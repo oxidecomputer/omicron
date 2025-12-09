@@ -20,6 +20,8 @@ use omicron_common::address::IPV6_MULTICAST_RANGE;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
+use omicron_common::api::internal::shared::ExternalIpv4Config;
+use omicron_common::api::internal::shared::ExternalIpv6Config;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -34,8 +36,6 @@ use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
 use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::RouterVersion;
-use omicron_common::api::internal::shared::SourceNatConfigV4;
-use omicron_common::api::internal::shared::SourceNatConfigV6;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::DelRouterEntryReq;
@@ -155,29 +155,19 @@ fn omicron_to_opte_ip_config(
         (
             PrivateIpConfig::V4(private_v4),
             Some(ExternalIpConfig::V4(external_v4)),
-        ) => IpCfg::Ipv4(build_opte_ipv4_config(
-            private_v4,
-            external_v4.source_nat().as_ref(),
-            external_v4.ephemeral_ip().as_ref(),
-            external_v4.floating_ips(),
-        )),
+        ) => IpCfg::Ipv4(build_opte_ipv4_config(private_v4, Some(external_v4))),
         // Only private IPv4 configuration
         (PrivateIpConfig::V4(private_v4), None) => {
-            IpCfg::Ipv4(build_opte_ipv4_config(private_v4, None, None, &[]))
+            IpCfg::Ipv4(build_opte_ipv4_config(private_v4, None))
         }
         // Private and public IPv6 configuration
         (
             PrivateIpConfig::V6(private_v6),
             Some(ExternalIpConfig::V6(external_v6)),
-        ) => IpCfg::Ipv6(build_opte_ipv6_config(
-            private_v6,
-            external_v6.source_nat().as_ref(),
-            external_v6.ephemeral_ip().as_ref(),
-            external_v6.floating_ips(),
-        )),
+        ) => IpCfg::Ipv6(build_opte_ipv6_config(private_v6, Some(external_v6))),
         // Only private IPv6 configuration
         (PrivateIpConfig::V6(private_v6), None) => {
-            IpCfg::Ipv6(build_opte_ipv6_config(private_v6, None, None, &[]))
+            IpCfg::Ipv6(build_opte_ipv6_config(private_v6, None))
         }
         // Private and public dual-stack configuration
         (
@@ -187,18 +177,8 @@ fn omicron_to_opte_ip_config(
                 v6: external_v6,
             }),
         ) => {
-            let ipv4 = build_opte_ipv4_config(
-                private_v4,
-                external_v4.source_nat().as_ref(),
-                external_v4.ephemeral_ip().as_ref(),
-                external_v4.floating_ips(),
-            );
-            let ipv6 = build_opte_ipv6_config(
-                private_v6,
-                external_v6.source_nat().as_ref(),
-                external_v6.ephemeral_ip().as_ref(),
-                external_v6.floating_ips(),
-            );
+            let ipv4 = build_opte_ipv4_config(private_v4, Some(external_v4));
+            let ipv6 = build_opte_ipv6_config(private_v6, Some(external_v6));
             IpCfg::DualStack { ipv4, ipv6 }
         }
         // Only private dual-stack configuration.
@@ -206,8 +186,8 @@ fn omicron_to_opte_ip_config(
             PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 },
             None,
         ) => {
-            let ipv4 = build_opte_ipv4_config(private_v4, None, None, &[]);
-            let ipv6 = build_opte_ipv6_config(private_v6, None, None, &[]);
+            let ipv4 = build_opte_ipv4_config(private_v4, None);
+            let ipv6 = build_opte_ipv6_config(private_v6, None);
             IpCfg::DualStack { ipv4, ipv6 }
         }
         // Private dual-stack, public IPv4 configuration.
@@ -215,13 +195,8 @@ fn omicron_to_opte_ip_config(
             PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 },
             Some(ExternalIpConfig::V4(external_v4)),
         ) => {
-            let ipv4 = build_opte_ipv4_config(
-                private_v4,
-                external_v4.source_nat().as_ref(),
-                external_v4.ephemeral_ip().as_ref(),
-                external_v4.floating_ips(),
-            );
-            let ipv6 = build_opte_ipv6_config(private_v6, None, None, &[]);
+            let ipv4 = build_opte_ipv4_config(private_v4, Some(external_v4));
+            let ipv6 = build_opte_ipv6_config(private_v6, None);
             IpCfg::DualStack { ipv4, ipv6 }
         }
         // Private dual-stack, public IPv6 configuration.
@@ -229,13 +204,8 @@ fn omicron_to_opte_ip_config(
             PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 },
             Some(ExternalIpConfig::V6(external_v6)),
         ) => {
-            let ipv4 = build_opte_ipv4_config(private_v4, None, None, &[]);
-            let ipv6 = build_opte_ipv6_config(
-                private_v6,
-                external_v6.source_nat().as_ref(),
-                external_v6.ephemeral_ip().as_ref(),
-                external_v6.floating_ips(),
-            );
+            let ipv4 = build_opte_ipv4_config(private_v4, None);
+            let ipv6 = build_opte_ipv6_config(private_v6, Some(external_v6));
             IpCfg::DualStack { ipv4, ipv6 }
         }
         // Cannot have external config of a different version, either
@@ -252,60 +222,66 @@ fn omicron_to_opte_ip_config(
 }
 
 fn build_opte_ipv4_config(
-    v4: &PrivateIpv4Config,
-    source_nat: Option<&SourceNatConfigV4>,
-    ephemeral_ip: Option<&Ipv4Addr>,
-    floating_ips: &[Ipv4Addr],
+    private_v4: &PrivateIpv4Config,
+    external_v4: Option<&ExternalIpv4Config>,
 ) -> Ipv4Cfg {
-    let gateway_ip = v4.opte_gateway().into();
-    let vpc_subnet = Ipv4Cidr::from(Ipv4Network::from(*v4.subnet()));
-    let private_ip = (*v4.ip()).into();
-    let external_ips =
-        build_external_ipv4_config(source_nat, ephemeral_ip, floating_ips);
+    let gateway_ip = private_v4.opte_gateway().into();
+    let vpc_subnet = Ipv4Cidr::from(Ipv4Network::from(*private_v4.subnet()));
+    let private_ip = (*private_v4.ip()).into();
+    let external_ips = build_external_ipv4_config(external_v4);
     Ipv4Cfg { vpc_subnet, private_ip, gateway_ip, external_ips }
 }
 
 fn build_opte_ipv6_config(
-    v6: &PrivateIpv6Config,
-    source_nat: Option<&SourceNatConfigV6>,
-    ephemeral_ip: Option<&Ipv6Addr>,
-    floating_ips: &[Ipv6Addr],
+    private_v6: &PrivateIpv6Config,
+    external_v6: Option<&ExternalIpv6Config>,
 ) -> Ipv6Cfg {
-    let gateway_ip = v6.opte_gateway().into();
-    let vpc_subnet = Ipv6Cidr::from(Ipv6Network::from(*v6.subnet()));
-    let private_ip = (*v6.ip()).into();
-    let external_ips =
-        build_external_ipv6_config(source_nat, ephemeral_ip, floating_ips);
+    let gateway_ip = private_v6.opte_gateway().into();
+    let vpc_subnet = Ipv6Cidr::from(Ipv6Network::from(*private_v6.subnet()));
+    let private_ip = (*private_v6.ip()).into();
+    let external_ips = build_external_ipv6_config(external_v6);
     Ipv6Cfg { vpc_subnet, private_ip, gateway_ip, external_ips }
 }
 
 // Build an ExternalIpCfg from parameters.
 fn build_external_ipv4_config(
-    source_nat: Option<&SourceNatConfigV4>,
-    ephemeral_ip: Option<&Ipv4Addr>,
-    floating_ips: &[Ipv4Addr],
+    external_v4: Option<&ExternalIpv4Config>,
 ) -> ExternalIpCfg<oxide_vpc::api::Ipv4Addr> {
-    let snat = source_nat.map(|snat| SNat4Cfg {
+    let Some(v4) = external_v4 else {
+        return ExternalIpCfg {
+            snat: None,
+            ephemeral_ip: None,
+            floating_ips: vec![],
+        };
+    };
+    let snat = v4.source_nat().map(|snat| SNat4Cfg {
         external_ip: snat.ip.into(),
         ports: snat.port_range(),
     });
-    let ephemeral_ip = ephemeral_ip.copied().map(Into::into);
-    let floating_ips = floating_ips.iter().copied().map(Into::into).collect();
+    let ephemeral_ip = v4.ephemeral_ip().as_ref().copied().map(Into::into);
+    let floating_ips =
+        v4.floating_ips().iter().copied().map(Into::into).collect();
     ExternalIpCfg { snat, ephemeral_ip, floating_ips }
 }
 
 // Build an OPTE External IPv6 configuration from parameters.
 fn build_external_ipv6_config(
-    source_nat: Option<&SourceNatConfigV6>,
-    ephemeral_ip: Option<&Ipv6Addr>,
-    floating_ips: &[Ipv6Addr],
+    external_v6: Option<&ExternalIpv6Config>,
 ) -> ExternalIpCfg<oxide_vpc::api::Ipv6Addr> {
-    let snat = source_nat.map(|snat| SNat6Cfg {
+    let Some(v6) = external_v6 else {
+        return ExternalIpCfg {
+            snat: None,
+            ephemeral_ip: None,
+            floating_ips: vec![],
+        };
+    };
+    let snat = v6.source_nat().map(|snat| SNat6Cfg {
         external_ip: snat.ip.into(),
         ports: snat.port_range(),
     });
-    let ephemeral_ip = ephemeral_ip.copied().map(Into::into);
-    let floating_ips = floating_ips.iter().copied().map(Into::into).collect();
+    let ephemeral_ip = v6.ephemeral_ip().as_ref().copied().map(Into::into);
+    let floating_ips =
+        v6.floating_ips().iter().copied().map(Into::into).collect();
     ExternalIpCfg { snat, ephemeral_ip, floating_ips }
 }
 
@@ -729,21 +705,22 @@ impl PortManager {
         let inet_gw_map = egw_lock.get(&nic_id).cloned();
         drop(egw_lock);
 
-        let external_ips_v4 = external_ips.ipv4_config().map(|v4| {
-            build_external_ipv4_config(
-                v4.source_nat().as_ref(),
-                v4.ephemeral_ip().as_ref(),
-                v4.floating_ips(),
-            )
-        });
-        let external_ips_v6 = external_ips.ipv6_config().map(|v6| {
-            build_external_ipv6_config(
-                v6.source_nat().as_ref(),
-                v6.ephemeral_ip().as_ref(),
-                v6.floating_ips(),
-            )
-        });
-
+        // NOTE: The Option::map() call here is a bit confusing.
+        //
+        // The `SetExternalIpsReq` type uses an `Option` around the IP
+        // configuration. However, `build_external_ipv{4,6}_config` accept an
+        // option and "push" that into the returned configuration type, i.e.,
+        // it's fields are optional rather than returning an option.
+        //
+        // We map the option so we can get the `None` we need for the
+        // `SetExternalIpsReq`. But that does mean we always call
+        // `build_external_ipv{4,6}_config` with `Some(_)`.
+        let external_ips_v4 = external_ips
+            .ipv4_config()
+            .map(|v4| build_external_ipv4_config(Some(v4)));
+        let external_ips_v6 = external_ips
+            .ipv6_config()
+            .map(|v6| build_external_ipv6_config(Some(v6)));
         let inet_gw_map = if let Some(map) = inet_gw_map {
             Some(
                 map.into_iter()
