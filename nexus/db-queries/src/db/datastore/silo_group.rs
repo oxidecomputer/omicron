@@ -824,7 +824,6 @@ impl DataStore {
                 })?
         };
 
-        // First get the paginated groups
         let groups = paginated(dsl::silo_group, dsl::id, pagparams)
             .filter(dsl::silo_id.eq(authz_silo.id()))
             .filter(dsl::time_deleted.is_null())
