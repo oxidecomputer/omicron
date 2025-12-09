@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Database representations for trust quorum types
+
 use super::impl_enum_type;
 use crate::SqlU8;
 use crate::typed_uuid::DbTypedUuid;
@@ -29,44 +30,44 @@ impl_enum_type!(
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = lrtq_member)]
 pub struct LrtqMember {
-    rack_id: DbTypedUuid<RackKind>,
-    hw_baseboard_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
+    pub hw_baseboard_id: Uuid,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = trust_quorum_configuration)]
 pub struct TrustQuorumConfiguration {
-    rack_id: DbTypedUuid<RackKind>,
-    epoch: i64,
-    state: DbTrustQuorumConfigurationState,
-    threshold: SqlU8,
-    commit_crash_tolerance: SqlU8,
-    coordinator: Uuid,
-    encrypted_rack_secrets_salt: String,
-    encrypted_rack_secrets: Vec<u8>,
+    pub rack_id: DbTypedUuid<RackKind>,
+    pub epoch: i64,
+    pub state: DbTrustQuorumConfigurationState,
+    pub threshold: SqlU8,
+    pub commit_crash_tolerance: SqlU8,
+    pub coordinator: Uuid,
+    pub encrypted_rack_secrets_salt: String,
+    pub encrypted_rack_secrets: Vec<u8>,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = trust_quorum_member)]
 pub struct TrustQuorumMember {
-    rack_id: DbTypedUuid<RackKind>,
-    epoch: i64,
-    hw_baseboard_id: Uuid,
-    share_digest: Option<String>,
+    pub rack_id: DbTypedUuid<RackKind>,
+    pub epoch: i64,
+    pub hw_baseboard_id: Uuid,
+    pub share_digest: Option<String>,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = trust_quorum_acked_prepare)]
 pub struct TrustQuorumAckedPrepare {
-    rack_id: DbTypedUuid<RackKind>,
-    epoch: i64,
-    hw_baseboard_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
+    pub epoch: i64,
+    pub hw_baseboard_id: Uuid,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = trust_quorum_acked_commit)]
 pub struct TrustQuorumAckedCommit {
-    rack_id: DbTypedUuid<RackKind>,
-    epoch: i64,
-    hw_baseboard_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
+    pub epoch: i64,
+    pub hw_baseboard_id: Uuid,
 }

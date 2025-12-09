@@ -2922,6 +2922,9 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(lrtq_member, hw_baseboard_id);
+joinable!(lrtq_member -> hw_baseboard_id(hw_baseboard_id));
+
 table! {
     trust_quorum_configuration (rack_id, epoch) {
         rack_id -> Uuid,
