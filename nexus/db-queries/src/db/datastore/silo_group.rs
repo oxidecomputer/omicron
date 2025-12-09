@@ -806,16 +806,16 @@ impl DataStore {
         authz_silo: &authz::Silo,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloGroup> {
-        use nexus_db_schema::schema::silo_group::dsl as sg_dsl;
+        use nexus_db_schema::schema::silo_group::dsl;
 
         opctx.authorize(authz::Action::Read, authz_silo).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let silo = {
-            use nexus_db_schema::schema::silo::dsl;
-            dsl::silo
-                .filter(dsl::id.eq(authz_silo.id()))
+            use nexus_db_schema::schema::silo::dsl as silo_dsl;
+            silo_dsl::silo
+                .filter(silo_dsl::id.eq(authz_silo.id()))
                 .select(model::Silo::as_select())
                 .get_result_async::<model::Silo>(&*conn)
                 .await
@@ -828,10 +828,10 @@ impl DataStore {
         };
 
         // First get the paginated groups
-        let groups = paginated(sg_dsl::silo_group, sg_dsl::id, pagparams)
-            .filter(sg_dsl::silo_id.eq(authz_silo.id()))
-            .filter(sg_dsl::time_deleted.is_null())
-            .filter(sg_dsl::user_provision_type.eq(silo.user_provision_type))
+        let groups = paginated(dsl::silo_group, dsl::id, pagparams)
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::user_provision_type.eq(silo.user_provision_type))
             .select(model::SiloGroup::as_select())
             .load_async::<model::SiloGroup>(&*conn)
             .await
