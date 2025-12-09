@@ -12,7 +12,7 @@ use itertools::Itertools;
 use omicron_common::{
     api::external::TufRepoDescription, update::OmicronZoneManifestSource,
 };
-use sled_agent_types_migrations::latest::inventory::{
+use sled_agent_types_versions::latest::inventory::{
     ZoneArtifactInventory, ZoneKind, ZoneManifestBootInventory,
 };
 use swrite::{SWrite, swrite};

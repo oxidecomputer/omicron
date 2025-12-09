@@ -26,7 +26,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use sled_agent_types_migrations::latest::inventory::ZoneKind;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -545,7 +545,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
+    use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
     use std::collections::BTreeSet;
     use std::net::IpAddr;
     use std::net::SocketAddr;

@@ -4,4 +4,4 @@
 
 //! Bootstore types for sled-agent.
 
-pub use sled_agent_types_migrations::latest::bootstore::*;
+pub use sled_agent_types_versions::latest::bootstore::*;

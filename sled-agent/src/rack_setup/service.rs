@@ -116,7 +116,7 @@ use sled_agent_types::rack_init::{
 use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::BaseboardId;
 use sled_agent_types::sled::StartSledAgentRequest;
-use sled_agent_types_migrations::latest::inventory::{
+use sled_agent_types_versions::latest::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
@@ -1729,7 +1729,7 @@ mod test {
         disk::{DiskIdentity, DiskVariant},
     };
     use omicron_uuid_kinds::SledUuid;
-    use sled_agent_types_migrations::latest::inventory::{
+    use sled_agent_types_versions::latest::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
         OmicronZoneType, SledCpuFamily, SledRole, ZoneImageResolverInventory,
     };

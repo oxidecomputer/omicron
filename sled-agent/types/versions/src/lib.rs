@@ -11,7 +11,7 @@
 //! ## Usage
 //!
 //! The API crate (`sled-agent-api`) uses fixed identifiers from this crate
-//! directly, e.g., `sled_agent_types_migrations::v1::inventory::Inventory`.
+//! directly, e.g., `sled_agent_types_versions::v1::inventory::Inventory`.
 //!
 //! The types crate (`sled-agent-types`) re-exports the latest versions as
 //! floating identifiers for use by business logic.

@@ -4,4 +4,4 @@
 
 //! Sled-agent types for inventory.
 
-pub use sled_agent_types_migrations::latest::inventory::*;
+pub use sled_agent_types_versions::latest::inventory::*;

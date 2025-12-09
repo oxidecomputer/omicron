@@ -15,7 +15,7 @@ use nexus_types::deployment::ZoneUnsafeToShutdown;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types_migrations::latest::inventory::ZoneKind;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 

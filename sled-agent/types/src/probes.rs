@@ -4,4 +4,4 @@
 
 //! Types for manipulating networking probe zones.
 
-pub use sled_agent_types_migrations::latest::probes::*;
+pub use sled_agent_types_versions::latest::probes::*;

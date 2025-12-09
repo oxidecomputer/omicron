@@ -16,9 +16,9 @@ use omicron_common::disk::DatasetName;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
-use sled_agent_types_migrations::latest::inventory::OmicronZoneType;
-use sled_agent_types_migrations::latest::inventory::ZoneKind;
+use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
+use sled_agent_types_versions::latest::inventory::OmicronZoneType;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use std::net::Ipv6Addr;
 
 #[derive(
@@ -348,7 +348,7 @@ pub mod blueprint_zone_type {
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;
-    use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
+    use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;

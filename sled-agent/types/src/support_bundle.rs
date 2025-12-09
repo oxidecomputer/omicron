@@ -4,7 +4,7 @@
 
 //! Types related to support bundles.
 
-pub use sled_agent_types_migrations::latest::support_bundle::*;
+pub use sled_agent_types_versions::latest::support_bundle::*;
 
 // The final name of the bundle, as it is stored within the dedicated
 // datasets.

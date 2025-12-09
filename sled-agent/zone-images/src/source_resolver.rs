@@ -12,7 +12,7 @@ use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use sled_agent_types::zone_images::RemoveMupdateOverrideResult;
 use sled_agent_types::zone_images::ResolverStatus;
-use sled_agent_types_migrations::latest::inventory::OmicronZoneImageSource;
+use sled_agent_types_versions::latest::inventory::OmicronZoneImageSource;
 use slog::o;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -129,7 +129,7 @@ mod tests {
         OmicronZoneImageLocation, RAMDISK_IMAGE_PATH, ZoneImageLocationError,
         ZoneManifestReadError, ZoneManifestZoneHashError,
     };
-    use sled_agent_types_migrations::latest::inventory::{
+    use sled_agent_types_versions::latest::inventory::{
         HostPhase2DesiredContents, ZoneKind,
     };
     use sled_agent_zone_images_examples::{

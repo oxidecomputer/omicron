@@ -66,7 +66,7 @@ omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
-sled-agent-types-migrations.workspace = true
+sled-agent-types-versions.workspace = true
 swrite.workspace = true
 tough.workspace = true
 
@@ -78,5 +78,5 @@ newtype-uuid = { workspace = true, features = ["proptest1"] }
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
-sled-agent-types-migrations = { workspace = true, features = ["testing"] }
+sled-agent-types-versions = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true

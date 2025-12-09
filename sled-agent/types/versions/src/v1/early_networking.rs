@@ -15,7 +15,7 @@ use slog::{Logger, warn};
 /// Network configuration required to bring up the control plane
 ///
 /// The fields in this structure are those from
-/// [`RackInitializeRequest`] necessary for use beyond RSS.
+/// `RackInitializeRequest` necessary for use beyond RSS.
 /// This is just for the initial rack configuration and cold boot purposes.
 /// Updates come from Nexus.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]

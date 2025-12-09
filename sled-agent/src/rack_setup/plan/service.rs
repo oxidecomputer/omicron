@@ -62,7 +62,7 @@ use sled_agent_client::{
 };
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
-use sled_agent_types_migrations::latest::inventory::{
+use sled_agent_types_versions::latest::inventory::{
     Inventory, OmicronZoneDataset, SledRole,
 };
 use slog::Logger;
@@ -1308,9 +1308,9 @@ mod tests {
     use oxnet::Ipv6Net;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
     use sled_agent_types::rack_init::RecoverySiloConfig;
-    use sled_agent_types_migrations::latest::inventory::ConfigReconcilerInventoryStatus;
-    use sled_agent_types_migrations::latest::inventory::SledCpuFamily;
-    use sled_agent_types_migrations::latest::inventory::ZoneImageResolverInventory;
+    use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types_versions::latest::inventory::SledCpuFamily;
+    use sled_agent_types_versions::latest::inventory::ZoneImageResolverInventory;
     use sled_hardware_types::Baseboard;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
@@ -1494,7 +1494,7 @@ mod tests {
         const DISK_COUNT: usize = 10;
         let disks: Vec<_> = (0..DISK_COUNT)
             .map(|i| {
-                sled_agent_types_migrations::latest::inventory::InventoryDisk {
+                sled_agent_types_versions::latest::inventory::InventoryDisk {
                     identity: omicron_common::disk::DiskIdentity {
                         vendor: "vendor".to_string(),
                         model: "model".to_string(),

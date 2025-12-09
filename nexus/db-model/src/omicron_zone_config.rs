@@ -21,7 +21,7 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
-use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
+use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
 use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 

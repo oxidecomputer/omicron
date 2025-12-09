@@ -58,7 +58,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
 use sled_agent_types::rack_init::RecoverySiloConfig;
-use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
+use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
 use slog::{Drain, Logger, info};
 use std::collections::HashMap;
 use std::net::IpAddr;

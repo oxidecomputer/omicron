@@ -29,7 +29,7 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use sled_agent_types_migrations::latest::inventory::ZoneKind;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;

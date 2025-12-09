@@ -11,7 +11,7 @@ use nexus_types::deployment::BlueprintZoneImageSource;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use sled_agent_types_migrations::latest::inventory::ZoneKind;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ZonesEditError {

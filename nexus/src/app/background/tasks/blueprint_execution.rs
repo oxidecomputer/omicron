@@ -259,7 +259,7 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use serde_json::json;
-    use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
+    use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
     use std::collections::BTreeMap;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;

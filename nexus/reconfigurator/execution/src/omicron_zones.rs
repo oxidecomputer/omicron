@@ -314,7 +314,7 @@ mod test {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
+    use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
     use std::iter;
     use uuid::Uuid;
 

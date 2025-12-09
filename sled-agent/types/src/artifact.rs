@@ -4,4 +4,4 @@
 
 //! Artifact types for sled-agent.
 
-pub use sled_agent_types_migrations::latest::artifact::*;
+pub use sled_agent_types_versions::latest::artifact::*;

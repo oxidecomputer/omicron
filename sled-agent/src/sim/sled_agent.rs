@@ -59,13 +59,13 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmSpecExt, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
-use sled_agent_types_migrations::latest::inventory::{
+use sled_agent_types_versions::latest::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
     HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
     InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
     ZoneImageResolverInventory,
 };
-use sled_agent_types_migrations::v9::params::LocalStorageDatasetEnsureRequest;
+use sled_agent_types_versions::v9::params::LocalStorageDatasetEnsureRequest;
 
 use slog::Logger;
 use std::collections::{HashMap, HashSet};

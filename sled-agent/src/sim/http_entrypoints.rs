@@ -37,7 +37,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use range_requests::PotentialRange;
 use sled_agent_api::*;
 // Use fixed identifiers from migrations crate to match the API trait
-use sled_agent_types_migrations::{v1, v3, v7, v9, v10};
+use sled_agent_types_versions::{v1, v3, v7, v9, v10};
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;

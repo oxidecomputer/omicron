@@ -27,7 +27,7 @@ use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
-use sled_agent_types_migrations::latest::inventory::ZoneKind;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use slog::{debug, info};
 use std::net::SocketAddrV6;
 use std::time::Duration;

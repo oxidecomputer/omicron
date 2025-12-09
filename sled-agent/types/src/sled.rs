@@ -4,6 +4,6 @@
 
 //! Types related to operating on sleds.
 
-pub use sled_agent_types_migrations::latest::sled::*;
+pub use sled_agent_types_versions::latest::sled::*;
 
 pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";

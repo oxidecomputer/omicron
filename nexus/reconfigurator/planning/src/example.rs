@@ -44,7 +44,7 @@ use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
-use sled_agent_types_migrations::latest::inventory::ZoneKind;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::KnownArtifactKind;
@@ -1024,7 +1024,7 @@ mod tests {
     use omicron_common::address::get_sled_address;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_types_migrations::latest::inventory::{
+    use sled_agent_types_versions::latest::inventory::{
         OmicronZoneConfig, ZoneKind,
     };
     use slog_error_chain::InlineErrorChain;

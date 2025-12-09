@@ -26,7 +26,7 @@ use sled_agent_types::zone_images::{
     InstallMetadataReadError, ZoneManifestArtifactResult,
     ZoneManifestArtifactsResult, ZoneManifestZoneHashError,
 };
-use sled_agent_types_migrations::latest::inventory::ZoneKind;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use tufaceous_artifact::ArtifactHash;
 
 pub struct OverridePaths {

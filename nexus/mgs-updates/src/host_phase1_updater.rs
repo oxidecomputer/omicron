@@ -143,7 +143,7 @@ use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::inventory::SpType;
 use omicron_common::disk::M2Slot;
 use sled_agent_client::Client as SledAgentClient;
-use sled_agent_types_migrations::latest::inventory::BootPartitionContents;
+use sled_agent_types_versions::latest::inventory::BootPartitionContents;
 use slog::Logger;
 use slog::debug;
 use slog_error_chain::InlineErrorChain;

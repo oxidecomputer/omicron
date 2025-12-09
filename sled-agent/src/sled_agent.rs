@@ -80,10 +80,10 @@ use sled_agent_types::zone_bundle::{
 use sled_agent_types::zone_images::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
-use sled_agent_types_migrations::latest::inventory::{
+use sled_agent_types_versions::latest::inventory::{
     Inventory, OmicronSledConfig, SledRole,
 };
-use sled_agent_types_migrations::v9::params::LocalStorageDatasetEnsureRequest;
+use sled_agent_types_versions::v9::params::LocalStorageDatasetEnsureRequest;
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};

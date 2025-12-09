@@ -1999,7 +1999,7 @@ mod test {
     use omicron_uuid_kinds::{
         ExternalIpUuid, GenericUuid as _, OmicronZoneUuid,
     };
-    use sled_agent_types_migrations::latest::inventory::ZoneKind;
+    use sled_agent_types_versions::latest::inventory::ZoneKind;
 
     #[tokio::test]
     async fn test_default_ip_pools() {

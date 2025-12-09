@@ -344,7 +344,7 @@ mod test {
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_types_migrations::latest::inventory::{
+    use sled_agent_types_versions::latest::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
         SledCpuFamily, SledRole, ZoneImageResolverInventory,
     };

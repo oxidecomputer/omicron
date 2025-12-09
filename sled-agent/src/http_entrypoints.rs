@@ -26,7 +26,7 @@ use range_requests::PotentialRange;
 use sled_agent_api::*;
 use sled_agent_types::zone_bundle::{CleanupPeriod, StorageLimit};
 // Use fixed identifiers from migrations crate to match the API trait
-use sled_agent_types_migrations::{v1, v3, v7, v9, v10};
+use sled_agent_types_versions::{v1, v3, v7, v9, v10};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };

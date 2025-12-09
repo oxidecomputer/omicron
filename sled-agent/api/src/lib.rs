@@ -17,7 +17,7 @@ use omicron_common::api::internal::{
         SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
     },
 };
-use sled_agent_types_migrations::{v1, v3, v4, v6, v7, v9, v10};
+use sled_agent_types_versions::{v1, v3, v4, v6, v7, v9, v10};
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
 api_versions!([

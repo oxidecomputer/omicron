@@ -40,7 +40,7 @@ use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::artifact::ArtifactConfig;
-use sled_agent_types_migrations::v1::views::{
+use sled_agent_types_versions::v1::views::{
     ArtifactListResponse, ArtifactPutResponse,
 };
 use slog::{Logger, error, info};

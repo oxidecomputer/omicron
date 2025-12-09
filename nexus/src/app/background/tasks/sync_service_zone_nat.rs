@@ -19,7 +19,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::inventory::Collection;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
 use serde_json::json;
-use sled_agent_types_migrations::latest::inventory::OmicronZoneType;
+use sled_agent_types_versions::latest::inventory::OmicronZoneType;
 use std::sync::Arc;
 use tokio::sync::watch;
 

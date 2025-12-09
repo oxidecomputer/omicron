@@ -31,7 +31,7 @@ use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::Client as SledAgentClient;
-use sled_agent_types_migrations::latest::inventory::SledRole;
+use sled_agent_types_versions::latest::inventory::SledRole;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;

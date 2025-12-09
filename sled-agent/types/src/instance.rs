@@ -4,4 +4,4 @@
 
 //! Common instance-related types.
 
-pub use sled_agent_types_migrations::latest::instance::*;
+pub use sled_agent_types_versions::latest::instance::*;

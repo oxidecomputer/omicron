@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 
 use camino::Utf8PathBuf;
 
-pub use sled_agent_types_migrations::latest::zone_bundle::*;
+pub use sled_agent_types_versions::latest::zone_bundle::*;
 
 /// Information about a zone bundle.
 ///

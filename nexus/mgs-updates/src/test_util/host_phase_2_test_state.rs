@@ -207,7 +207,7 @@ mod api_impl {
         ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
     };
     // Fixed identifiers from the migrations crate for API types
-    use sled_agent_types_migrations::{v1, v3, v7, v9, v10};
+    use sled_agent_types_versions::{v1, v3, v7, v9, v10};
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::time::Duration;
