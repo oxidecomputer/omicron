@@ -337,12 +337,16 @@ impl ProbeManagerInner {
             .as_ref()
             .ok_or(anyhow!("no interface specified for probe"))?;
 
-        // TODO-correctness: The code previously ignored the IP kind, and always
-        // created an Ephemeral address. Is that right?
+        // NOTE: The Nexus probe API only supports constructing an Ephemeral
+        // address, so ensure that's the case here and us it as such.
         let eip = probe
             .external_ips
             .get(0)
             .ok_or(anyhow!("expected an external ip"))?;
+        anyhow::ensure!(
+            matches!(eip.kind, sled_agent_types::probes::IpKind::Ephemeral),
+            "Probes are expected to have an Ephemeral IP address",
+        );
         let external_ips = match eip.ip {
             IpAddr::V4(ipv4) => ExternalIpConfigBuilder::new()
                 .with_ephemeral_ip(ipv4)

@@ -8,6 +8,8 @@ pub mod v1;
 
 use crate::address::NUM_SOURCE_NAT_PORTS;
 use daft::Diffable;
+use itertools::Either;
+use itertools::Itertools as _;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -510,6 +512,11 @@ impl ExternalIpConfig {
     /// `IpAddr`, rather than concrete `Ipv4Addr` or `Ipv6Addr`. This handles
     /// all the possible flavors of addresses for SNAT, Ephemeral, and Floating
     /// IPs.
+    ///
+    /// This returns an error if:
+    ///
+    /// - There are no addresses at all in the input parameters
+    /// - The input parameters specify mixed IP versions
     pub fn try_from_generic(
         source_nat: Option<v1::SourceNatConfig>,
         ephemeral_ip: Option<IpAddr>,
@@ -556,14 +563,11 @@ impl ExternalIpConfig {
         };
 
         // Populate one or the other arrays of floating IPs.
-        let mut fips_v4 = vec![];
-        let mut fips_v6 = vec![];
-        for fip in floating_ips.into_iter() {
-            match fip {
-                IpAddr::V4(v4) => fips_v4.push(v4),
-                IpAddr::V6(v6) => fips_v6.push(v6),
-            }
-        }
+        let (fips_v4, fips_v6): (Vec<_>, Vec<_>) =
+            floating_ips.into_iter().partition_map(|fip| match fip {
+                IpAddr::V4(v4) => Either::Left(v4),
+                IpAddr::V6(v6) => Either::Right(v6),
+            });
 
         match (snat_v4, snat_v6, ephemeral_ip) {
             (None, None, None) => {

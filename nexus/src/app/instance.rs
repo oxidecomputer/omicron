@@ -18,6 +18,8 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use itertools::Either;
+use itertools::Itertools as _;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::ExternalIp;
@@ -2305,32 +2307,23 @@ fn build_external_ip_config(
 ) -> Result<Option<ExternalIpConfig>, Error> {
     // Partition into concrete IPv4 and IPv6 addresses, using subset of data
     // needed for the concrete conversions only.
-    let mut ipv4 = Vec::new();
-    let mut ipv6 = Vec::new();
-    for ip in ips.iter() {
-        match ip.ip.ip() {
-            IpAddr::V4(v4) => {
-                let eip = ExternalIpData {
-                    ip: v4,
-                    first_port: ip.first_port.into(),
-                    last_port: ip.last_port.into(),
-                    kind: ip.kind,
-                    attach_state: ip.state,
-                };
-                ipv4.push(eip);
-            }
-            IpAddr::V6(v6) => {
-                let eip = ExternalIpData {
-                    ip: v6,
-                    first_port: ip.first_port.into(),
-                    last_port: ip.last_port.into(),
-                    kind: ip.kind,
-                    attach_state: ip.state,
-                };
-                ipv6.push(eip);
-            }
-        }
-    }
+    let (ipv4, ipv6): (Vec<_>, Vec<_>) =
+        ips.iter().partition_map(|ip| match ip.ip.ip() {
+            IpAddr::V4(v4) => Either::Left(ExternalIpData {
+                ip: v4,
+                first_port: ip.first_port.into(),
+                last_port: ip.last_port.into(),
+                kind: ip.kind,
+                attach_state: ip.state,
+            }),
+            IpAddr::V6(v6) => Either::Right(ExternalIpData {
+                ip: v6,
+                first_port: ip.first_port.into(),
+                last_port: ip.last_port.into(),
+                kind: ip.kind,
+                attach_state: ip.state,
+            }),
+        });
     let ipv4_config = if ipv4.is_empty() {
         None
     } else {
