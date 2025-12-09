@@ -137,6 +137,7 @@ pub use driver::Driver;
 pub use init::BackgroundTasksData;
 pub use init::BackgroundTasksInitializer;
 pub(crate) use init::BackgroundTasksInternal;
+pub(crate) use tasks::blueprint_load::LoadedTargetBlueprint;
 pub use nexus_background_task_interface::Activator;
 pub use tasks::saga_recovery::SagaRecoveryHelpers;
 
