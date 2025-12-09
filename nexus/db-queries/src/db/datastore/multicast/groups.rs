@@ -2890,7 +2890,6 @@ mod tests {
             },
             multicast_ip: None, // No explicit IP - triggers pool auto-selection
             source_ips: Some(vec!["10.0.0.1".parse().unwrap()]), // Has sources
-            mvlan: None,
         };
 
         // This should succeed via ASM fallback (no SSM pool exists)
