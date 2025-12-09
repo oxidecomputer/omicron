@@ -170,20 +170,12 @@ impl fmt::Display for DisplayCase<'_> {
                     "{:>indent$}{REPORTED_BY:<WIDTH$} {pn:>11}:{sn:<11} ({})",
                     "", ereport.reporter
                 )?;
-
-                if Some(assigned_sitrep_id) == sitrep_id.as_ref() {
-                    writeln!(
-                        f,
-                        "{:>indent$}{ADDED_IN:<WIDTH$} this sitrep",
-                        "",
-                    )?;
-                } else {
-                    writeln!(
-                        f,
-                        "{:>indent$}{ADDED_IN:<WIDTH$} sitrep {assigned_sitrep_id}",
-                        "",
-                    )?;
-                }
+                writeln!(
+                    f,
+                    "{:>indent$}{ADDED_IN:<WIDTH$} {assigned_sitrep_id}{}",
+                    "",
+                    this_sitrep(*assigned_sitrep_id)
+                )?;
 
                 writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "",)?;
             }
