@@ -22,7 +22,7 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use illumos_utils::svcs::SvcNotRunning;
+use illumos_utils::svcs::SvcInMaintenance;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
@@ -705,7 +705,7 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
-    pub smf_services_enabled_not_running: Vec<SvcNotRunning>,
+    pub smf_services_in_maintenance: Vec<SvcInMaintenance>,
 }
 
 impl IdOrdItem for SledAgent {

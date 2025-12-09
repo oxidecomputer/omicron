@@ -999,6 +999,6 @@ pub fn sled_agent(
         // TODO-K: We'll want to have the functionality to add some services
         // here in a future PR. This will be more useful when we add this
         // information to the DB.
-        smf_services_enabled_not_running: vec![],
+        smf_services_in_maintenance: vec![],
     }
 }

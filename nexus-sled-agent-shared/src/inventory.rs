@@ -15,7 +15,7 @@ use daft::Diffable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use illumos_utils::svcs::SvcNotRunning;
+use illumos_utils::svcs::SvcInMaintenance;
 use indent_write::fmt::IndentWriter;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::ledger::Ledgerable;
@@ -129,7 +129,7 @@ pub struct Inventory {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
-    pub smf_services_enabled_not_running: Vec<SvcNotRunning>,
+    pub smf_services_in_maintenance: Vec<SvcInMaintenance>,
 }
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to

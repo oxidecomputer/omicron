@@ -30,19 +30,19 @@ pub struct Svcs {}
 impl Svcs {
     /// Lists SMF services that are enabled but not running
     #[cfg(target_os = "illumos")]
-    pub async fn enabled_not_running(
+    pub async fn in_maintenance(
         log: &Logger,
-    ) -> Result<Vec<SvcNotRunning>, ExecutionError> {
+    ) -> Result<Vec<SvcInMaintenance>, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCS, "-Zx"]);
         let output = execute_async(cmd).await?;
-        Ok(SvcNotRunning::parse(log, &output.stdout))
+        Ok(SvcInMaintenance::parse(log, &output.stdout))
     }
 
     #[cfg(not(target_os = "illumos"))]
-    pub async fn enabled_not_running(
+    pub async fn in_maintenance(
         log: &Logger,
-    ) -> Result<Vec<SvcNotRunning>, ExecutionError> {
+    ) -> Result<Vec<SvcInMaintenance>, ExecutionError> {
         info!(log, "OS not illumos, will not check state of SMF services");
         Ok(vec![])
     }
@@ -96,7 +96,7 @@ impl From<String> for SvcState {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 /// Information about an SMF service that is enabled but not running
-pub struct SvcNotRunning {
+pub struct SvcInMaintenance {
     fmri: String,
     zone: String,
     state: SvcState,
@@ -107,14 +107,14 @@ pub struct SvcNotRunning {
     additional_info: Vec<String>,
 }
 
-impl SvcNotRunning {
+impl SvcInMaintenance {
     // These methods are only used when the target OS is "illumos". They are not
     // marked as a configuration option based on target OS because they are not
     // Illumos specific themselves. We mark them as unused instead.
     #[allow(dead_code)]
     // TODO-K: Remove pub
-    pub fn new() -> SvcNotRunning {
-        SvcNotRunning {
+    pub fn new() -> SvcInMaintenance {
+        SvcInMaintenance {
             fmri: String::new(),
             zone: String::new(),
             state: SvcState::Unknown,
@@ -126,7 +126,7 @@ impl SvcNotRunning {
     }
 
     #[allow(dead_code)]
-    fn parse(log: &Logger, data: &[u8]) -> Vec<SvcNotRunning> {
+    fn parse(log: &Logger, data: &[u8]) -> Vec<SvcInMaintenance> {
         let mut svcs = vec![];
         if data.is_empty() {
             return svcs;
@@ -151,13 +151,13 @@ impl SvcNotRunning {
         //    See: /var/svc/log/system-omicron-baseline:default.log
         // Impact: This service is not running.
         let s = String::from_utf8_lossy(data);
-        let mut current_svc = SvcNotRunning::new();
+        let mut current_svc = SvcInMaintenance::new();
         let lines = s.trim().lines();
         for line in lines {
             let line = line.trim();
             if line.starts_with("svc:") {
                 // This is a new service, wipe the slate clean
-                current_svc = SvcNotRunning::new();
+                current_svc = SvcInMaintenance::new();
                 // We remove the text inside the parenthesis that is not part
                 // of the fmri. As we are already checking that the line starts
                 // with "svc:" there should be no risk of there being nothing
@@ -239,9 +239,9 @@ impl SvcNotRunning {
     }
 }
 
-impl Display for SvcNotRunning {
+impl Display for SvcInMaintenance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let SvcNotRunning {
+        let SvcInMaintenance {
             fmri,
             zone,
             state,
@@ -299,14 +299,14 @@ Reason: Start method failed repeatedly, last died on Killed (9).
 Impact: This service is not running."#;
 
         let log = log();
-        let services = SvcNotRunning::parse(&log, output.as_bytes());
+        let services = SvcInMaintenance::parse(&log, output.as_bytes());
 
         // We want to make sure we only have two entries
         assert_eq!(services.len(), 2);
 
         assert_eq!(
             services[0],
-            SvcNotRunning {
+            SvcInMaintenance {
                 fmri: "svc:/site/fake-service:default".to_string(),
                 zone: "global".to_string(),
                 state: SvcState::Maintenance,
@@ -329,7 +329,7 @@ Impact: This service is not running."#;
 
         assert_eq!(
             services[1],
-            SvcNotRunning {
+            SvcInMaintenance {
                 fmri: "svc:/system/omicron/baseline:default".to_string(),
                 zone: "global".to_string(),
                 state: SvcState::Maintenance,
@@ -367,7 +367,7 @@ Impact: This service is not running.
 "#;
 
         let log = log();
-        let services = SvcNotRunning::parse(&log, output.as_bytes());
+        let services = SvcInMaintenance::parse(&log, output.as_bytes());
 
         // We want to make sure we have an entry even if we weren't able to
         // parse the timestamp.
@@ -375,7 +375,7 @@ Impact: This service is not running.
 
         assert_eq!(
             services[0],
-            SvcNotRunning {
+            SvcInMaintenance {
                 fmri: "svc:/site/fake-service:default".to_string(),
                 zone: "global".to_string(),
                 state: SvcState::Maintenance,
@@ -404,7 +404,7 @@ Impact: This service is not running.
 "#;
 
         let log = log();
-        let services = SvcNotRunning::parse(&log, output.as_bytes());
+        let services = SvcInMaintenance::parse(&log, output.as_bytes());
 
         // We want to make sure we have an entry even if we weren't able to
         // parse two lines.
@@ -412,7 +412,7 @@ Impact: This service is not running.
 
         assert_eq!(
             services[0],
-            SvcNotRunning {
+            SvcInMaintenance {
                 fmri: "svc:/site/fake-service:default".to_string(),
                 zone: "global".to_string(),
                 state: SvcState::Maintenance,

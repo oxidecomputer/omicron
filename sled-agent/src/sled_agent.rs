@@ -1138,7 +1138,7 @@ impl SledAgent {
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
         let zone_image_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
-        let smf_services_enabled_not_running =
+        let smf_services_in_maintenance =
             self.inner.health_monitor.to_inventory();
 
         let ReconcilerInventory {
@@ -1166,7 +1166,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
-            smf_services_enabled_not_running,
+            smf_services_in_maintenance,
         })
     }
 

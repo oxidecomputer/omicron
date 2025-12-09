@@ -1529,7 +1529,7 @@ mod tests {
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
-                smf_services_enabled_not_running: vec![],
+                smf_services_in_maintenance: vec![],
             },
             is_scrimlet,
         )];

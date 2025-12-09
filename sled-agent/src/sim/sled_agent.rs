@@ -809,7 +809,7 @@ impl SledAgent {
         };
 
         // TODO-K: Don't actually call svcs
-        let smf_services_enabled_not_running =
+        let smf_services_in_maintenance =
             //Svcs::enabled_not_running(&self.log).await?;
             self.health_monitor.to_inventory();
 
@@ -902,7 +902,7 @@ impl SledAgent {
             ),
             // TODO: simulate the zone image resolver with greater fidelity
             zone_image_resolver: ZoneImageResolverInventory::new_fake(),
-            smf_services_enabled_not_running,
+            smf_services_in_maintenance,
         })
     }
 
