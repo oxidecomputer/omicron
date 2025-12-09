@@ -103,7 +103,8 @@
 //!
 //! * `core.[zone-name].[exe-filename].[pid].[time]`: process core dumps
 //! * `unix.[0-9]+`, `bounds`: files associated with kernel crash dumps
-//! * `$UUID`: support bundles (wholly unrelated to the DebugCollector)
+//! * `$UUID`: directories related to support bundles (wholly unrelated to
+//!   the DebugCollector)
 //! * `oxz_[zone-type]_[zone-uuid]`: directory containing all the log files
 //!   for the corresponding zone.
 //!
