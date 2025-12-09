@@ -5,7 +5,8 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use iddqd::IdOrdMap;
 use omicron_common::update::{
-    OmicronInstallManifest, OmicronInstallManifestSource, OmicronInstallMetadata,
+    OmicronInstallManifest, OmicronInstallManifestSource,
+    OmicronInstallMetadata,
 };
 use omicron_uuid_kinds::InternalZpoolUuid;
 use rayon::iter::{ParallelBridge, ParallelIterator};

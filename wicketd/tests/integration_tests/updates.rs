@@ -17,7 +17,8 @@ use maplit::btreeset;
 use omicron_common::{
     disk::DiskIdentity,
     update::{
-        MupdateOverrideInfo, OmicronInstallManifest, OmicronInstallManifestSource,
+        MupdateOverrideInfo, OmicronInstallManifest,
+        OmicronInstallManifestSource,
     },
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
@@ -558,18 +559,21 @@ async fn installinator_fetch_impl(
     );
 
     // Ensure that the measurement manifest can be parsed.
-    let a_manifest_path =
-        a_path.join("install").join("measurements").join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
+    let a_manifest_path = a_path
+        .join("install")
+        .join("measurements")
+        .join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
     let a_manifest_bytes = std::fs::read(a_manifest_path)
         .expect("measurement manifest file successfully read");
     let a_measurement_manifest =
         serde_json::from_slice::<OmicronInstallManifest>(&a_manifest_bytes)
             .expect("measurement manifest file successfully deserialized");
 
-
     // Ensure that the B path also had the same file written out.
-    let b_manifest_path =
-        b_path.join("install").join("measurements").join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
+    let b_manifest_path = b_path
+        .join("install")
+        .join("measurements")
+        .join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
     assert!(b_manifest_path.is_file(), "{b_manifest_path} was written out");
     // Ensure that the measurement manifest can be parsed.
     let b_override_bytes = std::fs::read(b_manifest_path)

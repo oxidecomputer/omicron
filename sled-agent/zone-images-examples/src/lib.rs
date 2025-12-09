@@ -40,7 +40,8 @@ impl OverridePaths {
     fn for_uuid(uuid: InternalZpoolUuid) -> Self {
         let install_dataset =
             Utf8PathBuf::from(format!("pool/int/{uuid}/install"));
-        let zones_json = install_dataset.join(OmicronInstallManifest::ZONES_FILE_NAME);
+        let zones_json =
+            install_dataset.join(OmicronInstallManifest::ZONES_FILE_NAME);
         let measurements_json =
             install_dataset.join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
         let mupdate_override_json =
@@ -254,7 +255,8 @@ impl WriteInstallDatasetContext {
             })?;
             // No need to create intermediate directories with
             // camino-tempfile-ext.
-            dir.child(OmicronInstallManifest::ZONES_FILE_NAME).write_str(&json)?;
+            dir.child(OmicronInstallManifest::ZONES_FILE_NAME)
+                .write_str(&json)?;
         }
 
         let info = self.override_info();

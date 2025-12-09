@@ -24,8 +24,8 @@ use installinator_common::{
 use omicron_common::{
     disk::M2Slot,
     update::{
-        MupdateOverrideInfo, OmicronInstallManifest, OmicronInstallManifestSource,
-        OmicronInstallMetadata,
+        MupdateOverrideInfo, OmicronInstallManifest,
+        OmicronInstallManifestSource, OmicronInstallMetadata,
     },
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
