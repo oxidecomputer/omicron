@@ -2870,7 +2870,7 @@ mod tests {
             .expect("Should add ASM range to pool");
 
         // Link pool to silo as default
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
