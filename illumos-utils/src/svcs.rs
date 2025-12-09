@@ -35,7 +35,7 @@ impl Svcs {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCS, "-Za", "-H", "-o", "state,fmri,zone"]);
         let output = execute_async(cmd).await?;
-        let svcs_result = SvcsInMaintenanceResult{
+        let svcs_result = SvcsInMaintenanceResult {
             services: SvcInMaintenance::parse(log, &output.stdout),
             time_of_status: Some(Utc::now()),
         };
@@ -56,21 +56,16 @@ impl Svcs {
 #[serde(rename_all = "snake_case")]
 pub struct SvcsInMaintenanceResult {
     pub services: Vec<SvcInMaintenance>,
-    // TODO-K: Do I need a deserialiser like parse_cockroach_cli_timestamp?
     pub time_of_status: Option<DateTime<Utc>>,
 }
 
 impl SvcsInMaintenanceResult {
     pub fn new() -> Self {
-        Self {
-            services: vec![],
-            time_of_status: None,
-        }
+        Self { services: vec![], time_of_status: None }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.services.is_empty()
-        && self.time_of_status == None
+        self.services.is_empty() && self.time_of_status == None
     }
 }
 

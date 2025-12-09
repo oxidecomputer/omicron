@@ -28,8 +28,8 @@ use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, RawDisksSender,
     TimeSyncConfig,
 };
-use sled_agent_health_monitor::handle::HealthMonitorHandle;
-use sled_agent_health_monitor::handle::poll_smf_services_in_maintenance;
+use sled_agent_health_monitor::HealthMonitorHandle;
+use sled_agent_health_monitor::health_checks::poll_smf_services_in_maintenance;
 use sled_agent_types::zone_bundle::CleanupContext;
 use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
@@ -69,7 +69,8 @@ pub struct LongRunningTaskHandles {
     /// had any async involved within it, it would be a task.)
     pub zone_image_resolver: ZoneImageSourceResolver,
 
-    // TODO-K: Should I only have one or various handles for each health check?
+    /// A handle to the set of health checks managed by the health-check-monitor
+    /// system.
     pub health_monitor: HealthMonitorHandle,
 
     /// A handle for interacting with the trust quorum
@@ -277,7 +278,6 @@ async fn spawn_bootstore_tasks(
 
 // TODO-K: remove pub
 pub async fn spawn_health_monitor_tasks(log: &Logger) -> HealthMonitorHandle {
-    // TODO-K: This is a bit vague, should this log say something else?
     info!(log, "Starting health monitor");
     let health_handle = HealthMonitorHandle::new();
 
