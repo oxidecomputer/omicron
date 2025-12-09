@@ -10,8 +10,10 @@ use crate::starter::PopulateCrdb;
 use crate::starter::setup_with_config_impl;
 #[cfg(feature = "omicron-dev")]
 use anyhow::Context;
+#[cfg(feature = "omicron-dev")]
 use anyhow::Result;
 use camino::Utf8Path;
+#[cfg(feature = "omicron-dev")]
 use camino::Utf8PathBuf;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
