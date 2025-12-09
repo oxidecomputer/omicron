@@ -23,6 +23,7 @@ glob.workspace = true
 iddqd.workspace = true
 illumos-utils.workspace = true
 installinator-common.workspace = true
+itertools.workspace = true
 key-manager.workspace = true
 nexus-sled-agent-shared.workspace = true
 ntp-admin-client.workspace = true
