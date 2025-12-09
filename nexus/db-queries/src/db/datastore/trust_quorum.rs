@@ -12,11 +12,22 @@ use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::HwBaseboardId;
+use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
+use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
+use nexus_types::trust_quorum::BaseboardId;
+use nexus_types::trust_quorum::{
+    TrustQuorumConfig, TrustQuorumConfigState, TrustQuorumMemberData,
+    TrustQuorumMemberState,
+};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::OptionalLookupResult;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use trust_quorum_protocol::EncryptedRackSecrets;
+use trust_quorum_protocol::Salt;
+use trust_quorum_protocol::Sha3_256Digest;
 
 impl DataStore {
     /// Return all `HwBaseboardId`s for a given rack that has run LRTQ
@@ -42,6 +53,132 @@ impl DataStore {
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn tq_latest_config(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+    ) -> OptionalLookupResult<TrustQuorumConfig> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::hw_baseboard_id::dsl as hw_baseboard_id_dsl;
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl as tq_config_dsl;
+        use nexus_db_schema::schema::trust_quorum_member::dsl as tq_member_dsl;
+
+        // First, retrieve our configuration if there is one.
+        let Some(latest) = tq_config_dsl::trust_quorum_configuration
+            .filter(tq_config_dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+            .order_by(tq_config_dsl::epoch.desc())
+            .first_async::<DbTrustQuorumConfiguration>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+        else {
+            return Ok(None);
+        };
+
+        // Then get any members associated with the configuration
+        let members: Vec<(DbTrustQuorumMember, HwBaseboardId)> =
+            tq_member_dsl::trust_quorum_member
+                .filter(tq_member_dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+                .filter(tq_member_dsl::epoch.eq(latest.epoch))
+                .inner_join(hw_baseboard_id_dsl::hw_baseboard_id.on(
+                    hw_baseboard_id_dsl::id.eq(tq_member_dsl::hw_baseboard_id),
+                ))
+                .select((
+                    DbTrustQuorumMember::as_select(),
+                    HwBaseboardId::as_select(),
+                ))
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+        let mut tq_members: BTreeMap<BaseboardId, TrustQuorumMemberData> =
+            BTreeMap::new();
+        let mut coordinator: Option<BaseboardId> = None;
+        for (member, hw_baseboard_id) in members {
+            let digest = if let Some(digest_str) = member.share_digest {
+                let mut data = [0u8; 32];
+                hex::decode_to_slice(&digest_str, &mut data).map_err(|e| {
+                    Error::InternalError {
+                        internal_message: format!(
+                            "failed to decode share digest for {}:{} : {e}",
+                            hw_baseboard_id.part_number,
+                            hw_baseboard_id.serial_number
+                        ),
+                    }
+                })?;
+                Some(Sha3_256Digest(data))
+            } else {
+                None
+            };
+            // The coordinator is always a member of the group
+            // We pull out it's BaseboardId here.
+            if latest.coordinator == hw_baseboard_id.id {
+                coordinator = Some(hw_baseboard_id.clone().into());
+            }
+            tq_members.insert(
+                hw_baseboard_id.into(),
+                TrustQuorumMemberData { state: member.state.into(), digest },
+            );
+        }
+
+        let salt = if let Some(salt_str) = latest.encrypted_rack_secrets_salt {
+            let mut data = [0u8; 32];
+            hex::decode_to_slice(&salt_str, &mut data).map_err(|e| {
+                Error::InternalError {
+                    internal_message: format!(
+                        "failed to decode salt for TQ: \
+                        rack_id: {}, epoch: {}: {e}",
+                        latest.rack_id, latest.epoch
+                    ),
+                }
+            })?;
+            Some(Salt(data))
+        } else {
+            None
+        };
+
+        let encrypted_rack_secrets = if salt.is_some() {
+            let secrets =
+                latest.encrypted_rack_secrets.unwrap_or_else(|| {
+                    // This should never happend due to constraint checks
+                    Error::InternalError {
+                        internal_message: format!(
+                            "salt exists, but secrets do not for TQ:\
+                             rack_id: {}, epoch: {}"
+                            latest.rack_id, latest.epoch
+                        ),
+                    }
+                })?;
+            Some(EncryptedRackSecrets::new(salt, secrets))
+        } else {
+            None
+        };
+
+        let coordinator = coordinator.unwrap_or_else(|| {
+            return Err(Error::InternalError {
+                internal_message: format!(
+                    "Failed to find coordinator for id: {}",
+                    latest.coordinator
+                ),
+            });
+        });
+
+        Ok(Some(TrustQuorumConfig {
+            rack_id: latest.rack_id.into(),
+            epoch: latest.epoch.try_into().unwrap(),
+            state: latest.state.into(),
+            threshold: Threshold(latest.threshold.into()),
+            commit_crash_tolerance: latest.commit_crash_tolerance.into(),
+            coordinator,
+            encrypted_rack_secrets,
+            members: tq_members,
+        }))
     }
 }
 

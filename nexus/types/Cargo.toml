@@ -52,6 +52,13 @@ textwrap.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tufaceous-artifact.workspace = true
+
+# TODO: This currently depends on `sled-agent-types`. But that is only because
+# of `BaseboardId`. `BaseboardId` is moving to `sled-agent-types-conversions` as
+# part of https://github.com/oxidecomputer/omicron/pull/9488. At that point, we
+# can remove the dependency from `trust-quorum-protocol`. Yay.
+trust-quorum-protocol.workspace = true
+
 newtype-uuid.workspace = true
 update-engine.workspace = true
 unicode-width.workspace = true

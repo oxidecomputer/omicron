@@ -498,6 +498,15 @@ pub struct HwBaseboardId {
     pub serial_number: String,
 }
 
+impl From<HwBaseboardId> for trust_quorum_protocol::BaseboardId {
+    fn from(value: HwBaseboardId) -> Self {
+        Self {
+            part_number: value.part_number,
+            serial_number: value.serial_number,
+        }
+    }
+}
+
 impl From<BaseboardId> for HwBaseboardId {
     fn from(c: BaseboardId) -> Self {
         HwBaseboardId {
