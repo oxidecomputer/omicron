@@ -151,6 +151,7 @@ pub struct SpComponentConfig {
 pub struct SidecarConfig {
     #[serde(flatten)]
     pub common: SpCommonConfig,
+    pub authorized_keys: Option<PathBuf>,
 }
 
 /// Configuration of a simulated gimlet SP
