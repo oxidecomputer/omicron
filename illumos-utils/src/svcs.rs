@@ -113,10 +113,7 @@ impl SvcInMaintenance {
     #[allow(dead_code)]
     // TODO-K: Remove pub?
     pub fn new() -> SvcInMaintenance {
-        SvcInMaintenance {
-            fmri: String::new(),
-            zone: String::new(),
-        }
+        SvcInMaintenance { fmri: String::new(), zone: String::new() }
     }
 
     #[allow(dead_code)]
@@ -188,10 +185,7 @@ impl SvcInMaintenance {
 
 impl Display for SvcInMaintenance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let SvcInMaintenance {
-            fmri,
-            zone,
-        } = self;
+        let SvcInMaintenance { fmri, zone } = self;
 
         write!(f, "FMRI: {}", fmri)?;
         write!(f, "zone: {}", zone)

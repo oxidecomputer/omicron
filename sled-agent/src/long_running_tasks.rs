@@ -170,8 +170,6 @@ fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
     storage_key_requester
 }
 
-// TODO-K: Do the long running task here. Poll about every minute?
-
 async fn spawn_hardware_manager(
     log: &Logger,
     sled_mode: SledMode,
@@ -281,8 +279,9 @@ async fn spawn_bootstore_tasks(
 pub async fn spawn_health_monitor_tasks(log: &Logger) -> HealthMonitorHandle {
     // TODO-K: This is a bit vague, should this log say something else?
     info!(log, "Starting health monitor");
-    let health_handle = HealthMonitorHandle::new(log);
+    let health_handle = HealthMonitorHandle::new();
 
+    // Spawn a task to retrieve information about services in maintenance
     info!(log, "Starting SMF service health poller");
     let health_handle2 = health_handle.clone();
     let log = log.new(o!("component" => "smf_services_in_maintenance_poller"));

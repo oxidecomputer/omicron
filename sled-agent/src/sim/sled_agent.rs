@@ -810,8 +810,8 @@ impl SledAgent {
 
         // TODO-K: Don't actually call svcs
         let smf_services_in_maintenance =
-            //Svcs::enabled_not_running(&self.log).await?;
-            self.health_monitor.to_inventory();
+            //vec![SvcInMaintenance]
+            self.health_monitor.to_inventory().smf_services_in_maintenance;
 
         let storage = self.storage.lock();
 

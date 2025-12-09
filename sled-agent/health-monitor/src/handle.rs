@@ -11,23 +11,31 @@ use tokio::sync::watch;
 #[derive(Debug, Clone)]
 pub struct HealthMonitorHandle {
     // TODO-K: Do I actually need the logger here?
-    pub log: Logger,
+    //pub log: Logger,
     pub smf_services_in_maintenance_tx: watch::Sender<Vec<SvcInMaintenance>>,
 }
 
 impl HealthMonitorHandle {
-    pub fn new(log: &Logger) -> Self {
-        // TODO-K: Does this new() make sense? Or just spawn_health
+    pub fn new() -> Self {
         let (smf_services_in_maintenance_tx, _rx) =
             watch::channel(vec![SvcInMaintenance::new()]);
-        Self { log: log.clone(), smf_services_in_maintenance_tx }
+        Self { smf_services_in_maintenance_tx }
     }
 
-    // TODO-K: better return type with more health check fields?
-    pub fn to_inventory(&self) -> Vec<SvcInMaintenance> {
-        // TODO-K: Add some logging?
-        self.smf_services_in_maintenance_tx.borrow().clone()
+    pub fn to_inventory(&self) -> HealthMonitorInventory {
+        HealthMonitorInventory {
+            smf_services_in_maintenance: self
+                .smf_services_in_maintenance_tx
+                .borrow()
+                .clone(),
+        }
     }
+}
+
+/// Fields of sled-agent inventory reported by the health monitor subsystem.
+#[derive(Debug, Clone)]
+pub struct HealthMonitorInventory {
+    pub smf_services_in_maintenance: Vec<SvcInMaintenance>,
 }
 
 // TODO-K: Put this in another file?
