@@ -339,6 +339,23 @@ impl DataStore {
 
     /// Allocate an external multicast group from an IP Pool.
     ///
+    /// # Pool Selection
+    ///
+    /// - **With explicit IP**: Pool is resolved from the IP address.
+    /// - **Without explicit IP + `source_ips`**: Auto-select SSM pool (232/8,
+    ///   ff3x::/32). If no SSM pool is linked, we fall back to an ASM pool.
+    /// - **Without explicit IP + no `source_ips`**: Auto-select an ASM pool.
+    ///
+    /// ## ASM Fallback for Join-by-Name
+    ///
+    /// When `source_ips` are provided without an explicit IP (the join-by-name
+    /// case), this function falls back to an ASM pool if no SSM pool is linked,
+    /// as source filtering still works on ASM addresses via IGMPv3/MLDv2, just
+    /// without SSM's network-level guarantees.
+    ///
+    /// **Note:** Only "pool not found" triggers fallback. Actual errors (DB
+    /// failures, permission issues) propagate normally.
+    ///
     /// See [`Self::allocate_external_multicast_group_on_conn`] for the
     /// connection-reusing variant.
     pub(crate) async fn allocate_external_multicast_group(
@@ -359,24 +376,55 @@ impl DataStore {
 
         // Select the appropriate pool:
         // - If `source_ips` provided without explicit pool/IP, find an SSM pool.
+        //   If no SSM pool is linked, fall back to ASM pool with a warning.
+        //   This fallback exists because the join-by-name API has no way to
+        //   specify an explicit pool or IP, so users would be stuck without it.
+        //   Source filtering still works on ASM addresses via IGMPv3/MLDv2.
         // - If no `source_ips` and no explicit pool/IP, find an ASM pool.
         // - Otherwise (explicit pool or explicit IP provided), fall back to
         //   generic resolution via `resolve_pool_for_allocation` which validates
         //   linkage and type. ASM/SSM semantics are still enforced below.
+        let mut used_asm_fallback = false;
         let authz_pool = if needs_ssm_pool {
-            let (authz_pool, _) = self
-                .ip_pools_fetch_ssm_multicast(opctx)
-                .await
-                .map_err(|_| {
-                    external::Error::invalid_request(concat!(
-                        "No SSM multicast pool linked to your silo. ",
-                        "Create a multicast pool with SSM ranges ",
-                        "(IPv4 232/8, IPv6 ff3x::/32) and link it to ",
-                        "your silo, or provide an explicit SSM address.",
-                    ))
-                })?;
-            opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-            authz_pool
+            match self.ip_pools_fetch_ssm_multicast(opctx).await {
+                Ok((authz_pool, _)) => {
+                    opctx
+                        .authorize(authz::Action::CreateChild, &authz_pool)
+                        .await?;
+                    authz_pool
+                }
+                Err(external::Error::ObjectNotFound { .. }) => {
+                    // No SSM pool linked - fall back to ASM pool.
+                    // Only "not found" triggers fallback; real errors propagate.
+                    let (authz_pool, _) = self
+                        .ip_pools_fetch_asm_multicast(opctx)
+                        .await
+                        .map_err(|_| {
+                            external::Error::invalid_request(concat!(
+                                "No multicast pool linked to your silo. ",
+                                "Create a multicast pool and link it to ",
+                                "your silo, or provide an explicit ",
+                                "multicast address.",
+                            ))
+                        })?;
+
+                    debug!(
+                        opctx.log,
+                        "No SSM pool linked, using ASM pool for source-filtered group";
+                        "pool_id" => %authz_pool.id(),
+                    );
+
+                    // trigger fallback
+                    used_asm_fallback = true;
+
+                    opctx
+                        .authorize(authz::Action::CreateChild, &authz_pool)
+                        .await?;
+                    authz_pool
+                }
+                // Actual errors (DB failures, permission issues) propagate
+                Err(e) => return Err(e),
+            }
         } else if needs_asm_pool {
             let (authz_pool, _) = self
                 .ip_pools_fetch_asm_multicast(opctx)
@@ -404,20 +452,25 @@ impl DataStore {
         debug!(
             opctx.log,
             "multicast group allocation";
-            "pool_selection" => if needs_ssm_pool { "ssm" } else if needs_asm_pool { "asm" } else { "explicit" },
+            "pool_selection" => if used_asm_fallback { "asm_fallback" } else if needs_ssm_pool { "ssm" } else if needs_asm_pool { "asm" } else { "explicit" },
             "pool_id" => %authz_pool.id(),
         );
 
         // Enforce ASM/SSM semantics when allocating from a pool:
-        // - If sources are provided without an explicit IP (implicit allocation),
-        //   the pool must be SSM so we allocate an SSM address.
-        // - If the pool is SSM and sources are empty/missing, reject.
+        // - If sources are provided with an explicitly-specified ASM pool
+        //   (not via fallback), reject as user should use SSM pool or address.
+        // - If the pool is SSM and sources are empty/missing, also reject.
         let pool_is_ssm =
             self.multicast_pool_is_ssm(opctx, authz_pool.id()).await?;
 
-        // Note: When needs_ssm_pool was true, we already fetched an SSM pool,
+        // Note: When `needs_ssm_pool` was true, we already fetched an SSM pool,
         // so this check only triggers for explicitly-provided pools.
-        if !sources_empty && params.ip.is_none() && !pool_is_ssm {
+        // Skip this check if we used ASM fallback.
+        if !sources_empty
+            && params.ip.is_none()
+            && !pool_is_ssm
+            && !used_asm_fallback
+        {
             let pool_id = authz_pool.id();
             return Err(external::Error::invalid_request(&format!(
                 concat!(
@@ -2762,6 +2815,103 @@ mod tests {
             .expect("Should still find non-deleted group");
 
         assert_eq!(still_found_group2.id(), group2.id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test ASM fallback when source_ips are provided but no SSM pool exists.
+    ///
+    /// When a user requests source filtering (`source_ips`) without an explicit
+    /// IP address, we first try to allocate from an SSM pool. If no SSM pool
+    /// is linked to the silo, we fall back to an ASM pool since source
+    /// filtering still works via IGMPv3/MLDv2 on any multicast address.
+    #[tokio::test]
+    async fn test_multicast_group_asm_fallback_when_no_ssm_pool() {
+        let logctx =
+            dev::test_setup_log("test_multicast_group_asm_fallback_no_ssm");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create ONLY an ASM pool (224.x.x.x range, NOT SSM 232.x.x.x)
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "asm-only-pool".parse().unwrap(),
+            description: "ASM pool for fallback test".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            external::LookupType::ById(ip_pool.id()),
+        );
+
+        // Add ASM range (NOT SSM - 224.x.x.x, not 232.x.x.x)
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 100, 1, 1),
+                Ipv4Addr::new(224, 100, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add ASM range to pool");
+
+        // Link pool to silo as default
+        let link = IpPoolResource {
+            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_type: IpPoolResourceType::Silo,
+            ip_pool_id: ip_pool.id(),
+            is_default: true,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link ASM pool to silo");
+
+        // Create group with `source_ips` but without an explicit IP
+        // This should trigger fallback to ASM
+        let params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "source-filtered-group".parse().unwrap(),
+                description: "Group with sources, no SSM pool".to_string(),
+            },
+            multicast_ip: None, // No explicit IP - triggers pool auto-selection
+            source_ips: Some(vec!["10.0.0.1".parse().unwrap()]), // Has sources
+        };
+
+        // This should succeed via ASM fallback (no SSM pool exists)
+        let group = datastore
+            .multicast_group_create(&opctx, &params, None)
+            .await
+            .expect("Should create group via ASM fallback");
+
+        // Verify the IP is from our ASM pool range (224.100.1.x)
+        let ip_str = group.multicast_ip.ip().to_string();
+        assert!(
+            ip_str.starts_with("224.100.1."),
+            "IP {} should be from ASM pool range 224.100.1.x (fallback worked)",
+            ip_str
+        );
+
+        // Verify source IPs were stored
+        assert_eq!(group.source_ips.len(), 1);
+        assert_eq!(
+            group.source_ips[0].ip(),
+            "10.0.0.1".parse::<IpAddr>().unwrap()
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

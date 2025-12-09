@@ -21,13 +21,11 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
 use nexus_types::identity::Resource;
 use omicron_common::address::{
-    IPV4_ADMIN_SCOPED_MULTICAST_SUBNET, IPV4_GLOP_MULTICAST_SUBNET,
-    IPV4_LINK_LOCAL_MULTICAST_SUBNET, IPV4_SPECIFIC_RESERVED_MULTICAST_ADDRS,
-    IPV4_SSM_SUBNET, IPV6_INTERFACE_LOCAL_MULTICAST_LAST,
-    IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET, IPV6_LINK_LOCAL_MULTICAST_LAST,
-    IPV6_LINK_LOCAL_MULTICAST_SUBNET, IPV6_RESERVED_SCOPE_MULTICAST_LAST,
-    IPV6_RESERVED_SCOPE_MULTICAST_SUBNET, IPV6_SSM_SUBNET, Ipv4Range,
-    Ipv6Range,
+    IPV4_LINK_LOCAL_MULTICAST_SUBNET, IPV4_SSM_SUBNET,
+    IPV6_INTERFACE_LOCAL_MULTICAST_LAST, IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET,
+    IPV6_LINK_LOCAL_MULTICAST_LAST, IPV6_LINK_LOCAL_MULTICAST_SUBNET,
+    IPV6_RESERVED_SCOPE_MULTICAST_LAST, IPV6_RESERVED_SCOPE_MULTICAST_SUBNET,
+    IPV6_SSM_SUBNET, Ipv4Range, Ipv6Range,
 };
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -65,9 +63,8 @@ fn not_found_from_lookup(pool_lookup: &lookup::IpPool<'_>) -> Error {
 /// Enforces restrictions on multicast address ranges to prevent allocation
 /// of reserved or special-use addresses that would be rejected by Dendrite:
 ///
-/// - IPv4: Rejects link-local (224.0.0.0/24), GLOP (233.0.0.0/8),
-///   admin-scoped (239.0.0.0/8), specific reserved addresses (NTP, Cisco
-///   Auto-RP, PTP), and prevents ASM/SSM boundary spanning
+/// - IPv4: Rejects link-local (224.0.0.0/24) and prevents ASM/SSM
+///   boundary spanning
 /// - IPv6: Rejects reserved-scope (ff00::/16), interface-local (ff01::/16),
 ///   link-local (ff02::/16), and prevents ASM/SSM boundary spanning
 ///
@@ -96,45 +93,6 @@ fn validate_multicast_range(range: &shared::IpRange) -> Result<(), Error> {
                         "Cannot add IPv4 link-local multicast range \
                          (224.0.0.0/24) to IP pool",
                     ));
-                }
-
-                // GLOP (233.0.0.0/8)
-                let reserved = Ipv4Range {
-                    first: IPV4_GLOP_MULTICAST_SUBNET.addr(),
-                    last: IPV4_GLOP_MULTICAST_SUBNET
-                        .broadcast()
-                        .expect("valid IPv4 subnet"),
-                };
-                if v4_range.overlaps(&reserved) {
-                    return Err(Error::invalid_request(
-                        "Cannot add IPv4 GLOP multicast range \
-                         (233.0.0.0/8) to IP pool",
-                    ));
-                }
-
-                // admin-scoped (239.0.0.0/8)
-                let reserved = Ipv4Range {
-                    first: IPV4_ADMIN_SCOPED_MULTICAST_SUBNET.addr(),
-                    last: IPV4_ADMIN_SCOPED_MULTICAST_SUBNET
-                        .broadcast()
-                        .expect("valid IPv4 subnet"),
-                };
-                if v4_range.overlaps(&reserved) {
-                    return Err(Error::invalid_request(
-                        "Cannot add IPv4 administratively scoped multicast range \
-                         (239.0.0.0/8) to IP pool",
-                    ));
-                }
-            }
-
-            // Reject ranges that contain specific reserved addresses
-            // (NTP, Cisco Auto-RP, PTP) - aligned with Dendrite validation
-            for &reserved_addr in &IPV4_SPECIFIC_RESERVED_MULTICAST_ADDRS {
-                if v4_range.contains(reserved_addr) {
-                    return Err(Error::invalid_request(format!(
-                        "Cannot add range containing specifically reserved \
-                         multicast address {reserved_addr} to IP pool"
-                    )));
                 }
             }
 
