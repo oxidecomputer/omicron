@@ -10,10 +10,9 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
 use omicron_common::address::{
-    IPV4_ADMIN_SCOPED_MULTICAST_SUBNET, IPV4_GLOP_MULTICAST_SUBNET,
-    IPV4_LINK_LOCAL_MULTICAST_SUBNET, IPV4_SPECIFIC_RESERVED_MULTICAST_ADDRS,
-    IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET, IPV6_LINK_LOCAL_MULTICAST_SUBNET,
-    IPV6_RESERVED_SCOPE_MULTICAST_SUBNET, MAX_SSM_SOURCE_IPS,
+    IPV4_LINK_LOCAL_MULTICAST_SUBNET, IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET,
+    IPV6_LINK_LOCAL_MULTICAST_SUBNET, IPV6_RESERVED_SCOPE_MULTICAST_SUBNET,
+    MAX_SSM_SOURCE_IPS,
 };
 use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
@@ -3031,35 +3030,18 @@ pub fn validate_multicast_ip(ip: IpAddr) -> Result<(), String> {
 
 /// Validates IPv4 multicast addresses.
 ///
-/// Checks that the address is multicast and not in a reserved range. These
-/// checks are also enforced at IP pool creation time, but we validate here
-/// too for better error messages at the API layer.
+/// Checks that the address is multicast and not in the link-local range.
+/// These checks are also enforced at IP pool creation time, but we validate
+/// here too for better error messages at the API layer.
 fn validate_ipv4_multicast(addr: Ipv4Addr) -> Result<(), String> {
     if !addr.is_multicast() {
         return Err(format!("{addr} is not a multicast address"));
     }
 
-    // Check reserved subnets
+    // Link-local multicast (224.0.0.0/24) cannot be routed
     if IPV4_LINK_LOCAL_MULTICAST_SUBNET.contains(addr) {
         return Err(format!(
             "{addr} is in the link-local multicast range (224.0.0.0/24)"
-        ));
-    }
-    if IPV4_GLOP_MULTICAST_SUBNET.contains(addr) {
-        return Err(format!(
-            "{addr} is in the GLOP multicast range (233.0.0.0/8)"
-        ));
-    }
-    if IPV4_ADMIN_SCOPED_MULTICAST_SUBNET.contains(addr) {
-        return Err(format!(
-            "{addr} is in the admin-scoped multicast range (239.0.0.0/8)"
-        ));
-    }
-
-    // Check specific reserved addresses (NTP, Cisco Auto-RP, PTP)
-    if IPV4_SPECIFIC_RESERVED_MULTICAST_ADDRS.contains(&addr) {
-        return Err(format!(
-            "{addr} is a specifically reserved multicast address"
         ));
     }
 
@@ -3185,53 +3167,55 @@ mod tests {
             "231.5.6.7 should be valid ASM"
         );
 
-        // Invalid IPv4 multicast addresses - reserved ranges
+        // GLOP and admin-scoped are allowed (customer may have valid use)
         assert!(
             validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(233, 1, 1, 1)))
-                .is_err(),
-            "233.1.1.1 should be rejected (GLOP addressing)"
+                .is_ok(),
+            "233.1.1.1 should be valid (GLOP - customer use case)"
         );
         assert!(
             validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(239, 1, 1, 1)))
-                .is_err(),
-            "239.1.1.1 should be rejected (admin-scoped)"
+                .is_ok(),
+            "239.1.1.1 should be valid (admin-scoped - customer use case)"
         );
+
+        // Link-local multicast (224.0.0.0/24) should be rejected
         assert!(
             validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)))
                 .is_err(),
-            "224.0.0.1 should be rejected (link-local control)"
+            "224.0.0.1 should be rejected (link-local)"
         );
         assert!(
             validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 255)))
                 .is_err(),
-            "224.0.0.255 should be rejected (link-local control)"
+            "224.0.0.255 should be rejected (link-local)"
         );
 
-        // Specific reserved addresses (per IANA registry)
+        // Specific reserved addresses outside link-local are now allowed
         assert!(
             validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 1, 1)))
-                .is_err(),
-            "224.0.1.1 should be rejected (NTP)"
+                .is_ok(),
+            "224.0.1.1 should be valid (NTP - customer may want)"
         );
         assert!(
             validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 1, 39)))
-                .is_err(),
-            "224.0.1.39 should be rejected (Cisco Auto-RP-Announce)"
+                .is_ok(),
+            "224.0.1.39 should be valid (Cisco Auto-RP - customer may want)"
         );
         assert!(
             validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 1, 40)))
-                .is_err(),
-            "224.0.1.40 should be rejected (Cisco Auto-RP-Discovery)"
+                .is_ok(),
+            "224.0.1.40 should be valid (Cisco Auto-RP - customer may want)"
         );
         assert!(
             validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 1, 129)))
-                .is_err(),
-            "224.0.1.129 should be rejected (PTP-primary)"
+                .is_ok(),
+            "224.0.1.129 should be valid (PTP - customer may want)"
         );
         assert!(
             validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 1, 130)))
-                .is_err(),
-            "224.0.1.130 should be rejected (PTP-alternate1)"
+                .is_ok(),
+            "224.0.1.130 should be valid (PTP - customer may want)"
         );
 
         // Non-multicast addresses

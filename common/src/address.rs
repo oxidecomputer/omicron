@@ -147,52 +147,6 @@ pub const IPV6_RESERVED_SCOPE_MULTICAST_LAST: Ipv6Addr = Ipv6Addr::new(
     0xff00, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
 );
 
-/// IPv4 GLOP addressing block (233.0.0.0/8).
-///
-/// This range is reserved for GLOP addressing and should not be allocated from
-/// IP pools for general multicast use.
-///
-/// See [RFC 3180] for GLOP address allocation.
-///
-/// [RFC 3180]: https://www.rfc-editor.org/rfc/rfc3180
-pub const IPV4_GLOP_MULTICAST_SUBNET: Ipv4Net =
-    Ipv4Net::new_unchecked(Ipv4Addr::new(233, 0, 0, 0), 8);
-
-/// IPv4 administratively scoped multicast subnet (239.0.0.0/8).
-///
-/// This range is reserved for organization-local administrative scoping and
-/// should not be allocated from IP pools for general multicast use.
-///
-/// See [RFC 2365] for administratively scoped IP multicast.
-///
-/// [RFC 2365]: https://www.rfc-editor.org/rfc/rfc2365
-pub const IPV4_ADMIN_SCOPED_MULTICAST_SUBNET: Ipv4Net =
-    Ipv4Net::new_unchecked(Ipv4Addr::new(239, 0, 0, 0), 8);
-
-/// Specifically reserved IPv4 multicast addresses.
-///
-/// These addresses are reserved for specific protocols and should not be
-/// allocated from IP pools. They fall outside the link-local range
-/// (224.0.0.0/24) but are still reserved.
-///
-/// - 224.0.1.1: NTP (Network Time Protocol, RFC 5905)
-/// - 224.0.1.39: Cisco Auto-RP-Announce
-/// - 224.0.1.40: Cisco Auto-RP-Discovery
-/// - 224.0.1.129-132: PTP (Precision Time Protocol, IEEE 1588)
-///
-/// See [IANA IPv4 Multicast Address Space Registry] for complete assignments.
-///
-/// [IANA IPv4 Multicast Address Space Registry]: https://www.iana.org/assignments/multicast-addresses/multicast-addresses.xhtml
-pub const IPV4_SPECIFIC_RESERVED_MULTICAST_ADDRS: [Ipv4Addr; 7] = [
-    Ipv4Addr::new(224, 0, 1, 1),   // NTP
-    Ipv4Addr::new(224, 0, 1, 39),  // Cisco Auto-RP-Announce
-    Ipv4Addr::new(224, 0, 1, 40),  // Cisco Auto-RP-Discovery
-    Ipv4Addr::new(224, 0, 1, 129), // PTP-primary
-    Ipv4Addr::new(224, 0, 1, 130), // PTP-alternate1
-    Ipv4Addr::new(224, 0, 1, 131), // PTP-alternate2
-    Ipv4Addr::new(224, 0, 1, 132), // PTP-alternate3
-];
-
 /// maximum possible value for a tcp or udp port
 pub const MAX_PORT: u16 = u16::MAX;
 

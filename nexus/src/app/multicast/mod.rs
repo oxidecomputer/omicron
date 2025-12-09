@@ -587,7 +587,13 @@ impl super::Nexus {
     }
 }
 
-/// Validate SSM configuration per [RFC 4607]: IPv4 232/8 or IPv6 ff30::/12.
+/// Validate SSM configuration per [RFC 4607]: IPv4 232/8 or IPv6 ff3x::/32.
+///
+/// Per RFC 4607 Section 2, SSM addresses without sources are "meaningless"
+/// and "routers MUST ignore" such requests. We validate upfront for clarity.
+///
+/// Source filtering on non-SSM addresses is allowed. IGMPv3/MLDv2 support
+/// (S,G) joins for any multicast address, even outside the SSM range.
 ///
 /// [RFC 4607]: https://www.rfc-editor.org/rfc/rfc4607
 fn validate_ssm_configuration(
@@ -599,18 +605,15 @@ fn validate_ssm_configuration(
         IpAddr::V6(addr) => IPV6_SSM_SUBNET.contains(addr),
     };
 
-    let has_sources = !source_ips.is_empty();
-
-    match (is_ssm_address, has_sources) {
-        (true, false) => Err(external::Error::invalid_request(
-            "SSM multicast addresses require at least one source IP",
-        )),
-        (false, true) => Err(external::Error::invalid_request(
-            "ASM multicast addresses cannot have sources. \
-             Use SSM range (232.x.x.x for IPv4, FF3x:: for IPv6) for source-specific multicast",
-        )),
-        _ => Ok(()), // (true, true) and (false, false) are valid
+    // SSM addresses require source IPs per RFC 4607
+    if is_ssm_address && source_ips.is_empty() {
+        return Err(external::Error::invalid_request(
+            "SSM addresses (232/8 for IPv4, ff3x::/32 for IPv6) require \
+             at least one source IP per RFC 4607",
+        ));
     }
+
+    Ok(())
 }
 
 // Private helpers for join logic
@@ -739,13 +742,14 @@ mod tests {
             .is_ok()
         );
 
-        // Invalid - ASM address with sources
+        // Valid - ASM address with sources (IGMPv3/MLDv2 supports source
+        // filtering on any multicast address)
         assert!(
             validate_ssm_configuration(
                 IpAddr::V4(Ipv4Addr::new(224, 1, 1, 1)),
                 &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))]
             )
-            .is_err()
+            .is_ok()
         );
 
         // Invalid - SSM address without sources
@@ -757,13 +761,14 @@ mod tests {
             .is_err()
         );
 
-        // Invalid - IPv6 ASM address with sources
+        // Valid - IPv6 ASM address with sources (IGMPv3/MLDv2 supports source
+        // filtering on any multicast address)
         assert!(
             validate_ssm_configuration(
                 IpAddr::V6(Ipv6Addr::new(0xff0e, 0, 0, 0, 0, 0, 0, 1)),
                 &[IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))]
             )
-            .is_err()
+            .is_ok()
         );
 
         // Invalid - IPv6 SSM address without sources
