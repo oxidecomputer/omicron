@@ -19,7 +19,7 @@ use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::update::{
-    MupdateOverrideInfo, OmicronFileManifest, OmicronFileManifestSource,
+    MupdateOverrideInfo, OmicronInstallManifest, OmicronInstallManifestSource,
 };
 use omicron_common::zone_images::ZoneImageFileSource;
 use omicron_uuid_kinds::InternalZpoolUuid;
@@ -251,7 +251,7 @@ pub enum ManifestHashError {
 /// [`Self::is_valid`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZoneManifestArtifactsResult {
-    pub manifest: OmicronFileManifest,
+    pub manifest: OmicronInstallManifest,
     pub data: IdOrdMap<ZoneManifestArtifactResult>,
 }
 
@@ -279,7 +279,7 @@ impl ZoneManifestArtifactsResult {
 }
 
 pub struct ZoneManifestArtifactsDisplay<'a> {
-    source: &'a OmicronFileManifestSource,
+    source: &'a OmicronInstallManifestSource,
     artifacts: &'a IdOrdMap<ZoneManifestArtifactResult>,
 }
 

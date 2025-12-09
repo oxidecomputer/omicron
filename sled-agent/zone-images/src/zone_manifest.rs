@@ -5,7 +5,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use iddqd::IdOrdMap;
 use omicron_common::update::{
-    OmicronFileManifest, OmicronFileManifestSource, OmicronFileMetadata,
+    OmicronInstallManifest, OmicronInstallManifestSource, OmicronInstallMetadata,
 };
 use omicron_uuid_kinds::InternalZpoolUuid;
 use rayon::iter::{ParallelBridge, ParallelIterator};
@@ -247,7 +247,7 @@ impl AllZoneManifests {
 }
 
 fn make_non_boot_info(
-    info: InstallMetadataNonBootInfo<OmicronFileManifest>,
+    info: InstallMetadataNonBootInfo<OmicronInstallManifest>,
 ) -> ZoneManifestNonBootInfo {
     let result = make_non_boot_result(&info.dataset_dir, info.result);
     ZoneManifestNonBootInfo {
@@ -260,7 +260,7 @@ fn make_non_boot_info(
 
 fn make_non_boot_result(
     dataset_dir: &Utf8Path,
-    result: InstallMetadataNonBootResult<OmicronFileManifest>,
+    result: InstallMetadataNonBootResult<OmicronInstallManifest>,
 ) -> ZoneManifestNonBootResult {
     match result {
         InstallMetadataNonBootResult::MatchesPresent(
@@ -325,7 +325,7 @@ fn make_non_boot_result(
 
 fn make_artifacts_result(
     dir: &Utf8Path,
-    manifest: InstallMetadata<OmicronFileManifest>,
+    manifest: InstallMetadata<OmicronInstallManifest>,
 ) -> ZoneManifestArtifactsResult {
     let artifacts: Vec<_> = manifest
         .value
@@ -362,7 +362,7 @@ fn make_artifacts_result(
 fn synthesize_manifest(
     log: &slog::Logger,
     dataset_dir: &Utf8Path,
-) -> Result<Option<OmicronFileManifest>, InstallMetadataReadError> {
+) -> Result<Option<OmicronInstallManifest>, InstallMetadataReadError> {
     let mut zones = IdOrdMap::new();
 
     // Read all the files in the directory.
@@ -414,7 +414,7 @@ fn synthesize_manifest(
 
         match compute_size_and_hash(&mut f) {
             Ok((size, hash)) => {
-                zones.insert_overwrite(OmicronFileMetadata {
+                zones.insert_overwrite(OmicronInstallMetadata {
                     file_name: entry.file_name().to_string(),
                     file_size: size,
                     hash,
@@ -429,15 +429,15 @@ fn synthesize_manifest(
         }
     }
 
-    Ok(Some(OmicronFileManifest {
-        source: OmicronFileManifestSource::SledAgent,
+    Ok(Some(OmicronInstallManifest {
+        source: OmicronInstallManifestSource::SledAgent,
         zones,
     }))
 }
 
 fn validate_one(
     artifact_path: &Utf8Path,
-    zone: &OmicronFileMetadata,
+    zone: &OmicronInstallMetadata,
 ) -> ArtifactReadResult {
     let mut f = match File::open(artifact_path) {
         Ok(f) => f,
@@ -523,7 +523,7 @@ mod tests {
                 .current_with_boot_disk();
         let manifests = AllZoneManifests::read_all(
             &logctx.log,
-            OmicronFileManifest::FILE_NAME,
+            OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
         );
 
@@ -578,7 +578,7 @@ mod tests {
                 .current_with_boot_disk();
         let manifests = AllZoneManifests::read_all(
             &logctx.log,
-            OmicronFileManifest::FILE_NAME,
+            OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
         );
         // For the boot disk, we should synthesize a manifest.
@@ -630,7 +630,7 @@ mod tests {
                 .current_with_boot_disk();
         let manifests = AllZoneManifests::read_all(
             &logctx.log,
-            OmicronFileManifest::FILE_NAME,
+            OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
         );
         assert_eq!(
@@ -681,7 +681,7 @@ mod tests {
                 .current_with_boot_disk();
         let manifests = AllZoneManifests::read_all(
             &logctx.log,
-            OmicronFileManifest::FILE_NAME,
+            OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
         );
         assert_eq!(
@@ -752,7 +752,7 @@ mod tests {
         .current_with_boot_disk();
         let manifests = AllZoneManifests::read_all(
             &logctx.log,
-            OmicronFileManifest::FILE_NAME,
+            OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
         );
         // The boot disk is valid.

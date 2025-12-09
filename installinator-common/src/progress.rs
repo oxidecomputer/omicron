@@ -315,6 +315,9 @@ pub enum ControlPlaneZonesStepId {
     /// Writing the zone manifest.
     ZoneManifest,
 
+    /// Writing the measurement manifest.
+    MeasurementManifest,
+
     /// Writing the measurement corpus.
     Measurement { name: String },
 

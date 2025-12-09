@@ -20,7 +20,7 @@ use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::ledger::Ledgerable;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
-use omicron_common::update::OmicronFileManifestSource;
+use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
@@ -567,11 +567,11 @@ impl fmt::Display for ManifestInventoryDisplay<'_> {
 pub struct ManifestBootInventory {
     /// The manifest source.
     ///
-    /// In production this is [`OmicronFileManifestSource::Installinator`], but
+    /// In production this is [`OmicronInstallManifestSource::Installinator`], but
     /// in some development and testing flows Sled Agent synthesizes zone
     /// manifests. In those cases, the source is
-    /// [`OmicronFileManifestSource::SledAgent`].
-    pub source: OmicronFileManifestSource,
+    /// [`OmicronInstallManifestSource::SledAgent`].
+    pub source: OmicronInstallManifestSource,
 
     /// The artifacts on disk.
     pub artifacts: IdOrdMap<ZoneArtifactInventory>,
@@ -584,7 +584,7 @@ impl ManifestBootInventory {
     /// in `nexus-inventory`.
     pub fn new_fake() -> Self {
         Self {
-            source: OmicronFileManifestSource::Installinator {
+            source: OmicronInstallManifestSource::Installinator {
                 mupdate_id: MupdateUuid::nil(),
             },
             artifacts: IdOrdMap::new(),

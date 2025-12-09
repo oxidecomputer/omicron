@@ -1288,8 +1288,8 @@ mod tests {
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::disk::SharedDatasetConfig;
-    use omicron_common::update::OmicronFileManifest;
-    use omicron_common::update::OmicronFileManifestSource;
+    use omicron_common::update::OmicronInstallManifest;
+    use omicron_common::update::OmicronInstallManifestSource;
     use omicron_common::zone_images::ZoneImageFileSource;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
@@ -1505,8 +1505,8 @@ mod tests {
                     measurement_manifest: MeasurementManifestStatus {
                         boot_disk_path: boot_disk_path.clone(),
                         boot_disk_result: Ok(ZoneManifestArtifactsResult {
-                            manifest: OmicronFileManifest {
-                                source: OmicronFileManifestSource::SledAgent,
+                            manifest: OmicronInstallManifest {
+                                source: OmicronInstallManifestSource::SledAgent,
                                 zones: IdOrdMap::new(),
                             },
                             data: IdOrdMap::new(),
@@ -1516,8 +1516,8 @@ mod tests {
                     zone_manifest: ZoneManifestStatus {
                         boot_disk_path: boot_disk_path.clone(),
                         boot_disk_result: Ok(ZoneManifestArtifactsResult {
-                            manifest: OmicronFileManifest {
-                                source: OmicronFileManifestSource::SledAgent,
+                            manifest: OmicronInstallManifest {
+                                source: OmicronInstallManifestSource::SledAgent,
                                 zones: IdOrdMap::new(),
                             },
                             data: IdOrdMap::new(),

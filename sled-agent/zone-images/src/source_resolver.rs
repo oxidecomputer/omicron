@@ -8,7 +8,7 @@ use crate::mupdate_override::AllMupdateOverrides;
 use crate::zone_manifest::AllZoneManifests;
 use camino::Utf8PathBuf;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use omicron_common::update::OmicronFileManifest;
+use omicron_common::update::OmicronInstallManifest;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
@@ -113,12 +113,12 @@ impl ResolverInner {
 
         let zone_manifests = AllZoneManifests::read_all(
             &log,
-            OmicronFileManifest::FILE_NAME,
+            OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
         );
         let measurement_manifests = AllZoneManifests::read_all_measurements(
             &log,
-            OmicronFileManifest::MEASUREMENT_FILE_NAME,
+            OmicronInstallManifest::MEASUREMENT_FILE_NAME,
             &internal_disks,
         );
         let mupdate_overrides =

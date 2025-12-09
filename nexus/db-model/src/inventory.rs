@@ -76,7 +76,7 @@ use omicron_common::disk::DatasetName;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::M2Slot;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
-use omicron_common::update::OmicronFileManifestSource;
+use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
@@ -1516,7 +1516,7 @@ impl From<InvLastReconciliationZoneResult> for ConfigReconcilerInventoryResult {
     }
 }
 
-// See [`omicron_common::update::OmicronFileManifestSource`].
+// See [`omicron_common::update::OmicronInstallManifestSource`].
 impl_enum_type!(
     InvZoneManifestSourceEnum:
 
@@ -1553,12 +1553,12 @@ impl InvZoneImageResolver {
             zone_manifest_boot_disk_error,
         ) = match &inv.zone_manifest.boot_inventory {
             Ok(manifest) => match manifest.source {
-                OmicronFileManifestSource::Installinator { mupdate_id } => (
+                OmicronInstallManifestSource::Installinator { mupdate_id } => (
                     Some(InvZoneManifestSourceEnum::Installinator),
                     Some(mupdate_id.into()),
                     None,
                 ),
-                OmicronFileManifestSource::SledAgent => {
+                OmicronInstallManifestSource::SledAgent => {
                     (Some(InvZoneManifestSourceEnum::SledAgent), None, None)
                 }
             },
@@ -1607,7 +1607,7 @@ impl InvZoneImageResolver {
             } else {
                 let source = match self.zone_manifest_source {
                     Some(InvZoneManifestSourceEnum::Installinator) => {
-                        OmicronFileManifestSource::Installinator {
+                        OmicronInstallManifestSource::Installinator {
                             mupdate_id: self
                                 .zone_manifest_mupdate_id
                                 .context(
@@ -1619,7 +1619,7 @@ impl InvZoneImageResolver {
                         }
                     }
                     Some(InvZoneManifestSourceEnum::SledAgent) => {
-                        OmicronFileManifestSource::SledAgent
+                        OmicronInstallManifestSource::SledAgent
                     }
                     None => {
                         bail!(
