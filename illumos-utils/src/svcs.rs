@@ -19,7 +19,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
-use slog::info;
+use slog::{error, info};
 use std::fmt::Display;
 #[cfg(target_os = "illumos")]
 use tokio::process::Command;
@@ -34,7 +34,7 @@ impl Svcs {
         log: &Logger,
     ) -> Result<Vec<SvcInMaintenance>, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
-        let cmd = cmd.args(&[SVCS, "-Zx"]);
+        let cmd = cmd.args(&[SVCS, "-Za", "-H", "-o", "state,fmri,zone"]);
         let output = execute_async(cmd).await?;
         Ok(SvcInMaintenance::parse(log, &output.stdout))
     }
@@ -92,19 +92,18 @@ impl From<String> for SvcState {
     }
 }
 
-// TODO-K: Change to SvcInMaintenance?
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 /// Information about an SMF service that is enabled but not running
 pub struct SvcInMaintenance {
     fmri: String,
     zone: String,
-    state: SvcState,
-    // TODO-K: Do I need a deserialiser like parse_cockroach_cli_timestamp?
-    state_since: Option<DateTime<Utc>>,
-    reason: String,
-    impact: String,
-    additional_info: Vec<String>,
+    //state: SvcState,
+    //// TODO-K: Do I need a deserialiser like parse_cockroach_cli_timestamp?
+    //state_since: Option<DateTime<Utc>>,
+    //reason: String,
+    //impact: String,
+    //additional_info: Vec<String>,
 }
 
 impl SvcInMaintenance {
@@ -112,16 +111,11 @@ impl SvcInMaintenance {
     // marked as a configuration option based on target OS because they are not
     // Illumos specific themselves. We mark them as unused instead.
     #[allow(dead_code)]
-    // TODO-K: Remove pub
+    // TODO-K: Remove pub?
     pub fn new() -> SvcInMaintenance {
         SvcInMaintenance {
             fmri: String::new(),
             zone: String::new(),
-            state: SvcState::Unknown,
-            state_since: None,
-            reason: String::new(),
-            impact: String::new(),
-            additional_info: vec![],
         }
     }
 
@@ -131,107 +125,60 @@ impl SvcInMaintenance {
         if data.is_empty() {
             return svcs;
         }
-        // The reponse we get from running `svcs -Zxv` is a free-form text.
-        // Example:
+
+        // Example of the reponse from running `svcs -Za -H -o state,fmri,zone`
         //
-        // svc:/site/fake-service:default (?)
-        //   Zone: global
-        //  State: maintenance since Mon Nov 24 06:57:19 2025
-        // Reason: Restarting too quickly.
-        //    See: http://illumos.org/msg/SMF-8000-L5
-        //    See: /var/svc/log/site-fake-service:default.log
-        // Impact: This service is not running.
-        //
-        // svc:/system/omicron/baseline:default (Omicron brand baseline generation)
-        //   Zone: global
-        //  State: maintenance since Mon Nov 24 05:39:49 2025
-        // Reason: Start method failed repeatedly, last died on Killed (9).
-        //    See: http://illumos.org/msg/SMF-8000-KS
-        //    See: man -M /usr/share/man -s 7 omicron1
-        //    See: /var/svc/log/system-omicron-baseline:default.log
-        // Impact: This service is not running.
+        // legacy_run     lrc:/etc/rc2_d/S20sysetup                          global
+        // maintenance    svc:/site/fake-service:default                     global
+        // disabled       svc:/network/tcpkey:default                        global
+        // disabled       svc:/system/omicron/baseline:default               global
+        // online         svc:/milestone/sysconfig:default                   global
         let s = String::from_utf8_lossy(data);
-        let mut current_svc = SvcInMaintenance::new();
         let lines = s.trim().lines();
         for line in lines {
             let line = line.trim();
-            if line.starts_with("svc:") {
-                // This is a new service, wipe the slate clean
-                current_svc = SvcInMaintenance::new();
-                // We remove the text inside the parenthesis that is not part
-                // of the fmri. As we are already checking that the line starts
-                // with "svc:" there should be no risk of there being nothing
-                // in the line
-                if let Some(fmri) = line.split_whitespace().next() {
-                    current_svc.fmri = fmri.to_string()
-                };
-            } else {
-                // We don't return errors if data is missing from a line.
-                // We want to collect as much information as we can from
-                // every service in the response.
-                if let Some((key, value)) = line.split_once(": ") {
-                    match key.trim() {
-                        "Zone" => current_svc.zone = value.to_string(),
-                        "State" => {
-                            if let Some(state) = value.split_whitespace().next()
-                            {
-                                current_svc.state =
-                                    SvcState::from(state.to_string())
-                            };
+            let mut svc = line.split_whitespace();
 
-                            if let Some((_, state_since)) =
-                                value.split_once("since ")
-                            {
-                                let naive = match NaiveDateTime::parse_from_str(
-                                    state_since,
-                                    "%a %b %d %H:%M:%S %Y",
-                                ) {
-                                    Ok(t) => t,
-                                    Err(e) => {
-                                        info!(
-                                            log,
-                                            "unable to parse service instance \
-                                            state-since datetime {}: {}",
-                                            state_since,
-                                            e
-                                        );
-                                        continue;
-                                    }
-                                };
-
-                                current_svc.state_since =
-                                    Some(DateTime::from_naive_utc_and_offset(
-                                        naive, Utc,
-                                    ));
-                            }
-                        }
-                        "Reason" => current_svc.reason = value.to_string(),
-                        "See" => {
-                            current_svc.additional_info.push(value.to_string())
-                        }
-                        "Impact" => {
-                            current_svc.impact = value.to_string();
-                            // This should be the last line for each service
-                            // https://github.com/illumos/illumos-gate/blob/master/usr/src/cmd/svc/svcs/explain.c#L2070-L2097
-                            //
-                            // Push the service to the services vector.
-                            svcs.push(current_svc.clone());
-                        }
-                        _ => {
-                            info!(
+            if let Some(state) = svc.next() {
+                // Only attempt to parse a service that is in maintenance.
+                match SvcState::from(state.to_string()) {
+                    SvcState::Maintenance => {
+                        // This is a new service, wipe the slate clean
+                        let mut current_svc = SvcInMaintenance::new();
+                        if let Some(fmri) = svc.next() {
+                            current_svc.fmri = fmri.to_string()
+                        } else {
+                            error!(
                                 log,
-                                "unable to parse key due to unknown format: \
-                                {key}"
+                                "unable to parse; output line missing FMRI: {line}",
                             );
                         }
+
+                        if let Some(zone) = svc.next() {
+                            current_svc.zone = zone.to_string()
+                        } else {
+                            error!(
+                                log,
+                                "unable to parse; output line missing zone: {line}",
+                            );
+                        }
+
+                        // We add a service even if we were only partially able to
+                        // parse it. If there is something in maintenance we want to
+                        // include it in inventory. This means there is something
+                        // going on and someone should take a look.
+                        svcs.push(current_svc.clone());
                     }
-                } else {
-                    if !line.is_empty() {
+                    // If there is a weird state let's log it.
+                    SvcState::Unknown => {
                         info!(
                             log,
-                            "unable to parse line due to unknown format: {line}",
-                        );
+                            "output from 'svcs' contains a service with an unknown \
+                        state: {}",
+                            state
+                        )
                     }
+                    _ => (),
                 }
             }
         }
@@ -244,22 +191,10 @@ impl Display for SvcInMaintenance {
         let SvcInMaintenance {
             fmri,
             zone,
-            state,
-            state_since,
-            reason,
-            impact,
-            additional_info,
         } = self;
 
         write!(f, "FMRI: {}", fmri)?;
-        write!(f, "zone: {}", zone)?;
-        write!(f, "state: {:?}", state)?;
-        write!(f, "state since: {:?}", state_since)?;
-        write!(f, "reason: {}", reason)?;
-        for info in additional_info {
-            write!(f, "see: {}", info)?;
-        }
-        write!(f, "impact: {}", impact)
+        write!(f, "zone: {}", zone)
     }
 }
 
@@ -280,23 +215,13 @@ mod tests {
     }
 
     #[test]
-    fn test_svc_not_running_parse_success() {
-        let output = r#"svc:/site/fake-service:default
-  Zone: global
- State: maintenance since Mon Nov 24 06:57:19 2025
-Reason: Restarting too quickly.
-   See: http://illumos.org/msg/SMF-8000-L5
-   See: /var/svc/log/site-fake-service:default.log
-Impact: This service is not running.
-
-svc:/system/omicron/baseline:default (Omicron brand baseline generation)
-  Zone: global
- State: maintenance since Mon Nov 24 05:39:49 2025
-Reason: Start method failed repeatedly, last died on Killed (9).
-   See: http://illumos.org/msg/SMF-8000-KS
-   See: man -M /usr/share/man -s 7 omicron1
-   See: /var/svc/log/system-omicron-baseline:default.log
-Impact: This service is not running."#;
+    fn test_svc_in_maintenance_parse_success() {
+        let output = r#"legacy_run     lrc:/etc/rc2_d/S89PRESERVE                         global
+maintenance    svc:/site/fake-service:default                     global
+disabled       svc:/network/tcpkey:default                        global
+maintenance    svc:/system/omicron/baseline:default               global
+online         svc:/milestone/sysconfig:default                   global
+"#;
 
         let log = log();
         let services = SvcInMaintenance::parse(&log, output.as_bytes());
@@ -309,21 +234,6 @@ Impact: This service is not running."#;
             SvcInMaintenance {
                 fmri: "svc:/site/fake-service:default".to_string(),
                 zone: "global".to_string(),
-                state: SvcState::Maintenance,
-                state_since: Some(DateTime::from_naive_utc_and_offset(
-                    NaiveDateTime::parse_from_str(
-                        "Mon Nov 24 06:57:19 2025",
-                        "%a %b %d %H:%M:%S %Y",
-                    )
-                    .unwrap(),
-                    Utc,
-                )),
-                reason: "Restarting too quickly.".to_string(),
-                additional_info: vec![
-                    "http://illumos.org/msg/SMF-8000-L5".to_string(),
-                    "/var/svc/log/site-fake-service:default.log".to_string(),
-                ],
-                impact: "This service is not running.".to_string(),
             }
         );
 
@@ -332,105 +242,80 @@ Impact: This service is not running."#;
             SvcInMaintenance {
                 fmri: "svc:/system/omicron/baseline:default".to_string(),
                 zone: "global".to_string(),
-                state: SvcState::Maintenance,
-                state_since: Some(DateTime::from_naive_utc_and_offset(
-                    NaiveDateTime::parse_from_str(
-                        "Mon Nov 24 05:39:49 2025",
-                        "%a %b %d %H:%M:%S %Y",
-                    )
-                    .unwrap(),
-                    Utc,
-                )),
-                reason:
-                    "Start method failed repeatedly, last died on Killed (9)."
-                        .to_string(),
-                additional_info: vec![
-                    "http://illumos.org/msg/SMF-8000-KS".to_string(),
-                    "man -M /usr/share/man -s 7 omicron1".to_string(),
-                    "/var/svc/log/system-omicron-baseline:default.log"
-                        .to_string(),
-                ],
-                impact: "This service is not running.".to_string(),
             }
         );
     }
 
     #[test]
-    fn test_svc_not_running_parse_state_since_fail() {
-        let output = r#"svc:/site/fake-service:default
-  Zone: global
- State: maintenance since Mon Not 24 06:57:19 2025
-Reason: Restarting too quickly.
-   See: http://illumos.org/msg/SMF-8000-L5
-   See: /var/svc/log/site-fake-service:default.log
-Impact: This service is not running.
+    fn test_svc_in_maintenance_none_success() {
+        let output = r#"legacy_run     lrc:/etc/rc2_d/S89PRESERVE                         global
+online         svc:/site/fake-service:default                     global
+disabled       svc:/network/tcpkey:default                        global
+online         svc:/system/omicron/baseline:default               global
+online         svc:/milestone/sysconfig:default                   global
 "#;
 
         let log = log();
         let services = SvcInMaintenance::parse(&log, output.as_bytes());
 
-        // We want to make sure we have an entry even if we weren't able to
-        // parse the timestamp.
+        assert_eq!(services.len(), 0);
+    }
+
+    #[test]
+    fn test_svc_in_maintenance_empty_success() {
+        let output = r#""#;
+
+        let log = log();
+        let services = SvcInMaintenance::parse(&log, output.as_bytes());
+
+        assert_eq!(services.len(), 0);
+    }
+
+    #[test]
+    fn test_svc_in_maintenance_parse_unknown_zone_fail() {
+        let output = r#"maintenance    svc:/site/fake-service:default
+"#;
+
+        let log = log();
+        let services = SvcInMaintenance::parse(&log, output.as_bytes());
+
+        // We want to make sure we have an entry even if we're missing the zone
         assert_eq!(services.len(), 1);
 
         assert_eq!(
             services[0],
             SvcInMaintenance {
                 fmri: "svc:/site/fake-service:default".to_string(),
-                zone: "global".to_string(),
-                state: SvcState::Maintenance,
-                state_since: None,
-                reason: "Restarting too quickly.".to_string(),
-                additional_info: vec![
-                    "http://illumos.org/msg/SMF-8000-L5".to_string(),
-                    "/var/svc/log/site-fake-service:default.log".to_string(),
-                ],
-                impact: "This service is not running.".to_string(),
+                zone: "".to_string(),
             }
         );
     }
 
     #[test]
-    fn test_svc_not_running_parse_unknown_format_fail() {
-        let output = r#"svc:/site/fake-service:default
-  Zone: global
- State: maintenance since Mon Nov 24 06:57:19 2025
-Reason: Restarting too quickly.
-   See: http://illumos.org/msg/SMF-8000-L5
-   See: /var/svc/log/site-fake-service:default.log
-   Bob: Barnacles!
-   What?
-Impact: This service is not running.
+    fn test_svc_in_maintenance_parse_unknown_info_fail() {
+        let output = r#"maintenance
 "#;
 
         let log = log();
         let services = SvcInMaintenance::parse(&log, output.as_bytes());
 
-        // We want to make sure we have an entry even if we weren't able to
-        // parse two lines.
+        // We want to make sure we have an entry even if we're missing all information
         assert_eq!(services.len(), 1);
 
         assert_eq!(
             services[0],
-            SvcInMaintenance {
-                fmri: "svc:/site/fake-service:default".to_string(),
-                zone: "global".to_string(),
-                state: SvcState::Maintenance,
-                state_since: Some(DateTime::from_naive_utc_and_offset(
-                    NaiveDateTime::parse_from_str(
-                        "Mon Nov 24 06:57:19 2025",
-                        "%a %b %d %H:%M:%S %Y",
-                    )
-                    .unwrap(),
-                    Utc,
-                )),
-                reason: "Restarting too quickly.".to_string(),
-                additional_info: vec![
-                    "http://illumos.org/msg/SMF-8000-L5".to_string(),
-                    "/var/svc/log/site-fake-service:default.log".to_string(),
-                ],
-                impact: "This service is not running.".to_string(),
-            }
+            SvcInMaintenance { fmri: "".to_string(), zone: "".to_string() }
         );
+    }
+
+    #[test]
+    fn test_svc_in_maintenance_parse_unknown_state_fail() {
+        let output = r#"Barnacles!
+"#;
+
+        let log = log();
+        let services = SvcInMaintenance::parse(&log, output.as_bytes());
+
+        assert_eq!(services.len(), 0);
     }
 }
