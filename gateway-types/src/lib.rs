@@ -5,10 +5,10 @@
 //! Common types for MGS.
 //!
 //! This crate re-exports the latest versions of all types from the
-//! `gateway-types-migrations` crate. These are floating identifiers that should
+//! `gateway-types-versions` crate. These are floating identifiers that should
 //! be used by business logic that doesn't need to care about API versioning.
 //!
-//! The API crate (`gateway-api`) uses fixed identifiers from the migrations
+//! The API crate (`gateway-api`) uses fixed identifiers from the versions
 //! crate directly.
 
 pub mod caboose;

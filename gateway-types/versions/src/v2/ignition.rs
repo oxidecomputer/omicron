@@ -2,10 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Ignition types for Gateway API v2.
-//!
-//! This version added the `Cosmo` variant to `SpIgnitionSystemType`.
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

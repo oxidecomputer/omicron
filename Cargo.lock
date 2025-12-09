@@ -3828,7 +3828,7 @@ dependencies = [
  "dropshot-api-manager-types",
  "ereport-types",
  "gateway-types",
- "gateway-types-migrations",
+ "gateway-types-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -3977,25 +3977,12 @@ dependencies = [
 name = "gateway-types"
 version = "0.1.0"
 dependencies = [
- "daft",
- "dropshot",
- "gateway-messages",
- "gateway-types-migrations",
- "hex",
- "omicron-common",
- "omicron-uuid-kinds",
+ "gateway-types-versions",
  "omicron-workspace-hack",
- "proptest",
- "schemars 0.8.22",
- "serde",
- "test-strategy",
- "thiserror 2.0.17",
- "tufaceous-artifact",
- "uuid",
 ]
 
 [[package]]
-name = "gateway-types-migrations"
+name = "gateway-types-versions"
 version = "0.1.0"
 dependencies = [
  "daft",
@@ -8174,7 +8161,7 @@ dependencies = [
  "gateway-sp-comms",
  "gateway-test-utils",
  "gateway-types",
- "gateway-types-migrations",
+ "gateway-types-versions",
  "hex",
  "http",
  "hyper",

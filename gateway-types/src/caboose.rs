@@ -2,4 +2,4 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-pub use gateway_types_migrations::v1::caboose::SpComponentCaboose;
+pub use gateway_types_versions::latest::caboose::*;
