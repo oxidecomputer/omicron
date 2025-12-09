@@ -7523,6 +7523,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     PRIMARY KEY (rack_id, epoch)
 );
 
+-- Whether a node has prepared or committed yet
+CREATE TYPE IF NOT EXISTS omicron.public.trust_quorum_member_state AS ENUM (
+    -- The node has not acknowledged either a `Prepare` or `Commit` message
+    'unacked',
+    -- The node has acknoweledged a `Prepare` message
+    'prepared',
+    -- The node has acknowledged a `Commit` or `PrepareAndCommit` message
+    -- `committed` implies `prepared`
+    'committed'
+);
+
 -- Total group membership in trust quorum for a given epoch
 CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     -- Foreign key into the rack table
@@ -7535,6 +7546,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     -- Foreign key into the `hw_baseboard_id` table
     hw_baseboard_id UUID NOT NULL,
 
+    -- Whether a node has acknowledged a prepare or commit yet
+    state omicron.public.trust_quorum_member_state NOT NULL,
+
     -- The sha3-256 hash of the key share for this node. This is only filled in
     -- after Nexus has retrieved the configuration from the coordinator during
     -- the prepare phase of the protocol.
@@ -7545,33 +7559,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     PRIMARY KEY (rack_id, epoch, hw_baseboard_id)
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_acked_prepare (
-    -- Foreign key into the rack table
-    -- Foreign key into the `trust_quorum_configuration` table along with `epoch`
-    rack_id UUID NOT NULL,
-
-    -- Foreign key into the `trust_quorum_configuration` table along with `rack_id`
-    epoch INT8 NOT NULL,
-
-    -- Foreign key into the `hw_baseboard_id` table
-    hw_baseboard_id UUID NOT NULL,
-
-    PRIMARY KEY (rack_id, epoch, hw_baseboard_id)
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_acked_commit (
-    -- Foreign key into the rack table
-    -- Foreign key into the `trust_quorum_configuration` table along with `epoch`
-    rack_id UUID NOT NULL,
-
-    -- Foreign key into the `trust_quorum_configuration` table along with `rack_id`
-    epoch INT8 NOT NULL,
-
-    -- Foreign key into the `hw_baseboard_id` table
-    hw_baseboard_id UUID NOT NULL,
-
-    PRIMARY KEY (rack_id, epoch, hw_baseboard_id)
-);
 
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
