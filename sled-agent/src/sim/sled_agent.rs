@@ -24,6 +24,7 @@ use chrono::Utc;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_sled_agent_shared::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
     HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
@@ -58,7 +59,6 @@ use propolis_client::{
 use range_requests::PotentialRange;
 use sled_agent_api::LocalStorageDatasetEnsureRequest;
 use sled_agent_api::SupportBundleMetadata;
-use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -114,9 +114,6 @@ pub struct SledAgent {
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
-
-    // TODO-K: Removeme
-    health_monitor: HealthMonitorHandle,
 }
 
 impl SledAgent {
@@ -200,13 +197,8 @@ impl SledAgent {
             }),
             instance_ensure_state_error: Mutex::new(None),
             repo_depot,
-            // TODO-K: Remove clone
-            log: log.clone(),
+            log,
             bootstore_network_config,
-            // TODO-K: Removeme
-            health_monitor:
-                crate::long_running_tasks::spawn_health_monitor_tasks(&log)
-                    .await,
         })
     }
 
@@ -808,10 +800,7 @@ impl SledAgent {
             SocketAddr::V6(v6) => v6,
         };
 
-        // TODO-K: Don't actually call svcs
-        let smf_services_in_maintenance =
-            //vec![SvcInMaintenance]
-            self.health_monitor.to_inventory().smf_services_in_maintenance;
+        let smf_services_in_maintenance = SvcsInMaintenanceResult::new();
 
         let storage = self.storage.lock();
 
