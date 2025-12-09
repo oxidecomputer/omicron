@@ -622,43 +622,48 @@ impl DataStore {
             silo_group as sg, silo_group_membership as sgm,
         };
 
-        // First get the groups this user belongs to
-        let user_group_ids = paginated(sg::dsl::silo_group, sg::id, pagparams)
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // First get the groups this user belongs to, in the correct paginated order
+        let groups = paginated(sg::dsl::silo_group, sg::id, pagparams)
             .inner_join(sgm::table.on(sgm::silo_group_id.eq(sg::id)))
             .filter(sgm::silo_user_id.eq(to_db_typed_uuid(silo_user_id)))
             .filter(sg::time_deleted.is_null())
-            .select(sg::id)
-            .get_results_async::<Uuid>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .select(model::SiloGroup::as_select())
+            .load_async::<model::SiloGroup>(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        if user_group_ids.is_empty() {
+        if groups.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Now get those groups with member counts
-        let results = sg::dsl::silo_group
-            .filter(sg::id.eq_any(user_group_ids))
-            .filter(sg::time_deleted.is_null())
+        let group_ids: Vec<Uuid> =
+            groups.iter().map(|g| *g.id().as_untyped_uuid()).collect();
+
+        // Now get member counts for these groups
+        let member_counts = sg::dsl::silo_group
+            .filter(sg::id.eq_any(group_ids))
             .left_join(sgm::table.on(sgm::silo_group_id.eq(sg::id)))
             .group_by(sg::id)
             .select((
-                model::SiloGroup::as_select(),
+                sg::id,
                 sql::<BigInt>(
                     "CAST(COUNT(silo_group_membership.silo_user_id) AS BIGINT)",
                 ),
             ))
-            .load_async::<(model::SiloGroup, i64)>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .load_async::<(Uuid, i64)>(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        let page = results
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .into_iter()
-            .map(|(group, member_count)| {
+            .collect::<std::collections::HashMap<Uuid, i64>>();
+
+        let page = groups
+            .into_iter()
+            .map(|group| {
+                let group_id = *group.id().as_untyped_uuid();
+                let member_count =
+                    member_counts.get(&group_id).copied().unwrap_or(0);
                 let mut silo_group: SiloGroup = group.into();
                 silo_group.set_member_count(member_count);
                 silo_group
