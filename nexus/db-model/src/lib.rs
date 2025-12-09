@@ -263,6 +263,7 @@ pub use switch::*;
 pub use switch_interface::*;
 pub use switch_port::*;
 pub use target_release::*;
+pub use trust_quorum::*;
 pub use tuf_repo::*;
 pub use typed_uuid::DbTypedUuid;
 pub use typed_uuid::to_db_typed_uuid;

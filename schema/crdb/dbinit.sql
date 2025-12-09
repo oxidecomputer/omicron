@@ -7524,7 +7524,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     -- fault tolerance during the prepare phase and also during unlock.
     --
     -- In some documentation we call this the `Z` parameter.
-    commit_crash_tolerance INT2 NOT NULL CHECK commit_crash_tolerance >= 0),
+    commit_crash_tolerance INT2 NOT NULL CHECK (commit_crash_tolerance >= 0),
 
     -- Which member is coordinating the prepare phase of the protocol this epoch
     -- Foreign key into the `hw_baseboard_id` table
@@ -7536,7 +7536,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     -- during the prepare phase of the protocol by Nexus from the coordinator.
     --
     -- Salt is a hex-encoded string
-    encrypted_rack_secrets_salt: STRING(64),
+    encrypted_rack_secrets_salt STRING(64),
     encrypted_rack_secrets BYTES,
 
     -- Each rack has its own trust quorum
