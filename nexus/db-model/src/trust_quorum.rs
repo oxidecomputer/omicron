@@ -10,6 +10,9 @@ use crate::typed_uuid::DbTypedUuid;
 use nexus_db_schema::schema::{
     lrtq_member, trust_quorum_configuration, trust_quorum_member,
 };
+use nexus_types::trust_quorum::{
+    TrustQuorumConfigState, TrustQuorumMemberState,
+};
 use omicron_uuid_kinds::RackKind;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -26,6 +29,16 @@ impl_enum_type!(
     Aborted => b"aborted"
 );
 
+impl From<DbTrustQuorumConfigurationState> for TrustQuorumConfigState {
+    fn from(value: DbTrustQuorumConfigurationState) -> Self {
+        match value {
+            DbTrustQuorumConfigurationState::Preparing => Self::Preparing,
+            DbTrustQuorumConfigurationState::Committed => Self::Committed,
+            DbTrustQuorumConfigurationState::Aborted => Self::Aborted,
+        }
+    }
+}
+
 impl_enum_type!(
     TrustQuorumMemberStateEnum:
 
@@ -37,6 +50,22 @@ impl_enum_type!(
     Prepared => b"prepared"
     Committed => b"committed"
 );
+
+impl From<DbTrustQuorumMemberState> for TrustQuorumMemberState {
+    fn from(value: DbTrustQuorumMemberState) -> Self {
+        match value {
+            DbTrustQuorumMemberState::Unacked => {
+                TrustQuorumMemberState::Unacked
+            }
+            DbTrustQuorumMemberState::Prepared => {
+                TrustQuorumMemberState::Prepared
+            }
+            DbTrustQuorumMemberState::Committed => {
+                TrustQuorumMemberState::Committed
+            }
+        }
+    }
+}
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = lrtq_member)]
@@ -54,8 +83,8 @@ pub struct TrustQuorumConfiguration {
     pub threshold: SqlU8,
     pub commit_crash_tolerance: SqlU8,
     pub coordinator: Uuid,
-    pub encrypted_rack_secrets_salt: String,
-    pub encrypted_rack_secrets: Vec<u8>,
+    pub encrypted_rack_secrets_salt: Option<String>,
+    pub encrypted_rack_secrets: Option<Vec<u8>>,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]

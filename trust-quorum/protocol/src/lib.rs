@@ -9,7 +9,6 @@
 //! All persistent state and all networking is managed outside of this
 //! implementation.
 
-use crypto::Sha3_256Digest;
 use daft::Diffable;
 use derive_more::Display;
 use gfss::shamir::Share;
@@ -42,7 +41,10 @@ pub use validators::{
 };
 
 pub use alarm::Alarm;
-pub use crypto::{RackSecret, ReconstructedRackSecret};
+pub use crypto::{
+    EncryptedRackSecrets, RackSecret, ReconstructedRackSecret, Salt,
+    Sha3_256Digest,
+};
 pub use messages::*;
 pub use node::{CommitError, Node, NodeDiff, PrepareAndCommitError};
 // public only for docs.
