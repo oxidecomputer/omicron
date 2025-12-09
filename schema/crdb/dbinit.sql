@@ -7516,6 +7516,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     -- during the prepare phase of the protocol by Nexus from the coordinator.
     --
     -- Salt is a hex-encoded string
+    -- TODO: Add a check constraint that both are null or not null
     encrypted_rack_secrets_salt STRING(64),
     encrypted_rack_secrets BYTES,
 

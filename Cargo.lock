@@ -6766,6 +6766,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.17",
  "tokio",
+ "trust-quorum-protocol",
  "tufaceous-artifact",
  "uuid",
  "vergen-gitcl",
