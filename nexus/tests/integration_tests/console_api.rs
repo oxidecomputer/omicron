@@ -435,6 +435,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
                 id: USER_TEST_PRIVILEGED.id(),
                 display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
                 silo_id: DEFAULT_SILO.id(),
+                time_created: priv_user.user.time_created,
                 time_modified: priv_user.user.time_modified,
             },
             silo_name: DEFAULT_SILO.name().clone(),
@@ -458,6 +459,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
                     .clone()
                     .unwrap(),
                 silo_id: DEFAULT_SILO.id(),
+                time_created: unpriv_user.user.time_created,
                 time_modified: unpriv_user.user.time_modified,
             },
             silo_name: DEFAULT_SILO.name().clone(),
