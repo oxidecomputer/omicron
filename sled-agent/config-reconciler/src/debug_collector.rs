@@ -2,15 +2,88 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! This module is responsible for moving debug info (kernel crash dumps,
-//! userspace process core dumps, and rotated logs) onto external drives for
-//! perusal/archival, and to prevent internal drives from filling up.
-//! (For background on the paths and datasets being used, see RFD 118)
+//! The `DebugCollector` is responsible for collecting, archiving, and managing
+//! long-term storage of various debug data on the system:
 //!
-//! The behaviors documented below describe current behavior, but are not
-//! necessarily a long-term guarantee, and details may be subject to change.
+//! - kernel crash dumps
+//! - process core dumps
+//! - log files from zones
+//!
+//! Each of these types of debug data goes through a different flow, but
+//! ultimately all of it winds up on **debug datasets** (ZFS datasets on the
+//! system's external (U.2) disks).
+//!
+//! Support bundles also contain debug data and are stored in debug datasets.
+//! However, they're almost entirely layered _atop_ this subsystem.  The debug
+//! collector doesn't know anything about support bundles aside from the fact
+//! that it explicitly avoids deleting them when cleaning up debug datasets.
+//!
+//! ## Overview
+//!
+//! While the debug collector directly copies log files from zones into the
+//! debug dataset, it's only indirectly responsible for where kernel crash
+//! dumps and process core dumps go.  In summary, the DebugCollector:
+//!
+//! - nominates one of the currently available debug datasets as the
+//!   destination for debug data.
+//! - uses dumpadm(8) to specify a **dump device**, which is where the kernel
+//!   will save a crash dump if it panics.  Oxide sleds use slices on an
+//!   internal (M.2) disk as dump devices.
+//! - uses savecore(8) to copy any crash dumps found on eligible dump devices
+//!   to a debug dataset.
+//! - uses coreadm(8) to configure the system to save user process core dumps
+//!   to a specific **cores dataset*.
+//! - periodically archives to a debug dataset:
+//!   - core files found on any "cores" datasets, and
+//!   - log files from inside zones' filesystems.
+//!   When core files and log files are archived, they're copied to a debug
+//!   dataset and the original file is deleted.
+//! - when needed, deletes the oldest files in debug datasets to preserve space
+//!   for new debugging data
+//!
+//! That's the big picture, but there are many operational edge cases.
+//!
+//! Here's a summary of the data flow:
+//!
+//! ```text
+//!     +------------------------+  +--------------+      +---------------+
+//!     | dump device containing |  | user process |      | log files     |
+//!     | kernel crash dump      |  +--------------+      | inside zones  |
+//!     +------------------------+        |               +---------------+
+//!            |                          |                       |
+//!            |                          | process crash:        |
+//!            |                          | system writes         |
+//!            | DebugCollector           | core dump to          |
+//!            | invokes                  | configured            |
+//!            | savecore(8)              | directory             |
+//!            |                          |                       |
+//!            |                          v                       |
+//!            |        +--------------------------------------+  |
+//!            |        |        chosen "core" dataset         |  |
+//!            |        | (ZFS dataset on internal (M.2) disk) |  |
+//!            |        +--------------------------------------+  |
+//!            |                          |                       |
+//!            |                          |                       |
+//!            |                          |                       |
+//!            |                          | DebugCollector        |
+//!            |                          | periodically archives |
+//!            |                          | the core dumps and    |
+//!            |                          | log files (copies to  |
+//!            |                          | debug dataset, then   |
+//!            |                          | deletes the original) |
+//!            |                          |                       |
+//!            v                          v                       v
+//!        +----------------------------------------------------------+
+//!        |    debug datasets (ZFS datasets on external (U.2) disks) |-+
+//!        +----------------------------------------------------------+ |-+
+//!          +----------------------------------------------------------+ |
+//!            +----------------------------------------------------------+
+//! ```
+//!
+//! For background on the paths and datasets being used, see RFD 118.
 //!
 //! ## Choice of destination external drive for archived logs and dumps
+//!
 //! As zpools on external (U.2) drives come online, their proportion of space
 //! used is checked, any that are over 70% are skipped, and of the remaining
 //! candidates the one with the *most* content is designated as the target onto
@@ -23,7 +96,19 @@
 //! If the chosen drive eventually exceeds 80% of its capacity used, then a
 //! different drive is chosen by the same algorithm.
 //!
+//! ## Debug dataset directory structure (not a committed interface!)
+//!
+//! Debug datasets are mounted at `/pool/ext/$pool_uuid/crypt/debug`.  In that
+//! directory we find:
+//!
+//! * `core.[zone-name].[exe-filename].[pid].[time]`: process core dumps
+//! * `unix.[0-9]+`, `bounds`: files associated with kernel crash dumps
+//! * `$UUID`: support bundles (wholly unrelated to the DebugCollector)
+//! * `oxz_[zone-type]_[zone-uuid]`: directory containing all the log files
+//!   for the corresponding zone.
+//!
 //! ## Kernel crash dumps
+//!
 //! As internal (M.2) drives are discovered, their designated dump slices are
 //! checked for the presence of a previous kernel crash dump that hasn't been
 //! archived. If a dump is present that has not yet been archived, and an
@@ -40,14 +125,15 @@
 //! do not configure a dump slice, preferring to preserve evidence of the
 //! original root cause of an issue rather than overwriting it with confounding
 //! variables (in the event adjacent systems begin behaving erratically due to
-//! the initial failure).
-//! In this event, as soon as an external drive becomes available to archive
-//! one or all of the occupied dump slices' contents, the golden-path procedure
-//! detailed above occurs and a dump slice is configured.
+//! the initial failure).  In this event, as soon as an external drive becomes
+//! available to archive one or all of the occupied dump slices' contents, the
+//! golden-path procedure detailed above occurs and a dump slice is configured.
 //!
 //! ## Process core dumps
+//!
 //! As zpools on internal (M.2) drives come online, the first one seen by the
 //! poll loop is chosen to be the destination of process cores in all zones:
+//!
 //! ```text
 //!     /pool/int/*/crash/core.[zone-name].[exe-filename].[pid].[time]
 //! ```
@@ -61,17 +147,21 @@
 //!       -G default+debug
 //! ```
 //!
-//! Every 5 minutes, all core files found on internal drives are moved to the
-//! DUMP_DATASET of the (similarly chosen) removable U.2 drive, like so:
+//! Every 5 minutes, all core files found on internal drives are moved to a
+//! debug dataset, like so:
+//!
 //! ```text
 //!     /pool/int/*/crash/core.global.sled-agent.101.34784217
 //!         -> /pool/ext/*/crypt/debug/core.global.sled-agent.101.34784217
 //! ```
 //!
-//! ## Log rotation and archival
-//! Every 5 minutes, each log that logadm(8) has rotated (in every zone) gets
-//! archived into the DUMP_DATASET of the chosen U.2, with the suffixed
-//! number replaced by the modified timestamp, like so:
+//! ## Periodic log rotation and archival
+//!
+//! logadm(8) is confiured in all zones to rotate log files.  Every 5 minutes,
+//! each log that logadm(8) has rotated in every zone gets archived into the
+//! current debug dataset, with the suffixed number replaced by the modified
+//! timestamp, like so:
+//!
 //! ```text
 //!     /var/svc/log/foo.log.0
 //!         -> /pool/ext/*/crypt/debug/global/foo.log.34784217
@@ -85,6 +175,15 @@
 //! In the event of filename collisions (i.e. several instances of a service's
 //! rotated log files having the same modified time to the second), the
 //! number is incremented by 1 until no conflict remains.
+//!
+//! ## On-demand log archival
+//!
+//! Logs are also archived upon request.  This happens when zones are being
+//! shut down (to catch any logs rotated since the last periodic archival).  It
+//! also happens when the system starts up in order to archive logs from zones
+//! that were running when the system last shut down.  In both of these cases,
+//! the _live_ log files are also archived, since they will not have a chance
+//! to get rotated and so would otherwise be lost.
 
 use async_trait::async_trait;
 use camino::Utf8Path;
@@ -118,28 +217,75 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot;
 use zone::{Zone, ZoneError};
 
+// Names of ZFS dataset properties.  These are stable and documented in zfs(1M).
+
 const ZFS_PROP_USED: &str = "used";
 const ZFS_PROP_AVAILABLE: &str = "available";
 
+// Parameters related to management of storage on debug datasets
+
+/// Threshold of percent utilization for debug datasets above which we prefer to
+/// avoid using this dataset if others are available
+///
+/// This is also the target utilization when cleaning up old data.  We'll delete
+/// old data until a dataset reaches this level.
 const DATASET_USAGE_PERCENT_CHOICE: u64 = 70;
+
+/// Threshold of percent utilization for debug datasets above which we will try
+/// to switch to a different debug dataset or else trigger cleanup of old data
 const DATASET_USAGE_PERCENT_CLEANUP: u64 = 80;
 
+/// How frequently we move debug data (cores, log files, etc.) from their
+/// origins into debug datasets for long-term storage
 const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
 
-// we sure are passing a lot of Utf8PathBufs around, let's be careful about it
+// Newtypes for distinguishing different types of filesystem paths
+
+/// Filesystem path to a block device that can be used as a dump device
+///
+/// This is generally a slice on an internal (M.2) device.
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
 struct DumpSlicePath(Utf8PathBuf);
+
+/// Filesystem path to the mountpoint of a ZFS dataset that's intended for
+/// storing debug data for the long term
+///
+/// This is generally on a removable (U.2) device.
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
 struct DebugDataset(Utf8PathBuf);
+
+/// Filesystem path to the mountpoint of a ZFS dataset that's available as the
+/// first place that user process core dumps get written
+///
+/// This is generally on an internal (M.2) device.
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
 struct CoreDataset(Utf8PathBuf);
 
+// Types that describe ZFS datasets that are used to store different kinds of
+// debug data
+
+/// Identifies a ZFS dataset to which user process core dumps may be written
+///
+/// Equivalently, identifies a pool on which there exists such a dataset.  These
+/// are equivalent because there is exactly one such dataset on any pool and it
+/// has a well-known name within the pool.  See the impl of `GetMountpoint` for
+/// what it is.
+///
+/// This pool is generally on an M.2 device.
 #[derive(AsRef, Clone, Debug, From)]
 pub(super) struct CoreZpool {
     mount_config: Arc<MountConfig>,
     name: ZpoolName,
 }
 
+/// Identifies a ZFS dataset that's intended for long-term storage of debug data
+///
+/// Equivalently, identifies a pool on which there exists such a dataset.  These
+/// are equivalent because there is exactly one such dataset on any pool and it
+/// has a well-known name within the pool.  See the impl of `GetMountpoint` for
+/// what it is.
+///
+/// This pool is generally on an M.2 device.
 #[derive(AsRef, Clone, Debug, From)]
 pub(super) struct DebugZpool {
     mount_config: Arc<MountConfig>,
@@ -161,7 +307,8 @@ impl GetMountpoint for CoreZpool {
     }
 }
 
-// only want to access these directories after they're mounted!
+/// GetMountpoint provides a common interface for getting the mountpoint of a
+/// `DebugZpool` or `CoreZpool` dataset based on just the pool that it's on.
 trait GetMountpoint: AsRef<ZpoolName> {
     type NewType: From<Utf8PathBuf>;
     const MOUNTPOINT: &'static str;
@@ -172,6 +319,8 @@ trait GetMountpoint: AsRef<ZpoolName> {
         &self,
         invoker: &dyn ZfsInvoker,
     ) -> Result<Option<Self::NewType>, ZfsGetError> {
+        // It's important that we only access this directory if it's mounted.
+        // If not, return `None`.
         if invoker.zfs_get_prop(&self.as_ref().to_string(), "mounted")? == "yes"
         {
             Ok(Some(Self::NewType::from(invoker.mountpoint(
@@ -185,13 +334,25 @@ trait GetMountpoint: AsRef<ZpoolName> {
     }
 }
 
+/// Actor-style commands sent to the DebugCollectorWorker
+///
+/// These are sent from different places.
 #[derive(Debug)]
 enum DebugCollectorCmd {
+    /// Archive logs and other debug data from directory `zone_root`, which
+    /// corresponds to the root of a previously-running zone called `zone_name`.
+    /// Reply on `completion_tx` when finished.
+    ///
+    /// This message is sent from the DebugCollectorTask (outside this module).
     ArchiveFormerZoneRoot {
         zone_root: Utf8PathBuf,
         zone_name: String,
         completion_tx: oneshot::Sender<()>,
     },
+
+    /// Update the DebugCollector with details about the currently available
+    /// dump slices, debug datasets, and core datasets.  (See the corresponding
+    /// types above.)  Reply on `update_complete_tx` when finished.
     UpdateDumpdevSetup {
         dump_slices: Vec<DumpSlicePath>,
         debug_datasets: Vec<DebugZpool>,
@@ -200,27 +361,57 @@ enum DebugCollectorCmd {
     },
 }
 
+/// Operates the debug collector:
+///
+/// - receives and processes `DebugCollectorCmd` commands (see above)
+/// - configures dumpadm(8), savecore(8), and coreadm(8)
+/// - periodically archives log files and other debug data from running zones
+///
+/// This runs in its own tokio task.  More precisely, poll_file_archival() runs
+/// in its own tokio task and does all these things.
 struct DebugCollectorWorker {
+    /// list of ZFS datasets that can be used for saving process core dumps
     core_dataset_names: Vec<CoreZpool>,
+    /// list of ZFS datasets that can be used for long-term storage of
+    /// debug data
     debug_dataset_names: Vec<DebugZpool>,
 
+    /// currently-chosen dump device
     chosen_dump_slice: Option<DumpSlicePath>,
+    /// currently-chosen directory for long-term storage of new debug data
     chosen_debug_dir: Option<DebugDataset>,
+    /// currently-chosen directory for process core dumps
+    /// (before being moved to longer-term storage)
     chosen_core_dir: Option<CoreDataset>,
 
+    /// list of dump devices available
     known_dump_slices: Vec<DumpSlicePath>,
+    /// list of directories available for long-term storage of debug data
     known_debug_dirs: Vec<DebugDataset>,
+    /// list of directories available for process core dumps
     known_core_dirs: Vec<CoreDataset>,
 
+    /// list of dump devices that once contained a crash dump that has since
+    /// been saved to a debug directory
     savecored_slices: HashSet<DumpSlicePath>,
 
     log: Logger,
+
+    /// channel for receiving commands to update configuration, etc.
     rx: Receiver<DebugCollectorCmd>,
+
+    // helpers for invoking system functionality
+    // (abstracted behind traits for testing)
     coredumpadm_invoker: Box<dyn CoreDumpAdmInvoker + Send + Sync>,
     zfs_invoker: Box<dyn ZfsInvoker + Send + Sync>,
     zone_invoker: Box<dyn ZoneInvoker + Send + Sync>,
 }
 
+/// "External" handle to the debug collector
+///
+/// The DebugCollectorTask (a tiny task that passes information from the rest of
+/// sled agent to this subystem) has this handle and uses it to send commands to
+/// the DebugCollectorWorker.
 pub struct DebugCollector {
     tx: tokio::sync::mpsc::Sender<DebugCollectorCmd>,
     mount_config: Arc<MountConfig>,
@@ -411,6 +602,7 @@ enum ZfsGetError {
     Parse(#[from] std::num::ParseIntError),
 }
 
+/// Helper for invoking coreadm(8) and dumpadm(8), abstracted out for tests
 #[async_trait]
 trait CoreDumpAdmInvoker {
     fn coreadm(&self, core_dir: &Utf8PathBuf) -> Result<(), ExecutionError>;
@@ -421,6 +613,7 @@ trait CoreDumpAdmInvoker {
     ) -> Result<Option<OsString>, ExecutionError>;
 }
 
+/// Helper for interacting with ZFS filesystems, abstracted out for tests
 trait ZfsInvoker {
     fn zfs_get_prop(
         &self,
@@ -459,6 +652,7 @@ trait ZfsInvoker {
     ) -> Utf8PathBuf;
 }
 
+/// Helper for listing currently-running zones on the system
 #[async_trait]
 trait ZoneInvoker {
     async fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError>;
@@ -584,6 +778,8 @@ impl ZoneInvoker for RealZone {
     }
 }
 
+/// Returns whether a given file on a debug dataset can safely be deleted as
+/// part of cleaning up that dataset
 fn safe_to_delete(path: &Utf8Path, meta: &std::fs::Metadata) -> bool {
     if !meta.is_file() {
         // Ignore non-files (e.g. directories, symlinks)
@@ -629,6 +825,7 @@ impl DebugCollectorWorker {
         }
     }
 
+    /// Runs the body of the DebugCollector
     async fn poll_file_archival(mut self) {
         info!(self.log, "DebugCollector poll loop started.");
 
@@ -640,6 +837,9 @@ impl DebugCollectorWorker {
         let mut evaluation_and_archiving_complete_tx = None;
 
         loop {
+            // Wait for either:
+            // - an external command to arrive on `self.rx`
+            // - a timer to fire for periodic archival of logs, etc.
             match tokio::time::timeout(ARCHIVAL_INTERVAL, self.rx.recv()).await
             {
                 Ok(Some(DebugCollectorCmd::UpdateDumpdevSetup {
