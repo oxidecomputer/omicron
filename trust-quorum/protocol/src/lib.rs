@@ -75,6 +75,10 @@ impl Epoch {
     pub fn next(&self) -> Epoch {
         Epoch(self.0.checked_add(1).expect("fewer than 2^64 epochs"))
     }
+
+    pub fn previous(&self) -> Option<Epoch> {
+        self.0.checked_sub(1).map(Epoch)
+    }
 }
 
 /// The number of shares required to reconstruct the rack secret
