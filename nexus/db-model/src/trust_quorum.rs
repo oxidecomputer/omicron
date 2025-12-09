@@ -8,8 +8,7 @@ use super::impl_enum_type;
 use crate::SqlU8;
 use crate::typed_uuid::DbTypedUuid;
 use nexus_db_schema::schema::{
-    lrtq_member, trust_quorum_acked_commit, trust_quorum_acked_prepare,
-    trust_quorum_configuration, trust_quorum_member,
+    lrtq_member, trust_quorum_configuration, trust_quorum_member,
 };
 use omicron_uuid_kinds::RackKind;
 use serde::{Deserialize, Serialize};
@@ -25,6 +24,18 @@ impl_enum_type!(
     Preparing => b"preparing"
     Committed => b"committed"
     Aborted => b"aborted"
+);
+
+impl_enum_type!(
+    TrustQuorumMemberStateEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    pub enum DbTrustQuorumMemberState;
+
+    // Enum values
+    Unacked => b"unacked"
+    Prepared => b"prepared"
+    Committed => b"committed"
 );
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -53,21 +64,6 @@ pub struct TrustQuorumMember {
     pub rack_id: DbTypedUuid<RackKind>,
     pub epoch: i64,
     pub hw_baseboard_id: Uuid,
+    pub state: DbTrustQuorumMemberState,
     pub share_digest: Option<String>,
-}
-
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[diesel(table_name = trust_quorum_acked_prepare)]
-pub struct TrustQuorumAckedPrepare {
-    pub rack_id: DbTypedUuid<RackKind>,
-    pub epoch: i64,
-    pub hw_baseboard_id: Uuid,
-}
-
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[diesel(table_name = trust_quorum_acked_commit)]
-pub struct TrustQuorumAckedCommit {
-    pub rack_id: DbTypedUuid<RackKind>,
-    pub epoch: i64,
-    pub hw_baseboard_id: Uuid,
 }
