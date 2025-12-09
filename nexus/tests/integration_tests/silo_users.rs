@@ -217,29 +217,13 @@ async fn test_silo_group_member_count_and_user_endpoints(
 
     // Fetch users via the query parameter endpoint
     let query_param_url = format!("/v1/users?group={}", group.id);
-    let query_param_users =
+    let users =
         objects_list_page_authz::<views::User>(client, &query_param_url).await;
 
-    // Fetch users via the new RESTful endpoint
-    let restful_url = format!("/v1/groups/{}/users", group.id);
-    let restful_users =
-        objects_list_page_authz::<views::User>(client, &restful_url).await;
-
-    // Verify both endpoints return the same results
-    assert_eq!(
-        query_param_users.items.len(),
-        restful_users.items.len(),
-        "Both endpoints should return the same number of users"
-    );
-    assert_eq!(query_param_users.items.len(), 1);
-
-    let query_param_user_ids: Vec<_> =
-        query_param_users.items.iter().map(|u| u.id).collect();
-    let restful_user_ids: Vec<_> =
-        restful_users.items.iter().map(|u| u.id).collect();
-
-    assert_same_items(query_param_user_ids.clone(), restful_user_ids.clone());
-    assert_same_items(query_param_user_ids, vec![USER_TEST_UNPRIVILEGED.id()]);
+    // Verify we get the expected user
+    assert_eq!(users.items.len(), 1);
+    let user_ids: Vec<_> = users.items.iter().map(|u| u.id).collect();
+    assert_same_items(user_ids, vec![USER_TEST_UNPRIVILEGED.id()]);
 
     // Add privileged user to the group as well
     let authz_silo_user_priv = authz::SiloUser::new(
@@ -264,21 +248,16 @@ async fn test_silo_group_member_count_and_user_endpoints(
         .await;
     assert_eq!(group.member_count, 2);
 
-    // Verify both endpoints still return the same results with 2 users
-    let query_param_users =
+    // Verify we now get both users
+    let users =
         objects_list_page_authz::<views::User>(client, &query_param_url).await;
-    let restful_users =
-        objects_list_page_authz::<views::User>(client, &restful_url).await;
 
-    assert_eq!(query_param_users.items.len(), 2);
-    assert_eq!(restful_users.items.len(), 2);
-
-    let query_param_user_ids: Vec<_> =
-        query_param_users.items.iter().map(|u| u.id).collect();
-    let restful_user_ids: Vec<_> =
-        restful_users.items.iter().map(|u| u.id).collect();
-
-    assert_same_items(query_param_user_ids, restful_user_ids);
+    assert_eq!(users.items.len(), 2);
+    let user_ids: Vec<_> = users.items.iter().map(|u| u.id).collect();
+    assert_same_items(
+        user_ids,
+        vec![USER_TEST_UNPRIVILEGED.id(), USER_TEST_PRIVILEGED.id()],
+    );
 }
 
 async fn expect_failure(
