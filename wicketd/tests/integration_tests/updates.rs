@@ -537,7 +537,7 @@ async fn installinator_fetch_impl(
     // Check that the images are present in the zone set.
     for file_name in FAKE_NON_SEMVER_ZONE_FILE_NAMES {
         assert!(
-            a_zone_manifest.zones.contains_key(file_name),
+            a_zone_manifest.files.contains_key(file_name),
             "{file_name} is present in the zone set"
         );
     }

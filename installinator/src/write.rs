@@ -941,13 +941,13 @@ impl ControlPlaneZoneWriteContext<'_> {
     }
 
     async fn omicron_measurement_manifest_artifact(&self) -> BufList {
-        let zones = compute_measurement_hashes(self.measurement_corpus).await;
+        let files = compute_measurement_hashes(self.measurement_corpus).await;
 
         let omicron_zone_manifest = OmicronInstallManifest {
             source: OmicronInstallManifestSource::Installinator {
                 mupdate_id: self.mupdate_id,
             },
-            zones,
+            files,
         };
         let json_bytes = serde_json::to_vec(&omicron_zone_manifest)
             .expect("this serialization is infallible");
@@ -955,13 +955,13 @@ impl ControlPlaneZoneWriteContext<'_> {
     }
 
     async fn omicron_zone_manifest_artifact(&self) -> BufList {
-        let zones = compute_zone_hashes(&self.zones).await;
+        let files = compute_zone_hashes(&self.zones).await;
 
         let omicron_zone_manifest = OmicronInstallManifest {
             source: OmicronInstallManifestSource::Installinator {
                 mupdate_id: self.mupdate_id,
             },
-            zones,
+            files,
         };
         let json_bytes = serde_json::to_vec(&omicron_zone_manifest)
             .expect("this serialization is infallible");

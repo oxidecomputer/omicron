@@ -17,8 +17,8 @@ pub struct OmicronInstallManifest {
     /// The source of the manifest.
     pub source: OmicronInstallManifestSource,
 
-    /// Omicron zone file names and hashes.
-    pub zones: IdOrdMap<OmicronInstallMetadata>,
+    /// Omicron install file names and hashes.
+    pub files: IdOrdMap<OmicronInstallMetadata>,
 }
 
 impl OmicronInstallManifest {

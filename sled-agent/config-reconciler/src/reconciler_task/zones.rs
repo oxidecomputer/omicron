@@ -1507,7 +1507,7 @@ mod tests {
                         boot_disk_result: Ok(ZoneManifestArtifactsResult {
                             manifest: OmicronInstallManifest {
                                 source: OmicronInstallManifestSource::SledAgent,
-                                zones: IdOrdMap::new(),
+                                files: IdOrdMap::new(),
                             },
                             data: IdOrdMap::new(),
                         }),
@@ -1518,7 +1518,7 @@ mod tests {
                         boot_disk_result: Ok(ZoneManifestArtifactsResult {
                             manifest: OmicronInstallManifest {
                                 source: OmicronInstallManifestSource::SledAgent,
-                                zones: IdOrdMap::new(),
+                                files: IdOrdMap::new(),
                             },
                             data: IdOrdMap::new(),
                         }),

@@ -253,7 +253,7 @@ mod tests {
             OmicronZoneFileSource {
                 location: OmicronZoneImageLocation::InstallDataset {
                     hash: Ok(manifest
-                        .zones
+                        .files
                         .get(
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )
@@ -355,7 +355,7 @@ mod tests {
                 location: OmicronZoneImageLocation::InstallDataset {
                     // The hash should be looked up from the zone manifest.
                     hash: Ok(manifest
-                        .zones
+                        .files
                         .get(
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )
@@ -479,7 +479,7 @@ mod tests {
                 location: OmicronZoneImageLocation::InstallDataset {
                     // The hash should be looked up from the zone manifest.
                     hash: Ok(manifest
-                        .zones
+                        .files
                         .get(
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )

@@ -200,7 +200,7 @@ impl WriteInstallDatasetContext {
         };
         OmicronInstallManifest {
             source,
-            zones: self
+            files: self
                 .zones
                 .iter()
                 .filter_map(|zone| {

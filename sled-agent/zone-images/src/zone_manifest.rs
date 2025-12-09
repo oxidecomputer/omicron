@@ -330,7 +330,7 @@ fn make_artifacts_result(
 ) -> ZoneManifestArtifactsResult {
     let artifacts: Vec<_> = manifest
         .value
-        .zones
+        .files
         .iter()
         // Parallelize artifact reading to speed it up.
         .par_bridge()
@@ -364,7 +364,7 @@ fn synthesize_manifest(
     log: &slog::Logger,
     dataset_dir: &Utf8Path,
 ) -> Result<Option<OmicronInstallManifest>, InstallMetadataReadError> {
-    let mut zones = IdOrdMap::new();
+    let mut files = IdOrdMap::new();
 
     // Read all the files in the directory.
     let entries = dataset_dir.read_dir_utf8().map_err(|error| {
@@ -415,7 +415,7 @@ fn synthesize_manifest(
 
         match compute_size_and_hash(&mut f) {
             Ok((size, hash)) => {
-                zones.insert_overwrite(OmicronInstallMetadata {
+                files.insert_overwrite(OmicronInstallMetadata {
                     file_name: entry.file_name().to_string(),
                     file_size: size,
                     hash,
@@ -432,7 +432,7 @@ fn synthesize_manifest(
 
     Ok(Some(OmicronInstallManifest {
         source: OmicronInstallManifestSource::SledAgent,
-        zones,
+        files,
     }))
 }
 
