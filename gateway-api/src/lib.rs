@@ -125,7 +125,10 @@ pub trait GatewayApi {
     async fn sp_component_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<v1::params::PathSpComponent>,
-    ) -> Result<HttpResponseOk<Vec<v1::component_details::SpComponentDetails>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<Vec<v1::component_details::SpComponentDetails>>,
+        HttpError,
+    >;
 
     /// Get the caboose of an SP component
     ///

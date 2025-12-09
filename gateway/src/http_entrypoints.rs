@@ -170,7 +170,10 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<v1::params::PathSpComponent>,
-    ) -> Result<HttpResponseOk<Vec<v1::component_details::SpComponentDetails>>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<Vec<v1::component_details::SpComponentDetails>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let v1::params::PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
@@ -208,7 +211,8 @@ impl GatewayApi for GatewayImpl {
         rqctx: RequestContext<Self::Context>,
         path: Path<v1::params::PathSpComponent>,
         query_params: Query<v1::params::ComponentCabooseSlot>,
-    ) -> Result<HttpResponseOk<v1::caboose::SpComponentCaboose>, HttpError> {
+    ) -> Result<HttpResponseOk<v1::caboose::SpComponentCaboose>, HttpError>
+    {
         const CABOOSE_KEY_GIT_COMMIT: [u8; 4] = *b"GITC";
         const CABOOSE_KEY_BOARD: [u8; 4] = *b"BORD";
         const CABOOSE_KEY_NAME: [u8; 4] = *b"NAME";
@@ -353,7 +357,8 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_active_slot_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<v1::params::PathSpComponent>,
-    ) -> Result<HttpResponseOk<v1::component::SpComponentFirmwareSlot>, HttpError> {
+    ) -> Result<HttpResponseOk<v1::component::SpComponentFirmwareSlot>, HttpError>
+    {
         let apictx = rqctx.context();
         let v1::params::PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
@@ -440,7 +445,8 @@ impl GatewayApi for GatewayImpl {
 
         // TODO-cleanup: "component" support for the serial console is half baked;
         // we don't use it at all to detach.
-        let v1::params::PathSpComponent { sp, component: _ } = path.into_inner();
+        let v1::params::PathSpComponent { sp, component: _ } =
+            path.into_inner();
         let sp_id = sp.into();
         let handler = async {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
@@ -456,7 +462,8 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_reset(
         rqctx: RequestContext<Self::Context>,
         path: Path<v1::params::PathSpComponent>,
-    ) -> Result<HttpResponseUpdatedNoContent, v1::update::SpComponentResetError> {
+    ) -> Result<HttpResponseUpdatedNoContent, v1::update::SpComponentResetError>
+    {
         let apictx = rqctx.context();
         let v1::params::PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
@@ -479,7 +486,9 @@ impl GatewayApi for GatewayImpl {
                     .allowed_to_reset_sp(sp_id)
                     .map_err(HttpError::from)?
             {
-                return Err(v1::update::SpComponentResetError::ResetSpOfLocalSled);
+                return Err(
+                    v1::update::SpComponentResetError::ResetSpOfLocalSled,
+                );
             }
 
             sp.reset_component_prepare(component)
@@ -554,8 +563,11 @@ impl GatewayApi for GatewayImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
 
-        let v1::params::PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
-            path.into_inner();
+        let v1::params::PathSpComponentFirmwareSlot {
+            sp,
+            component,
+            firmware_slot,
+        } = path.into_inner();
         let sp_id = sp.into();
         let handler = async {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
@@ -589,11 +601,15 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_hash_firmware_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<v1::params::PathSpComponentFirmwareSlot>,
-    ) -> Result<HttpResponseOk<v1::host::ComponentFirmwareHashStatus>, HttpError> {
+    ) -> Result<HttpResponseOk<v1::host::ComponentFirmwareHashStatus>, HttpError>
+    {
         let apictx = rqctx.context();
 
-        let v1::params::PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
-            path.into_inner();
+        let v1::params::PathSpComponentFirmwareSlot {
+            sp,
+            component,
+            firmware_slot,
+        } = path.into_inner();
         let sp_id = sp.into();
         let handler = async {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
@@ -608,7 +624,9 @@ impl GatewayApi for GatewayImpl {
 
             let status = match sp.get_host_flash_hash(firmware_slot).await {
                 // success
-                Ok(sha256) => v1::host::ComponentFirmwareHashStatus::Hashed { sha256 },
+                Ok(sha256) => {
+                    v1::host::ComponentFirmwareHashStatus::Hashed { sha256 }
+                }
 
                 // expected failure: hash needs to be calculated (or
                 // recalculated; either way the client operation is the same)
@@ -711,8 +729,12 @@ impl GatewayApi for GatewayImpl {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
             let data = match slot {
                 v1::rot::RotCfpaSlot::Active => sp.read_rot_active_cfpa().await,
-                v1::rot::RotCfpaSlot::Inactive => sp.read_rot_inactive_cfpa().await,
-                v1::rot::RotCfpaSlot::Scratch => sp.read_rot_scratch_cfpa().await,
+                v1::rot::RotCfpaSlot::Inactive => {
+                    sp.read_rot_inactive_cfpa().await
+                }
+                v1::rot::RotCfpaSlot::Scratch => {
+                    sp.read_rot_scratch_cfpa().await
+                }
             }
             .map_err(|err| {
                 SpCommsError::SpCommunicationFailed { sp: sp_id, err }
@@ -815,16 +837,21 @@ impl GatewayApi for GatewayImpl {
 
     async fn ignition_list_v1(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<v1::ignition::SpIgnitionInfo>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<v1::ignition::SpIgnitionInfo>>, HttpError>
+    {
         let HttpResponseOk(v2_info) = Self::ignition_list(rqctx).await?;
         Ok(HttpResponseOk(
-            v2_info.into_iter().map(|x| v1::ignition::SpIgnitionInfo::from(x)).collect(),
+            v2_info
+                .into_iter()
+                .map(|x| v1::ignition::SpIgnitionInfo::from(x))
+                .collect(),
         ))
     }
 
     async fn ignition_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<v2::ignition::SpIgnitionInfo>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<v2::ignition::SpIgnitionInfo>>, HttpError>
+    {
         let apictx = rqctx.context();
         let mgmt_switch = &apictx.mgmt_switch;
         let handler = async {
@@ -870,8 +897,10 @@ impl GatewayApi for GatewayImpl {
                     err,
                 })?;
 
-            let info =
-                v2::ignition::SpIgnitionInfo { id: sp_id.into(), details: state.into() };
+            let info = v2::ignition::SpIgnitionInfo {
+                id: sp_id.into(),
+                details: state.into(),
+            };
             Ok(HttpResponseOk(info))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -883,7 +912,8 @@ impl GatewayApi for GatewayImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let mgmt_switch = &apictx.mgmt_switch;
-        let v1::params::PathSpIgnitionCommand { sp, command } = path.into_inner();
+        let v1::params::PathSpIgnitionCommand { sp, command } =
+            path.into_inner();
         let sp_id = sp.into();
 
         let handler = async {
@@ -1020,7 +1050,9 @@ impl GatewayApi for GatewayImpl {
 
             let Some(progress) = sp.most_recent_host_phase2_request().await
             else {
-                return Ok(HttpResponseOk(v1::update::HostPhase2Progress::None));
+                return Ok(HttpResponseOk(
+                    v1::update::HostPhase2Progress::None,
+                ));
             };
 
             // Our `host_phase2_provider` is using an in-memory cache, so the only way
@@ -1031,7 +1063,9 @@ impl GatewayApi for GatewayImpl {
             let Ok(total_size) =
                 apictx.host_phase2_provider.total_size(progress.hash).await
             else {
-                return Ok(HttpResponseOk(v1::update::HostPhase2Progress::None));
+                return Ok(HttpResponseOk(
+                    v1::update::HostPhase2Progress::None,
+                ));
             };
 
             let image_id = v1::update::HostPhase2RecoveryImageId {
@@ -1070,7 +1104,8 @@ impl GatewayApi for GatewayImpl {
     async fn recovery_host_phase2_upload(
         rqctx: RequestContext<Self::Context>,
         body: UntypedBody,
-    ) -> Result<HttpResponseOk<v1::update::HostPhase2RecoveryImageId>, HttpError> {
+    ) -> Result<HttpResponseOk<v1::update::HostPhase2RecoveryImageId>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             // TODO: this makes a full copy of the host image, potentially unnecessarily
@@ -1090,7 +1125,9 @@ impl GatewayApi for GatewayImpl {
                 )?;
             let sha256_hash = ArtifactHash(sha256_hash);
 
-            Ok(HttpResponseOk(v1::update::HostPhase2RecoveryImageId { sha256_hash }))
+            Ok(HttpResponseOk(v1::update::HostPhase2RecoveryImageId {
+                sha256_hash,
+            }))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
@@ -1109,7 +1146,8 @@ impl GatewayApi for GatewayImpl {
 
     async fn sp_all_ids(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<v1::component::SpIdentifier>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<v1::component::SpIdentifier>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let all_ids = apictx
