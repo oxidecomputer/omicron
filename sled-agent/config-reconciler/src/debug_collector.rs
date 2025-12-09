@@ -1143,15 +1143,23 @@ impl DebugCollectorWorker {
             .as_ref()
             .ok_or(ArchiveLogsError::NoDebugDirYet)?;
         let oxz_zones = self.zone_invoker.get_zones().await?;
+
         for zone in oxz_zones {
-            let logdir = if zone.global() {
-                PathBuf::from("/var/svc/log")
+            let zone_root = if zone.global() {
+                zone.path().to_owned()
             } else {
-                zone.path().join("root/var/svc/log")
+                zone.path().join("root")
             };
+            let logdir = zone_root.join("var/svc/log");
             let zone_name = zone.name();
             self.archive_logs_from_zone_path(
-                debug_dir, logdir, zone_name, false,
+                debug_dir, logdir, "*.log", zone_name, false,
+            )
+            .await?;
+
+            let adm_logdir = zone_root.join("var/adm");
+            self.archive_logs_from_zone_path(
+                debug_dir, adm_logdir, "messages", zone_name, false,
             )
             .await?;
         }
@@ -1173,6 +1181,7 @@ impl DebugCollectorWorker {
             .archive_logs_from_zone_path(
                 debug_dir,
                 logdir.into(),
+                "*.log",
                 zone_name,
                 true,
             )
@@ -1189,17 +1198,26 @@ impl DebugCollectorWorker {
         rv
     }
 
+    // Archives log files found in `logdir` for zone `zone_name` to the
+    // destination debug dataset.
+    //
+    // `log_name_pattern` should be a glob pattern that matches against file
+    // names, e.g., `*.log`, `mylog`. If `include_live` is `true`, this will
+    // archive all logs, matching on `{log_name_pattern}*`. If it is `false`,
+    // only rotated logs will be archived, matching on
+    // `{log_name_pattern}.[0-9]`.
     async fn archive_logs_from_zone_path(
         &self,
         debug_dir: &DebugDataset,
         logdir: PathBuf,
+        log_name_pattern: &str,
         zone_name: &str,
         include_live: bool,
     ) -> Result<(), ArchiveLogsError> {
         let mut rotated_log_files = Vec::new();
         if include_live {
             let pattern = logdir
-                .join("*.log*")
+                .join(format!("{log_name_pattern}*"))
                 .to_str()
                 .ok_or_else(|| ArchiveLogsError::Utf8(zone_name.to_string()))?
                 .to_string();
@@ -1210,7 +1228,7 @@ impl DebugCollectorWorker {
             // any
             for n in 1..9 {
                 let pattern = logdir
-                    .join(format!("*.log.{}", "[0-9]".repeat(n)))
+                    .join(format!("{log_name_pattern}.{}", "[0-9]".repeat(n)))
                     .to_str()
                     .ok_or_else(|| {
                         ArchiveLogsError::Utf8(zone_name.to_string())
@@ -1841,11 +1859,18 @@ mod tests {
         let tempdir = Utf8TempDir::new().unwrap();
         let core_dir = tempdir.path().join(CRASH_DATASET);
         let debug_dir = tempdir.path().join(DUMP_DATASET);
-        let zone_logs = tempdir.path().join("root/var/svc/log");
+        let zone_path = tempdir.path().join("myzone");
+        let zone_logs = zone_path.join("root/var/svc/log");
+        let global_path = tempdir.path().join("global");
+        let adm_logs = global_path.join("var/adm");
 
         let tempdir_path = tempdir.path().as_str().to_string();
+        let global_zone = Zone::from_str(&format!(
+            "0:global:running:{global_path}::ipkg:shared"
+        ))
+        .unwrap();
         let zone = Zone::from_str(&format!(
-            "1:myzone:running:{tempdir_path}::ipkg:shared"
+            "1:myzone:running:{zone_path}::ipkg:shared"
         ))
         .unwrap();
 
@@ -1879,14 +1904,17 @@ mod tests {
                 .into_iter()
                 .collect(),
             }),
-            Box::new(FakeZone { zones: vec![zone.clone()] }),
+            Box::new(FakeZone { zones: vec![global_zone, zone.clone()] }),
             logctx.log.clone(),
             tokio::sync::mpsc::channel(1).1,
         );
 
+        tokio::fs::create_dir_all(&zone_path).await.unwrap();
+        tokio::fs::create_dir_all(&global_path).await.unwrap();
         tokio::fs::create_dir_all(&core_dir).await.unwrap();
         tokio::fs::create_dir_all(&debug_dir).await.unwrap();
         tokio::fs::create_dir_all(&zone_logs).await.unwrap();
+        tokio::fs::create_dir_all(&adm_logs).await.unwrap();
         const LOG_NAME: &'static str = "foo.log.0";
         tokio::fs::File::create(zone_logs.join(LOG_NAME))
             .await
@@ -1894,6 +1922,14 @@ mod tests {
             .write_all(b"hello")
             .await
             .expect("writing fake log");
+
+        const ADM_LOG_NAME: &'static str = "messages.0";
+        tokio::fs::File::create(adm_logs.join(ADM_LOG_NAME))
+            .await
+            .expect("creating fake adm log")
+            .write_all(b"admin stuff")
+            .await
+            .expect("writing fake adm log");
 
         const CORE_NAME: &str = "core.myzone.myexe.123.1690540950";
         tokio::fs::File::create(core_dir.join(CORE_NAME))
@@ -1926,6 +1962,12 @@ mod tests {
             debug_dir.join(zone.name()).join(LOG_NAME.replace(".0", ".*"));
         assert_eq!(glob::glob(log_glob.as_str()).unwrap().count(), 1);
         assert!(!zone_logs.join(LOG_NAME).is_file());
+
+        let adm_glob =
+            debug_dir.join("global").join(ADM_LOG_NAME.replace(".0", ".*"));
+        assert_eq!(glob::glob(adm_glob.as_str()).unwrap().count(), 1);
+        assert!(!adm_logs.join(ADM_LOG_NAME).is_file());
+
         assert!(debug_dir.join(CORE_NAME).is_file());
         assert!(!core_dir.join(CORE_NAME).is_file());
         logctx.cleanup_successful();

@@ -1,5 +1,5 @@
 [package]
-name = "internal-dns-types-migrations"
+name = "internal-dns-types-versions"
 version = "0.1.0"
 edition.workspace = true
 

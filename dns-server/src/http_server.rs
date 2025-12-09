@@ -11,7 +11,7 @@ use dns_service_client::{
     ERROR_CODE_UPDATE_IN_PROGRESS,
 };
 use dropshot::RequestContext;
-use internal_dns_types_migrations::{
+use internal_dns_types_versions::{
     v1, v2,
     v2::config::{V1ToV2TranslationError, V2ToV1TranslationError},
 };

@@ -2,12 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! DNS configuration types for API version 2.0.0 (SOA_AND_NS).
-//!
-//! This version adds:
-//! - A `serial` field to [`DnsConfigParams`] and [`DnsConfig`] for SOA records
-//! - The [`DnsRecord::Ns`] variant for nameserver records
-
 use crate::v1;
 use anyhow::ensure;
 use omicron_common::api::external::Generation;

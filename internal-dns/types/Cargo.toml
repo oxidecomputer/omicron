@@ -9,7 +9,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
-internal-dns-types-migrations.workspace = true
+internal-dns-types-versions.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
