@@ -60,7 +60,7 @@ pub struct BlueprintPlanner {
     rx_config: Receiver<ReconfiguratorConfigLoaderState>,
     rx_inventory: Receiver<Option<Arc<Collection>>>,
     rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
-    tx_blueprint: Sender<Option<LoadedTargetBlueprint>>,
+    tx_planned: Sender<Option<BlueprintUuid>>,
     blueprint_limit: u64,
 }
 
@@ -87,19 +87,35 @@ impl BlueprintPlanner {
         rx_inventory: Receiver<Option<Arc<Collection>>>,
         rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
     ) -> Self {
-        let (tx_blueprint, _) = watch::channel(None);
+        let (tx_planned, _) = watch::channel(None);
         Self {
             datastore,
             rx_config,
             rx_inventory,
             rx_blueprint,
-            tx_blueprint,
+            tx_planned,
             blueprint_limit: DEFAULT_BLUEPRINT_LIMIT,
         }
     }
 
-    pub fn watcher(&self) -> watch::Receiver<Option<LoadedTargetBlueprint>> {
-        self.tx_blueprint.subscribe()
+    /// Receiving end of a watch channel that holds the most recent blueprint
+    /// created and set as the current target by this `BlueprintPlanner`.
+    ///
+    /// This exact contents of this channel are unlikely to be useful. If you
+    /// want the current target blueprint, you should use the channel exposed by
+    /// the `blueprint_loader` task instead. This channel will often be `None`
+    /// for an extended period of time after Nexus startup (e.g., any time Nexus
+    /// starts up and there are no planning changes to be made), and even if
+    /// it's `Some(blueprint_id)`, the stored ID is the last blueprint planned
+    /// _by this `BlueprintPlanner`_; the current target blueprint may have
+    /// already been set to something else by other sources (e.g., the
+    /// `BlueprintPlanner` tasks on other Nexus instances).
+    ///
+    /// The primary use of this channel is to be notified when the planner has
+    /// created a new target blueprint, at which point a concerned party should
+    /// load the current target.
+    pub fn watcher(&self) -> watch::Receiver<Option<BlueprintUuid>> {
+        self.tx_planned.subscribe()
     }
 
     /// Run a planning iteration to generate a new blueprint.
@@ -312,10 +328,7 @@ impl BlueprintPlanner {
 
         // We have a new target!
 
-        self.tx_blueprint.send_replace(Some(LoadedTargetBlueprint {
-            target,
-            blueprint: Arc::new(blueprint),
-        }));
+        self.tx_planned.send_replace(Some(blueprint.id));
         Ok(BlueprintPlannerStatus::Targeted {
             parent_blueprint_id,
             blueprint_id,
