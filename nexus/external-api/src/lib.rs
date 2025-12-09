@@ -3801,6 +3801,18 @@ pub trait NexusExternalApi {
         path_params: Path<params::GroupPath>,
     ) -> Result<HttpResponseOk<views::Group>, HttpError>;
 
+    /// List users in group
+    #[endpoint {
+        method = GET,
+        path = "/v1/groups/{group_id}/users",
+        tags = ["silos"],
+    }]
+    async fn group_users_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::GroupPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::User>>, HttpError>;
+
     // Built-in (system) users
 
     /// List built-in users

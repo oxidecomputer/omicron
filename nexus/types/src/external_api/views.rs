@@ -975,6 +975,9 @@ pub struct Group {
 
     /// Uuid of the silo to which this group belongs
     pub silo_id: Uuid,
+
+    /// Number of members in this group
+    pub member_count: i64,
 }
 
 // BUILT-IN USERS

@@ -8104,6 +8104,41 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn group_users_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::GroupPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let users = nexus
+                .current_silo_group_users_list(
+                    &opctx,
+                    &pagparams,
+                    &path.group_id,
+                )
+                .await?;
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                users.into_iter().map(|i| i.into()).collect(),
+                &|_, user: &User| user.id.into_untyped_uuid(),
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Built-in (system) users
 
     async fn user_builtin_list(

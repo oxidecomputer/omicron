@@ -32,6 +32,7 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use uuid::Uuid;
@@ -68,6 +69,15 @@ impl SiloGroup {
             SiloGroup::Scim(u) => u.silo_id,
         }
     }
+
+    /// Set the member count for this group
+    pub fn set_member_count(&mut self, count: i64) {
+        match self {
+            SiloGroup::ApiOnly(g) => g.member_count = count,
+            SiloGroup::Jit(g) => g.member_count = count,
+            SiloGroup::Scim(g) => g.member_count = count,
+        }
+    }
 }
 
 impl From<model::SiloGroup> for SiloGroup {
@@ -85,6 +95,7 @@ impl From<model::SiloGroup> for SiloGroup {
                         group with provision type 'api_only' from having a \
                         null external_id",
                     ),
+                    member_count: 0,
                 })
             }
 
@@ -99,6 +110,7 @@ impl From<model::SiloGroup> for SiloGroup {
                     group with provision type 'jit' from having a null \
                     external_id",
                 ),
+                member_count: 0,
             }),
 
             UserProvisionType::Scim => SiloGroup::Scim(SiloGroupScim {
@@ -113,6 +125,7 @@ impl From<model::SiloGroup> for SiloGroup {
                     display_name",
                 ),
                 external_id: record.external_id,
+                member_count: 0,
             }),
         }
     }
@@ -148,6 +161,9 @@ pub struct SiloGroupApiOnly {
 
     /// The identity provider's ID for this group.
     pub external_id: String,
+
+    /// The number of members in this group
+    pub member_count: i64,
 }
 
 impl SiloGroupApiOnly {
@@ -159,6 +175,7 @@ impl SiloGroupApiOnly {
             time_deleted: None,
             silo_id,
             external_id,
+            member_count: 0,
         }
     }
 }
@@ -193,6 +210,7 @@ impl From<SiloGroupApiOnly> for views::Group {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
+            member_count: u.member_count,
         }
     }
 }
@@ -207,6 +225,9 @@ pub struct SiloGroupJit {
 
     /// The identity provider's ID for this user.
     pub external_id: String,
+
+    /// The number of members in this group
+    pub member_count: i64,
 }
 
 impl SiloGroupJit {
@@ -218,6 +239,7 @@ impl SiloGroupJit {
             time_deleted: None,
             silo_id,
             external_id,
+            member_count: 0,
         }
     }
 }
@@ -252,6 +274,7 @@ impl From<SiloGroupJit> for views::Group {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
+            member_count: u.member_count,
         }
     }
 }
@@ -268,6 +291,9 @@ pub struct SiloGroupScim {
     pub display_name: String,
 
     pub external_id: Option<String>,
+
+    /// The number of members in this group
+    pub member_count: i64,
 }
 
 impl SiloGroupScim {
@@ -285,6 +311,7 @@ impl SiloGroupScim {
             silo_id,
             display_name,
             external_id,
+            member_count: 0,
         }
     }
 }
@@ -319,6 +346,7 @@ impl From<SiloGroupScim> for views::Group {
             // TODO the use of display name as display_name is temporary
             display_name: u.display_name,
             silo_id: u.silo_id,
+            member_count: u.member_count,
         }
     }
 }
@@ -570,6 +598,9 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloGroup> {
+        use diesel::dsl::sql;
+        use diesel::sql_types::BigInt;
+
         // Similar to session_hard_delete (see comment there), we do not do a
         // typical authz check, instead effectively encoding the policy here
         // that any user is allowed to fetch their own group memberships
@@ -591,16 +622,47 @@ impl DataStore {
             silo_group as sg, silo_group_membership as sgm,
         };
 
-        let page = paginated(sg::dsl::silo_group, sg::id, pagparams)
+        // First get the groups this user belongs to
+        let user_group_ids = paginated(sg::dsl::silo_group, sg::id, pagparams)
             .inner_join(sgm::table.on(sgm::silo_group_id.eq(sg::id)))
             .filter(sgm::silo_user_id.eq(to_db_typed_uuid(silo_user_id)))
             .filter(sg::time_deleted.is_null())
-            .select(model::SiloGroup::as_returning())
-            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .select(sg::id)
+            .get_results_async::<Uuid>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if user_group_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Now get those groups with member counts
+        let results = sg::dsl::silo_group
+            .filter(sg::id.eq_any(user_group_ids))
+            .filter(sg::time_deleted.is_null())
+            .left_join(sgm::table.on(sgm::silo_group_id.eq(sg::id)))
+            .group_by(sg::id)
+            .select((
+                model::SiloGroup::as_select(),
+                sql::<BigInt>(
+                    "CAST(COUNT(silo_group_membership.silo_user_id) AS BIGINT)",
+                ),
+            ))
+            .load_async::<(model::SiloGroup, i64)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let page = results
             .into_iter()
-            .map(|group: model::SiloGroup| group.into())
+            .map(|(group, member_count)| {
+                let mut silo_group: SiloGroup = group.into();
+                silo_group.set_member_count(member_count);
+                silo_group
+            })
             .collect::<Vec<SiloGroup>>();
 
         Ok(page)
@@ -735,7 +797,10 @@ impl DataStore {
         authz_silo: &authz::Silo,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloGroup> {
-        use nexus_db_schema::schema::silo_group::dsl;
+        use diesel::dsl::sql;
+        use diesel::sql_types::BigInt;
+        use nexus_db_schema::schema::silo_group::dsl as sg_dsl;
+        use nexus_db_schema::schema::silo_group_membership::dsl as sgm_dsl;
 
         opctx.authorize(authz::Action::Read, authz_silo).await?;
 
@@ -756,18 +821,75 @@ impl DataStore {
                 })?
         };
 
-        let page = paginated(dsl::silo_group, dsl::id, pagparams)
-            .filter(dsl::silo_id.eq(authz_silo.id()))
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::user_provision_type.eq(silo.user_provision_type))
+        // First get the paginated groups
+        let groups = paginated(sg_dsl::silo_group, sg_dsl::id, pagparams)
+            .filter(sg_dsl::silo_id.eq(authz_silo.id()))
+            .filter(sg_dsl::time_deleted.is_null())
+            .filter(sg_dsl::user_provision_type.eq(silo.user_provision_type))
             .select(model::SiloGroup::as_select())
             .load_async::<model::SiloGroup>(&*conn)
             .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if groups.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let group_ids: Vec<Uuid> =
+            groups.iter().map(|g| *g.id().as_untyped_uuid()).collect();
+
+        // Now get member counts for these groups
+        let member_counts = sg_dsl::silo_group
+            .filter(sg_dsl::id.eq_any(group_ids))
+            .left_join(
+                sgm_dsl::silo_group_membership
+                    .on(sgm_dsl::silo_group_id.eq(sg_dsl::id)),
+            )
+            .group_by(sg_dsl::id)
+            .select((
+                sg_dsl::id,
+                sql::<BigInt>(
+                    "CAST(COUNT(silo_group_membership.silo_user_id) AS BIGINT)",
+                ),
+            ))
+            .load_async::<(Uuid, i64)>(&*conn)
+            .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .into_iter()
-            .map(|group: model::SiloGroup| group.into())
+            .collect::<std::collections::HashMap<Uuid, i64>>();
+
+        let page = groups
+            .into_iter()
+            .map(|group| {
+                let group_id = *group.id().as_untyped_uuid();
+                let member_count =
+                    member_counts.get(&group_id).copied().unwrap_or(0);
+                let mut silo_group: SiloGroup = group.into();
+                silo_group.set_member_count(member_count);
+                silo_group
+            })
             .collect::<Vec<SiloGroup>>();
 
         Ok(page)
+    }
+
+    /// Fetch the member count for a single silo group
+    pub async fn silo_group_member_count(
+        &self,
+        opctx: &OpContext,
+        group_id: SiloGroupUuid,
+    ) -> Result<i64, Error> {
+        use nexus_db_schema::schema::silo_group_membership::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let count = dsl::silo_group_membership
+            .filter(dsl::silo_group_id.eq(to_db_typed_uuid(group_id)))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(count)
     }
 }

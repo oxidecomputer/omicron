@@ -150,6 +150,137 @@ async fn test_silo_group_detail_bad_group_id(
     expect_failure(&client, &"/v1/groups/abc", StatusCode::BAD_REQUEST).await;
 }
 
+#[nexus_test]
+async fn test_silo_group_member_count_and_user_endpoints(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let opctx = OpContext::for_tests(
+        cptestctx.logctx.log.new(o!()),
+        cptestctx.server.server_context().nexus.datastore().clone(),
+    );
+
+    let authz_silo = authz::Silo::new(
+        authz::FLEET,
+        DEFAULT_SILO_ID,
+        LookupType::ById(DEFAULT_SILO_ID),
+    );
+
+    // Create a group
+    let group_name = "test-group".to_string();
+    nexus
+        .datastore()
+        .silo_group_ensure(
+            &opctx,
+            &authz_silo,
+            SiloGroupApiOnly::new(
+                authz_silo.id(),
+                SiloGroupUuid::new_v4(),
+                group_name.clone(),
+            )
+            .into(),
+        )
+        .await
+        .expect("Group created");
+
+    // Fetch the group and verify member_count is 0
+    let groups =
+        objects_list_page_authz::<views::Group>(client, &"/v1/groups").await;
+    assert_eq!(groups.items.len(), 1);
+    let group = groups.items.get(0).unwrap();
+    assert_eq!(group.member_count, 0);
+
+    // Add unprivileged user to the group
+    let authz_silo_user = authz::SiloUser::new(
+        authz_silo.clone(),
+        USER_TEST_UNPRIVILEGED.id(),
+        LookupType::by_id(USER_TEST_UNPRIVILEGED.id()),
+    );
+    nexus
+        .datastore()
+        .silo_group_membership_replace_for_user(
+            &opctx,
+            &authz_silo_user,
+            vec![group.id],
+        )
+        .await
+        .expect("Failed to set user group memberships");
+
+    // Fetch the group again and verify member_count is now 1
+    let group_url = format!("/v1/groups/{}", group.id);
+    let group = NexusRequest::object_get(&client, &group_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Group>()
+        .await;
+    assert_eq!(group.member_count, 1);
+
+    // Fetch users via the query parameter endpoint
+    let query_param_url = format!("/v1/users?group={}", group.id);
+    let query_param_users =
+        objects_list_page_authz::<views::User>(client, &query_param_url).await;
+
+    // Fetch users via the new RESTful endpoint
+    let restful_url = format!("/v1/groups/{}/users", group.id);
+    let restful_users =
+        objects_list_page_authz::<views::User>(client, &restful_url).await;
+
+    // Verify both endpoints return the same results
+    assert_eq!(
+        query_param_users.items.len(),
+        restful_users.items.len(),
+        "Both endpoints should return the same number of users"
+    );
+    assert_eq!(query_param_users.items.len(), 1);
+
+    let query_param_user_ids: Vec<_> =
+        query_param_users.items.iter().map(|u| u.id).collect();
+    let restful_user_ids: Vec<_> =
+        restful_users.items.iter().map(|u| u.id).collect();
+
+    assert_same_items(query_param_user_ids.clone(), restful_user_ids.clone());
+    assert_same_items(query_param_user_ids, vec![USER_TEST_UNPRIVILEGED.id()]);
+
+    // Add privileged user to the group as well
+    let authz_silo_user_priv = authz::SiloUser::new(
+        authz_silo,
+        USER_TEST_PRIVILEGED.id(),
+        LookupType::by_id(USER_TEST_PRIVILEGED.id()),
+    );
+    nexus
+        .datastore()
+        .silo_group_membership_replace_for_user(
+            &opctx,
+            &authz_silo_user_priv,
+            vec![group.id],
+        )
+        .await
+        .expect("Failed to set user group memberships");
+
+    // Fetch the group and verify member_count is now 2
+    let group = NexusRequest::object_get(&client, &group_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Group>()
+        .await;
+    assert_eq!(group.member_count, 2);
+
+    // Verify both endpoints still return the same results with 2 users
+    let query_param_users =
+        objects_list_page_authz::<views::User>(client, &query_param_url).await;
+    let restful_users =
+        objects_list_page_authz::<views::User>(client, &restful_url).await;
+
+    assert_eq!(query_param_users.items.len(), 2);
+    assert_eq!(restful_users.items.len(), 2);
+
+    let query_param_user_ids: Vec<_> =
+        query_param_users.items.iter().map(|u| u.id).collect();
+    let restful_user_ids: Vec<_> =
+        restful_users.items.iter().map(|u| u.id).collect();
+
+    assert_same_items(query_param_user_ids, restful_user_ids);
+}
+
 async fn expect_failure(
     client: &ClientTestContext,
     url: &str,
