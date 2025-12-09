@@ -197,6 +197,7 @@ mod api_impl {
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
     use iddqd::IdOrdMap;
+    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use nexus_sled_agent_shared::inventory::BootImageHeader;
     use nexus_sled_agent_shared::inventory::BootPartitionContents;
     use nexus_sled_agent_shared::inventory::BootPartitionDetails;
@@ -356,7 +357,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
-                smf_services_in_maintenance: vec![],
+                smf_services_in_maintenance: SvcsInMaintenanceResult::new(),
             }))
         }
 

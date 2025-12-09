@@ -338,6 +338,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use dropshot::PaginationOrder;
+    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use nexus_db_lookup::LookupPath;
     use nexus_sled_agent_shared::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
@@ -704,7 +705,7 @@ mod test {
                         ConfigReconcilerInventoryStatus::NotYetRun,
                     last_reconciliation: None,
                     zone_image_resolver: ZoneImageResolverInventory::new_fake(),
-                    smf_services_in_maintenance: vec![],
+                    smf_services_in_maintenance: SvcsInMaintenanceResult::new(),
                 },
             )
             .unwrap();

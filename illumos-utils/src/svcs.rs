@@ -13,7 +13,6 @@ use crate::execute_async;
 use crate::zone::SVCS;
 
 use chrono::DateTime;
-use chrono::NaiveDateTime;
 use chrono::Utc;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -32,19 +31,46 @@ impl Svcs {
     #[cfg(target_os = "illumos")]
     pub async fn in_maintenance(
         log: &Logger,
-    ) -> Result<Vec<SvcInMaintenance>, ExecutionError> {
+    ) -> Result<SvcsInMaintenanceResult, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCS, "-Za", "-H", "-o", "state,fmri,zone"]);
         let output = execute_async(cmd).await?;
-        Ok(SvcInMaintenance::parse(log, &output.stdout))
+        let svcs_result = SvcsInMaintenanceResult{
+            services: SvcInMaintenance::parse(log, &output.stdout),
+            time_of_status: Some(Utc::now()),
+        };
+        Ok(svcs_result)
     }
 
     #[cfg(not(target_os = "illumos"))]
     pub async fn in_maintenance(
         log: &Logger,
-    ) -> Result<Vec<SvcInMaintenance>, ExecutionError> {
+    ) -> Result<SvcsInMaintenanceResult, ExecutionError> {
         info!(log, "OS not illumos, will not check state of SMF services");
-        Ok(vec![])
+        let svcs_result = SvcsInMaintenanceResult::new();
+        Ok(svcs_result)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct SvcsInMaintenanceResult {
+    pub services: Vec<SvcInMaintenance>,
+    // TODO-K: Do I need a deserialiser like parse_cockroach_cli_timestamp?
+    pub time_of_status: Option<DateTime<Utc>>,
+}
+
+impl SvcsInMaintenanceResult {
+    pub fn new() -> Self {
+        Self {
+            services: vec![],
+            time_of_status: None,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.services.is_empty()
+        && self.time_of_status == None
     }
 }
 
@@ -98,12 +124,6 @@ impl From<String> for SvcState {
 pub struct SvcInMaintenance {
     fmri: String,
     zone: String,
-    //state: SvcState,
-    //// TODO-K: Do I need a deserialiser like parse_cockroach_cli_timestamp?
-    //state_since: Option<DateTime<Utc>>,
-    //reason: String,
-    //impact: String,
-    //additional_info: Vec<String>,
 }
 
 impl SvcInMaintenance {
@@ -111,8 +131,7 @@ impl SvcInMaintenance {
     // marked as a configuration option based on target OS because they are not
     // Illumos specific themselves. We mark them as unused instead.
     #[allow(dead_code)]
-    // TODO-K: Remove pub?
-    pub fn new() -> SvcInMaintenance {
+    fn new() -> SvcInMaintenance {
         SvcInMaintenance { fmri: String::new(), zone: String::new() }
     }
 

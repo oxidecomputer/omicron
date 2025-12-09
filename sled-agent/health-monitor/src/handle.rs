@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use illumos_utils::svcs::SvcInMaintenance;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use illumos_utils::svcs::Svcs;
 use slog::Logger;
 use slog::error;
@@ -10,15 +10,13 @@ use tokio::sync::watch;
 
 #[derive(Debug, Clone)]
 pub struct HealthMonitorHandle {
-    // TODO-K: Do I actually need the logger here?
-    //pub log: Logger,
-    pub smf_services_in_maintenance_tx: watch::Sender<Vec<SvcInMaintenance>>,
+    pub smf_services_in_maintenance_tx: watch::Sender<SvcsInMaintenanceResult>,
 }
 
 impl HealthMonitorHandle {
     pub fn new() -> Self {
         let (smf_services_in_maintenance_tx, _rx) =
-            watch::channel(vec![SvcInMaintenance::new()]);
+            watch::channel(SvcsInMaintenanceResult::new());
         Self { smf_services_in_maintenance_tx }
     }
 
@@ -35,13 +33,13 @@ impl HealthMonitorHandle {
 /// Fields of sled-agent inventory reported by the health monitor subsystem.
 #[derive(Debug, Clone)]
 pub struct HealthMonitorInventory {
-    pub smf_services_in_maintenance: Vec<SvcInMaintenance>,
+    pub smf_services_in_maintenance: SvcsInMaintenanceResult,
 }
 
 // TODO-K: Put this in another file?
 pub async fn poll_smf_services_in_maintenance(
     log: Logger,
-    smf_services_in_maintenance_tx: watch::Sender<Vec<SvcInMaintenance>>,
+    smf_services_in_maintenance_tx: watch::Sender<SvcsInMaintenanceResult>,
 ) {
     // We poll every minute to verify the health of all services. This interval
     // is arbitrary.

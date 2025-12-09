@@ -897,9 +897,9 @@ fn display_sleds(
         }
 
         if !smf_services_in_maintenance.is_empty() {
-            writeln!(indented, "SMF services in maintenance:")?;
+            writeln!(indented, "SMF services in maintenance at {:#?}:", &smf_services_in_maintenance.time_of_status)?;
             let mut indent2 = IndentWriter::new("  ", &mut indented);
-            for svc in smf_services_in_maintenance {
+            for svc in &smf_services_in_maintenance.services {
                 writeln!(indent2, "{svc}")?;
             }
         }

@@ -27,6 +27,7 @@ use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
@@ -4000,7 +4001,7 @@ impl DataStore {
                 last_reconciliation,
                 zone_image_resolver,
                 // TODO-K: Actually query the DB when there is something there
-                smf_services_in_maintenance: vec![],
+                smf_services_in_maintenance: SvcsInMaintenanceResult::new(),
             };
             sled_agents
                 .insert_unique(sled_agent)

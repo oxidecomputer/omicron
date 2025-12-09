@@ -15,6 +15,7 @@ use gateway_client::types::SpState;
 use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::BootImageHeader;
 use nexus_sled_agent_shared::inventory::BootPartitionContents;
@@ -1369,7 +1370,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 ConfigReconcilerInventoryStatus::NotYetRun,
                             zone_image_resolver:
                                 ZoneImageResolverInventory::new_fake(),
-                            smf_services_in_maintenance: vec![],
+                            smf_services_in_maintenance: SvcsInMaintenanceResult::new(),
                         },
                     )
                     .unwrap();
