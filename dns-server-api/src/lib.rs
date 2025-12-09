@@ -91,6 +91,7 @@
 
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
 use dropshot_api_manager_types::api_versions;
+use internal_dns_types_versions::{v1, v2};
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -132,10 +133,7 @@ pub trait DnsServerApi {
     )]
     async fn dns_config_get_v1(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<internal_dns_types_versions::v1::config::DnsConfig>,
-        HttpError,
-    >;
+    ) -> Result<HttpResponseOk<v1::config::DnsConfig>, HttpError>;
 
     #[endpoint(
         method = GET,
@@ -145,10 +143,7 @@ pub trait DnsServerApi {
     )]
     async fn dns_config_get_v2(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<internal_dns_types_versions::v2::config::DnsConfig>,
-        HttpError,
-    >;
+    ) -> Result<HttpResponseOk<v2::config::DnsConfig>, HttpError>;
 
     #[endpoint(
         method = PUT,
@@ -158,9 +153,7 @@ pub trait DnsServerApi {
     )]
     async fn dns_config_put_v1(
         rqctx: RequestContext<Self::Context>,
-        rq: dropshot::TypedBody<
-            internal_dns_types_versions::v1::config::DnsConfigParams,
-        >,
+        rq: dropshot::TypedBody<v1::config::DnsConfigParams>,
     ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>;
 
     #[endpoint(
@@ -171,8 +164,6 @@ pub trait DnsServerApi {
     )]
     async fn dns_config_put_v2(
         rqctx: RequestContext<Self::Context>,
-        rq: dropshot::TypedBody<
-            internal_dns_types_versions::v2::config::DnsConfigParams,
-        >,
+        rq: dropshot::TypedBody<v2::config::DnsConfigParams>,
     ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>;
 }
