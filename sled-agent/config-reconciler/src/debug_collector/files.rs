@@ -8,99 +8,120 @@
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use slog::Logger;
-use tokio::fs::File;
 
-#[derive(Debug, Clone, Copy)]
-pub struct ZoneInfo<'a> {
-    name: &'a str,
-    root: &'a Utf8Path,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ArchiveWhat {
-    ImmutableOnly,
-    Everything,
-}
-
-#[derive(Debug, Clone)]
-pub struct GlobGroup<'a> {
-    label: &'static str,
-    glob_pattern: String,
-    kind: DebugFileKind<'a>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum DebugFileKind<'a> {
-    LogRotated(&'a ZoneInfo<'a>),
-    LogLive(&'a ZoneInfo<'a>),
-    Core,
-}
-
-impl DebugFileKind<'_> {
-    fn should_delete_original(&self) -> bool {
-        match self {
-            DebugFileKind::LogRotated(_) | DebugFileKind::Core => true,
-            DebugFileKind::LogLive(zone_info) => false,
-        }
-    }
-}
-
-pub fn plan_archive_zones<'a>(
-    zones: &'a [ZoneInfo<'a>],
+pub struct Archiver {
+    log: Logger,
     what: ArchiveWhat,
-) -> impl Iterator<Item = GlobGroup<'a>> {
-    let mut rv = Vec::new();
+    glob_groups: Vec<GlobGroup>,
+}
 
-    for zone in zones {
-        let smf_log_dir = format!("{}/var/svc/log", zone.root);
-        rv.push(GlobGroup {
-            label: "rotated SMF logs",
+impl Archiver {
+    pub fn new(log: Logger, what: ArchiveWhat) -> Archiver {
+        Archiver { log, what, glob_groups: Vec::new() }
+    }
+
+    pub fn include_zone(&mut self, zone_name: &str, zone_root: &Utf8Path) {
+        let zone_name = zone_name.to_owned();
+        let smf_log_dir = format!("{}/var/svc/log", zone_root);
+        self.glob_groups.push(GlobGroup {
+            label: format!("zone {zone_name}: rotated SMF logs"),
             // XXX-dap digits
             glob_pattern: format!("{smf_log_dir}/*.log.*"),
-            kind: DebugFileKind::LogRotated(zone),
+            kind: DebugFileKind::LogRotated(zone_name.clone()),
         });
 
-        let syslog_dir = format!("{}/var/adm", zone.root);
-        rv.push(GlobGroup {
-            label: "rotated syslog",
+        let syslog_dir = format!("{}/var/adm", zone_root);
+        self.glob_groups.push(GlobGroup {
+            label: format!("zone {zone_name}: rotated syslog"),
             // XXX-dap digits
             glob_pattern: format!("{syslog_dir}/messages.*"),
-            kind: DebugFileKind::LogRotated(zone),
+            kind: DebugFileKind::LogRotated(zone_name.clone()),
         });
 
-        match what {
+        match self.what {
             ArchiveWhat::ImmutableOnly => (),
             ArchiveWhat::Everything => {
-                rv.push(GlobGroup {
-                    label: "live SMF logs",
+                self.glob_groups.push(GlobGroup {
+                    label: format!("zone {zone_name}: live SMF logs"),
                     glob_pattern: format!("{smf_log_dir}/*.log"),
-                    kind: DebugFileKind::LogLive(zone),
+                    kind: DebugFileKind::LogLive(zone_name.clone()),
                 });
-                rv.push(GlobGroup {
-                    label: "live syslog",
+                self.glob_groups.push(GlobGroup {
+                    label: format!("zone {zone_name}: live syslog"),
                     glob_pattern: format!("{syslog_dir}/messages"),
-                    kind: DebugFileKind::LogLive(zone),
+                    kind: DebugFileKind::LogLive(zone_name.clone()),
                 });
             }
         }
     }
 
-    rv.into_iter()
+    pub fn include_cores_directory(&mut self, cores_dir: &Utf8Path) {
+        self.glob_groups.push(GlobGroup {
+            label: format!("core files in {cores_dir}"),
+            glob_pattern: format!("{cores_dir}/*"),
+            kind: DebugFileKind::Core,
+        });
+    }
+
+    // XXX-dap error type
+    pub fn to_plan(&self) -> Result<ArchivePlan<'_>, glob::PatternError> {
+        ArchivePlan::new(&self.log, &self.glob_groups)
+    }
 }
 
-pub fn plan_archive_cores<'a>(
-    core_directories: &'a [&'a Utf8Path],
-) -> impl Iterator<Item = GlobGroup<'a>> {
-    core_directories.iter().map(|core_dir| GlobGroup {
-        label: "core files",
-        glob_pattern: format!("{core_dir}/*"),
-        kind: DebugFileKind::Core,
-    })
+/// Describes what to archive in this path
+#[derive(Debug, Clone, Copy)]
+pub enum ArchiveWhat {
+    /// Archive only immutable files
+    ///
+    /// This includes core files and rotated log files, but ignores live log
+    /// files, since they are still being written-to.
+    ImmutableOnly,
+
+    /// Archive everything, including live log files that may still be written
+    /// to
+    Everything,
+}
+
+/// Basic unit of archival: a group of files of kind `kind` identified by
+/// `glob_pattern`
+#[derive(Debug, Clone)]
+struct GlobGroup {
+    label: String,
+    glob_pattern: String,
+    kind: DebugFileKind,
+}
+
+/// Describes what type of debug file this is
+///
+/// This is used to determine where in the debug dataset the file will be
+/// archived and whether the original should be deleted.
+#[derive(Debug, Clone)]
+enum DebugFileKind {
+    /// a rotated (now-immutable) log file in the given zone
+    LogRotated(String),
+    /// a live log file in the given zone
+    LogLive(String),
+    /// a user process core dump
+    Core,
+}
+
+impl DebugFileKind {
+    /// Returns whether the original file should be deleted when the file is
+    /// archived
+    ///
+    /// Live log files are never deleted.  Rotated log files and core dumps are.
+    fn should_delete_original(&self) -> bool {
+        match self {
+            DebugFileKind::LogRotated(_) | DebugFileKind::Core => true,
+            DebugFileKind::LogLive(_) => false,
+        }
+    }
 }
 
 pub struct ArchiveStep<'a> {
     source: Utf8PathBuf,
-    kind: DebugFileKind<'a>,
+    kind: &'a DebugFileKind,
 }
 
 impl ArchiveStep<'_> {
@@ -113,36 +134,49 @@ impl ArchiveStep<'_> {
     }
 }
 
-pub fn plan_archive<'a>(
-    globs: impl Iterator<Item = GlobGroup<'a>>,
-) -> Result<impl Iterator<Item = ArchiveStep<'a>>, glob::PatternError> {
-    // XXX-dap this really ought to work in a streaming way
-    let mut rv = Vec::new();
-
-    for glob_group in globs {
-        // XXX-dap warn instead of ignoring these errors with flatten
-        let files = glob::glob(&glob_group.glob_pattern)?.flatten();
-        for file in files {
-            // XXX-dap unwrap()
-            let path = Utf8PathBuf::try_from(file).unwrap();
-            rv.push(ArchiveStep { source: path, kind: glob_group.kind });
-        }
-    }
-
-    Ok(rv.into_iter())
+pub struct ArchivePlan<'a> {
+    log: &'a Logger,
+    glob_groups: &'a [GlobGroup],
+    steps: Box<dyn Iterator<Item = ArchiveStep<'a>> + 'a>,
 }
 
-pub async fn archive_all<'a>(
-    log: &Logger,
-    debug_dir: &Utf8Path,
-    steps: impl Iterator<Item = ArchiveStep<'a>>,
-) {
-    // XXX-dap logging
-    for step in steps {
-        match archive_one(debug_dir, step).await {
-            Ok(()) => (),
-            Err(error) => {
-                // XXX-dap warning
+impl<'a> ArchivePlan<'a> {
+    pub fn new(
+        log: &'a Logger,
+        glob_groups: &'a [GlobGroup],
+    ) -> Result<ArchivePlan<'a>, glob::PatternError> {
+        // XXX-dap this really ought to work in a streaming way
+        let mut rv = Vec::new();
+
+        for glob_group in glob_groups {
+            // XXX-dap warn instead of ignoring these errors with flatten
+            let files = glob::glob(&glob_group.glob_pattern)?.flatten();
+            for file in files {
+                // XXX-dap unwrap()
+                let path = Utf8PathBuf::try_from(file).unwrap();
+                rv.push(ArchiveStep { source: path, kind: &glob_group.kind });
+            }
+        }
+
+        let steps = Box::new(rv.into_iter());
+        Ok(ArchivePlan { log, glob_groups, steps })
+    }
+
+    #[cfg(test)]
+    fn into_steps(self) -> Box<dyn Iterator<Item = ArchiveStep<'a>> + 'a> {
+        self.steps
+    }
+
+    pub async fn execute(self, debug_dir: &Utf8Path) {
+        let log = self.log;
+        let steps = self.steps;
+        // XXX-dap logging
+        for step in steps {
+            match archive_one(debug_dir, step).await {
+                Ok(()) => (),
+                Err(error) => {
+                    // XXX-dap warning
+                }
             }
         }
     }
