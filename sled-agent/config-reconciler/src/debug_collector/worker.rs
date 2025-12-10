@@ -103,7 +103,8 @@
 //!
 //! * `core.[zone-name].[exe-filename].[pid].[time]`: process core dumps
 //! * `unix.[0-9]+`, `bounds`: files associated with kernel crash dumps
-//! * `$UUID`: support bundles (wholly unrelated to the DebugCollector)
+//! * `$UUID`: directories related to support bundles (wholly unrelated to
+//!   the DebugCollector)
 //! * `oxz_[zone-type]_[zone-uuid]`: directory containing all the log files
 //!   for the corresponding zone.
 //!
@@ -185,26 +186,25 @@
 //! the _live_ log files are also archived, since they will not have a chance
 //! to get rotated and so would otherwise be lost.
 
-use async_trait::async_trait;
+use super::helpers::CoreDumpAdmInvoker;
+use super::helpers::ZFS_PROP_AVAILABLE;
+use super::helpers::ZFS_PROP_USED;
+use super::helpers::ZfsGetError;
+use super::helpers::ZfsInvoker;
+use super::helpers::ZoneInvoker;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use derive_more::{AsRef, From};
 use illumos_utils::ExecutionError;
-use illumos_utils::coreadm::{CoreAdm, CoreFileOption};
-use illumos_utils::dumpadm::{DumpAdm, DumpContentType};
-use illumos_utils::zone::ZONE_PREFIX;
-use illumos_utils::zpool::{ZpoolHealth, ZpoolName};
-use omicron_common::disk::DiskVariant;
+use illumos_utils::zpool::ZpoolName;
 use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
 use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
-use sled_storage::disk::Disk;
 use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
-use slog::o;
 use slog::trace;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -215,12 +215,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot;
-use zone::{Zone, ZoneError};
-
-// Names of ZFS dataset properties.  These are stable and documented in zfs(1M).
-
-const ZFS_PROP_USED: &str = "used";
-const ZFS_PROP_AVAILABLE: &str = "available";
+use zone::ZoneError;
 
 // Parameters related to management of storage on debug datasets
 
@@ -245,21 +240,21 @@ const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
 ///
 /// This is generally a slice on an internal (M.2) device.
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
-struct DumpSlicePath(Utf8PathBuf);
+pub(super) struct DumpSlicePath(Utf8PathBuf);
 
 /// Filesystem path to the mountpoint of a ZFS dataset that's intended for
 /// storing debug data for the long term
 ///
 /// This is generally on a removable (U.2) device.
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
-struct DebugDataset(Utf8PathBuf);
+pub(super) struct DebugDataset(Utf8PathBuf);
 
 /// Filesystem path to the mountpoint of a ZFS dataset that's available as the
 /// first place that user process core dumps get written
 ///
 /// This is generally on an internal (M.2) device.
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
-struct CoreDataset(Utf8PathBuf);
+pub(super) struct CoreDataset(Utf8PathBuf);
 
 // Types that describe ZFS datasets that are used to store different kinds of
 // debug data
@@ -274,8 +269,8 @@ struct CoreDataset(Utf8PathBuf);
 /// This pool is generally on an M.2 device.
 #[derive(AsRef, Clone, Debug, From)]
 pub(super) struct CoreZpool {
-    mount_config: Arc<MountConfig>,
-    name: ZpoolName,
+    pub(super) mount_config: Arc<MountConfig>,
+    pub(super) name: ZpoolName,
 }
 
 /// Identifies a ZFS dataset that's intended for long-term storage of debug data
@@ -288,8 +283,8 @@ pub(super) struct CoreZpool {
 /// This pool is generally on an M.2 device.
 #[derive(AsRef, Clone, Debug, From)]
 pub(super) struct DebugZpool {
-    mount_config: Arc<MountConfig>,
-    name: ZpoolName,
+    pub(super) mount_config: Arc<MountConfig>,
+    pub(super) name: ZpoolName,
 }
 
 impl GetMountpoint for DebugZpool {
@@ -338,7 +333,7 @@ trait GetMountpoint: AsRef<ZpoolName> {
 ///
 /// These are sent from different places.
 #[derive(Debug)]
-enum DebugCollectorCmd {
+pub(super) enum DebugCollectorCmd {
     /// Archive logs and other debug data from directory `zone_root`, which
     /// corresponds to the root of a previously-running zone called `zone_name`.
     /// Reply on `completion_tx` when finished.
@@ -369,7 +364,7 @@ enum DebugCollectorCmd {
 ///
 /// This runs in its own tokio task.  More precisely, poll_file_archival() runs
 /// in its own tokio task and does all these things.
-struct DebugCollectorWorker {
+pub(super) struct DebugCollectorWorker {
     /// list of ZFS datasets that can be used for saving process core dumps
     core_dataset_names: Vec<CoreZpool>,
     /// list of ZFS datasets that can be used for long-term storage of
@@ -407,377 +402,6 @@ struct DebugCollectorWorker {
     zone_invoker: Box<dyn ZoneInvoker + Send + Sync>,
 }
 
-/// "External" handle to the debug collector
-///
-/// The DebugCollectorTask (a tiny task that passes information from the rest of
-/// sled agent to this subystem) has this handle and uses it to send commands to
-/// the DebugCollectorWorker.
-pub struct DebugCollector {
-    tx: tokio::sync::mpsc::Sender<DebugCollectorCmd>,
-    mount_config: Arc<MountConfig>,
-    _poller: tokio::task::JoinHandle<()>,
-    log: Logger,
-}
-
-impl DebugCollector {
-    pub fn new(log: &Logger, mount_config: Arc<MountConfig>) -> Self {
-        let (tx, rx) = tokio::sync::mpsc::channel(16);
-        let worker = DebugCollectorWorker::new(
-            Box::new(RealCoreDumpAdm {}),
-            Box::new(RealZfs {}),
-            Box::new(RealZone {}),
-            log.new(o!("component" => "DebugCollector-worker")),
-            rx,
-        );
-        let _poller =
-            tokio::spawn(async move { worker.poll_file_archival().await });
-        let log = log.new(o!("component" => "DebugCollector"));
-        Self { tx, mount_config, _poller, log }
-    }
-
-    /// Given the set of all managed disks, updates the dump device location
-    /// for logs and dumps.
-    ///
-    /// This function returns only once this request has been handled, which
-    /// can be used as a signal by callers that any "old disks" are no longer
-    /// being used by [DebugCollector].
-    pub async fn update_dumpdev_setup(
-        &self,
-        disks: impl Iterator<Item = &Disk>,
-    ) {
-        let log = &self.log;
-        let mut m2_dump_slices = Vec::new();
-        let mut u2_debug_datasets = Vec::new();
-        let mut m2_core_datasets = Vec::new();
-        let mount_config = self.mount_config.clone();
-        for disk in disks {
-            match disk.variant() {
-                DiskVariant::M2 => {
-                    // We only setup dump devices on real disks
-                    if !disk.is_synthetic() {
-                        match disk.dump_device_devfs_path(false) {
-                            Ok(path) => {
-                                m2_dump_slices.push(DumpSlicePath(path))
-                            }
-                            Err(err) => {
-                                warn!(
-                                    log,
-                                    "Error getting dump device devfs path: \
-                                     {err:?}"
-                                );
-                            }
-                        }
-                    }
-                    let name = disk.zpool_name();
-                    if let Ok(info) =
-                        illumos_utils::zpool::Zpool::get_info(&name.to_string())
-                            .await
-                    {
-                        if info.health() == ZpoolHealth::Online {
-                            m2_core_datasets.push(CoreZpool {
-                                mount_config: mount_config.clone(),
-                                name: *name,
-                            });
-                        } else {
-                            warn!(
-                                log,
-                                "Zpool {name:?} not online, won't attempt to \
-                                 save process core dumps there"
-                            );
-                        }
-                    }
-                }
-                DiskVariant::U2 => {
-                    let name = disk.zpool_name();
-                    if let Ok(info) =
-                        illumos_utils::zpool::Zpool::get_info(&name.to_string())
-                            .await
-                    {
-                        if info.health() == ZpoolHealth::Online {
-                            u2_debug_datasets.push(DebugZpool {
-                                mount_config: mount_config.clone(),
-                                name: *name,
-                            });
-                        } else {
-                            warn!(
-                                log,
-                                "Zpool {name:?} not online, won't attempt to \
-                                 save kernel core dumps there"
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        let (tx, rx) = oneshot::channel();
-        if let Err(err) = self
-            .tx
-            .send(DebugCollectorCmd::UpdateDumpdevSetup {
-                dump_slices: m2_dump_slices,
-                debug_datasets: u2_debug_datasets,
-                core_datasets: m2_core_datasets,
-                update_complete_tx: tx,
-            })
-            .await
-        {
-            error!(log, "DebugCollector channel closed: {:?}", err.0);
-        };
-
-        if let Err(err) = rx.await {
-            error!(log, "DebugCollector failed to await update"; "err" => ?err);
-        }
-    }
-
-    /// Request archive of logs from the specified directory, which is assumed
-    /// to correspond to the root filesystem of a zone that is no longer
-    /// running.
-    ///
-    /// Unlike typical log file archival, this includes non-rotated log files.
-    ///
-    /// This makes a best-effort and logs failures rather than reporting them to
-    /// the caller.
-    ///
-    /// When this future completes, the request has only been enqueued.  To know
-    /// when archival has completed, you must wait on the receive side of
-    /// `completion_tx`.
-    pub async fn archive_former_zone_root(
-        &self,
-        zone_root: &Utf8Path,
-        completion_tx: oneshot::Sender<()>,
-    ) {
-        let log = self.log.new(o!("zone_root" => zone_root.to_string()));
-
-        // Validate the path that we were given.  We're only ever given zone
-        // root filesystems, whose basename is always a zonename, and we always
-        // prefix our zone names with `oxz_`.  If that's not what we find here,
-        // log an error and bail out.  These error cases should be impossible to
-        // hit in practice.
-        let Some(file_name) = zone_root.file_name() else {
-            error!(
-                log,
-                "cannot archive former zone root";
-                "error" => "path has no filename part",
-            );
-            return;
-        };
-
-        if !file_name.starts_with("oxz_") {
-            error!(
-                log,
-                "cannot archive former zone root";
-                "error" => "filename does not start with \"oxz_\"",
-            );
-            return;
-        }
-
-        info!(log, "requesting archive of former zone root");
-        let zone_root = zone_root.to_owned();
-        let zone_name = file_name.to_string();
-        let cmd = DebugCollectorCmd::ArchiveFormerZoneRoot {
-            zone_root,
-            zone_name,
-            completion_tx,
-        };
-        if let Err(_) = self.tx.send(cmd).await {
-            error!(
-                log,
-                "failed to request archive of former zone root";
-                "error" => "DebugCollector channel closed"
-            );
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-enum ZfsGetError {
-    #[error("Error executing 'zfs get' command: {0}")]
-    IoError(#[from] std::io::Error),
-    #[error(
-        "Output of 'zfs get' was not only not an integer string, it wasn't \
-         even UTF-8: {0}"
-    )]
-    Utf8(#[from] std::string::FromUtf8Error),
-    #[error("Error parsing output of 'zfs get' command as integer: {0}")]
-    Parse(#[from] std::num::ParseIntError),
-}
-
-/// Helper for invoking coreadm(8) and dumpadm(8), abstracted out for tests
-#[async_trait]
-trait CoreDumpAdmInvoker {
-    fn coreadm(&self, core_dir: &Utf8PathBuf) -> Result<(), ExecutionError>;
-    async fn dumpadm(
-        &self,
-        dump_slice: &Utf8PathBuf,
-        savecore_dir: Option<&Utf8PathBuf>,
-    ) -> Result<Option<OsString>, ExecutionError>;
-}
-
-/// Helper for interacting with ZFS filesystems, abstracted out for tests
-trait ZfsInvoker {
-    fn zfs_get_prop(
-        &self,
-        mountpoint_or_name: &str,
-        property: &str,
-    ) -> Result<String, ZfsGetError>;
-
-    fn zfs_get_integer(
-        &self,
-        mountpoint_or_name: &str,
-        property: &str,
-    ) -> Result<u64, ZfsGetError> {
-        self.zfs_get_prop(mountpoint_or_name, property)?
-            .parse()
-            .map_err(Into::into)
-    }
-
-    fn below_thresh(
-        &self,
-        mountpoint: &Utf8PathBuf,
-        percent: u64,
-    ) -> Result<(bool, u64), ZfsGetError> {
-        let used = self.zfs_get_integer(mountpoint.as_str(), ZFS_PROP_USED)?;
-        let available =
-            self.zfs_get_integer(mountpoint.as_str(), ZFS_PROP_AVAILABLE)?;
-        let capacity = used + available;
-        let below = (used * 100) / capacity < percent;
-        Ok((below, used))
-    }
-
-    fn mountpoint(
-        &self,
-        mount_config: &MountConfig,
-        zpool: &ZpoolName,
-        mountpoint: &'static str,
-    ) -> Utf8PathBuf;
-}
-
-/// Helper for listing currently-running zones on the system
-#[async_trait]
-trait ZoneInvoker {
-    async fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError>;
-}
-
-struct RealCoreDumpAdm {}
-struct RealZfs {}
-struct RealZone {}
-
-#[async_trait]
-impl CoreDumpAdmInvoker for RealCoreDumpAdm {
-    fn coreadm(&self, core_dir: &Utf8PathBuf) -> Result<(), ExecutionError> {
-        let mut cmd = CoreAdm::new();
-
-        // disable per-process core patterns
-        cmd.disable(CoreFileOption::Process);
-        cmd.disable(CoreFileOption::ProcSetid);
-
-        // use the global core pattern
-        cmd.enable(CoreFileOption::Global);
-        cmd.enable(CoreFileOption::GlobalSetid);
-
-        // set the global pattern to place all cores into core_dir,
-        // with filenames of "core.[zone-name].[exe-filename].[pid].[time]"
-        cmd.global_pattern(core_dir.join("core.%z.%f.%p.%t"));
-
-        // also collect DWARF data from the exe and its library deps
-        cmd.global_contents("default+debug");
-
-        cmd.execute()
-    }
-
-    // Invokes `dumpadm(8)` to configure the kernel to dump core into the given
-    // `dump_slice` block device in the event of a panic. If a core is already
-    // present in that block device, and a `savecore_dir` is provided, this
-    // function also invokes `savecore(8)` to save it into that directory.
-    // On success, returns Ok(Some(stdout)) if `savecore(8)` was invoked, or
-    // Ok(None) if it wasn't.
-    async fn dumpadm(
-        &self,
-        dump_slice: &Utf8PathBuf,
-        savecore_dir: Option<&Utf8PathBuf>,
-    ) -> Result<Option<OsString>, ExecutionError> {
-        let savecore_dir_cloned = if let Some(dir) = savecore_dir.cloned() {
-            dir
-        } else {
-            // if we don't have a savecore destination yet, still create and use
-            // a tmpfs path (rather than the default location under /var/crash,
-            // which is in the ramdisk pool), because dumpadm refuses to do what
-            // we ask otherwise.
-            let tmp_crash = "/tmp/crash";
-            tokio::fs::create_dir_all(tmp_crash).await.map_err(|err| {
-                ExecutionError::ExecutionStart {
-                    command: format!("mkdir {tmp_crash:?}"),
-                    err,
-                }
-            })?;
-            Utf8PathBuf::from(tmp_crash)
-        };
-
-        // Use the given block device path for dump storage:
-        let mut cmd = DumpAdm::new(dump_slice.to_owned(), savecore_dir_cloned);
-
-        // Include memory from the current process if there is one for the panic
-        // context, in addition to kernel memory:
-        cmd.content_type(DumpContentType::CurProc);
-
-        // Compress crash dumps:
-        cmd.compress(true);
-
-        // Do not run savecore(8) automatically on boot (irrelevant anyhow, as
-        // the config file being mutated by dumpadm won't survive reboots on
-        // gimlets).  The sled-agent will invoke it manually instead.
-        cmd.no_boot_time_savecore();
-
-        cmd.execute()?;
-
-        // do we have a destination for the saved dump
-        if savecore_dir.is_some() {
-            // and does the dump slice have one to save off
-            if let Ok(true) =
-                illumos_utils::dumpadm::dump_flag_is_valid(dump_slice).await
-            {
-                return illumos_utils::dumpadm::SaveCore.execute();
-            }
-        }
-        Ok(None)
-    }
-}
-
-impl ZfsInvoker for RealZfs {
-    fn zfs_get_prop(
-        &self,
-        mountpoint_or_name: &str,
-        property: &str,
-    ) -> Result<String, ZfsGetError> {
-        let mut cmd = std::process::Command::new(illumos_utils::zfs::ZFS);
-        cmd.arg("get").arg("-Hpo").arg("value");
-        cmd.arg(property);
-        cmd.arg(mountpoint_or_name);
-        let output = cmd.output()?;
-        Ok(String::from_utf8(output.stdout)?.trim().to_string())
-    }
-
-    fn mountpoint(
-        &self,
-        mount_config: &MountConfig,
-        zpool: &ZpoolName,
-        mountpoint: &'static str,
-    ) -> Utf8PathBuf {
-        zpool.dataset_mountpoint(&mount_config.root, mountpoint)
-    }
-}
-
-#[async_trait]
-impl ZoneInvoker for RealZone {
-    async fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError> {
-        Ok(zone::Adm::list()
-            .await?
-            .into_iter()
-            .filter(|z| z.global() || z.name().starts_with(ZONE_PREFIX))
-            .collect::<Vec<_>>())
-    }
-}
-
 /// Returns whether a given file on a debug dataset can safely be deleted as
 /// part of cleaning up that dataset
 fn safe_to_delete(path: &Utf8Path, meta: &std::fs::Metadata) -> bool {
@@ -800,7 +424,7 @@ fn safe_to_delete(path: &Utf8Path, meta: &std::fs::Metadata) -> bool {
 }
 
 impl DebugCollectorWorker {
-    fn new(
+    pub(super) fn new(
         coredumpadm_invoker: Box<dyn CoreDumpAdmInvoker + Send + Sync>,
         zfs_invoker: Box<dyn ZfsInvoker + Send + Sync>,
         zone_invoker: Box<dyn ZoneInvoker + Send + Sync>,
@@ -826,7 +450,7 @@ impl DebugCollectorWorker {
     }
 
     /// Runs the body of the DebugCollector
-    async fn poll_file_archival(mut self) {
+    pub(super) async fn poll_file_archival(mut self) {
         info!(self.log, "DebugCollector poll loop started.");
 
         // A oneshot which helps callers track when updates have propagated.
@@ -1691,6 +1315,7 @@ struct CleanupDirInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
     use illumos_utils::dumpadm::{
@@ -1700,6 +1325,7 @@ mod tests {
     use std::collections::HashMap;
     use std::str::FromStr;
     use tokio::io::AsyncWriteExt;
+    use zone::Zone;
 
     impl Clone for ZfsGetError {
         fn clone(&self) -> Self {
@@ -1792,7 +1418,7 @@ mod tests {
     }
     #[async_trait]
     impl ZoneInvoker for FakeZone {
-        async fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError> {
+        async fn get_zones(&self) -> Result<Vec<Zone>, ZoneError> {
             Ok(self.zones.clone())
         }
     }
