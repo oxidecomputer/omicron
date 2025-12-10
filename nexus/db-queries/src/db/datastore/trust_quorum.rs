@@ -455,7 +455,7 @@ mod tests {
         let rack_id = RackUuid::new_v4();
 
         // Create an initial config
-        let config = TrustQuorumConfig {
+        let mut config = TrustQuorumConfig {
             rack_id,
             epoch: Epoch(1),
             state: TrustQuorumConfigState::Preparing,
@@ -472,12 +472,52 @@ mod tests {
 
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
-        let config2 = datastore
+        let read_config = datastore
             .tq_latest_config(opctx, rack_id)
             .await
             .expect("no error")
             .expect("returned config");
 
-        assert_eq!(config, config2);
+        assert_eq!(config, read_config);
+
+        // Inserting the same config again should fail
+        datastore
+            .tq_insert_latest_config(opctx, config.clone())
+            .await
+            .expect_err("duplicate insert should fail");
+
+        // Bumping the epoch and inserting should succeed
+        config.epoch = Epoch(2);
+        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
+
+        let read_config = datastore
+            .tq_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        assert_eq!(config, read_config);
+
+        // We should get an error if we try to insert with a coordinator that is
+        // not part of the membership.
+        config.epoch = Epoch(3);
+        let saved_serial = config.coordinator.serial_number.clone();
+        config.coordinator.serial_number = "dummy".to_string();
+        datastore
+            .tq_insert_latest_config(opctx, config.clone())
+            .await
+            .expect_err("insert should fail with invalid coordinator");
+
+        // Restoring the serial number should succeed
+        config.coordinator.serial_number = saved_serial;
+        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
+
+        let read_config = datastore
+            .tq_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        assert_eq!(config, read_config);
     }
 }
