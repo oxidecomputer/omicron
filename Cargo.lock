@@ -12909,7 +12909,6 @@ dependencies = [
  "iddqd",
  "illumos-utils",
  "installinator-common",
- "itertools 0.14.0",
  "key-manager",
  "nexus-sled-agent-shared",
  "ntp-admin-client",
