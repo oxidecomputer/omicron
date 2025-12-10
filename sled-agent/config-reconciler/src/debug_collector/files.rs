@@ -5,9 +5,11 @@
 //! Configuration and implementation for archiving ordinary files as debug data
 //! (e.g., log files)
 
+use anyhow::anyhow;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use slog::Logger;
+use thiserror::Error;
 
 pub struct Archiver {
     log: Logger,
@@ -63,8 +65,7 @@ impl Archiver {
         });
     }
 
-    // XXX-dap error type
-    pub fn to_plan(&self) -> Result<ArchivePlan<'_>, glob::PatternError> {
+    pub fn to_plan(&self) -> ArchivePlan<'_> {
         ArchivePlan::new(&self.log, &self.glob_groups)
     }
 }
@@ -137,20 +138,26 @@ impl ArchiveStep<'_> {
 pub struct ArchivePlan<'a> {
     log: &'a Logger,
     glob_groups: &'a [GlobGroup],
-    steps: Box<dyn Iterator<Item = ArchiveStep<'a>> + 'a>,
+    steps: Box<dyn Iterator<Item = ArchiveStep<'a>> + Send + Sync + 'a>,
 }
 
 impl<'a> ArchivePlan<'a> {
     pub fn new(
         log: &'a Logger,
         glob_groups: &'a [GlobGroup],
-    ) -> Result<ArchivePlan<'a>, glob::PatternError> {
+    ) -> ArchivePlan<'a> {
         // XXX-dap this really ought to work in a streaming way
         let mut rv = Vec::new();
 
         for glob_group in glob_groups {
             // XXX-dap warn instead of ignoring these errors with flatten
-            let files = glob::glob(&glob_group.glob_pattern)?.flatten();
+            let files = match glob::glob(&glob_group.glob_pattern) {
+                Ok(files) => files.flatten(),
+                Err(error) => {
+                    // XXX-dap log error -- this should never happen
+                    continue;
+                }
+            };
             for file in files {
                 // XXX-dap unwrap()
                 let path = Utf8PathBuf::try_from(file).unwrap();
@@ -159,7 +166,7 @@ impl<'a> ArchivePlan<'a> {
         }
 
         let steps = Box::new(rv.into_iter());
-        Ok(ArchivePlan { log, glob_groups, steps })
+        ArchivePlan { log, glob_groups, steps }
     }
 
     #[cfg(test)]
@@ -167,18 +174,25 @@ impl<'a> ArchivePlan<'a> {
         self.steps
     }
 
-    pub async fn execute(self, debug_dir: &Utf8Path) {
+    pub async fn execute(
+        self,
+        debug_dir: &Utf8Path,
+    ) -> Result<(), anyhow::Error> {
         let log = self.log;
         let steps = self.steps;
         // XXX-dap logging
+        let mut rv = Ok(());
         for step in steps {
             match archive_one(debug_dir, step).await {
                 Ok(()) => (),
                 Err(error) => {
                     // XXX-dap warning
+                    rv = Err(anyhow!("failed to archive some files"));
                 }
             }
         }
+
+        rv
     }
 }
 

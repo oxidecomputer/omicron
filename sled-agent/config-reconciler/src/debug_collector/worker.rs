@@ -186,6 +186,8 @@
 //! the _live_ log files are also archived, since they will not have a chance
 //! to get rotated and so would otherwise be lost.
 
+use super::files::ArchiveWhat;
+use super::files::Archiver;
 use super::helpers::CoreDumpAdmInvoker;
 use super::helpers::ZFS_PROP_AVAILABLE;
 use super::helpers::ZFS_PROP_USED;
@@ -884,59 +886,44 @@ impl DebugCollectorWorker {
         }
     }
 
-    async fn archive_files(&self) -> tokio::io::Result<()> {
-        if let Some(debug_dir) = &self.chosen_debug_dir {
-            if self.known_core_dirs.is_empty() {
-                info!(self.log, "No core dump locations yet known.");
-            }
-            for core_dir in &self.known_core_dirs {
-                if let Ok(dir) = core_dir.as_ref().read_dir() {
-                    for entry in dir.flatten() {
-                        if let Some(path) = entry.file_name().to_str() {
-                            let dest = debug_dir.as_ref().join(path);
+    async fn archive_files(&self) -> Result<(), anyhow::Error> {
+        let log = &self.log;
+        let Some(debug_dir) = &self.chosen_debug_dir else {
+            error!(
+                &log,
+                "Archiving skipped: no archival destination available"
+            );
+            return Ok(());
+        };
 
-                            if let Err(err) =
-                                Self::copy_sync_and_remove(&entry.path(), &dest)
-                                    .await
-                            {
-                                error!(
-                                    self.log,
-                                    "Failed to archive {entry:?}: {err:?}"
-                                );
-                            } else {
-                                info!(
-                                    self.log,
-                                    "Relocated {entry:?} to {dest:?}"
-                                );
-                            }
-                        } else {
-                            error!(
-                                self.log,
-                                "Non-UTF8 path found while archiving core \
-                                 dumps: {entry:?}"
-                            );
-                        }
-                    }
+        info!(&log, "Archiving files");
+        // XXX-dap log clone
+        let mut archiver =
+            Archiver::new(log.clone(), ArchiveWhat::ImmutableOnly);
+        if self.known_core_dirs.is_empty() {
+            warn!(self.log, "No core dump locations yet known.");
+        }
+        for core_dir in &self.known_core_dirs {
+            archiver.include_cores_directory(core_dir.as_ref());
+        }
+
+        match self.zone_invoker.get_zones().await {
+            Ok(zones) => {
+                for zone in zones {
+                    // XXX-dap unwrap
+                    archiver.include_zone(
+                        zone.name(),
+                        zone.path().try_into().unwrap(),
+                    );
                 }
             }
-        } else {
-            info!(
-                self.log,
-                "No archival destination for crash dumps yet chosen."
-            );
-        }
-
-        if let Err(err) = self.archive_logs_from_running_zones().await {
-            if !matches!(err, ArchiveLogsError::NoDebugDirYet) {
-                error!(
-                    self.log,
-                    "Failure while trying to archive logs to debug dataset: \
-                     {err:?}"
-                );
+            Err(error) => {
+                let error = InlineErrorChain::new(&error);
+                warn!(log, "Failed to list running zones"; error);
             }
-        }
+        };
 
-        Ok(())
+        archiver.to_plan().execute(debug_dir.as_ref()).await
     }
 
     async fn copy_sync_and_remove(
@@ -959,37 +946,6 @@ impl DebugCollectorWorker {
         Ok(())
     }
 
-    async fn archive_logs_from_running_zones(
-        &self,
-    ) -> Result<(), ArchiveLogsError> {
-        let debug_dir = self
-            .chosen_debug_dir
-            .as_ref()
-            .ok_or(ArchiveLogsError::NoDebugDirYet)?;
-        let oxz_zones = self.zone_invoker.get_zones().await?;
-
-        for zone in oxz_zones {
-            let zone_root = if zone.global() {
-                zone.path().to_owned()
-            } else {
-                zone.path().join("root")
-            };
-            let logdir = zone_root.join("var/svc/log");
-            let zone_name = zone.name();
-            self.archive_logs_from_zone_path(
-                debug_dir, logdir, "*.log", zone_name, false,
-            )
-            .await?;
-
-            let adm_logdir = zone_root.join("var/adm");
-            self.archive_logs_from_zone_path(
-                debug_dir, adm_logdir, "messages", zone_name, false,
-            )
-            .await?;
-        }
-        Ok(())
-    }
-
     async fn do_archive_former_zone_root(
         &self,
         zone_root: &Utf8Path,
@@ -1000,16 +956,15 @@ impl DebugCollectorWorker {
             .chosen_debug_dir
             .as_ref()
             .ok_or(ArchiveLogsError::NoDebugDirYet)?;
-        let logdir = zone_root.join("root/var/svc/log");
-        let rv = self
-            .archive_logs_from_zone_path(
-                debug_dir,
-                logdir.into(),
-                "*.log",
-                zone_name,
-                true,
-            )
-            .await;
+        // XXX-dap log clone
+        let mut archiver =
+            Archiver::new(self.log.clone(), ArchiveWhat::Everything);
+        archiver.include_zone(zone_name, zone_root);
+        archiver
+            .to_plan()
+            .execute(debug_dir.as_ref())
+            .await
+            .map_err(ArchiveLogsError::Archiver)?;
         if let Err(()) = completion_tx.send(()) {
             // In practice, it would be surprising for our caller to have
             // dropped this channel.  Make a note.
@@ -1019,9 +974,10 @@ impl DebugCollectorWorker {
                 "error" => "completion channel closed",
             );
         }
-        rv
+        Ok(())
     }
 
+    // XXX-dap this still does a bunch of stuff we still need to do
     // Archives log files found in `logdir` for zone `zone_name` to the
     // destination debug dataset.
     //
@@ -1030,81 +986,81 @@ impl DebugCollectorWorker {
     // archive all logs, matching on `{log_name_pattern}*`. If it is `false`,
     // only rotated logs will be archived, matching on
     // `{log_name_pattern}.[0-9]`.
-    async fn archive_logs_from_zone_path(
-        &self,
-        debug_dir: &DebugDataset,
-        logdir: PathBuf,
-        log_name_pattern: &str,
-        zone_name: &str,
-        include_live: bool,
-    ) -> Result<(), ArchiveLogsError> {
-        let mut rotated_log_files = Vec::new();
-        if include_live {
-            let pattern = logdir
-                .join(format!("{log_name_pattern}*"))
-                .to_str()
-                .ok_or_else(|| ArchiveLogsError::Utf8(zone_name.to_string()))?
-                .to_string();
-            rotated_log_files.extend(glob::glob(&pattern)?.flatten());
-        } else {
-            // patterns matching archived logs, e.g. foo.log.3
-            // keep checking for greater numbers of digits until we don't find
-            // any
-            for n in 1..9 {
-                let pattern = logdir
-                    .join(format!("{log_name_pattern}.{}", "[0-9]".repeat(n)))
-                    .to_str()
-                    .ok_or_else(|| {
-                        ArchiveLogsError::Utf8(zone_name.to_string())
-                    })?
-                    .to_string();
-                rotated_log_files.extend(glob::glob(&pattern)?.flatten());
-            }
-        }
-        let dest_dir = debug_dir.as_ref().join(zone_name).into_std_path_buf();
-        if !rotated_log_files.is_empty() {
-            tokio::fs::create_dir_all(&dest_dir).await?;
-            let count = rotated_log_files.len();
-            info!(
-                self.log,
-                "Archiving {count} log files from {zone_name} zone"
-            );
-        } else if include_live {
-            warn!(
-                self.log,
-                "Found no log files from {zone_name} zone, including live \
-                 log files"
-            );
-        }
-        for entry in rotated_log_files {
-            let src_name = entry.file_name().unwrap();
-            // as we archive them, logadm will keep resetting to .log.0,
-            // so we need to maintain our own numbering in the dest dataset.
-            // we'll use the modified date of the rotated log file, or try
-            // falling back to the time of archival if that fails, and
-            // falling back to counting up from 0 if *that* somehow fails.
-            let mut n = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .unwrap_or_else(|_| SystemTime::now())
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let mut dest;
-            loop {
-                dest = dest_dir.join(src_name).with_extension(format!("{n}"));
-                if dest.exists() {
-                    n += 1;
-                } else {
-                    break;
-                }
-            }
-            if let Err(err) = Self::copy_sync_and_remove(&entry, dest).await {
-                warn!(self.log, "Failed to archive {entry:?}: {err:?}");
-            }
-        }
-        Ok(())
-    }
+    // async fn archive_logs_from_zone_path(
+    //     &self,
+    //     debug_dir: &DebugDataset,
+    //     logdir: PathBuf,
+    //     log_name_pattern: &str,
+    //     zone_name: &str,
+    //     include_live: bool,
+    // ) -> Result<(), ArchiveLogsError> {
+    //     let mut rotated_log_files = Vec::new();
+    //     if include_live {
+    //         let pattern = logdir
+    //             .join(format!("{log_name_pattern}*"))
+    //             .to_str()
+    //             .ok_or_else(|| ArchiveLogsError::Utf8(zone_name.to_string()))?
+    //             .to_string();
+    //         rotated_log_files.extend(glob::glob(&pattern)?.flatten());
+    //     } else {
+    //         // patterns matching archived logs, e.g. foo.log.3
+    //         // keep checking for greater numbers of digits until we don't find
+    //         // any
+    //         for n in 1..9 {
+    //             let pattern = logdir
+    //                 .join(format!("{log_name_pattern}.{}", "[0-9]".repeat(n)))
+    //                 .to_str()
+    //                 .ok_or_else(|| {
+    //                     ArchiveLogsError::Utf8(zone_name.to_string())
+    //                 })?
+    //                 .to_string();
+    //             rotated_log_files.extend(glob::glob(&pattern)?.flatten());
+    //         }
+    //     }
+    //     let dest_dir = debug_dir.as_ref().join(zone_name).into_std_path_buf();
+    //     if !rotated_log_files.is_empty() {
+    //         tokio::fs::create_dir_all(&dest_dir).await?;
+    //         let count = rotated_log_files.len();
+    //         info!(
+    //             self.log,
+    //             "Archiving {count} log files from {zone_name} zone"
+    //         );
+    //     } else if include_live {
+    //         warn!(
+    //             self.log,
+    //             "Found no log files from {zone_name} zone, including live \
+    //              log files"
+    //         );
+    //     }
+    //     for entry in rotated_log_files {
+    //         let src_name = entry.file_name().unwrap();
+    //         // as we archive them, logadm will keep resetting to .log.0,
+    //         // so we need to maintain our own numbering in the dest dataset.
+    //         // we'll use the modified date of the rotated log file, or try
+    //         // falling back to the time of archival if that fails, and
+    //         // falling back to counting up from 0 if *that* somehow fails.
+    //         let mut n = entry
+    //             .metadata()
+    //             .and_then(|m| m.modified())
+    //             .unwrap_or_else(|_| SystemTime::now())
+    //             .duration_since(UNIX_EPOCH)
+    //             .map(|d| d.as_secs())
+    //             .unwrap_or(0);
+    //         let mut dest;
+    //         loop {
+    //             dest = dest_dir.join(src_name).with_extension(format!("{n}"));
+    //             if dest.exists() {
+    //                 n += 1;
+    //             } else {
+    //                 break;
+    //             }
+    //         }
+    //         if let Err(err) = Self::copy_sync_and_remove(&entry, dest).await {
+    //             warn!(self.log, "Failed to archive {entry:?}: {err:?}");
+    //         }
+    //     }
+    //     Ok(())
+    // }
 
     // Have dumpadm write the config for crash dumps to be
     // on this slice, and then invoke savecore(8) to save any
@@ -1287,6 +1243,9 @@ pub enum ArchiveLogsError {
         "No debug dir into which we should archive logs has yet been chosen"
     )]
     NoDebugDirYet,
+    // XXX-dap
+    #[error("Archive error")]
+    Archiver(#[source] anyhow::Error),
 }
 
 #[derive(thiserror::Error, Debug)]
