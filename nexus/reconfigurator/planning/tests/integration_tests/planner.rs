@@ -99,14 +99,9 @@ fn assert_blueprint_diff_is_empty(bp1: &Blueprint, bp2: &Blueprint) {
     );
 
     let summary = bp2.diff_since_blueprint(&bp1);
-    if !summary.diff.sleds.added.is_empty()
-        || !summary.diff.sleds.removed.is_empty()
-        || summary.diff.sleds.modified().count() != 0
-    {
-        panic!(
-            "expected empty blueprint diff, but got nonempty diff:\n{}",
-            summary.display()
-        );
+    if summary.has_changes() {
+        eprintln!("unexpected blueprint diff:\n{}", summary.display());
+        panic!("expected no changes between blueprints");
     }
 }
 

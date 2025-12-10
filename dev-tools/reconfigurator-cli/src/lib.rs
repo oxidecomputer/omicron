@@ -267,7 +267,7 @@ impl ReconfiguratorSim {
         &mut self,
         seed: Option<String>,
         f: F,
-    ) -> anyhow::Result<Option<String>>
+    ) -> anyhow::Result<String>
     where
         F: FnOnce(ExampleSystemBuilder) -> anyhow::Result<ExampleSystemBuilder>,
     {
@@ -339,11 +339,60 @@ impl ReconfiguratorSim {
             state,
         );
 
-        Ok(Some(format!(
+        Ok(format!(
             "loaded example system with:\n\
              - collection: {collection_id}\n\
              - blueprint: {blueprint_id}",
-        )))
+        ))
+    }
+
+    fn run_planner(
+        &mut self,
+        parent_blueprint_id: BlueprintId,
+        collection_id: CollectionId,
+    ) -> anyhow::Result<String> {
+        let mut state = self.current_state().to_mut();
+        let rng = state.rng_mut().next_planner_rng();
+        let system = state.system_mut();
+
+        let parent_blueprint = {
+            let resolved = system.resolve_blueprint_id(parent_blueprint_id);
+            system.get_blueprint(&resolved)?
+        };
+
+        let collection = {
+            let resolved = system.resolve_collection_id(collection_id)?;
+            system.get_collection(&resolved)?
+        };
+
+        let creator = "reconfigurator-sim";
+        let planning_input = self
+            .planning_input(parent_blueprint)
+            .context("failed to construct planning input")?;
+        let planner = Planner::new_based_on(
+            self.log.clone(),
+            parent_blueprint,
+            &planning_input,
+            creator,
+            collection,
+            rng,
+        )
+        .context("creating planner")?;
+
+        let blueprint = planner.plan().context("generating blueprint")?;
+        let rv = format!(
+            "generated blueprint {} based on parent blueprint {}\n\
+             blueprint source: {}",
+            blueprint.id, parent_blueprint.id, blueprint.source,
+        );
+        system.add_blueprint(blueprint)?;
+
+        self.commit_and_bump(
+            "reconfigurator-cli blueprint-plan".to_owned(),
+            state,
+        );
+
+        Ok(rv)
     }
 }
 
@@ -2334,24 +2383,19 @@ fn cmd_blueprint_plan(
     sim: &mut ReconfiguratorSim,
     args: BlueprintPlanArgs,
 ) -> anyhow::Result<Option<String>> {
-    let mut state = sim.current_state().to_mut();
-    let rng = state.rng_mut().next_planner_rng();
-    let system = state.system_mut();
+    let state = sim.current_state();
+    let system = state.system();
 
-    let parent_blueprint_id =
-        system.resolve_blueprint_id(args.parent_blueprint_id.into());
-    let parent_blueprint = system.get_blueprint(&parent_blueprint_id)?;
-    let collection = match args.collection_id {
-        Some(collection_id) => {
-            let resolved =
-                system.resolve_collection_id(collection_id.into())?;
-            system.get_collection(&resolved)?
-        }
+    let parent_blueprint_id = args.parent_blueprint_id.into();
+    let collection_id = match args.collection_id {
+        Some(collection_id) => collection_id.into(),
         None => {
             let mut all_collections_iter = system.all_collections();
             match all_collections_iter.len() {
                 0 => bail!("cannot plan blueprint with no loaded collections"),
-                1 => all_collections_iter.next().expect("iter length is 1"),
+                1 => CollectionId::Id(
+                    all_collections_iter.next().expect("iter length is 1").id,
+                ),
                 _ => bail!(
                     "blueprint-plan: must specify collection ID (one of {:?})",
                     all_collections_iter.map(|c| c.id).join(", ")
@@ -2360,31 +2404,7 @@ fn cmd_blueprint_plan(
         }
     };
 
-    let creator = "reconfigurator-sim";
-    let planning_input = sim
-        .planning_input(parent_blueprint)
-        .context("failed to construct planning input")?;
-    let planner = Planner::new_based_on(
-        sim.log.clone(),
-        parent_blueprint,
-        &planning_input,
-        creator,
-        collection,
-        rng,
-    )
-    .context("creating planner")?;
-
-    let blueprint = planner.plan().context("generating blueprint")?;
-    let rv = format!(
-        "generated blueprint {} based on parent blueprint {}\n\
-         blueprint source: {}",
-        blueprint.id, parent_blueprint.id, blueprint.source,
-    );
-    system.add_blueprint(blueprint)?;
-
-    sim.commit_and_bump("reconfigurator-cli blueprint-plan".to_owned(), state);
-
-    Ok(Some(rv))
+    sim.run_planner(parent_blueprint_id, collection_id).map(Some)
 }
 
 fn cmd_blueprint_edit(
@@ -3459,6 +3479,7 @@ fn cmd_load_example(
         }
         Ok(builder)
     })
+    .map(Some)
 }
 
 fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {

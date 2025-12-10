@@ -272,18 +272,55 @@ pub struct SupportBundleCleanupReport {
 pub struct SupportBundleCollectionReport {
     pub bundle: SupportBundleUuid,
 
-    /// True iff we could list in-service sleds
-    pub listed_in_service_sleds: bool,
-
-    /// True iff we could list the service processors.
-    pub listed_sps: bool,
-
     /// True iff the bundle was successfully made 'active' in the database.
     pub activated_in_db_ok: bool,
+
+    /// All steps taken, alongside their timing information, when collecting the
+    /// bundle.
+    pub steps: Vec<SupportBundleCollectionStep>,
 
     /// Status of ereport collection, or `None` if no ereports were requested
     /// for this support bundle.
     pub ereports: Option<SupportBundleEreportStatus>,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleCollectionStep {
+    pub name: String,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub status: SupportBundleCollectionStepStatus,
+}
+
+impl SupportBundleCollectionStep {
+    /// Step name constants for the main collection steps.
+    ///
+    /// These are used both when creating steps and when validating in tests.
+    pub const STEP_BUNDLE_ID: &'static str = "bundle id";
+    pub const STEP_RECONFIGURATOR_STATE: &'static str = "reconfigurator state";
+    pub const STEP_EREPORTS: &'static str = "ereports";
+    pub const STEP_SLED_CUBBY_INFO: &'static str = "sled cubby info";
+    pub const STEP_SPAWN_SP_DUMPS: &'static str =
+        "spawn steps to query all SP dumps";
+    pub const STEP_SPAWN_SLEDS: &'static str = "spawn steps to query all sleds";
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SupportBundleCollectionStepStatus {
+    Ok,
+    Skipped,
+    Failed(String),
+}
+
+impl std::fmt::Display for SupportBundleCollectionStepStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use SupportBundleCollectionStepStatus::*;
+        match self {
+            Ok => write!(f, "ok"),
+            Skipped => write!(f, "skipped"),
+            Failed(why) => write!(f, "failed: {why}"),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -306,9 +343,8 @@ impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
         Self {
             bundle,
-            listed_in_service_sleds: false,
-            listed_sps: false,
             activated_in_db_ok: false,
+            steps: vec![],
             ereports: None,
         }
     }

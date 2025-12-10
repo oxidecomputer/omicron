@@ -150,6 +150,7 @@ Commands:
   alert                        Print information about alerts
   zpool                        Commands for querying and interacting with pools
   user-data-export             Commands for querying and interacting with user data export objects
+  whatis                       Given a UUID, try to figure out what type of object it refers to
   help                         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -214,6 +215,7 @@ Commands:
   alert                        Print information about alerts
   zpool                        Commands for querying and interacting with pools
   user-data-export             Commands for querying and interacting with user data export objects
+  whatis                       Given a UUID, try to figure out what type of object it refers to
   help                         Print this message or the help of the given subcommand(s)
 
 Options:

@@ -124,6 +124,11 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
+    /// Return the current header map.
+    pub fn headers(&self) -> &http::HeaderMap {
+        &self.headers
+    }
+
     /// Set the outgoing request body
     ///
     /// If `body` is `None`, the request body will be empty.

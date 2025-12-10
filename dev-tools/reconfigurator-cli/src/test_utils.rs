@@ -6,12 +6,7 @@
 //! simulated system
 
 use std::sync::Arc;
-
-use crate::BlueprintIdOpt;
-use crate::BlueprintPlanArgs;
-use crate::CollectionIdOpt;
 use crate::ReconfiguratorSim;
-use crate::cmd_blueprint_plan;
 use anyhow::Context;
 use nexus_inventory::CollectionBuilder;
 use nexus_inventory::now_db_precision;
@@ -63,10 +58,8 @@ impl ReconfiguratorCliTestState {
     where
         F: FnOnce(ExampleSystemBuilder) -> anyhow::Result<ExampleSystemBuilder>,
     {
-        if let Some(output) = self.sim.load_example(None, f)? {
-            println!("{output}");
-        }
-
+        let output = self.sim.load_example(None, f)?;
+        println!("{output}");
         Ok(())
     }
 
@@ -103,16 +96,9 @@ impl ReconfiguratorCliTestState {
     /// planner's tests, we want to assert that any blueprint we plan is indeed
     /// blippy clean.
     pub fn run_planner(&mut self) -> anyhow::Result<Arc<Blueprint>> {
-        if let Some(output) = cmd_blueprint_plan(
-            &mut self.sim,
-            BlueprintPlanArgs {
-                parent_blueprint_id: BlueprintIdOpt::Latest,
-                collection_id: Some(CollectionIdOpt::Latest),
-            },
-        )? {
-            println!("{output}");
-        }
-
+        let output =
+            self.sim.run_planner(BlueprintId::Latest, CollectionId::Latest)?;
+        println!("{output}");
         Ok(self.assert_latest_blueprint_is_blippy_clean())
     }
 
