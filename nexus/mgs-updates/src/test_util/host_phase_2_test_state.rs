@@ -197,12 +197,12 @@ mod api_impl {
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
     use iddqd::IdOrdMap;
-    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use nexus_sled_agent_shared::inventory::BootImageHeader;
     use nexus_sled_agent_shared::inventory::BootPartitionContents;
     use nexus_sled_agent_shared::inventory::BootPartitionDetails;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+    use nexus_sled_agent_shared::inventory::HealthMonitorInventory;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
     use nexus_sled_agent_shared::inventory::Inventory;
@@ -357,7 +357,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
-                smf_services_in_maintenance: SvcsInMaintenanceResult::new(),
+                health_monitor: HealthMonitorInventory::new(),
             }))
         }
 

@@ -60,7 +60,7 @@ impl From<inventory::Inventory> for Inventory {
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
-            smf_services_in_maintenance: _,
+            health_monitor: _,
         } = value;
         Self {
             sled_id,

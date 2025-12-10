@@ -1722,11 +1722,11 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
 mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
-    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use nexus_sled_agent_shared::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        OmicronZoneType, SledCpuFamily, SledRole, ZoneImageResolverInventory,
+        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
+        Inventory, InventoryDisk, OmicronZoneType, SledCpuFamily, SledRole,
+        ZoneImageResolverInventory,
     };
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
@@ -1776,7 +1776,7 @@ mod test {
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
-                smf_services_in_maintenance: SvcsInMaintenanceResult::new(),
+                health_monitor: HealthMonitorInventory::new(),
             },
             true,
         )

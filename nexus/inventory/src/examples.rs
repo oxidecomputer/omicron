@@ -15,12 +15,12 @@ use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_types::rot::RotSlot;
 use iddqd::id_ord_map;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::BootImageHeader;
 use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::HealthMonitorInventory;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
@@ -1000,6 +1000,6 @@ pub fn sled_agent(
         // TODO-K: We'll want to have the functionality to add some services
         // here in a future PR. This will be more useful when we add this
         // information to the DB.
-        smf_services_in_maintenance: SvcsInMaintenanceResult::new(),
+        health_monitor: HealthMonitorInventory::new(),
     }
 }

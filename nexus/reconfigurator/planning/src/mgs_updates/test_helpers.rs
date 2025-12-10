@@ -15,13 +15,13 @@ use gateway_client::types::SpState;
 use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::BootImageHeader;
 use nexus_sled_agent_shared::inventory::BootPartitionContents;
 use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::HealthMonitorInventory;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -1370,8 +1370,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 ConfigReconcilerInventoryStatus::NotYetRun,
                             zone_image_resolver:
                                 ZoneImageResolverInventory::new_fake(),
-                            smf_services_in_maintenance:
-                                SvcsInMaintenanceResult::new(),
+                            health_monitor: HealthMonitorInventory::new(),
                         },
                     )
                     .unwrap();

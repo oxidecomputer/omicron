@@ -3,17 +3,19 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use illumos_utils::svcs::SvcsInMaintenanceResult;
+use nexus_sled_agent_shared::inventory::HealthMonitorInventory;
 use tokio::sync::watch;
 
 #[derive(Debug, Clone)]
 pub struct HealthMonitorHandle {
-    pub smf_services_in_maintenance_tx: watch::Sender<SvcsInMaintenanceResult>,
+    pub smf_services_in_maintenance_tx:
+        watch::Sender<Result<SvcsInMaintenanceResult, String>>,
 }
 
 impl HealthMonitorHandle {
     pub fn new() -> Self {
         let (smf_services_in_maintenance_tx, _rx) =
-            watch::channel(SvcsInMaintenanceResult::new());
+            watch::channel(Ok(SvcsInMaintenanceResult::new()));
         Self { smf_services_in_maintenance_tx }
     }
 
@@ -27,8 +29,10 @@ impl HealthMonitorHandle {
     }
 }
 
-/// Fields of sled-agent inventory reported by the health monitor subsystem.
-#[derive(Debug, Clone)]
-pub struct HealthMonitorInventory {
-    pub smf_services_in_maintenance: SvcsInMaintenanceResult,
-}
+// /// Fields of sled-agent inventory reported by the health monitor subsystem.
+// #[derive(Debug, Clone)]
+// pub struct HealthMonitorInventory {
+//     pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
+//
+//     // TODO: Other health check results will live here as well
+// }

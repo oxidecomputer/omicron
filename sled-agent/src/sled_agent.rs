@@ -68,9 +68,7 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
-use sled_agent_health_monitor::handle::{
-    HealthMonitorHandle, HealthMonitorInventory,
-};
+use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
@@ -1141,8 +1139,7 @@ impl SledAgent {
         let zone_image_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
-        let HealthMonitorInventory { smf_services_in_maintenance } =
-            self.inner.health_monitor.to_inventory();
+        let health_monitor = self.inner.health_monitor.to_inventory();
 
         let ReconcilerInventory {
             disks,
@@ -1169,7 +1166,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
-            smf_services_in_maintenance,
+            health_monitor,
         })
     }
 

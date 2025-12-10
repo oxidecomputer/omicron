@@ -7,12 +7,13 @@
 use illumos_utils::svcs::Svcs;
 use illumos_utils::svcs::SvcsInMaintenanceResult;
 use slog::Logger;
-use slog::error;
 use tokio::sync::watch;
 
 pub async fn poll_smf_services_in_maintenance(
     log: Logger,
-    smf_services_in_maintenance_tx: watch::Sender<SvcsInMaintenanceResult>,
+    smf_services_in_maintenance_tx: watch::Sender<
+        Result<SvcsInMaintenanceResult, String>,
+    >,
 ) {
     // We poll every minute to verify the health of all services. This interval
     // is arbitrary.
@@ -21,9 +22,12 @@ pub async fn poll_smf_services_in_maintenance(
 
     loop {
         match Svcs::in_maintenance(&log).await {
-            Err(e) => error!(log, "failed to check health of SMF services"; &e),
+            Err(e) => smf_services_in_maintenance_tx.send_modify(|status| {
+                // TODO-K: Return a real error type instead of a string?
+                *status = Err(e.to_string());
+            }),
             Ok(svcs) => smf_services_in_maintenance_tx.send_modify(|status| {
-                *status = svcs;
+                *status = Ok(svcs);
             }),
         };
         tokio::time::sleep(SVCS_POLL_INTERVAL).await;

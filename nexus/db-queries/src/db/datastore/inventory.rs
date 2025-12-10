@@ -27,7 +27,6 @@ use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
@@ -91,6 +90,7 @@ use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::HealthMonitorInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
@@ -4001,7 +4001,7 @@ impl DataStore {
                 last_reconciliation,
                 zone_image_resolver,
                 // TODO-K: Actually query the DB when there is something there
-                smf_services_in_maintenance: SvcsInMaintenanceResult::new(),
+                health_monitor: HealthMonitorInventory::new(),
             };
             sled_agents
                 .insert_unique(sled_agent)
