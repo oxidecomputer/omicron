@@ -6887,7 +6887,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
 
     comment TEXT NOT NULL,
 
-    PRIMARY KEY (sitrep_id, restart_id, ena)
+    PRIMARY KEY (sitrep_id, case_id, restart_id, ena)
 );
 
 CREATE INDEX IF NOT EXISTS
