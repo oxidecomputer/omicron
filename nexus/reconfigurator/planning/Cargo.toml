@@ -65,5 +65,6 @@ maplit.workspace = true
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
+reconfigurator-cli.workspace = true
 semver.workspace = true
 test-strategy.workspace = true
