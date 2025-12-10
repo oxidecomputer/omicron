@@ -475,6 +475,9 @@ fn test_spread_internal_dns_zones_across_sleds() {
     // Try to run the planner with a high number of internal DNS zones;
     // it will fail because the target is > INTERNAL_DNS_REDUNDANCY.
     {
+        // TODO-cleanup Once https://github.com/oxidecomputer/omicron/pull/9365
+        // lands, we should remove `sim'` `Clone` impl and use the operation log
+        // to go back to previous states for this test.
         let mut sim = sim.clone();
         sim.change_description("change policy", |desc| {
             desc.set_target_internal_dns_zone_count(14);
