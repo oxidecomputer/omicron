@@ -28,11 +28,3 @@ impl HealthMonitorHandle {
         }
     }
 }
-
-// /// Fields of sled-agent inventory reported by the health monitor subsystem.
-// #[derive(Debug, Clone)]
-// pub struct HealthMonitorInventory {
-//     pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
-//
-//     // TODO: Other health check results will live here as well
-// }
