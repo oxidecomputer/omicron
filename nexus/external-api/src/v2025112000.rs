@@ -7,17 +7,10 @@
 //! Version 2025112000 types (before disk backend refactoring).
 //!
 //! Key differences from newer API versions:
-//! - Uses [`DiskType::Crucible`] instead of [`DiskType::Distributed`] for disk
+//! - Uses `DiskType::Crucible` instead of `DiskType::Distributed` for disk
 //!   backend type naming.
-//! - [`DiskSource`] uses flat variants instead of nested [`DiskBackend`] enum.
-//! - [`InstanceDiskAttachment`] uses the old [`DiskCreate`] format.
-//!
-//! [`DiskType::Crucible`]: self::DiskType::Crucible
-//! [`DiskType::Distributed`]: omicron_common::api::external::DiskType::Distributed
-//! [`DiskSource`]: self::DiskSource
-//! [`DiskBackend`]: params::DiskBackend
-//! [`DiskCreate`]: self::DiskCreate
-//! [`InstanceDiskAttachment`]: self::InstanceDiskAttachment
+//! - `DiskSource` uses flat variants instead of nested `DiskBackend` enum.
+//! - `InstanceDiskAttachment` uses the old `DiskCreate` format.
 
 use nexus_types::external_api::params;
 use omicron_common::api::external;
