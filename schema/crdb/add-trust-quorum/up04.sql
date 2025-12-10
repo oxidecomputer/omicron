@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     encrypted_rack_secrets_salt String(64),
     encrypted_rack_secrets BYTES,
 
+    CONSTRAINT encrypted_rack_secrets_both_or_neither_null CHECK (
+        (encrypted_rack_secrets_salt IS NULL
+            AND encrypted_rack_secrets IS NULL)
+        OR
+        (encrypted_rack_secrets_salt IS NOT NULL
+            AND encrypted_rack_secrets IS NOT NULL)
+    ),
+
     -- Each rack has its own trust quorum
     PRIMARY KEY (rack_id, epoch)
 );

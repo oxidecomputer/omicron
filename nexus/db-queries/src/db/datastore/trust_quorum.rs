@@ -60,7 +60,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    // TODO: Probably abstract out some of this error handling.
     pub async fn tq_latest_config(
         &self,
         opctx: &OpContext,
@@ -122,8 +121,9 @@ impl DataStore {
             } else {
                 None
             };
+
             // The coordinator is always a member of the group
-            // We pull out it's BaseboardId here.
+            // We pull out its `BaseboardId` here.
             if latest.coordinator == hw_baseboard_id.id {
                 coordinator = Some(hw_baseboard_id.clone().into());
             }
@@ -519,5 +519,14 @@ mod tests {
             .expect("returned config");
 
         assert_eq!(config, read_config);
+
+        // Incrementing the epoch by more than one should fail
+        config.epoch = Epoch(5);
+        datastore
+            .tq_insert_latest_config(opctx, config.clone())
+            .await
+            .expect_err(
+                "insert should fail because previous epoch is incorrect",
+            );
     }
 }
