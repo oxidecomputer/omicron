@@ -373,40 +373,43 @@ mod tests {
     use omicron_uuid_kinds::RackUuid;
     use uuid::Uuid;
 
-    async fn insert_hw_baseboard_ids(db: &TestDatabase) -> Vec<Uuid> {
+    async fn insert_hw_baseboard_ids(db: &TestDatabase) -> Vec<HwBaseboardId> {
         let (_, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         use nexus_db_schema::schema::hw_baseboard_id::dsl;
-        let mut uuids = Vec::new();
-        for i in 0..10 {
-            let uuid = Uuid::new_v4();
-            uuids.push(uuid);
-            diesel::insert_into(dsl::hw_baseboard_id)
-                .values(HwBaseboardId {
-                    id: uuid,
-                    part_number: "test-part".to_string(),
-                    serial_number: i.to_string(),
-                })
-                .execute_async(&*conn)
-                .await
-                .unwrap();
-        }
-        uuids
+        let hw_baseboard_ids: Vec<_> = (0..10)
+            .map(|i| HwBaseboardId {
+                id: Uuid::new_v4(),
+                part_number: "test-part".to_string(),
+                serial_number: i.to_string(),
+            })
+            .collect();
+
+        diesel::insert_into(dsl::hw_baseboard_id)
+            .values(hw_baseboard_ids.clone())
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        hw_baseboard_ids
     }
 
     async fn insert_lrtq_members(
         db: &TestDatabase,
         rack_id1: RackUuid,
         rack_id2: RackUuid,
-        hw_ids: Vec<Uuid>,
+        hw_ids: Vec<HwBaseboardId>,
     ) {
         let (_, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         use nexus_db_schema::schema::lrtq_member::dsl;
-        for (i, &hw_baseboard_id) in hw_ids.iter().enumerate() {
+        for (i, hw_baseboard_id) in hw_ids.into_iter().enumerate() {
             let rack_id = if i < 5 { rack_id1.into() } else { rack_id2.into() };
             diesel::insert_into(dsl::lrtq_member)
-                .values(LrtqMember { rack_id, hw_baseboard_id })
+                .values(LrtqMember {
+                    rack_id,
+                    hw_baseboard_id: hw_baseboard_id.id,
+                })
                 .execute_async(&*conn)
                 .await
                 .unwrap();
@@ -439,5 +442,42 @@ mod tests {
             datastore.lrtq_members(opctx, rack_id2).await.unwrap();
         assert_eq!(hw_baseboard_ids2.len(), 5);
         assert_ne!(hw_baseboard_ids1, hw_baseboard_ids2);
+    }
+
+    #[tokio::test]
+    async fn test_insert_latest_tq_round_trip() {
+        let logctx = test_setup_log("test_insert_latest_tq_round_trip");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+
+        let rack_id = RackUuid::new_v4();
+
+        // Create an initial config
+        let config = TrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(1),
+            state: TrustQuorumConfigState::Preparing,
+            threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
+            commit_crash_tolerance: 2,
+            coordinator: hw_ids.first().unwrap().clone().into(),
+            encrypted_rack_secrets: None,
+            members: hw_ids
+                .clone()
+                .into_iter()
+                .map(|m| (m.into(), TrustQuorumMemberData::new()))
+                .collect(),
+        };
+
+        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
+
+        let config2 = datastore
+            .tq_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        assert_eq!(config, config2);
     }
 }
