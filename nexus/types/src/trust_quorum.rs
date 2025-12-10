@@ -11,21 +11,21 @@ use trust_quorum_protocol::{
     BaseboardId, EncryptedRackSecrets, Epoch, Sha3_256Digest, Threshold,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrustQuorumConfigState {
     Preparing,
     Committed,
     Aborted,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrustQuorumMemberState {
     Unacked,
     Prepared,
     Committed,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustQuorumMemberData {
     pub state: TrustQuorumMemberState,
 
@@ -34,7 +34,16 @@ pub struct TrustQuorumMemberData {
     pub digest: Option<Sha3_256Digest>,
 }
 
-#[derive(Debug, Clone)]
+impl TrustQuorumMemberData {
+    pub fn new() -> Self {
+        TrustQuorumMemberData {
+            state: TrustQuorumMemberState::Unacked,
+            digest: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustQuorumConfig {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
