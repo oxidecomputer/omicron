@@ -39,6 +39,16 @@ impl From<DbTrustQuorumConfigurationState> for TrustQuorumConfigState {
     }
 }
 
+impl From<TrustQuorumConfigState> for DbTrustQuorumConfigurationState {
+    fn from(value: TrustQuorumConfigState) -> Self {
+        match value {
+            TrustQuorumConfigState::Preparing => Self::Preparing,
+            TrustQuorumConfigState::Committed => Self::Committed,
+            TrustQuorumConfigState::Aborted => Self::Aborted,
+        }
+    }
+}
+
 impl_enum_type!(
     TrustQuorumMemberStateEnum:
 
@@ -54,15 +64,19 @@ impl_enum_type!(
 impl From<DbTrustQuorumMemberState> for TrustQuorumMemberState {
     fn from(value: DbTrustQuorumMemberState) -> Self {
         match value {
-            DbTrustQuorumMemberState::Unacked => {
-                TrustQuorumMemberState::Unacked
-            }
-            DbTrustQuorumMemberState::Prepared => {
-                TrustQuorumMemberState::Prepared
-            }
-            DbTrustQuorumMemberState::Committed => {
-                TrustQuorumMemberState::Committed
-            }
+            DbTrustQuorumMemberState::Unacked => Self::Unacked,
+            DbTrustQuorumMemberState::Prepared => Self::Prepared,
+            DbTrustQuorumMemberState::Committed => Self::Committed,
+        }
+    }
+}
+
+impl From<TrustQuorumMemberState> for DbTrustQuorumMemberState {
+    fn from(value: TrustQuorumMemberState) -> Self {
+        match value {
+            TrustQuorumMemberState::Unacked => Self::Unacked,
+            TrustQuorumMemberState::Prepared => Self::Prepared,
+            TrustQuorumMemberState::Committed => Self::Committed,
         }
     }
 }
