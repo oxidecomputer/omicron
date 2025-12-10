@@ -7,6 +7,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::datastore::CollectorReassignment;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
@@ -23,7 +24,9 @@ use nexus_types::trust_quorum::{
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::OptionalLookupResult;
+use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use std::collections::{BTreeMap, BTreeSet};
@@ -200,39 +203,41 @@ impl DataStore {
 
         self.transaction_retry_wrapper("tq_insert_latest_config")
             .transaction(&conn, |c| {
-
                 let err = err.clone();
                 let config = config.clone();
 
                 async move {
-                let current = self
-                    .tq_get_latest_epoch_in_txn(opctx, &c, config.rack_id)
-                    .await
-                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let current = self
+                        .tq_get_latest_epoch_in_txn(opctx, &c, config.rack_id)
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
-                let is_insertable = if let Some(epoch) = current.clone() {
-                    // Only insert if what is in the DB is immediately prior to
-                    // this configuration.
-                    Some(epoch) == config.epoch.previous()
-                } else {
-                    // Unconditional update is fine here, since a config doesn't exist
-                    // TODO: Should we ensure that epoch == 1 || epoch == 2 ?
-                    true
-                };
+                    let is_insertable = if let Some(epoch) = current.clone() {
+                        // Only insert if what is in the DB is immediately prior to
+                        // this configuration.
+                        Some(epoch) == config.epoch.previous()
+                    } else {
+                        // Unconditional update is fine here, since a config doesn't
+                        // exist TODO: Should we ensure that epoch == 1 || epoch ==
+                        // 2 ?
+                        true
+                    };
 
-                if !is_insertable {
-                    return Err(err.bail(TransactionError::CustomError(
-                        Error::conflict(format!(
-                            "expected current TQ epoch for {} be {:?}, found {:?}",
-                            config.rack_id,
-                            config.epoch.previous(),
-                            current
-                        )),
-                    )));
-                }
+                    if !is_insertable {
+                        return Err(err.bail(TransactionError::CustomError(
+                            Error::conflict(format!(
+                                "expected current TQ epoch for rack_id \
+                            {} to be {:?}, found {:?}",
+                                config.rack_id,
+                                config.epoch.previous(),
+                                current
+                            )),
+                        )));
+                    }
 
-                // TODO: Do the inserts
-                todo!()
+                    self.insert_tq_config_in_txn(opctx, conn, config)
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))
                 }
             })
             .await
@@ -240,6 +245,103 @@ impl DataStore {
                 Some(err) => err.into(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
+    }
+
+    // Unconditional insert that should only run inside a transaction
+    async fn insert_tq_config_in_txn(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        config: TrustQuorumConfig,
+    ) -> Result<(), TransactionError<Error>> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let members = self
+            .lookup_hw_baseboard_ids_conn(
+                opctx,
+                conn,
+                config.members.keys().cloned(),
+            )
+            .await?;
+
+        let (salt, secrets) =
+            config.encrypted_rack_secrets.map_or((None, None), |s| {
+                (Some(hex::encode(s.salt.0)), Some(s.data.into()))
+            });
+
+        // Max of 32 members to search. We could use binary search if we sorted
+        // the output with an `order_by` in the DB query, or speed up search
+        // if converted to a map. Neither seems necessary for such a rare
+        // operation.
+        let coordinator_id = members.iter().find(|m| {
+            m.part_number == config.coordinator.part_number
+                && m.serial_number == config.coordinator.serial_number
+        });
+        bail_unless!(
+            coordinator_id.is_some(),
+            "Coordinator: {} is not a member of the trust quorum",
+            config.coordinator
+        );
+        let coordinator_id = coordinator_id.unwrap().id;
+
+        // Insert the configuration
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+        diesel::insert_into(dsl::trust_quorum_configuration)
+            .values(DbTrustQuorumConfiguration {
+                rack_id: config.rack_id.into(),
+                epoch: config.epoch.0.try_into().unwrap(),
+                state: config.state.into(),
+                threshold: config.threshold.0.into(),
+                commit_crash_tolerance: config.commit_crash_tolerance.into(),
+                coordinator: coordinator_id,
+                encrypted_rack_secrets_salt: salt,
+                encrypted_rack_secrets: secrets,
+            })
+            .execute_async(conn)
+            .await?;
+
+        // Insert the members
+        let members: Vec<_> = members
+            .into_iter()
+            .map(|m| DbTrustQuorumMember {
+                rack_id: config.rack_id.into(),
+                epoch: config.epoch.0.try_into().unwrap(),
+                hw_baseboard_id: m.id,
+                state: nexus_db_model::DbTrustQuorumMemberState::Unacked,
+                share_digest: None,
+            })
+            .collect();
+
+        use nexus_db_schema::schema::trust_quorum_member::dsl as members_dsl;
+        diesel::insert_into(members_dsl::trust_quorum_member)
+            .values(members)
+            .execute_async(conn)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn lookup_hw_baseboard_ids_conn(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        members: impl Iterator<Item = BaseboardId>,
+    ) -> ListResultVec<HwBaseboardId> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::hw_baseboard_id::dsl;
+
+        let (parts, serials): (Vec<_>, Vec<_>) = members
+            .into_iter()
+            .map(|m| (m.part_number, m.serial_number))
+            .collect();
+
+        dsl::hw_baseboard_id
+            .filter(dsl::part_number.eq_any(parts))
+            .filter(dsl::serial_number.eq_any(serials))
+            .select(HwBaseboardId::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     async fn tq_get_latest_epoch_in_txn(
