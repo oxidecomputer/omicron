@@ -930,30 +930,26 @@ fn test_dataset_settings_modified_in_place() {
 
     // Manually update the blueprint to report an abnormal "Debug dataset"
     let blueprint1a = sim
-        .blueprint_edit_latest_low_level(
-            "change dataset properties",
-            |blueprint| {
-                let sled_config = blueprint.sleds.get_mut(&sled_id).unwrap();
-                let mut dataset_config = sled_config
-                    .datasets
-                    .iter_mut()
-                    .find(|config| {
-                        matches!(
-                            config.kind,
-                            omicron_common::disk::DatasetKind::Debug
-                        )
-                    })
-                    .expect("No debug dataset found");
+        .blueprint_edit_latest_raw("change dataset properties", |blueprint| {
+            let sled_config = blueprint.sleds.get_mut(&sled_id).unwrap();
+            let mut dataset_config = sled_config
+                .datasets
+                .iter_mut()
+                .find(|config| {
+                    matches!(
+                        config.kind,
+                        omicron_common::disk::DatasetKind::Debug
+                    )
+                })
+                .expect("No debug dataset found");
 
-                // These values are out-of-sync with what the blueprint will
-                // typically enforce.
-                dataset_config.quota = None;
-                dataset_config.reservation =
-                    Some(ByteCount::from_gibibytes_u32(1));
+            // These values are out-of-sync with what the blueprint will
+            // typically enforce.
+            dataset_config.quota = None;
+            dataset_config.reservation = Some(ByteCount::from_gibibytes_u32(1));
 
-                Ok(())
-            },
-        )
+            Ok(())
+        })
         .expect("changed properties");
 
     let blueprint2 = sim.run_planner().expect("planning succeeded");
@@ -2371,7 +2367,7 @@ fn test_expunge_clickhouse_clusters() {
     // Directly manipulate the blueprint and inventory so that the
     // clickhouse clusters are stable
     let blueprint2a = sim
-        .blueprint_edit_latest_low_level("stable cluster", |blueprint2| {
+        .blueprint_edit_latest_raw("stable cluster", |blueprint2| {
             let config = blueprint2.clickhouse_cluster_config.as_mut().unwrap();
             config.max_used_keeper_id = (u64::from(target_keepers)).into();
             config.keepers = keeper_zone_ids
@@ -2473,7 +2469,7 @@ fn test_expunge_clickhouse_clusters() {
 
     // Updating the inventory to reflect the removed keeper results in a new one
     // being added
-    sim.inventory_edit_latest_low_level("adjust membership", |collection| {
+    sim.inventory_edit_latest_raw("adjust membership", |collection| {
         println!("{:?}", collection.clickhouse_keeper_cluster_membership);
         println!("xxx {expunged_keeper_id}");
         // Remove the keeper for the expunged zone
@@ -2683,7 +2679,7 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
     // we're testing, and failing to do this will interfere with some of the
     // checks we do below.
     let blueprint2 = sim
-        .blueprint_edit_latest_low_level(
+        .blueprint_edit_latest_raw(
             "manually mark disk ready for cleanup",
             |bp| {
                 for mut disk in
@@ -2746,7 +2742,7 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
     );
 
     eprintln!("planning with config ledgered but not reconciled...");
-    sim.inventory_edit_latest_low_level("ledger sled config", |collection| {
+    sim.inventory_edit_latest_raw("ledger sled config", |collection| {
         collection
             .sled_agents
             .get_mut(&sled_id)
@@ -2761,7 +2757,7 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
     );
 
     eprintln!("planning with config ledgered but zones failed to shut down...");
-    sim.inventory_edit_latest_low_level("ledger sled config", |collection| {
+    sim.inventory_edit_latest_raw("ledger sled config", |collection| {
         collection
             .sled_agents
             .get_mut(&sled_id)
@@ -2792,7 +2788,7 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
     );
 
     // Now make both changes to the inventory.
-    sim.inventory_edit_latest_low_level("ledger sled config", |collection| {
+    sim.inventory_edit_latest_raw("ledger sled config", |collection| {
         let mut config = collection.sled_agents.get_mut(&sled_id).unwrap();
         config.ledgered_sled_config = Some(bp2_sled_config.clone());
         config.last_reconciliation =
@@ -3183,7 +3179,7 @@ fn test_update_crucible_pantry_before_nexus() {
 
     // Manually update all zones except CruciblePantry and Nexus.
     let blueprint2 = sim
-        .blueprint_edit_latest_low_level(
+        .blueprint_edit_latest_raw(
             "update zones other than Nexus and pantry",
             |bp| {
                 for mut zone in bp
@@ -3534,7 +3530,7 @@ fn test_update_cockroach() {
     // We just specified a new TUF repo, everything is going to shift from
     // the initial 0.0.1 repo to this new repo.
     blueprint = sim
-        .blueprint_edit_latest_low_level("update non-crdb zones", |bp| {
+        .blueprint_edit_latest_raw("update non-crdb zones", |bp| {
             for mut zone in bp
                 .sleds
                 .values_mut()
@@ -3584,7 +3580,7 @@ fn test_update_cockroach() {
 
     // If we have missing info in our inventory, the
     // planner will not update any Cockroach zones.
-    sim.inventory_edit_latest_low_level("no cockroach status", |collection| {
+    sim.inventory_edit_latest_raw("no cockroach status", |collection| {
         collection.cockroach_status = BTreeMap::new();
         Ok(())
     })
@@ -3596,14 +3592,11 @@ fn test_update_cockroach() {
 
     // If we don't have valid statuses from enough internal DNS zones, we
     // will refuse to update.
-    sim.inventory_edit_latest_low_level(
-        "too few cockroach statuses",
-        |collection| {
-            collection.cockroach_status = create_valid_looking_status();
-            collection.cockroach_status.pop_first();
-            Ok(())
-        },
-    )
+    sim.inventory_edit_latest_raw("too few cockroach statuses", |collection| {
+        collection.cockroach_status = create_valid_looking_status();
+        collection.cockroach_status.pop_first();
+        Ok(())
+    })
     .unwrap();
     sim_assert_planning_makes_no_changes(
         &mut sim,
@@ -3612,18 +3605,15 @@ fn test_update_cockroach() {
 
     // If we have any non-zero "ranges_underreplicated" in in our inventory,
     // the planner will not update any Cockroach zones.
-    sim.inventory_edit_latest_low_level(
-        "ranges underreplicated",
-        |collection| {
-            collection.cockroach_status = create_valid_looking_status();
-            *collection.cockroach_status.values_mut().next().unwrap() =
-                CockroachStatus {
-                    ranges_underreplicated: Some(1),
-                    liveness_live_nodes: Some(GOAL_REDUNDANCY),
-                };
-            Ok(())
-        },
-    )
+    sim.inventory_edit_latest_raw("ranges underreplicated", |collection| {
+        collection.cockroach_status = create_valid_looking_status();
+        *collection.cockroach_status.values_mut().next().unwrap() =
+            CockroachStatus {
+                ranges_underreplicated: Some(1),
+                liveness_live_nodes: Some(GOAL_REDUNDANCY),
+            };
+        Ok(())
+    })
     .unwrap();
     sim_assert_planning_makes_no_changes(
         &mut sim,
@@ -3631,7 +3621,7 @@ fn test_update_cockroach() {
     );
 
     // If we don't have enough live nodes, we won't update Cockroach zones.
-    sim.inventory_edit_latest_low_level("too few live nodes", |collection| {
+    sim.inventory_edit_latest_raw("too few live nodes", |collection| {
         collection.cockroach_status = create_valid_looking_status();
         *collection.cockroach_status.values_mut().next().unwrap() =
             CockroachStatus {
@@ -3654,13 +3644,10 @@ fn test_update_cockroach() {
     for i in 1..=COCKROACHDB_REDUNDANCY {
         // Keep setting this value in a loop;
         // "sim_update_collection_from_blueprint" resets it.
-        sim.inventory_edit_latest_low_level(
-            "valid cockroach status",
-            |collection| {
-                collection.cockroach_status = create_valid_looking_status();
-                Ok(())
-            },
-        )
+        sim.inventory_edit_latest_raw("valid cockroach status", |collection| {
+            collection.cockroach_status = create_valid_looking_status();
+            Ok(())
+        })
         .unwrap();
 
         println!("Updating cockroach {i} of {COCKROACHDB_REDUNDANCY}");
@@ -3685,13 +3672,10 @@ fn test_update_cockroach() {
 
     // Validate that we have no further changes to make, once all Cockroach
     // zones have been updated.
-    sim.inventory_edit_latest_low_level(
-        "valid cockroach status",
-        |collection| {
-            collection.cockroach_status = create_valid_looking_status();
-            Ok(())
-        },
-    )
+    sim.inventory_edit_latest_raw("valid cockroach status", |collection| {
+        collection.cockroach_status = create_valid_looking_status();
+        Ok(())
+    })
     .unwrap();
 
     // Note that we use `InputUnchanged` here because we just updated the
@@ -3703,19 +3687,16 @@ fn test_update_cockroach() {
 
     // Validate that we do not flip back to the 0.0.1 artifact after
     // performing the update.
-    sim.inventory_edit_latest_low_level(
-        "invalid cockroach status",
-        |collection| {
-            collection.cockroach_status = create_valid_looking_status();
-            collection
-                .cockroach_status
-                .values_mut()
-                .next()
-                .unwrap()
-                .ranges_underreplicated = Some(1);
-            Ok(())
-        },
-    )
+    sim.inventory_edit_latest_raw("invalid cockroach status", |collection| {
+        collection.cockroach_status = create_valid_looking_status();
+        collection
+            .cockroach_status
+            .values_mut()
+            .next()
+            .unwrap()
+            .ranges_underreplicated = Some(1);
+        Ok(())
+    })
     .unwrap();
     sim_assert_planning_makes_no_changes(
         &mut sim,
@@ -3765,7 +3746,7 @@ fn test_update_boundary_ntp() {
     // ask for the other boundary NTP zones.
 
     let blueprint = sim
-        .blueprint_edit_latest_low_level("manually promote NTP zone", |bp| {
+        .blueprint_edit_latest_raw("manually promote NTP zone", |bp| {
             let mut zone = bp
                 .sleds
                 .values_mut()
@@ -3923,7 +3904,7 @@ fn test_update_boundary_ntp() {
     // We just specified a new TUF repo, everything is going to shift from
     // the 0.0.1 repo to this new repo.
     let blueprint = sim
-        .blueprint_edit_latest_low_level("manually update zones", |bp| {
+        .blueprint_edit_latest_raw("manually update zones", |bp| {
             for mut zone in bp
                 .sleds
                 .values_mut()
@@ -3999,19 +3980,16 @@ fn test_update_boundary_ntp() {
 
     let sim_set_valid_looking_timesync =
         |sim: &mut ReconfiguratorCliTestState| {
-            sim.inventory_edit_latest_low_level(
-                "valid NTP status",
-                |collection| {
-                    set_valid_looking_timesync(collection);
-                    Ok(())
-                },
-            )
+            sim.inventory_edit_latest_raw("valid NTP status", |collection| {
+                set_valid_looking_timesync(collection);
+                Ok(())
+            })
             .unwrap();
         };
 
     // If we have missing info in our inventory, the
     // planner will not update any boundary NTP zones.
-    sim.inventory_edit_latest_low_level("no timesync status", |collection| {
+    sim.inventory_edit_latest_raw("no timesync status", |collection| {
         collection.ntp_timesync = IdOrdMap::new();
         Ok(())
     })
@@ -4023,7 +4001,7 @@ fn test_update_boundary_ntp() {
 
     // If we don't have enough info from boundary NTP nodes, we'll refuse to
     // update.
-    sim.inventory_edit_latest_low_level("too few NTP zones", |collection| {
+    sim.inventory_edit_latest_raw("too few NTP zones", |collection| {
         set_valid_looking_timesync(collection);
         let boundary_ntp_zone = collection
             .all_running_omicron_zones()
@@ -4046,7 +4024,7 @@ fn test_update_boundary_ntp() {
 
     // If we don't have enough explicitly synced nodes, we'll refuse to
     // update.
-    sim.inventory_edit_latest_low_level("unsynced NTP zones", |collection| {
+    sim.inventory_edit_latest_raw("unsynced NTP zones", |collection| {
         set_valid_looking_timesync(collection);
         let boundary_ntp_zone = collection
             .all_running_omicron_zones()
@@ -4245,7 +4223,7 @@ fn test_update_boundary_ntp() {
 
     // Validate that we do not flip back to the 0.0.1 artifact after
     // performing the update, even if we lose timesync data.
-    sim.inventory_edit_latest_low_level("no timesync status", |collection| {
+    sim.inventory_edit_latest_raw("no timesync status", |collection| {
         collection.ntp_timesync = IdOrdMap::new();
         Ok(())
     })
@@ -4320,7 +4298,7 @@ fn test_update_internal_dns() {
     // We just specified a new TUF repo, everything is going to shift from
     // the 0.0.1 repo to this new repo.
     let mut blueprint = sim
-        .blueprint_edit_latest_low_level("manually update zones", |bp| {
+        .blueprint_edit_latest_raw("manually update zones", |bp| {
             for mut zone in bp
                 .sleds
                 .values_mut()
@@ -4372,7 +4350,7 @@ fn test_update_internal_dns() {
 
     // If we have missing info in our inventory, the
     // planner will not update any Internal DNS zones.
-    sim.inventory_edit_latest_low_level("no status", |collection| {
+    sim.inventory_edit_latest_raw("no status", |collection| {
         collection.internal_dns_generation_status = IdOrdMap::new();
         Ok(())
     })
@@ -4384,7 +4362,7 @@ fn test_update_internal_dns() {
 
     // If we're missing info from even a single zone, we
     // will still refuse to update.
-    sim.inventory_edit_latest_low_level("missing node status", |collection| {
+    sim.inventory_edit_latest_raw("missing node status", |collection| {
         collection.internal_dns_generation_status =
             create_valid_looking_status(&blueprint);
         let first_zone = collection
@@ -4407,7 +4385,7 @@ fn test_update_internal_dns() {
 
     // If we have any out-of-sync generations in our inventory,
     // the planner will not update Internal DNS zones.
-    sim.inventory_edit_latest_low_level("out of sync gen", |collection| {
+    sim.inventory_edit_latest_raw("out of sync gen", |collection| {
         collection.internal_dns_generation_status =
             create_valid_looking_status(&blueprint);
         // I'd rather have the generation be "too low", but we also reject
@@ -4432,7 +4410,7 @@ fn test_update_internal_dns() {
     // We'll update one zone at a time, from the 0.0.1 artifact to the new
     // TUF repo artifact.
     for i in 1..=INTERNAL_DNS_REDUNDANCY {
-        sim.inventory_edit_latest_low_level("valid status", |collection| {
+        sim.inventory_edit_latest_raw("valid status", |collection| {
             collection.internal_dns_generation_status =
                 create_valid_looking_status(&blueprint);
             Ok(())
@@ -4487,7 +4465,7 @@ fn test_update_internal_dns() {
 
     // Validate that we have no further changes to make, once all Internal
     // DNS zones have been updated.
-    sim.inventory_edit_latest_low_level("valid status", |collection| {
+    sim.inventory_edit_latest_raw("valid status", |collection| {
         collection.internal_dns_generation_status =
             create_valid_looking_status(&blueprint);
         Ok(())
@@ -4500,7 +4478,7 @@ fn test_update_internal_dns() {
 
     // Validate that we do not flip back to the 0.0.1 artifact after
     // performing the update.
-    sim.inventory_edit_latest_low_level("empty status", |collection| {
+    sim.inventory_edit_latest_raw("empty status", |collection| {
         collection.internal_dns_generation_status = IdOrdMap::new();
         Ok(())
     })

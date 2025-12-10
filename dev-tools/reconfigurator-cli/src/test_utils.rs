@@ -5,7 +5,6 @@
 //! helpers for writing Rust tests that use reconfigurator-cli to drive a
 //! simulated system
 
-use std::sync::Arc;
 use crate::ReconfiguratorSim;
 use anyhow::Context;
 use nexus_inventory::CollectionBuilder;
@@ -29,6 +28,7 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct ReconfiguratorCliTestState {
@@ -219,7 +219,7 @@ impl ReconfiguratorCliTestState {
     /// State change helper: create a new latest inventory collection, then pass
     /// it to `f` which is allowed to edit it in abnormal ways that cannot be
     /// done via `CollectionBuilder`.
-    pub fn inventory_edit_latest_low_level<F, T>(
+    pub fn inventory_edit_latest_raw<F, T>(
         &mut self,
         description: &str,
         f: F,
@@ -284,7 +284,7 @@ impl ReconfiguratorCliTestState {
     /// the current latest blueprint (but with a new ID and correct parent ID),
     /// then pass it to `f` which is allowed to edit it in abnormal ways that
     /// cannot be done via `BlueprintBuilder`.
-    pub fn blueprint_edit_latest_low_level<F>(
+    pub fn blueprint_edit_latest_raw<F>(
         &mut self,
         description: &str,
         f: F,
