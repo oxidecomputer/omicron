@@ -36,6 +36,7 @@ use openapiv3::OpenAPI;
 /// Copies of data types that changed between versions
 mod v2025112000;
 pub mod v2025120300;
+mod v2025120500;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -65,6 +66,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2025121000, DEFAULT_POOL_IP_VERSION_PREFERENCE),
     (2025120500, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
     (2025120300, LOCAL_STORAGE),
     (2025112000, INITIAL),
@@ -1057,8 +1059,21 @@ pub trait NexusExternalApi {
     /// Users in linked silos can allocate external IPs from this pool for their
     /// instances. A silo can have at most one default pool per combination of
     /// pool type (unicast or multicast) and IP version (IPv4 or IPv6), allowing
-    /// up to 4 default pools. IPs are allocated from the default pool when
-    /// users ask for one without specifying a pool.
+    /// up to 4 default pools total.
+    ///
+    /// When users request an IP without specifying a pool, the system selects
+    /// the appropriate default based on the operation type:
+    ///
+    /// - Ephemeral IPs use the ip_version preference if specified. If not
+    ///   specified and only one default pool exists, that pool is used. If
+    ///   multiple default pools of different IP versions exist, the request
+    ///   fails asking the user to specify ip_version.
+    /// - Floating IPs use the ip_version preference if specified. If a
+    ///   specific IP address is requested, the pool matching that address's
+    ///   version is used. Otherwise, the same rules as ephemeral IPs apply.
+    /// - Multicast groups use the ip_version preference if specified. If a
+    ///   specific multicast IP is provided, the pool matching that address's
+    ///   version is used. Otherwise, the same rules as ephemeral IPs apply.
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools/{pool}/silos",
@@ -1209,10 +1224,33 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<ResultsPage<views::FloatingIp>>, HttpError>;
 
     /// Create floating IP
+    ///
+    /// Old API version (before ip_version preference was added).
     #[endpoint {
         method = POST,
         path = "/v1/floating-ips",
         tags = ["floating-ips"],
+        versions = ..VERSION_DEFAULT_POOL_IP_VERSION_PREFERENCE,
+    }]
+    async fn v2025120500_floating_ip_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        floating_params: TypedBody<v2025120500::FloatingIpCreate>,
+    ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
+        Self::floating_ip_create(
+            rqctx,
+            query_params,
+            floating_params.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create floating IP
+    #[endpoint {
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_DEFAULT_POOL_IP_VERSION_PREFERENCE..,
     }]
     async fn floating_ip_create(
         rqctx: RequestContext<Self::Context>,
@@ -2980,10 +3018,35 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError>;
 
     /// Allocate and attach ephemeral IP to instance
+    ///
+    /// Old API version (before ip_version preference was added).
     #[endpoint {
         method = POST,
         path = "/v1/instances/{instance}/external-ips/ephemeral",
         tags = ["instances"],
+        versions = ..VERSION_DEFAULT_POOL_IP_VERSION_PREFERENCE,
+    }]
+    async fn v2025120500_instance_ephemeral_ip_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        ip_to_create: TypedBody<v2025120500::EphemeralIpCreate>,
+    ) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError> {
+        Self::instance_ephemeral_ip_attach(
+            rqctx,
+            path_params,
+            query_params,
+            ip_to_create.map(Into::into),
+        )
+        .await
+    }
+
+    /// Allocate and attach ephemeral IP to instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = VERSION_DEFAULT_POOL_IP_VERSION_PREFERENCE..,
     }]
     async fn instance_ephemeral_ip_attach(
         rqctx: RequestContext<Self::Context>,

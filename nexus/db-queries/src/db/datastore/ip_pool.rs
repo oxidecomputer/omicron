@@ -253,10 +253,15 @@ impl DataStore {
     /// Related to `ip_pools_fetch_default`, but this one allows you to specify
     /// the pool type (unicast or multicast) to fetch the default pool of that
     /// type.
+    ///
+    /// If `ip_version` is `None` and there are multiple default pools of
+    /// different IP versions, this returns an error asking the caller to
+    /// specify which version. If there's only one default pool, it is returned.
     async fn ip_pools_fetch_default_by_type(
         &self,
         opctx: &OpContext,
         pool_type: IpPoolType,
+        ip_version: Option<IpVersion>,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
         use nexus_db_schema::schema::ip_pool;
         use nexus_db_schema::schema::ip_pool_resource;
@@ -276,7 +281,7 @@ impl DataStore {
             "default {pool_type} IP pool for current silo"
         ));
 
-        ip_pool::table
+        let mut query = ip_pool::table
             .inner_join(ip_pool_resource::table)
             .filter(
                 ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
@@ -286,21 +291,22 @@ impl DataStore {
             .filter(ip_pool::time_deleted.is_null())
             // Filter by pool type
             .filter(ip_pool::pool_type.eq(pool_type))
-            // Order by most specific first so we get the most specific.
-            // resource_type is an enum in the DB and therefore gets its order
-            // from the definition; it's not lexicographic. So correctness here
-            // relies on the types being most-specific-first in the definition.
-            // There are tests for this.
-            //
-            // Also order by IP version to prefer V4 over V6 when both exist.
-            .order((
-                ip_pool_resource::resource_type.asc(),
-                ip_pool::ip_version.asc(),
-            ))
+            .into_boxed();
+
+        // Filter by IP version if specified
+        if let Some(version) = ip_version {
+            query = query.filter(ip_pool::ip_version.eq(version));
+        }
+
+        // Order by most specific first so we get the most specific.
+        // resource_type is an enum in the DB and therefore gets its order
+        // from the definition; it's not lexicographic. So correctness here
+        // relies on the types being most-specific-first in the definition.
+        // There are tests for this.
+        let pools: Vec<IpPool> = query
+            .order(ip_pool_resource::resource_type.asc())
             .select(IpPool::as_select())
-            .first_async::<IpPool>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_lookup(
@@ -308,12 +314,34 @@ impl DataStore {
                     ResourceType::IpPool,
                     &lookup_type,
                 )
-            })
-            .map(|ip_pool| {
+            })?;
+
+        // If `ip_version` was not specified and we have multiple pools of
+        // different IP versions, return an error asking the caller to specify
+        // which version.
+        if ip_version.is_none() && pools.len() > 1 {
+            let has_v4 = pools.iter().any(|p| p.ip_version == IpVersion::V4);
+            let has_v6 = pools.iter().any(|p| p.ip_version == IpVersion::V6);
+            if has_v4 && has_v6 {
+                return Err(Error::invalid_request(format!(
+                    "Multiple default {pool_type} IP pools exist with different \
+                     IP versions. Please specify ip_version (v4 or v6) or \
+                     provide an explicit pool."
+                )));
+            }
+        }
+
+        match pools.into_iter().next() {
+            None => Err(Error::ObjectNotFound {
+                type_name: ResourceType::IpPool,
+                lookup_type,
+            }),
+            Some(ip_pool) => {
                 let authz_pool =
                     authz::IpPool::new(authz::FLEET, ip_pool.id(), lookup_type);
-                (authz_pool, ip_pool)
-            })
+                Ok((authz_pool, ip_pool))
+            }
+        }
     }
 
     /// Look up any IP pool by pool type linked to the caller's silo.
@@ -322,6 +350,9 @@ impl DataStore {
     /// back to any linked pool, selecting alphabetically by name (arbitrary
     /// tie-breaker, not semantically meaningful). Returns an error if no pool
     /// of the given type is linked to the caller's silo.
+    ///
+    /// If `ip_version` is `None` and there are multiple pools of different IP
+    /// versions, returns an error asking the caller to specify which version.
     ///
     /// Note: For multicast pools, this method does not distinguish between
     /// ASM (224/4) and SSM (232/8) pools.
@@ -335,6 +366,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pool_type: IpPoolType,
+        ip_version: Option<IpVersion>,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
         use nexus_db_schema::schema::ip_pool;
         use nexus_db_schema::schema::ip_pool_resource;
@@ -346,7 +378,7 @@ impl DataStore {
 
         // Find any pool of the given type linked to the caller's silo,
         // preferring default pools
-        ip_pool::table
+        let mut query = ip_pool::table
             .inner_join(ip_pool_resource::table)
             .filter(
                 ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
@@ -354,11 +386,17 @@ impl DataStore {
             .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
             .filter(ip_pool::time_deleted.is_null())
             .filter(ip_pool::pool_type.eq(pool_type))
+            .into_boxed();
+
+        // Filter by IP version if specified
+        if let Some(version) = ip_version {
+            query = query.filter(ip_pool::ip_version.eq(version));
+        }
+
+        let pools: Vec<IpPool> = query
             .order((ip_pool_resource::is_default.desc(), ip_pool::name.asc()))
             .select(IpPool::as_select())
-            .first_async::<IpPool>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_lookup(
@@ -366,12 +404,34 @@ impl DataStore {
                     ResourceType::IpPool,
                     &lookup_type,
                 )
-            })
-            .map(|ip_pool| {
+            })?;
+
+        // If `ip_version` was not specified and we have multiple pools of
+        // different IP versions, return an error asking the caller to specify
+        // which version.
+        if ip_version.is_none() && pools.len() > 1 {
+            let has_v4 = pools.iter().any(|p| p.ip_version == IpVersion::V4);
+            let has_v6 = pools.iter().any(|p| p.ip_version == IpVersion::V6);
+            if has_v4 && has_v6 {
+                return Err(Error::invalid_request(format!(
+                    "Multiple default {pool_type} IP pools exist with different \
+                     IP versions. Please specify ip_version (v4 or v6) or \
+                     provide an explicit pool."
+                )));
+            }
+        }
+
+        match pools.into_iter().next() {
+            None => Err(Error::ObjectNotFound {
+                type_name: ResourceType::IpPool,
+                lookup_type,
+            }),
+            Some(ip_pool) => {
                 let authz_pool =
                     authz::IpPool::new(authz::FLEET, ip_pool.id(), lookup_type);
-                (authz_pool, ip_pool)
-            })
+                Ok((authz_pool, ip_pool))
+            }
+        }
     }
 
     /// Look up an SSM multicast pool linked to the caller's silo.
@@ -386,10 +446,15 @@ impl DataStore {
     /// back to any linked SSM pool, selecting alphabetically by name (arbitrary
     /// tie-breaker).
     ///
+    /// If `ip_version` is `None` and there are multiple SSM pools with
+    /// different IP versions, returns an error asking the caller to specify
+    /// which version.
+    ///
     /// [RFC 4607]: https://datatracker.ietf.org/doc/html/rfc4607
     pub async fn ip_pools_fetch_ssm_multicast(
         &self,
         opctx: &OpContext,
+        ip_version: Option<IpVersion>,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
         use nexus_db_schema::schema::ip_pool;
         use nexus_db_schema::schema::ip_pool_range;
@@ -401,7 +466,7 @@ impl DataStore {
 
         // We need to find multicast pools with SSM ranges.
         // SSM ranges are: IPv4 232.0.0.0/8, IPv6 ff3x::/32
-        let pools: Vec<(IpPool, IpPoolRange, bool)> = ip_pool::table
+        let mut query = ip_pool::table
             .inner_join(ip_pool_resource::table)
             .inner_join(
                 ip_pool_range::table
@@ -414,6 +479,15 @@ impl DataStore {
             .filter(ip_pool::time_deleted.is_null())
             .filter(ip_pool_range::time_deleted.is_null())
             .filter(ip_pool::pool_type.eq(IpPoolType::Multicast))
+            .into_boxed();
+
+        // Filter by IP version if specified
+        if let Some(version) = ip_version {
+            query = query.filter(ip_pool::ip_version.eq(version));
+        }
+
+        let pools: Vec<(IpPool, IpPoolRange, bool)> = query
+            // Prefer default pool, then alphabetically by name
             .order((ip_pool_resource::is_default.desc(), ip_pool::name.asc()))
             .select((
                 IpPool::as_select(),
@@ -426,26 +500,49 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        // Find the first pool with an SSM range (already ordered by preference)
+        // Collect all SSM pools (deduplicating by pool ID)
+        let mut ssm_pools: Vec<IpPool> = Vec::new();
+        let mut seen_pool_ids = std::collections::HashSet::new();
         for (pool, range, _is_default) in pools {
             let is_ssm = match range.first_address {
                 IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
                 IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
             };
 
-            if is_ssm {
-                let authz_pool =
-                    authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
-                return Ok((authz_pool, pool));
+            if is_ssm && seen_pool_ids.insert(pool.id()) {
+                ssm_pools.push(pool);
             }
         }
 
-        // No SSM pool found
-        Err(public_error_from_diesel_lookup(
-            DieselError::NotFound,
-            ResourceType::IpPool,
-            &lookup_type,
-        ))
+        // If `ip_version` was not specified and we have multiple SSM pools of
+        // different IP versions, return an error asking the caller to specify
+        // which version.
+        if ip_version.is_none() && ssm_pools.len() > 1 {
+            let has_v4 =
+                ssm_pools.iter().any(|p| p.ip_version == IpVersion::V4);
+            let has_v6 =
+                ssm_pools.iter().any(|p| p.ip_version == IpVersion::V6);
+            if has_v4 && has_v6 {
+                return Err(Error::invalid_request(
+                    "Multiple default SSM multicast pools exist with different \
+                     IP versions. Please specify ip_version (v4 or v6) or \
+                     provide an explicit pool.",
+                ));
+            }
+        }
+
+        match ssm_pools.into_iter().next() {
+            None => Err(public_error_from_diesel_lookup(
+                DieselError::NotFound,
+                ResourceType::IpPool,
+                &lookup_type,
+            )),
+            Some(pool) => {
+                let authz_pool =
+                    authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
+                Ok((authz_pool, pool))
+            }
+        }
     }
 
     /// Look up an ASM multicast pool linked to the caller's silo.
@@ -459,9 +556,13 @@ impl DataStore {
     /// Prefers the default pool if one exists. If no default exists, falls
     /// back to any linked ASM pool, selecting alphabetically by name
     /// (arbitrary tie-breaker).
+    ///
+    /// If `ip_version` is `None` and there are multiple ASM pools with different
+    /// IP versions, returns an error asking the caller to specify which version.
     pub async fn ip_pools_fetch_asm_multicast(
         &self,
         opctx: &OpContext,
+        ip_version: Option<IpVersion>,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
         use nexus_db_schema::schema::ip_pool;
         use nexus_db_schema::schema::ip_pool_range;
@@ -471,7 +572,7 @@ impl DataStore {
         let lookup_type =
             LookupType::ByOther("ASM multicast pool for current silo".into());
 
-        let pools: Vec<(IpPool, IpPoolRange, bool)> = ip_pool::table
+        let mut query = ip_pool::table
             .inner_join(ip_pool_resource::table)
             .inner_join(
                 ip_pool_range::table
@@ -484,6 +585,15 @@ impl DataStore {
             .filter(ip_pool::time_deleted.is_null())
             .filter(ip_pool_range::time_deleted.is_null())
             .filter(ip_pool::pool_type.eq(IpPoolType::Multicast))
+            .into_boxed();
+
+        // Filter by IP version if specified
+        if let Some(version) = ip_version {
+            query = query.filter(ip_pool::ip_version.eq(version));
+        }
+
+        let pools: Vec<(IpPool, IpPoolRange, bool)> = query
+            // Prefer default pool, then alphabetically by name
             .order((ip_pool_resource::is_default.desc(), ip_pool::name.asc()))
             .select((
                 IpPool::as_select(),
@@ -496,24 +606,49 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
+        // Collect all ASM pools (deduplicating by pool ID)
+        let mut asm_pools: Vec<IpPool> = Vec::new();
+        let mut seen_pool_ids = std::collections::HashSet::new();
         for (pool, range, _is_default) in pools {
             let is_ssm = match range.first_address {
                 IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
                 IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
             };
 
-            if !is_ssm {
-                let authz_pool =
-                    authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
-                return Ok((authz_pool, pool));
+            if !is_ssm && seen_pool_ids.insert(pool.id()) {
+                asm_pools.push(pool);
             }
         }
 
-        Err(public_error_from_diesel_lookup(
-            DieselError::NotFound,
-            ResourceType::IpPool,
-            &lookup_type,
-        ))
+        // If `ip_version` was not specified and we have multiple ASM pools of
+        // different IP versions, return an error asking the caller to specify
+        // which version.
+        if ip_version.is_none() && asm_pools.len() > 1 {
+            let has_v4 =
+                asm_pools.iter().any(|p| p.ip_version == IpVersion::V4);
+            let has_v6 =
+                asm_pools.iter().any(|p| p.ip_version == IpVersion::V6);
+            if has_v4 && has_v6 {
+                return Err(Error::invalid_request(
+                    "Multiple default ASM multicast pools exist with different \
+                     IP versions. Please specify ip_version (v4 or v6) or \
+                     provide an explicit pool.",
+                ));
+            }
+        }
+
+        match asm_pools.into_iter().next() {
+            None => Err(public_error_from_diesel_lookup(
+                DieselError::NotFound,
+                ResourceType::IpPool,
+                &lookup_type,
+            )),
+            Some(pool) => {
+                let authz_pool =
+                    authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
+                Ok((authz_pool, pool))
+            }
+        }
     }
 
     /// Look up internal service IP Pools for both IP versions.
@@ -546,8 +681,11 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
-        // Default to unicast pools (existing behavior)
-        self.ip_pools_fetch_default_by_type(opctx, IpPoolType::Unicast).await
+        // Default to unicast pools (existing behavior). If multiple default
+        // pools of different IP versions exist, this will fail asking the
+        // caller to specify `ip_version`.
+        self.ip_pools_fetch_default_by_type(opctx, IpPoolType::Unicast, None)
+            .await
     }
 
     /// Pool resolution for allocation by pool type.
@@ -561,6 +699,7 @@ impl DataStore {
         opctx: &OpContext,
         pool: Option<authz::IpPool>,
         pool_type: IpPoolType,
+        ip_version: Option<IpVersion>,
     ) -> LookupResult<authz::IpPool> {
         use nexus_db_schema::schema::ip_pool;
 
@@ -601,12 +740,16 @@ impl DataStore {
             None => {
                 let (authz_pool, ..) = match pool_type {
                     IpPoolType::Multicast => {
-                        self.ip_pools_fetch_any_by_type(opctx, pool_type)
-                            .await?
+                        self.ip_pools_fetch_any_by_type(
+                            opctx, pool_type, ip_version,
+                        )
+                        .await?
                     }
                     IpPoolType::Unicast => {
-                        self.ip_pools_fetch_default_by_type(opctx, pool_type)
-                            .await?
+                        self.ip_pools_fetch_default_by_type(
+                            opctx, pool_type, ip_version,
+                        )
+                        .await?
                     }
                 };
                 authz_pool
@@ -2725,7 +2868,14 @@ mod test {
             description: "".to_string(),
         };
         let ip = datastore
-            .allocate_floating_ip(&opctx, project.id(), identity, None, None)
+            .allocate_floating_ip(
+                &opctx,
+                project.id(),
+                identity,
+                None,
+                None,
+                None,
+            )
             .await
             .expect("Could not allocate floating IP");
         assert_eq!(ip.ip.to_string(), "10.0.0.1/32");
@@ -2834,7 +2984,14 @@ mod test {
             description: "".to_string(),
         };
         let ip = datastore
-            .allocate_floating_ip(&opctx, project.id(), identity, None, None)
+            .allocate_floating_ip(
+                &opctx,
+                project.id(),
+                identity,
+                None,
+                None,
+                None,
+            )
             .await
             .expect("Could not allocate floating IP");
         assert_eq!(ip.ip.to_string(), "fd00::a/128");
@@ -3021,7 +3178,7 @@ mod test {
 
         // Initially no default multicast pool
         let error = datastore
-            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast)
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast, None)
             .await
             .unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
@@ -3056,7 +3213,7 @@ mod test {
 
         // Now should find the default multicast pool
         let default_pool = datastore
-            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast)
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast, None)
             .await
             .expect("Should find default multicast pool");
         assert_eq!(default_pool.1.id(), pool.id());
@@ -3081,7 +3238,7 @@ mod test {
 
         // Initially no multicast pool at all
         let error = datastore
-            .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast)
+            .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast, None)
             .await
             .unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
@@ -3116,14 +3273,14 @@ mod test {
 
         // fetch_default_by_type should fail (no default)
         let error = datastore
-            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast)
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast, None)
             .await
             .unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         // But fetch_any_by_type should succeed
         let found_pool = datastore
-            .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast)
+            .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast, None)
             .await
             .expect("Should find non-default multicast pool");
         assert_eq!(found_pool.1.id(), pool.id());
@@ -3159,7 +3316,7 @@ mod test {
 
         // Now fetch_any_by_type should prefer the default pool
         let found_pool = datastore
-            .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast)
+            .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast, None)
             .await
             .expect("Should find default multicast pool");
         assert_eq!(found_pool.1.id(), default_pool.id());
@@ -3193,6 +3350,7 @@ mod test {
             .ip_pools_fetch_any_by_type(
                 &other_silo_opctx,
                 IpPoolType::Multicast,
+                None,
             )
             .await
             .unwrap_err();
@@ -3204,7 +3362,11 @@ mod test {
 
         // Same for unicast - pools are silo-scoped
         let unicast_error = datastore
-            .ip_pools_fetch_any_by_type(&other_silo_opctx, IpPoolType::Unicast)
+            .ip_pools_fetch_any_by_type(
+                &other_silo_opctx,
+                IpPoolType::Unicast,
+                None,
+            )
             .await
             .unwrap_err();
         assert_matches!(
@@ -3332,9 +3494,11 @@ mod test {
 
         let authz_silo = opctx.authn.silo_required().unwrap();
 
-        // Initially no SSM pool - should fail
-        let error =
-            datastore.ip_pools_fetch_ssm_multicast(&opctx).await.unwrap_err();
+        // Initially no SSM pool -> should fail
+        let error = datastore
+            .ip_pools_fetch_ssm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         // Create ASM pool with name that comes first alphabetically
@@ -3387,8 +3551,10 @@ mod test {
             .expect("Should link ASM multicast pool to silo");
 
         // Even with ASM pool linked, fetch_ssm should still fail (no SSM pool)
-        let error =
-            datastore.ip_pools_fetch_ssm_multicast(&opctx).await.unwrap_err();
+        let error = datastore
+            .ip_pools_fetch_ssm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         // Create SSM pool with name that comes after alphabetical ordering
@@ -3442,7 +3608,7 @@ mod test {
 
         // `ip_pools_fetch_ssm_multicast`` should succeed and return the SSM pool
         let (_, found_pool) = datastore
-            .ip_pools_fetch_ssm_multicast(&opctx)
+            .ip_pools_fetch_ssm_multicast(&opctx, None)
             .await
             .expect("Should find SSM multicast pool");
         assert_eq!(found_pool.id(), ssm_pool.id());
@@ -3466,9 +3632,11 @@ mod test {
 
         let authz_silo = opctx.authn.silo_required().unwrap();
 
-        // Initially no ASM pool - should fail
-        let error =
-            datastore.ip_pools_fetch_asm_multicast(&opctx).await.unwrap_err();
+        // Initially no ASM pool -> should fail
+        let error = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         // Create SSM pool first with a name that would sort first if chosen
@@ -3520,8 +3688,10 @@ mod test {
             .expect("Should link SSM pool to silo");
 
         // With only SSM pool linked, ASM lookup should still fail
-        let error =
-            datastore.ip_pools_fetch_asm_multicast(&opctx).await.unwrap_err();
+        let error = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         // Create ASM pool and link
@@ -3574,7 +3744,7 @@ mod test {
 
         // ASM fetcher should now return the ASM pool
         let (_, found_pool) = datastore
-            .ip_pools_fetch_asm_multicast(&opctx)
+            .ip_pools_fetch_asm_multicast(&opctx, None)
             .await
             .expect("Should find ASM multicast pool");
         assert_eq!(found_pool.id(), asm_pool.id());
@@ -3582,6 +3752,85 @@ mod test {
             found_pool.identity.name.to_string(),
             "zzz-asm-multicast-pool"
         );
+
+        // Test V4/V6 conflict: Create an IPv6 ASM pool. When both V4 and V6
+        // pools exist without specifying an `ip_version`, an error should be
+        // returned.
+        let asm_v6_identity = IdentityMetadataCreateParams {
+            name: "aaa-asm-ipv6-multicast-pool".parse().unwrap(),
+            description: "ASM IPv6 multicast pool".to_string(),
+        };
+        let asm_v6_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &asm_v6_identity,
+                    IpVersion::V6,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create ASM IPv6 multicast pool");
+
+        let authz_asm_v6_pool = authz::IpPool::new(
+            authz::FLEET,
+            asm_v6_pool.id(),
+            LookupType::ById(asm_v6_pool.id()),
+        );
+
+        // Add IPv6 ASM range (ff0e::/16 is ASM, not ff3x::/32 which is SSM)
+        let asm_v6_range = IpRange::V6(
+            Ipv6Range::new(
+                "ff0e::1".parse().unwrap(),
+                "ff0e::10".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_asm_v6_pool,
+                &asm_v6_pool,
+                &asm_v6_range,
+            )
+            .await
+            .expect("Should add ASM IPv6 multicast range");
+
+        // Link IPv6 ASM pool to silo
+        let asm_v6_link = IncompleteIpPoolResource {
+            ip_pool_id: asm_v6_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, asm_v6_link)
+            .await
+            .expect("Should link ASM IPv6 pool to silo");
+
+        // ASM fetcher should fail when both V4 and V6 default pools exist
+        // without specifying `ip_version`
+        let error = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("Multiple default ASM multicast pools"),
+            "Expected V4/V6 conflict error, got: {error}"
+        );
+
+        // But specifying `ip_version` should work
+        let (_, found_v4_pool) = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, Some(IpVersion::V4))
+            .await
+            .expect("Should find ASM V4 pool when ip_version specified");
+        assert_eq!(found_v4_pool.id(), asm_pool.id());
+
+        let (_, found_v6_pool) = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, Some(IpVersion::V6))
+            .await
+            .expect("Should find ASM V6 pool when ip_version specified");
+        assert_eq!(found_v6_pool.id(), asm_v6_pool.id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -4571,15 +4820,44 @@ mod test {
             .await
             .unwrap();
 
-        // Verify unicast IPv4 and multicast IPv4 are defaults
+        // Verify that fetching without `ip_version` fails when both V4 and V6 exist
+        let error = datastore.ip_pools_fetch_default(&opctx).await.expect_err(
+            "Should fail when both V4 and V6 unicast defaults exist",
+        );
+        assert!(
+            error.to_string().contains("Multiple"),
+            "Expected V4/V6 conflict error, got: {error}"
+        );
+
+        let error = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast, None)
+            .await
+            .expect_err(
+                "Should fail when both V4 and V6 multicast defaults exist",
+            );
+        assert!(
+            error.to_string().contains("Multiple"),
+            "Expected V4/V6 conflict error, got: {error}"
+        );
+
+        // Verify unicast IPv4 and multicast IPv4 are defaults when specifying
+        // the `ip_version`
         let default_unicast_ipv4 = datastore
-            .ip_pools_fetch_default(&opctx)
+            .ip_pools_fetch_default_by_type(
+                &opctx,
+                IpPoolType::Unicast,
+                Some(IpVersion::V4),
+            )
             .await
             .expect("Should find default unicast IPv4 pool");
         assert_eq!(default_unicast_ipv4.1.id(), unicast_ipv4.id());
 
         let default_multicast_ipv4 = datastore
-            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast)
+            .ip_pools_fetch_default_by_type(
+                &opctx,
+                IpPoolType::Multicast,
+                Some(IpVersion::V4),
+            )
             .await
             .expect("Should find default multicast IPv4 pool");
         assert_eq!(default_multicast_ipv4.1.id(), multicast_ipv4.id());
@@ -4626,15 +4904,24 @@ mod test {
             .expect("Should set new unicast IPv4 as default");
 
         // Verify new unicast IPv4 is now default
+        // (we still need ip_version due to IPv6 default)
         let default_unicast_ipv4 = datastore
-            .ip_pools_fetch_default(&opctx)
+            .ip_pools_fetch_default_by_type(
+                &opctx,
+                IpPoolType::Unicast,
+                Some(IpVersion::V4),
+            )
             .await
             .expect("Should find new default unicast IPv4 pool");
         assert_eq!(default_unicast_ipv4.1.id(), new_unicast_ipv4.id());
 
         // Verify other defaults were not affected
         let default_multicast_ipv4 = datastore
-            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast)
+            .ip_pools_fetch_default_by_type(
+                &opctx,
+                IpPoolType::Multicast,
+                Some(IpVersion::V4),
+            )
             .await
             .expect("Multicast IPv4 should still be default");
         assert_eq!(default_multicast_ipv4.1.id(), multicast_ipv4.id());
@@ -4665,22 +4952,27 @@ mod test {
             .await
             .expect("Should unset multicast IPv6 default");
 
-        // Other defaults should still exist
+        // Other defaults should still exist (unicast still has both V4 and V6)
         let default_unicast_ipv4 = datastore
-            .ip_pools_fetch_default(&opctx)
+            .ip_pools_fetch_default_by_type(
+                &opctx,
+                IpPoolType::Unicast,
+                Some(IpVersion::V4),
+            )
             .await
             .expect("Unicast IPv4 should still be default");
         assert_eq!(default_unicast_ipv4.1.id(), new_unicast_ipv4.id());
 
+        // Multicast now only has V4 default (V6 is no longer default) -> no conflict
         let default_multicast_ipv4 = datastore
-            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast)
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast, None)
             .await
-            .expect("Multicast IPv4 should still be default");
+            .expect("Multicast IPv4 should still be default (only V4 remains)");
         assert_eq!(default_multicast_ipv4.1.id(), multicast_ipv4.id());
 
         // Verify the unique constraint: trying to link another unicast IPv4 pool
-        // as default should fail because `new_unicast_ipv4` is already the default
-        // for that (pool_type, ip_version) variation
+        // as default should fail because `new_unicast_ipv4` is already the
+        // default for that (pool_type, ip_version) variation
         let duplicate_unicast_ipv4 = datastore
             .ip_pool_create(
                 &opctx,
@@ -4715,7 +5007,8 @@ mod test {
     }
 
     /// Test that when both IPv4 and IPv6 defaults exist for the same pool type,
-    /// `ip_pools_fetch_default_by_type` returns the IPv4 pool (ordering preference).
+    /// `ip_pools_fetch_default_by_type` returns an error unless `ip_version`
+    /// is explicitly specified.
     #[tokio::test]
     async fn test_default_pool_ipv4_ipv6_ordering() {
         let logctx =
@@ -4783,29 +5076,55 @@ mod test {
             .await
             .expect("Should link unicast IPv4");
 
-        // Fetch default - should get IPv4 even though IPv6 was created first
-        let (_, default_pool) = datastore
-            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Unicast)
+        // Fetch default without `ip_version`. This should fail since both V4
+        // and V6 defaults exist
+        let error = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Unicast, None)
             .await
-            .expect("Should find default unicast pool");
-
-        assert_eq!(
-            default_pool.id(),
-            unicast_ipv4.id(),
-            "Should prefer IPv4 over IPv6 when both are defaults"
-        );
-        assert_eq!(
-            default_pool.ip_version,
-            IpVersion::V4,
-            "Default pool should be IPv4"
+            .expect_err("Should fail when both V4 and V6 defaults exist");
+        assert!(
+            error.to_string().contains("Multiple"),
+            "Expected V4/V6 conflict error, got: {error}"
         );
 
-        // Also verify via `ip_pools_fetch_default`
-        let (_, default_pool) = datastore
+        // Also verify via `ip_pools_fetch_default` (which uses None for ip_version)
+        let error = datastore
             .ip_pools_fetch_default(&opctx)
             .await
-            .expect("Should find default pool");
-        assert_eq!(default_pool.ip_version, IpVersion::V4);
+            .expect_err("Should fail when both V4 and V6 defaults exist");
+        assert!(
+            error.to_string().contains("Multiple"),
+            "Expected V4/V6 conflict error, got: {error}"
+        );
+
+        // Test explicit ip_version preference
+        let (_, v6_pool) = datastore
+            .ip_pools_fetch_default_by_type(
+                &opctx,
+                IpPoolType::Unicast,
+                Some(IpVersion::V6),
+            )
+            .await
+            .expect("Should find IPv6 pool when explicitly requested");
+        assert_eq!(
+            v6_pool.id(),
+            unicast_ipv6.id(),
+            "Should return IPv6 pool when ip_version=V6"
+        );
+
+        let (_, v4_pool) = datastore
+            .ip_pools_fetch_default_by_type(
+                &opctx,
+                IpPoolType::Unicast,
+                Some(IpVersion::V4),
+            )
+            .await
+            .expect("Should find IPv4 pool when explicitly requested");
+        assert_eq!(
+            v4_pool.id(),
+            unicast_ipv4.id(),
+            "Should return IPv4 pool when ip_version=V4"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -4851,7 +5170,7 @@ mod test {
 
         // Should successfully fetch the IPv6 default
         let (_, default_pool) = datastore
-            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Unicast)
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Unicast, None)
             .await
             .expect("Should find default unicast pool");
 
@@ -4888,7 +5207,7 @@ mod test {
             .expect("Should link multicast IPv6");
 
         let (_, default_mcast) = datastore
-            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast)
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast, None)
             .await
             .expect("Should find default multicast pool");
 

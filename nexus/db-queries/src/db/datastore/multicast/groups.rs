@@ -31,8 +31,8 @@ use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult,
-    IdentityMetadataCreateParams, ListResultVec, LookupResult, LookupType,
-    ResourceType, UpdateResult,
+    IdentityMetadataCreateParams, IpVersion, ListResultVec, LookupResult,
+    LookupType, ResourceType, UpdateResult,
 };
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
@@ -55,6 +55,10 @@ pub(crate) struct MulticastGroupAllocationParams {
     pub ip: Option<IpAddr>,
     pub pool: Option<authz::IpPool>,
     pub source_ips: Option<Vec<IpAddr>>,
+    /// Preferred IP version when allocating without a specific address or pool.
+    /// Required if multiple default multicast pools of different IP versions
+    /// exist.
+    pub ip_version: Option<IpVersion>,
 }
 
 impl DataStore {
@@ -163,6 +167,7 @@ impl DataStore {
                 ip: params.multicast_ip,
                 pool: authz_pool,
                 source_ips: params.source_ips.clone(),
+                ip_version: params.ip_version,
             },
         )
         .await
@@ -386,7 +391,13 @@ impl DataStore {
         //   linkage and type. ASM/SSM semantics are still enforced below.
         let mut used_asm_fallback = false;
         let authz_pool = if needs_ssm_pool {
-            match self.ip_pools_fetch_ssm_multicast(opctx).await {
+            match self
+                .ip_pools_fetch_ssm_multicast(
+                    opctx,
+                    params.ip_version.map(Into::into),
+                )
+                .await
+            {
                 Ok((authz_pool, _)) => {
                     opctx
                         .authorize(authz::Action::CreateChild, &authz_pool)
@@ -397,7 +408,10 @@ impl DataStore {
                     // No SSM pool linked - fall back to ASM pool.
                     // Only "not found" triggers fallback; real errors propagate.
                     let (authz_pool, _) = self
-                        .ip_pools_fetch_asm_multicast(opctx)
+                        .ip_pools_fetch_asm_multicast(
+                            opctx,
+                            params.ip_version.map(Into::into),
+                        )
                         .await
                         .map_err(|_| {
                             external::Error::invalid_request(concat!(
@@ -427,7 +441,10 @@ impl DataStore {
             }
         } else if needs_asm_pool {
             let (authz_pool, _) = self
-                .ip_pools_fetch_asm_multicast(opctx)
+                .ip_pools_fetch_asm_multicast(
+                    opctx,
+                    params.ip_version.map(Into::into),
+                )
                 .await
                 .map_err(|_| {
                     external::Error::invalid_request(concat!(
@@ -445,6 +462,7 @@ impl DataStore {
                 opctx,
                 params.pool,
                 IpPoolType::Multicast,
+                params.ip_version.map(Into::into),
             )
             .await?
         };
@@ -875,6 +893,7 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
+            ip_version: None,
         };
         datastore
             .multicast_group_create(&opctx, &params1, Some(authz_pool.clone()))
@@ -889,6 +908,7 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
+            ip_version: None,
         };
         datastore
             .multicast_group_create(&opctx, &params2, Some(authz_pool.clone()))
@@ -903,6 +923,7 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
+            ip_version: None,
         };
         let result3 = datastore
             .multicast_group_create(&opctx, &params3, Some(authz_pool.clone()))
@@ -975,6 +996,7 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
+            ip_version: None,
         };
 
         let group_default = datastore
@@ -999,6 +1021,7 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
+            ip_version: None,
         };
         let group_explicit = datastore
             .multicast_group_create(&opctx, &params_explicit, None)
@@ -1125,6 +1148,7 @@ mod tests {
             },
             multicast_ip: Some("224.1.3.3".parse().unwrap()),
             source_ips: None,
+            ip_version: None,
         };
 
         let external_group = datastore
@@ -1221,6 +1245,7 @@ mod tests {
             },
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             source_ips: None,
+            ip_version: None,
         };
 
         let group = datastore
@@ -1685,6 +1710,7 @@ mod tests {
             },
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             source_ips: None,
+            ip_version: None,
         };
 
         let group = datastore
@@ -1816,6 +1842,7 @@ mod tests {
             },
             multicast_ip: None, // Let it allocate from pool
             source_ips: None,
+            ip_version: None,
         };
         let group = datastore
             .multicast_group_create(
@@ -2027,6 +2054,7 @@ mod tests {
             },
             multicast_ip: Some(target_ip),
             source_ips: None,
+            ip_version: None,
         };
 
         let group1 = datastore
@@ -2053,6 +2081,7 @@ mod tests {
             },
             multicast_ip: Some(target_ip),
             source_ips: None,
+            ip_version: None,
         };
 
         let group2 = datastore
@@ -2137,6 +2166,7 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
+            ip_version: None,
         };
 
         let group1 = datastore
@@ -2153,6 +2183,7 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
+            ip_version: None,
         };
 
         let result2 = datastore
@@ -2182,6 +2213,7 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
+            ip_version: None,
         };
 
         let group3 = datastore
@@ -2267,6 +2299,7 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
+            ip_version: None,
         };
 
         let group = datastore
@@ -2393,6 +2426,7 @@ mod tests {
                 "10.0.0.1".parse().unwrap(),
                 "10.0.0.2".parse().unwrap(),
             ]),
+            ip_version: None,
         };
 
         let group = datastore
@@ -2499,6 +2533,7 @@ mod tests {
             },
             multicast_ip: Some("224.100.20.10".parse().unwrap()),
             source_ips: None,
+            ip_version: None,
         };
 
         let params_2 = MulticastGroupCreate {
@@ -2508,6 +2543,7 @@ mod tests {
             },
             multicast_ip: Some("224.100.20.11".parse().unwrap()),
             source_ips: None,
+            ip_version: None,
         };
 
         let params_3 = MulticastGroupCreate {
@@ -2517,6 +2553,7 @@ mod tests {
             },
             multicast_ip: Some("224.100.20.12".parse().unwrap()),
             source_ips: None,
+            ip_version: None,
         };
 
         // Create groups (all are fleet-scoped)
@@ -2624,6 +2661,7 @@ mod tests {
             },
             multicast_ip: Some("224.100.30.5".parse().unwrap()),
             source_ips: None,
+            ip_version: None,
         };
 
         // Create group - starts in "Creating" state
@@ -2890,6 +2928,7 @@ mod tests {
             },
             multicast_ip: None, // No explicit IP - triggers pool auto-selection
             source_ips: Some(vec!["10.0.0.1".parse().unwrap()]), // Has sources
+            ip_version: None,
         };
 
         // This should succeed via ASM fallback (no SSM pool exists)

@@ -2,7 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2025112000 to 2025120300
+//! Nexus external API types (version 2025112000).
+//!
+//! Version 2025112000 types (before disk backend refactoring).
+//!
+//! Key differences from newer API versions:
+//! - Uses [`DiskType::Crucible`] instead of [`DiskType::Distributed`] for disk
+//!   backend type naming.
+//! - [`DiskSource`] uses flat variants instead of nested [`DiskBackend`] enum.
+//! - [`InstanceDiskAttachment`] uses the old [`DiskCreate`] format.
+//!
+//! [`DiskType::Crucible`]: self::DiskType::Crucible
+//! [`DiskType::Distributed`]: omicron_common::api::external::DiskType::Distributed
+//! [`DiskSource`]: self::DiskSource
+//! [`DiskBackend`]: params::DiskBackend
+//! [`DiskCreate`]: self::DiskCreate
+//! [`InstanceDiskAttachment`]: self::InstanceDiskAttachment
 
 use nexus_types::external_api::params;
 use omicron_common::api::external;

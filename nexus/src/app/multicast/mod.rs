@@ -353,6 +353,8 @@ impl super::Nexus {
             },
             multicast_ip: Some(ip),
             source_ips: source_ips.clone(),
+            // IP version is determined by the multicast IP address itself
+            ip_version: None,
         };
 
         // Create the group; on conflict -> re-lookup
@@ -421,6 +423,8 @@ impl super::Nexus {
             },
             multicast_ip: None,
             source_ips: source_ips.clone(),
+            // No explicit IP, defaults to V4 when allocating from pool
+            ip_version: None,
         };
 
         // Create the group; on conflict -> re-lookup

@@ -1112,6 +1112,12 @@ pub struct FloatingIpCreate {
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
     pub pool: Option<NameOrId>,
+
+    /// Preferred IP version when allocating from the default pool.
+    /// Only used when both `ip` and `pool` are not specified. Required if
+    /// multiple default pools of different IP versions exist.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1228,6 +1234,11 @@ pub struct EphemeralIpCreate {
     /// Name or ID of the IP pool used to allocate an address. If unspecified,
     /// the default IP pool will be used.
     pub pool: Option<NameOrId>,
+    /// Preferred IP version when allocating from the default pool.
+    /// Only used when `pool` is not specified. Required if multiple default
+    /// pools of different IP versions exist.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 /// Parameters for detaching an external IP from an instance.
