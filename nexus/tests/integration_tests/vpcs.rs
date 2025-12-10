@@ -769,6 +769,7 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
             },
             ip: None,
             pool: None,
+            ip_version: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(limited_user.id))

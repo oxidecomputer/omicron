@@ -1078,7 +1078,10 @@ pub struct IpPoolLinkSilo {
     pub silo: NameOrId,
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
 }
 
@@ -1086,9 +1089,11 @@ pub struct IpPoolLinkSilo {
 pub struct IpPoolSiloUpdate {
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo, so when a pool is
-    /// made default, an existing default will remain linked but will no longer
-    /// be the default.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total. When a pool is made default, only an existing
+    /// default with the same pool type and IP version will be demoted.
     pub is_default: bool,
 }
 
@@ -1107,6 +1112,12 @@ pub struct FloatingIpCreate {
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
     pub pool: Option<NameOrId>,
+
+    /// Preferred IP version when allocating from the default pool.
+    /// Only used when both `ip` and `pool` are not specified. Required if
+    /// multiple default pools of different IP versions exist.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1223,6 +1234,11 @@ pub struct EphemeralIpCreate {
     /// Name or ID of the IP pool used to allocate an address. If unspecified,
     /// the default IP pool will be used.
     pub pool: Option<NameOrId>,
+    /// Preferred IP version when allocating from the default pool.
+    /// Only used when `pool` is not specified. Required if multiple default
+    /// pools of different IP versions exist.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 /// Parameters for detaching an external IP from an instance.

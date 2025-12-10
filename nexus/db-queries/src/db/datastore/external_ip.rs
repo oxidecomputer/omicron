@@ -88,7 +88,7 @@ impl DataStore {
         pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalIp> {
         let authz_pool = self
-            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast, None)
             .await?;
         let data = IncompleteExternalIp::for_ephemeral_probe(
             ip_id,
@@ -126,7 +126,7 @@ impl DataStore {
         // IP was not attached, including on idempotent success.
 
         let authz_pool = self
-            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast, None)
             .await?;
         let data = IncompleteExternalIp::for_ephemeral(ip_id, authz_pool.id());
 
@@ -198,11 +198,17 @@ impl DataStore {
         identity: IdentityMetadataCreateParams,
         ip: Option<IpAddr>,
         pool: Option<authz::IpPool>,
+        ip_version: Option<IpVersion>,
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
         let authz_pool = self
-            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .resolve_pool_for_allocation(
+                opctx,
+                pool,
+                IpPoolType::Unicast,
+                ip_version,
+            )
             .await?;
 
         let data = if let Some(ip) = ip {

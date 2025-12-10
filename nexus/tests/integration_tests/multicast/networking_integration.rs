@@ -138,6 +138,7 @@ async fn test_multicast_with_external_ip_basic(
         RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
             .body(Some(&EphemeralIpCreate {
                 pool: None, // Use default pool
+                ip_version: None,
             }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
@@ -320,6 +321,7 @@ async fn test_multicast_external_ip_lifecycle(
             RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
                 .body(Some(&EphemeralIpCreate {
                     pool: None, // Use default pool
+                    ip_version: None,
                 }))
                 .expect_status(Some(StatusCode::ACCEPTED)),
         )

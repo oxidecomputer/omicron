@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external API types (version 2025120300)
+//! Nexus external API types (version 2025120300).
 //!
 //! Version 2025120300 types (before [`MulticastGroupIdentifier`] was introduced
 //! and before implicit group lifecycle).
@@ -33,8 +33,8 @@ use nexus_types::external_api::{params, views};
 use nexus_types::multicast::MulticastGroupCreate as InternalMulticastGroupCreate;
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, Name,
-    NameOrId, Nullable, ObjectIdentity,
+    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
+    IpVersion, Name, NameOrId, Nullable, ObjectIdentity,
 };
 use omicron_common::vlan::VlanID;
 use params::{
@@ -173,6 +173,9 @@ impl From<MulticastGroupCreate> for InternalMulticastGroupCreate {
             },
             multicast_ip: old.multicast_ip,
             source_ips: old.source_ips,
+            // This version predates `ip_version` support. V4 is used by default
+            // since V6 pools were not yet supported.
+            ip_version: Some(IpVersion::V4),
         }
     }
 }

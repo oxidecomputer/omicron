@@ -24,6 +24,7 @@ use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_local_user;
+use nexus_test_utils::resource_helpers::create_multicast_ip_pool;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::grant_iam;
@@ -227,6 +228,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
         },
         ip: None,
         pool: Some(NameOrId::Name("other-pool".parse().unwrap())),
+        ip_version: None,
     };
     let url = format!("/v1/floating-ips?project={}", project.identity.name);
     let error =
@@ -343,6 +345,7 @@ async fn test_floating_ip_create_non_admin(
         },
         pool: None,
         ip: None,
+        ip_version: None,
     };
     let fip: views::FloatingIp =
         NexusRequest::objects_post(client, &create_url, &body)
@@ -359,6 +362,7 @@ async fn test_floating_ip_create_non_admin(
         },
         pool: Some(NameOrId::Name("other-pool".parse().unwrap())),
         ip: None,
+        ip_version: None,
     };
     let fip: views::FloatingIp =
         NexusRequest::objects_post(client, &create_url, &body)
@@ -375,6 +379,7 @@ async fn test_floating_ip_create_non_admin(
         },
         pool: Some(NameOrId::Name("unlinked-pool".parse().unwrap())),
         ip: None,
+        ip_version: None,
     };
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &create_url)
@@ -427,6 +432,7 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
         },
         ip: None,
         pool: Some(NameOrId::Name("external-silo-pool".parse().unwrap())),
+        ip_version: None,
     };
 
     let error =
@@ -484,6 +490,7 @@ async fn test_floating_ip_create_ip_in_use(
             },
             ip: Some(contested_ip),
             pool: None,
+            ip_version: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -532,6 +539,7 @@ async fn test_floating_ip_create_name_in_use(
             },
             ip: None,
             pool: None,
+            ip_version: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -1177,7 +1185,10 @@ async fn test_external_ip_attach_fails_after_maximum(
     let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
-            .body(Some(&params::EphemeralIpCreate { pool: None }))
+            .body(Some(&params::EphemeralIpCreate {
+                pool: None,
+                ip_version: None,
+            }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1393,6 +1404,7 @@ async fn ephemeral_ip_attach(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::EphemeralIpCreate {
                 pool: pool_name.map(|v| v.parse::<Name>().unwrap().into()),
+                ip_version: None,
             }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
@@ -1446,4 +1458,234 @@ async fn floating_ip_detach(
     .unwrap()
     .parsed_body()
     .unwrap()
+}
+
+// Test that ephemeral IPs use the unicast default pool even when a multicast
+// default pool also exists.
+#[nexus_test]
+async fn test_ephemeral_ip_uses_unicast_default_not_multicast(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project(&client, PROJECT_NAME).await;
+
+    // Create unicast pool with range 10.0.0.1 - 10.0.0.10 and link as default
+    let unicast_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 10))
+            .unwrap(),
+    );
+    create_ip_pool(&client, "unicast-pool", Some(unicast_range)).await;
+    link_ip_pool(&client, "unicast-pool", &DEFAULT_SILO.id(), true).await;
+
+    // Create multicast pool with range 224.1.0.1 - 224.1.0.10 and link as default
+    let multicast_range = IpRange::V4(
+        Ipv4Range::new(
+            Ipv4Addr::new(224, 1, 0, 1),
+            Ipv4Addr::new(224, 1, 0, 10),
+        )
+        .unwrap(),
+    );
+    create_multicast_ip_pool(&client, "multicast-pool", Some(multicast_range))
+        .await;
+    link_ip_pool(&client, "multicast-pool", &DEFAULT_SILO.id(), true).await;
+
+    // Create instance requesting ephemeral IP from default pool (pool: None)
+    let instance = instance_for_external_ips(
+        client,
+        "test-instance",
+        true, // start
+        true, // use_ephemeral_ip
+        &[],  // no floating IPs
+    )
+    .await;
+
+    // Wait for instance to be running
+    instance_simulate(
+        &cptestctx.server.server_context().nexus,
+        &InstanceUuid::from_untyped_uuid(instance.identity.id),
+    )
+    .await;
+
+    // Get the external IPs and verify the ephemeral IP is from unicast range
+    let external_ips =
+        fetch_instance_external_ips(client, "test-instance", PROJECT_NAME)
+            .await;
+
+    let ephemeral_ip = external_ips
+        .iter()
+        .find(|ip| matches!(ip, views::ExternalIp::Ephemeral { .. }))
+        .expect("Instance should have an ephemeral IP");
+
+    if let views::ExternalIp::Ephemeral { ip, .. } = ephemeral_ip {
+        // The IP should be in the unicast range (10.0.0.x), not multicast (224.x.x.x)
+        match ip {
+            IpAddr::V4(v4) => {
+                assert!(
+                    v4.octets()[0] == 10,
+                    "Ephemeral IP {ip} should be from unicast range 10.0.0.x, not multicast"
+                );
+            }
+            IpAddr::V6(_) => panic!("Expected IPv4 address"),
+        }
+    } else {
+        panic!("Expected ephemeral IP");
+    }
+}
+
+// Test that floating IPs use the unicast default pool even when a multicast
+// default pool also exists.
+#[nexus_test]
+async fn test_floating_ip_uses_unicast_default_not_multicast(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project(&client, PROJECT_NAME).await;
+
+    // Create unicast pool with range 10.0.0.1 - 10.0.0.10 and link as default
+    let unicast_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 10))
+            .unwrap(),
+    );
+    create_ip_pool(&client, "unicast-pool", Some(unicast_range)).await;
+    link_ip_pool(&client, "unicast-pool", &DEFAULT_SILO.id(), true).await;
+
+    // Create multicast pool with range 224.1.0.1 - 224.1.0.10 and link as default
+    let multicast_range = IpRange::V4(
+        Ipv4Range::new(
+            Ipv4Addr::new(224, 1, 0, 1),
+            Ipv4Addr::new(224, 1, 0, 10),
+        )
+        .unwrap(),
+    );
+    create_multicast_ip_pool(&client, "multicast-pool", Some(multicast_range))
+        .await;
+    link_ip_pool(&client, "multicast-pool", &DEFAULT_SILO.id(), true).await;
+
+    // Create floating IP from default pool (pool: None)
+    let fip_params = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "test-fip".parse().unwrap(),
+            description: "test floating IP".to_string(),
+        },
+        pool: None, // Use default pool
+        ip: None,   // Auto-allocate
+        ip_version: None,
+    };
+
+    let url = get_floating_ips_url(PROJECT_NAME);
+    let fip: FloatingIp = object_create(client, &url, &fip_params).await;
+
+    // Verify the floating IP is from unicast range (10.0.0.x), not multicast
+    match fip.ip {
+        IpAddr::V4(v4) => {
+            assert!(
+                v4.octets()[0] == 10,
+                "Floating IP {} should be from unicast range 10.0.0.x, not multicast",
+                fip.ip
+            );
+        }
+        IpAddr::V6(_) => panic!("Expected IPv4 address"),
+    }
+}
+
+/// Test that creating a floating IP without a default pool returns a proper error.
+///
+/// This verifies that datastore errors bubble up correctly to the API level.
+#[nexus_test]
+async fn test_floating_ip_fails_without_default_pool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create project but NO default IP pool
+    create_project(&client, PROJECT_NAME).await;
+
+    // Try to create floating IP with pool: None
+    let fip_params = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "should-fail".parse().unwrap(),
+            description: "this should fail".to_string(),
+        },
+        pool: None,
+        ip: None,
+        ip_version: None,
+    };
+
+    let url = get_floating_ips_url(PROJECT_NAME);
+    let error =
+        object_create_error(client, &url, &fip_params, StatusCode::NOT_FOUND)
+            .await;
+
+    // Verify the error message indicates no default pool found
+    assert!(
+        error.message.contains("not found"),
+        "Expected 'not found' error for missing default pool, got: {}",
+        error.message
+    );
+}
+
+/// Test that attaching an ephemeral IP without a default pool returns a proper error.
+///
+/// This verifies that datastore errors bubble up correctly to the API level.
+#[nexus_test]
+async fn test_ephemeral_ip_fails_without_default_pool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let silo_id = DEFAULT_SILO.id();
+
+    // Create project and first pool (will hold instance SNAT)
+    create_project(&client, PROJECT_NAME).await;
+    let pool1_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 10))
+            .unwrap(),
+    );
+    create_ip_pool(&client, "pool1", Some(pool1_range)).await;
+    link_ip_pool(&client, "pool1", &silo_id, true).await; // default
+
+    // Create instance (uses pool1 for SNAT)
+    let instance = instance_for_external_ips(
+        client,
+        INSTANCE_NAMES[0],
+        false, // don't start
+        false, // no ephemeral IP
+        &[],   // no floating IPs
+    )
+    .await;
+
+    // Update pool1 to no longer be default (but stay linked)
+    let update_url = format!("/v1/system/ip-pools/pool1/silos/{}", silo_id);
+    let _: views::IpPoolSiloLink = object_put(
+        client,
+        &update_url,
+        &params::IpPoolSiloUpdate { is_default: false },
+    )
+    .await;
+
+    // Try to attach ephemeral IP with pool: None
+    let url = instance_ephemeral_ip_url(
+        instance.identity.name.as_str(),
+        PROJECT_NAME,
+    );
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::EphemeralIpCreate {
+                pool: None,
+                ip_version: None,
+            }))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request")
+    .parsed_body()
+    .unwrap();
+
+    // Verify the error message indicates no default pool found
+    assert!(
+        error.message.contains("not found"),
+        "Expected 'not found' error for missing default pool, got: {}",
+        error.message
+    );
 }
