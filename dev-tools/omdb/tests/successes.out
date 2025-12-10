@@ -1975,6 +1975,20 @@ note: database schema version matches expected (<redacted database version>)
 assembling reconfigurator state ... done
 saving to <TMP_PATH_REDACTED> ... done
 =============================================
+EXECUTING COMMAND: omdb ["db", "whatis", "..........<REDACTED_UUID>...........", "..........<REDACTED_UUID>..........."]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+..........<REDACTED_UUID>........... found in silo.id
+..........<REDACTED_UUID>........... found in silo_auth_settings.silo_id
+..........<REDACTED_UUID>........... found in silo_quotas.silo_id
+..........<REDACTED_UUID>........... found in virtual_provisioning_collection.id
+..........<REDACTED_UUID>........... found in silo_user.id
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
 EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-mark-nexus-quiesced", "--skip-confirmation", "--skip-blueprint-validation", "..........<REDACTED_UUID>..........."]
 termination: Exited(0)
 ---------------------------------------------

@@ -276,6 +276,12 @@ async fn sfd_get_pantry_address(
         .map_err(ActionError::action_failed)?
     {
         datastore::Disk::Crucible(disk) => disk,
+
+        datastore::Disk::LocalStorage(_) => {
+            // This is unreachable because the saga only accepts a CrucibleDisk,
+            // and disks cannot ever change type.
+            unreachable!();
+        }
     };
 
     // At any stage of executing this saga, if the disk moves from state

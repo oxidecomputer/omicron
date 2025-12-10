@@ -14,7 +14,7 @@ use dropshot::{
     Query, RequestContext, ResultsPage, StreamingBody, TypedBody,
     WebsocketChannelResult, WebsocketConnection,
 };
-use dropshot_api_manager_types::ValidationContext;
+use dropshot_api_manager_types::{ValidationContext, api_versions};
 use http::Response;
 use ipnetwork::IpNetwork;
 use nexus_types::{
@@ -33,7 +33,52 @@ use omicron_common::api::external::{
 };
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20251208.0.0";
+/// Copies of data types that changed between versions
+mod v2025112000;
+
+api_versions!([
+    // API versions are in the format YYYYMMDDNN.0.0, defined below as
+    // YYYYMMDDNN. Here, NN is a two-digit number starting at 00 for a
+    // particular date.
+    //
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- First, determine the next API version number to use.
+    // |
+    // |  * On the main branch: Take today's date in YYYYMMDD format, e.g. 20251112.
+    // |    Find the smallest NN that isn't already defined in the list below. In
+    // |    most cases, that is 00, but if 00 is already taken, use 01, 02, etc.
+    // |
+    // |  * On a release branch, don't alter the date. Instead, always bump the NN.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // |
+    // |  If there's a merge conflict, update the version number to the current
+    // |  date. Otherwise, it is okay to leave the version number unchanged even
+    // |  if you land your change on a different day from the one you make it on.
+    // |
+    // |  Ensure that version numbers are sorted in descending order. (This macro
+    // |  will panic at runtime if they're not in descending order.) The newest
+    // |  date-based version should be at the top of the list.
+    // v
+    // (next_yyyymmddnn, IDENT),
+    (2025120300, LOCAL_STORAGE),
+    (2025112000, INITIAL),
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2025120100, ADD_FOOBAR)
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
 
 const MIB: usize = 1024 * 1024;
 const GIB: usize = 1024 * MIB;
@@ -1361,9 +1406,41 @@ pub trait NexusExternalApi {
 
     /// List disks
     #[endpoint {
+        operation_id = "disk_list",
         method = GET,
         path = "/v1/disks",
         tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025112000::Disk>>, HttpError> {
+        match Self::disk_list(rqctx, query_params).await {
+            Ok(page) => {
+                let new_page = ResultsPage {
+                    next_page: page.0.next_page,
+                    items: {
+                        let mut items = Vec::with_capacity(page.0.items.len());
+                        for item in page.0.items {
+                            items.push(item.try_into()?);
+                        }
+                        items
+                    },
+                };
+
+                Ok(HttpResponseOk(new_page))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// List disks
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -1373,9 +1450,34 @@ pub trait NexusExternalApi {
     // TODO-correctness See note about instance create.  This should be async.
     /// Create a disk
     #[endpoint {
+        operation_id = "disk_create",
         method = POST,
         path = "/v1/disks",
-        tags = ["disks"]
+        tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_disk_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_disk: TypedBody<v2025112000::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2025112000::Disk>, HttpError> {
+        match Self::disk_create(rqctx, query_params, new_disk.map(Into::into))
+            .await
+        {
+            Ok(HttpResponseCreated(disk)) => {
+                Ok(HttpResponseCreated(disk.try_into()?))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create a disk
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn disk_create(
         rqctx: RequestContext<Self::Context>,
@@ -1385,9 +1487,29 @@ pub trait NexusExternalApi {
 
     /// Fetch disk
     #[endpoint {
+        operation_id = "disk_view",
         method = GET,
         path = "/v1/disks/{disk}",
-        tags = ["disks"]
+        tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_disk_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::DiskPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2025112000::Disk>, HttpError> {
+        match Self::disk_view(rqctx, path_params, query_params).await {
+            Ok(HttpResponseOk(disk)) => Ok(HttpResponseOk(disk.try_into()?)),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fetch disk
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn disk_view(
         rqctx: RequestContext<Self::Context>,
@@ -1477,9 +1599,27 @@ pub trait NexusExternalApi {
 
     /// Create instance
     #[endpoint {
+        operation_id = "disk_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2025112000::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+            .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
@@ -1605,9 +1745,45 @@ pub trait NexusExternalApi {
 
     /// List disks for instance
     #[endpoint {
+        operation_id = "instance_disk_list",
         method = GET,
         path = "/v1/instances/{instance}/disks",
         tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_instance_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025112000::Disk>>, HttpError> {
+        match Self::instance_disk_list(rqctx, query_params, path_params).await {
+            Ok(page) => {
+                let page = ResultsPage {
+                    next_page: page.0.next_page,
+                    items: {
+                        let mut items = Vec::with_capacity(page.0.items.len());
+                        for item in page.0.items {
+                            items.push(item.try_into()?);
+                        }
+                        items
+                    },
+                };
+
+                Ok(HttpResponseOk(page))
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    /// List disks for instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn instance_disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -1619,9 +1795,40 @@ pub trait NexusExternalApi {
 
     /// Attach disk to instance
     #[endpoint {
+        operation_id = "instance_disk_attach",
         method = POST,
         path = "/v1/instances/{instance}/disks/attach",
         tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_instance_disk_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2025112000::Disk>, HttpError> {
+        match Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach,
+        )
+        .await
+        {
+            Ok(HttpResponseAccepted(disk)) => {
+                Ok(HttpResponseAccepted(disk.try_into()?))
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Attach disk to instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn instance_disk_attach(
         rqctx: RequestContext<Self::Context>,
@@ -1632,9 +1839,40 @@ pub trait NexusExternalApi {
 
     /// Detach disk from instance
     #[endpoint {
+        operation_id = "instance_disk_detach",
         method = POST,
         path = "/v1/instances/{instance}/disks/detach",
         tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_instance_disk_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2025112000::Disk>, HttpError> {
+        match Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        {
+            Ok(HttpResponseAccepted(disk)) => {
+                Ok(HttpResponseAccepted(disk.try_into()?))
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Detach disk from instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn instance_disk_detach(
         rqctx: RequestContext<Self::Context>,
@@ -4364,8 +4602,37 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseDeleted, HttpError>;
 }
 
-/// Perform extra validations on the OpenAPI spec.
+/// Perform extra validations on the OpenAPI document, and generate the
+/// nexus_tags.txt file.
 pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
+    let blessed = cx
+        .is_blessed()
+        .expect("this is a versioned API so is_blessed should always be Some");
+
+    // There are two parts to this function:
+    //
+    // 1. Perform validation on the OpenAPI document.
+    // 2. Generate the nexus_tags.txt file.
+    //
+    // Step 1 should only be performed on non-blessed versions. That's because
+    // blessed versions are immutable, and if new checks are added in the
+    // future, we don't want old API versions to be affected.
+    //
+    // nexus_tags.txt is unversioned, so step 2 should only be performed on the
+    // latest version, whether or not it's blessed.
+
+    if !blessed {
+        validate_api_doc(spec, &mut cx);
+    }
+
+    // nexus_tags.txt is unversioned, so only write it out for the latest
+    // version (whether it's blessed or not).
+    if cx.is_latest() {
+        generate_tags_file(spec, &mut cx);
+    }
+}
+
+fn validate_api_doc(spec: &OpenAPI, cx: &mut ValidationContext<'_>) {
     if spec.openapi != "3.0.3" {
         cx.report_error(anyhow!(
             "Expected OpenAPI version to be 3.0.3, found {}",
@@ -4378,13 +4645,6 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
             spec.info.title,
         ));
     }
-    if spec.info.version != API_VERSION {
-        cx.report_error(anyhow!(
-            "Expected OpenAPI version to be '{}', found '{}'",
-            API_VERSION,
-            spec.info.version,
-        ));
-    }
 
     // Spot check a couple of items.
     if spec.paths.paths.is_empty() {
@@ -4394,13 +4654,7 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
         cx.report_error(anyhow!("Expected a path for /v1/projects"));
     }
 
-    // Construct a string that helps us identify the organization of tags and
-    // operations.
-    let mut ops_by_tag =
-        BTreeMap::<String, Vec<(String, String, String)>>::new();
-
-    let mut ops_by_tag_valid = true;
-    for (path, method, op) in spec.operations() {
+    for (_path, _method, op) in spec.operations() {
         // Make sure each operation has exactly one tag. Note, we intentionally
         // do this before validating the OpenAPI output as fixing an error here
         // would necessitate refreshing the spec file again.
@@ -4410,8 +4664,6 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
                 op.operation_id.as_ref().unwrap(),
                 op.tags.len()
             ));
-            ops_by_tag_valid = false;
-            continue;
         }
 
         // Every non-hidden endpoint must have a summary
@@ -4421,8 +4673,21 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
                 "operation '{}' is missing a summary doc comment",
                 op.operation_id.as_ref().unwrap()
             ));
-            // This error does not prevent `ops_by_tag` from being populated
-            // correctly, so we can continue.
+        }
+    }
+}
+
+fn generate_tags_file(spec: &OpenAPI, cx: &mut ValidationContext<'_>) {
+    // Construct a string that helps us identify the organization of tags and
+    // operations.
+    let mut ops_by_tag =
+        BTreeMap::<String, Vec<(String, String, String)>>::new();
+
+    for (path, method, op) in spec.operations() {
+        // If an operation doesn't have exactly one tag, skip generating the
+        // tags file entirely. (Validation above catches this case).
+        if op.tags.len() != 1 {
+            return;
         }
 
         ops_by_tag
@@ -4435,34 +4700,29 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
             ));
     }
 
-    if ops_by_tag_valid {
-        let mut tags = String::new();
-        for (tag, mut ops) in ops_by_tag {
-            ops.sort();
+    let mut tags = String::new();
+    for (tag, mut ops) in ops_by_tag {
+        ops.sort();
+        tags.push_str(&format!(r#"API operations found with tag "{}""#, tag));
+        tags.push_str(&format!(
+            "\n{:40} {:8} {}\n",
+            "OPERATION ID", "METHOD", "URL PATH"
+        ));
+        for (operation_id, method, path) in ops {
             tags.push_str(&format!(
-                r#"API operations found with tag "{}""#,
-                tag
+                "{:40} {:8} {}\n",
+                operation_id, method, path
             ));
-            tags.push_str(&format!(
-                "\n{:40} {:8} {}\n",
-                "OPERATION ID", "METHOD", "URL PATH"
-            ));
-            for (operation_id, method, path) in ops {
-                tags.push_str(&format!(
-                    "{:40} {:8} {}\n",
-                    operation_id, method, path
-                ));
-            }
-            tags.push('\n');
         }
-
-        // When this fails, verify that operations on which you're adding,
-        // renaming, or changing the tags are what you intend.
-        cx.record_file_contents(
-            "nexus/external-api/output/nexus_tags.txt",
-            tags.into_bytes(),
-        );
+        tags.push('\n');
     }
+
+    // When this fails, verify that operations on which you're adding,
+    // renaming, or changing the tags are what you intend.
+    cx.record_file_contents(
+        "nexus/external-api/output/nexus_tags.txt",
+        tags.into_bytes(),
+    );
 }
 
 pub type IpPoolRangePaginationParams =

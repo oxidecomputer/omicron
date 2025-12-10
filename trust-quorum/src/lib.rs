@@ -10,7 +10,7 @@ mod ledgers;
 mod proxy;
 mod task;
 
-pub use proxy::Proxy;
+pub use proxy::{Proxy, ProxyError};
 
 pub(crate) use connection_manager::{
     ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg,

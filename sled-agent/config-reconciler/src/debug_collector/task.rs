@@ -2,11 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Long-running tokio task responsible for updating the dump device setup in
-//! response to changes in available disks.
-
+use super::handle::DebugCollector;
 use crate::InternalDisksReceiver;
-use crate::dump_setup::DumpSetup;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use sled_storage::config::MountConfig;
@@ -21,6 +18,9 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 
+/// Set up the debug collector subsystem
+///
+/// See the comment in debug_collector/mod.rs for details.
 pub(crate) fn spawn(
     internal_disks_rx: InternalDisksReceiver,
     external_disks_rx: watch::Receiver<HashSet<Disk>>,
@@ -33,16 +33,16 @@ pub(crate) fn spawn(
     // to enqueue the request or for the request to complete.
     let (archive_tx, archive_rx) = mpsc::channel(1);
 
-    let dump_setup_task = DumpSetupTask {
+    let debug_collector_task = DebugCollectorTask {
         internal_disks_rx,
         external_disks_rx,
         archive_rx,
-        dump_setup: DumpSetup::new(base_log, mount_config),
+        debug_collector: DebugCollector::new(base_log, mount_config),
         last_disks_used: HashSet::new(),
-        log: base_log.new(slog::o!("component" => "DumpSetupTask")),
+        log: base_log.new(slog::o!("component" => "DebugCollectorTask")),
     };
 
-    tokio::spawn(dump_setup_task.run());
+    tokio::spawn(debug_collector_task.run());
 
     FormerZoneRootArchiver {
         log: DebugIgnore(
@@ -52,7 +52,16 @@ pub(crate) fn spawn(
     }
 }
 
-struct DumpSetupTask {
+/// The `DebugCollectorTask` does two things:
+///
+/// - watches for changes to the disk-related `watch` channels and propagates
+///   them to the `DebugCollectorWorker`
+///
+/// - accepts requests to archive debug data from former zone root filesystems
+///   and propagates them to the `DebugCollectorWorker`
+///
+/// See the comment in debug_collector/mod.rs for details.
+struct DebugCollectorTask {
     // Input channels on which we receive updates about disk changes.
     internal_disks_rx: InternalDisksReceiver,
     external_disks_rx: watch::Receiver<HashSet<Disk>>,
@@ -60,15 +69,16 @@ struct DumpSetupTask {
     archive_rx: mpsc::Receiver<FormerZoneRootArchiveRequest>,
 
     // Invokes dumpadm(8) and savecore(8) when new disks are encountered
-    dump_setup: DumpSetup,
+    debug_collector: DebugCollector,
 
-    // Set of internal + external disks we most recently passed to `dump_setup`.
+    // Set of internal + external disks we most recently passed to the
+    // Debug Collector
     last_disks_used: HashSet<Disk>,
 
     log: Logger,
 }
 
-impl DumpSetupTask {
+impl DebugCollectorTask {
     async fn run(mut self) {
         self.update_setup_if_needed().await;
 
@@ -119,7 +129,7 @@ impl DumpSetupTask {
                          completion_tx
                     } = request;
                     self
-                        .dump_setup
+                        .debug_collector
                         .archive_former_zone_root(&path, completion_tx)
                         .await;
                 }
@@ -138,7 +148,7 @@ impl DumpSetupTask {
             .collect::<HashSet<_>>();
 
         if disks_avail != self.last_disks_used {
-            self.dump_setup.update_dumpdev_setup(disks_avail.iter()).await;
+            self.debug_collector.update_dumpdev_setup(disks_avail.iter()).await;
             self.last_disks_used = disks_avail;
         }
     }

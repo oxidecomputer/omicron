@@ -192,9 +192,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         },
         ManagedApiConfig {
             title: "Oxide Region API",
-            versions: Versions::new_lockstep(semver::Version::new(
-                20251208, 0, 0,
-            )),
+            versions: Versions::new_versioned(
+                nexus_external_api::supported_versions(),
+            ),
             metadata: ManagedApiMetadata {
                 description: Some(
                     "API for interacting with the Oxide control plane",
@@ -315,6 +315,7 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
     let apis = ManagedApis::new(apis)
         .context("error creating ManagedApis")?
         .with_validation(validate);
+
     Ok(apis)
 }
 
