@@ -12,7 +12,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_project, object_create,
+    create_default_ip_pools, create_instance, create_project, object_create,
     object_delete, object_get, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
@@ -38,7 +38,7 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
     // Setup: project, pools, group with member - parallelize creation
     let (_, _, mcast_pool) = ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -114,7 +114,7 @@ async fn test_multicast_reconciler_state_consistency_validation(
     // Create multiple groups to test reconciler batch processing with failures
     let (_, _, mcast_pool) = ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -207,7 +207,7 @@ async fn test_dpd_failure_during_creating_state(
     // Setup: project, pools, group with member - parallelize creation
     let (_, _, mcast_pool) = ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -294,7 +294,7 @@ async fn test_dpd_failure_during_active_state(
 
     // Setup: project, pools, group with member
     create_project(&client, project_name).await;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     let mcast_pool = create_multicast_ip_pool(&client, "mcast-pool").await;
 
@@ -392,7 +392,7 @@ async fn test_dpd_failure_during_deleting_state(
 
     // Setup: project, pools, group with member
     create_project(&client, project_name).await;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     let mcast_pool = create_multicast_ip_pool(&client, "mcast-pool").await;
 
@@ -512,7 +512,7 @@ async fn test_multicast_group_members_during_dpd_failure(
     // Setup: project, pools, group with member - parallelize creation
     let (_, _, mcast_pool) = ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;

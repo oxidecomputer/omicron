@@ -10,7 +10,7 @@ use gateway_client::types::{PowerState, RotState, SpState};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_project,
+    create_default_ip_pools, create_project,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::SledFilter;
@@ -48,7 +48,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
 
     // Create project and multicast IP pool
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     create_project(client, PROJECT_NAME).await;
     let pool = create_multicast_ip_pool(client, "sled-move-pool").await;
 
@@ -319,7 +319,7 @@ async fn test_cache_ttl_driven_refresh() {
     let client = &cptestctx.external_client;
 
     // Create project and multicast IP pool
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     create_project(client, PROJECT_NAME).await;
     let pool = create_multicast_ip_pool(client, "ttl-test-pool").await;
 
@@ -530,7 +530,7 @@ async fn test_backplane_cache_ttl_expiry() {
     let client = &cptestctx.external_client;
 
     // Create project and multicast IP pool
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     create_project(client, PROJECT_NAME).await;
     let pool = create_multicast_ip_pool(client, "backplane-ttl-pool").await;
 

@@ -21,7 +21,7 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::dpd_client;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_project, link_ip_pool,
+    create_default_ip_pools, create_instance, create_project, link_ip_pool,
     object_create, object_create_error, object_delete, object_get,
     object_get_error, object_put, object_put_error,
 };
@@ -446,7 +446,7 @@ async fn test_multicast_group_with_source_ips(
 
     // Create a project and SSM multicast IP pool (232.0.0.0/8 range)
     create_project(&client, project_name).await;
-    create_default_ip_pool(&client).await; // Required for any instance operations
+    create_default_ip_pools(&client).await; // Required for any instance operations
     let mcast_pool = create_multicast_ip_pool_with_range(
         &client,
         "mcast-pool",
@@ -727,7 +727,7 @@ async fn test_multicast_group_member_operations(
     // Create project and IP pools in parallel
     let (_, _, mcast_pool) = ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client), // For instance networking
+        create_default_ip_pools(&client), // For instance networking
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",
@@ -928,7 +928,7 @@ async fn test_instance_multicast_endpoints(
 
     // Create a project, default unicast pool, and multicast IP pool
     create_project(&client, project_name).await;
-    create_default_ip_pool(&client).await; // For instance networking
+    create_default_ip_pools(&client).await; // For instance networking
     let mcast_pool = create_multicast_ip_pool_with_range(
         &client,
         "mcast-pool",
@@ -1327,7 +1327,7 @@ async fn test_instance_deletion_removes_multicast_memberships(
 
     // Setup: project, pools, group with unique IP range
     create_project(&client, project_name).await;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     let mcast_pool = create_multicast_ip_pool_with_range(
         &client,
         "mcast-pool",
@@ -1432,7 +1432,7 @@ async fn test_member_operations_via_rpw_reconciler(
 
     // Setup: project, pools, group with unique IP range
     create_project(&client, project_name).await;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     let mcast_pool = create_multicast_ip_pool_with_range(
         &client,
         "mcast-pool",
@@ -2655,7 +2655,7 @@ async fn test_multicast_group_mvlan_with_member_operations(
     let instance_name = "mvlan-test-instance";
 
     // Setup
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     create_project(&client, project_name).await;
     let mcast_pool = create_multicast_ip_pool_with_range(
         &client,
@@ -2766,7 +2766,7 @@ async fn test_multicast_group_mvlan_reconciler_update(
     let instance_name = "mvlan-reconciler-instance";
 
     // Setup
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     create_project(&client, project_name).await;
     let mcast_pool = create_multicast_ip_pool_with_range(
         &client,
