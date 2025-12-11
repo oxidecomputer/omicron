@@ -193,14 +193,6 @@ impl Nexus {
     ) -> Result<Alert, Error> {
         let alert =
             self.datastore().alert_create(opctx, id, class, event).await?;
-        slog::debug!(
-            &opctx.log,
-            "published alert";
-            "alert_id" => ?id,
-            "alert_class" => %alert.class,
-            "time_created" => ?alert.identity.time_created,
-        );
-
         // Once the alert has been inserted, activate the dispatcher task to
         // ensure its propagated to receivers.
         self.background_tasks.task_alert_dispatcher.activate();

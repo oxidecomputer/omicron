@@ -23,6 +23,28 @@ pub struct Ereport {
     pub reporter: Reporter,
 }
 
+impl Ereport {
+    pub fn id(&self) -> &EreportId {
+        &self.data.id
+    }
+}
+
+impl core::ops::Deref for Ereport {
+    type Target = EreportData;
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl iddqd::IdOrdItem for Ereport {
+    type Key<'a> = &'a EreportId;
+    fn key(&self) -> Self::Key<'_> {
+        self.id()
+    }
+
+    iddqd::id_upcast!();
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EreportData {
     #[serde(flatten)]
@@ -123,7 +145,16 @@ impl EreportData {
 
 /// Describes the source of an ereport.
 #[derive(
-    Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize,
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    Hash,
 )]
 #[serde(tag = "reporter")]
 pub enum Reporter {
@@ -133,18 +164,17 @@ pub enum Reporter {
 
 impl fmt::Display for Reporter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Display format based on:
+        // https://rfd.shared.oxide.computer/rfd/200#_labeling
         match self {
-            Self::Sp { sp_type: SpType::Sled, slot } => {
-                write!(f, "Sled (SP) {slot:02}")
-            }
-            Self::Sp { sp_type: SpType::Switch, slot } => {
-                write!(f, "Switch {slot}")
-            }
-            Self::Sp { sp_type: SpType::Power, slot } => {
-                write!(f, "PSC {slot}")
+            Self::Sp { sp_type: sp_type @ SpType::Sled, slot } => {
+                write!(f, "{sp_type} {slot:<2} (SP)")
             }
             Self::HostOs { sled } => {
-                write!(f, "Sled (OS) {sled:?}")
+                write!(f, "{} {sled:?} (OS)", SpType::Sled)
+            }
+            Self::Sp { sp_type, slot } => {
+                write!(f, "{sp_type} {slot}")
             }
         }
     }
