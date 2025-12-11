@@ -26,9 +26,9 @@ use dropshot::HttpError;
 use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
-    HealthMonitorInventory, HostPhase2DesiredSlots, Inventory,
-    InventoryDataset, InventoryDisk, InventoryZpool, OmicronSledConfig,
-    OmicronZonesConfig, SledRole, ZoneImageResolverInventory,
+    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
+    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
+    ZoneImageResolverInventory,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -58,6 +58,7 @@ use propolis_client::{
 use range_requests::PotentialRange;
 use sled_agent_api::LocalStorageDatasetEnsureRequest;
 use sled_agent_api::SupportBundleMetadata;
+use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -113,6 +114,7 @@ pub struct SledAgent {
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
+    health_monitor: HealthMonitorHandle,
 }
 
 impl SledAgent {
@@ -166,6 +168,14 @@ impl SledAgent {
                 .await
                 .start(&log, &config.dropshot);
 
+        // TODO: This will always report a healthy state for all services for
+        // now. Eventually, we'll want to have the ability to "turn on" the real
+        // health monitor on simulated systems
+        let health_monitor = HealthMonitorHandle::new();
+        // TODO-K: removeme
+        //crate::long_running_tasks::spawn_health_monitor_tasks(&log)
+        //    .await;
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -198,6 +208,7 @@ impl SledAgent {
             repo_depot,
             log,
             bootstore_network_config,
+            health_monitor,
         })
     }
 
@@ -799,8 +810,6 @@ impl SledAgent {
             SocketAddr::V6(v6) => v6,
         };
 
-        let health_monitor = HealthMonitorInventory::new();
-
         let storage = self.storage.lock();
 
         let disks_config =
@@ -808,6 +817,7 @@ impl SledAgent {
         let datasets_config =
             storage.datasets_config_list().unwrap_or_default();
         let zones_config = self.fake_zones.lock().unwrap().clone();
+        let health_monitor = self.health_monitor.to_inventory();
 
         let sled_config = OmicronSledConfig {
             generation: zones_config.generation,
