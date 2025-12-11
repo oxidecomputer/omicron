@@ -116,7 +116,7 @@ fn get_nexus_ids_at_generation(
     generation: Generation,
 ) -> BTreeSet<OmicronZoneUuid> {
     blueprint
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(_, z)| match &z.zone_type {
             BlueprintZoneType::Nexus(nexus_zone)
                 if nexus_zone.nexus_generation == generation =>
@@ -502,7 +502,7 @@ fn test_spread_internal_dns_zones_across_sleds() {
     // Expunge two of the internal DNS zones; the planner should put new
     // zones back in their places.
     let zones_to_expunge = blueprint1
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(sled_id, zone)| {
             zone.zone_type.is_internal_dns().then_some((sled_id, zone.id))
         })
@@ -760,7 +760,7 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
 
     assert_eq!(
         blueprint1a
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, zone)| zone.zone_type.is_external_dns())
             .count(),
         3,
@@ -775,7 +775,7 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     // This blueprint should have three external DNS zones.
     assert_eq!(
         blueprint2
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, zone)| zone.zone_type.is_external_dns())
             .count(),
         3,
@@ -810,7 +810,7 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     // The IP addresses of the new external DNS zones should be the
     // same as the original set that we set up.
     let mut ips = blueprint3
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(_id, zone)| {
             zone.zone_type
                 .is_external_dns()
@@ -1342,7 +1342,7 @@ fn test_disk_expungement_removes_zones_transient_filesystem() {
     let mut zones_on_pool = BTreeSet::new();
     let mut zone_kinds_on_pool = BTreeMap::<_, usize>::new();
     for (_, zone_config) in
-        blueprint1.danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        blueprint1.in_service_zones()
     {
         if pool_to_expunge == zone_config.filesystem_pool {
             zones_on_pool.insert(zone_config.id);
@@ -1959,7 +1959,7 @@ fn test_crucible_pantry() {
     // We should start with CRUCIBLE_PANTRY_REDUNDANCY pantries spread out
     // to at most 1 per sled. Find one of the sleds running one.
     let pantry_sleds = blueprint1
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(sled_id, zone)| {
             zone.zone_type.is_crucible_pantry().then_some(sled_id)
         })
@@ -1981,7 +1981,7 @@ fn test_crucible_pantry() {
     println!("1 -> 2 (expunged sled):\n{}", diff.display());
     assert_eq!(
         blueprint2
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(sled_id, zone)| *sled_id != expunged_sled_id
                 && zone.zone_type.is_crucible_pantry())
             .count(),
@@ -2034,7 +2034,7 @@ fn test_single_node_clickhouse() {
     println!("1 -> 2 (expunged sled):\n{}", diff.display());
     assert_eq!(
         blueprint2
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(sled, zone)| *sled != clickhouse_sled
                 && zone.zone_type.is_clickhouse())
             .count(),
@@ -2087,7 +2087,7 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
 
     // We should see zones for 3 clickhouse keepers, and 2 servers created
     let active_zones: Vec<_> = blueprint2
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .map(|(_, z)| z.clone())
         .collect();
 
@@ -2214,7 +2214,7 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
     );
 
     let active_zones: Vec<_> = blueprint5
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .map(|(_, z)| z.clone())
         .collect();
 
@@ -2349,7 +2349,7 @@ fn test_expunge_clickhouse_clusters() {
 
     // We should see zones for 3 clickhouse keepers, and 2 servers created
     let active_zones: Vec<_> = blueprint2
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .map(|(_, z)| z.clone())
         .collect();
 
@@ -2422,7 +2422,7 @@ fn test_expunge_clickhouse_clusters() {
 
     // Find the sled containing one of the keeper zones and expunge it
     let (sled_id, bp_zone_config) = blueprint3
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .find(|(_, z)| z.zone_type.is_clickhouse_keeper())
         .unwrap();
 
@@ -2547,7 +2547,7 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
 
     // We should see zones for 3 clickhouse keepers, and 2 servers created
     let active_zones: Vec<_> = blueprint2
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .map(|(_, z)| z.clone())
         .collect();
 
@@ -2627,7 +2627,7 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
     assert_eq!(
         1,
         blueprint4
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| z.zone_type.is_clickhouse())
             .count()
     );
@@ -3115,7 +3115,7 @@ fn test_update_crucible_pantry_before_nexus() {
     // default.
     assert!(
         blueprint1
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .all(|(_, z)| matches!(
                 &z.image_source,
                 BlueprintZoneImageSource::Artifact { version, hash: _ }
@@ -3296,7 +3296,7 @@ fn test_update_crucible_pantry_before_nexus() {
     // All Crucible Pantries should now be updated.
     assert_eq!(
         blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| is_up_to_date_pantry(z))
             .count(),
         CRUCIBLE_PANTRY_REDUNDANCY
@@ -3415,14 +3415,14 @@ fn test_update_crucible_pantry_before_nexus() {
     let blueprint12 = parent;
     assert_eq!(
         blueprint12
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| is_up_to_date_nexus(z))
             .count(),
         NEXUS_REDUNDANCY,
     );
     assert_eq!(
         blueprint12
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| is_old_nexus(z))
             .count(),
         0,
@@ -3485,7 +3485,7 @@ fn test_update_cockroach() {
     eprintln!("{}", blueprint.display());
     assert!(
         blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .all(|(_, z)| matches!(
                 &z.image_source,
                 BlueprintZoneImageSource::Artifact { version, hash: _ }
@@ -3658,14 +3658,14 @@ fn test_update_cockroach() {
 
         assert_eq!(
             blueprint
-                .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter(|(_, z)| is_old_cockroach(z))
                 .count(),
             COCKROACHDB_REDUNDANCY - i
         );
         assert_eq!(
             blueprint
-                .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter(|(_, z)| is_up_to_date_cockroach(z))
                 .count(),
             i
@@ -3859,7 +3859,7 @@ fn test_update_boundary_ntp() {
     // All zones should be sourced from the 0.0.1 repo by default.
     assert!(
         blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .all(|(_, z)| matches!(
                 &z.image_source,
                 BlueprintZoneImageSource::Artifact { version, hash: _ }
@@ -3939,7 +3939,7 @@ fn test_update_boundary_ntp() {
     };
     let old_boundary_ntp_count = |blueprint: &Blueprint| -> usize {
         blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| is_old_boundary_ntp(z))
             .count()
     };
@@ -3948,7 +3948,7 @@ fn test_update_boundary_ntp() {
     };
     let up_to_date_boundary_ntp_count = |blueprint: &Blueprint| -> usize {
         blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| is_up_to_date_boundary_ntp(z))
             .count()
     };
@@ -4253,7 +4253,7 @@ fn test_update_internal_dns() {
     // All zones should be sourced from the initial TUF repo by default.
     assert!(
         blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .all(|(_, z)| matches!(
                 &z.image_source,
                 BlueprintZoneImageSource::Artifact { version, hash: _ }
@@ -4452,14 +4452,14 @@ fn test_update_internal_dns() {
 
         assert_eq!(
             blueprint
-                .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter(|(_, z)| is_old_internal_dns(z))
                 .count(),
             INTERNAL_DNS_REDUNDANCY - i
         );
         assert_eq!(
             blueprint
-                .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter(|(_, z)| is_up_to_date_internal_dns(z))
                 .count(),
             i
@@ -4509,7 +4509,7 @@ fn test_update_all_zones() {
     // All zones should be sourced from the 0.0.1 repo by default.
     assert!(
         blueprint1
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .all(|(_, z)| matches!(
                 &z.image_source,
                 BlueprintZoneImageSource::Artifact { version, hash: _ }

@@ -67,7 +67,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
 
     for (sled_id, zone) in blippy
         .blueprint()
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
     {
         let ip = zone.underlay_ip();
 
@@ -160,7 +160,7 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
 
     for (sled_id, zone, external_ip, nic) in blippy
         .blueprint()
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(sled_id, zone)| {
             zone.zone_type
                 .external_networking()
@@ -265,7 +265,7 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
     // kind.
     for (sled_id, zone) in blippy
         .blueprint()
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
     {
         // Check "one kind per zpool" for transient datasets...
         let filesystem_dataset = zone.filesystem_dataset();
@@ -691,7 +691,7 @@ fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
     // Collect all Nexus zones and their generations
     for (sled_id, zone) in blippy
         .blueprint()
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
     {
         if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
             generation_info.entry(nexus.nexus_generation).or_default().push((

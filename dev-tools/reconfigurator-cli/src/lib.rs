@@ -160,7 +160,7 @@ impl ReconfiguratorSim {
 
         // Handle zone networking setup first
         for (_, zone) in parent_blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
         {
             if let Some((external_ip, nic)) =
                 zone.zone_type.external_networking()
@@ -233,7 +233,7 @@ impl ReconfiguratorSim {
                 state.config().active_nexus_zone_generation();
             let mut not_yet_nexus_zones = BTreeSet::new();
             for (_, zone) in parent_blueprint
-                .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
             {
                 match &zone.zone_type {
                     nexus_types::deployment::BlueprintZoneType::Nexus(

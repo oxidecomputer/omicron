@@ -307,6 +307,16 @@ impl Blueprint {
         }
     }
 
+    /// Iterate over the in-service [`BlueprintZoneConfig`] instances in the
+    /// blueprint, along with the associated sled id.
+    pub fn in_service_zones(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
+    {
+        // TODO-john explain
+        self.danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+    }
+
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
     /// that match the provided filter, along with the associated sled id.
     ///

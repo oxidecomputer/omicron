@@ -4296,7 +4296,7 @@ mod tests {
 
         // Insert an IP pool range covering the one Nexus IP.
         let nexus_ip = blueprint1
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .find_map(|(_, zone_config)| {
                 zone_config
                     .zone_type

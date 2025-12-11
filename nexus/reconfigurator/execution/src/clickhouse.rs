@@ -235,7 +235,7 @@ pub(crate) async fn deploy_single_node(
     deploy_single_node_impl(
         opctx,
         blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| z.zone_type.is_clickhouse()),
     )
     .await

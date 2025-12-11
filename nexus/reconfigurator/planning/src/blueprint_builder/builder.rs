@@ -3317,7 +3317,7 @@ pub mod test {
         // provisions CRDB; this check makes sure we update our use of it if
         // that changes).
         for (_, z) in
-            parent.danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            parent.in_service_zones()
         {
             assert!(
                 !z.zone_type.is_cockroach(),
@@ -3361,7 +3361,7 @@ pub mod test {
         verify_blueprint(&blueprint, &input);
         assert_eq!(
             blueprint
-                .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter(|(sled_id, z)| {
                     *sled_id == target_sled_id
                         && z.zone_type.kind() == ZoneKind::CockroachDb

@@ -822,7 +822,7 @@ mod test {
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
         let omicron_zones_by_ip: BTreeMap<_, _> = blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .map(|(_, zone)| (zone.underlay_ip(), zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);

@@ -269,7 +269,7 @@ mod tests {
         // `ExampleSystemBuilder` doesn't place any cockroach nodes; assert so
         // we bail out early if that changes.
         let ncockroach = bp0
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| z.zone_type.is_cockroach())
             .count();
         assert_eq!(ncockroach, 0);

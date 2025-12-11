@@ -104,7 +104,7 @@ pub fn blueprint_external_dns_nameserver_ips(
     blueprint: &Blueprint,
 ) -> Vec<IpAddr> {
     blueprint
-        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(_, z)| match z.zone_type {
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { dns_address, .. },
