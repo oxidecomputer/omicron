@@ -527,7 +527,7 @@ impl DataStore {
             };
 
         // If any local storage disks have been allocated already, then this
-        // constraints VMM placement and where other unallocated local storage
+        // constrains VMM placement and where other unallocated local storage
         // must be.
         let maybe_must_use_sleds = if !local_storage_disks.is_empty() {
             // Any local storage disk that was allocated already will have a
