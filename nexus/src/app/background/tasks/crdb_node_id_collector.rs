@@ -143,12 +143,10 @@ impl CockroachAdminFromBlueprint for CockroachAdminFromBlueprintViaFixedPort {
         &'a self,
         blueprint: &'a Blueprint,
     ) -> impl Iterator<Item = (OmicronZoneUuid, SocketAddrV6)> + 'a {
-        // We can only actively collect from zones that should be running; if
+        // We can only actively collect from zones that should be in-service; if
         // there are CRDB zones in other states that still need their node ID
         // collected, we have to wait until they're running.
-        let zone_filter = BlueprintZoneDisposition::is_in_service;
-
-        blueprint.danger_all_omicron_zones(zone_filter).filter_map(
+        blueprint.in_service_zones().filter_map(
             |(_sled_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb { address, .. },

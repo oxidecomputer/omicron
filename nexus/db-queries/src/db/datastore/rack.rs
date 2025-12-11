@@ -1503,9 +1503,7 @@ mod test {
         let mut ntp1_id = None;
         let mut ntp2_id = None;
         let mut ntp3_id = None;
-        for (sled_id, zone) in
-            blueprint.in_service_zones()
-        {
+        for (sled_id, zone) in blueprint.in_service_zones() {
             match &zone.zone_type {
                 BlueprintZoneType::BoundaryNtp(_) => {
                     let which = if sled_id == sled1.id() {
@@ -1750,10 +1748,8 @@ mod test {
         assert_eq!(observed_blueprint, blueprint);
 
         // We should see both of the Nexus services we provisioned.
-        let mut observed_zones: Vec<_> = observed_blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::any)
-            .map(|(_, z)| z)
-            .collect();
+        let mut observed_zones: Vec<_> =
+            observed_blueprint.in_service_zones().map(|(_, z)| z).collect();
         observed_zones.sort_by_key(|z| z.id);
         assert_eq!(observed_zones.len(), 2);
 
@@ -1778,12 +1774,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .danger_all_omicron_zones(BlueprintZoneDisposition::any)
-                .next()
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().next().unwrap().1.zone_type
             {
                 external_ip.ip
             } else {
@@ -1797,12 +1788,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .danger_all_omicron_zones(BlueprintZoneDisposition::any)
-                .nth(1)
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().nth(1).unwrap().1.zone_type
             {
                 external_ip.ip
             } else {
@@ -1955,10 +1941,8 @@ mod test {
         assert_eq!(observed_blueprint, blueprint);
 
         // We should see the Nexus service we provisioned.
-        let mut observed_zones: Vec<_> = observed_blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::any)
-            .map(|(_, z)| z)
-            .collect();
+        let mut observed_zones: Vec<_> =
+            observed_blueprint.in_service_zones().map(|(_, z)| z).collect();
         observed_zones.sort_by_key(|z| z.id);
         assert_eq!(observed_zones.len(), 1);
 
@@ -1985,12 +1969,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .danger_all_omicron_zones(BlueprintZoneDisposition::any)
-                .next()
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().next().unwrap().1.zone_type
             {
                 external_ip.ip
             } else {

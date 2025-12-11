@@ -3245,9 +3245,7 @@ pub mod test {
             // that are already in use by existing zones. Attempting to add a
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
-            for (_, z) in
-                parent.danger_all_omicron_zones(BlueprintZoneDisposition::any)
-            {
+            for (_, z) in parent.in_service_zones() {
                 if let Some((external_ip, _)) =
                     z.zone_type.external_networking()
                 {
@@ -3316,9 +3314,7 @@ pub mod test {
         // Ensure no CRDB zones (currently `ExampleSystemBuilder` never
         // provisions CRDB; this check makes sure we update our use of it if
         // that changes).
-        for (_, z) in
-            parent.in_service_zones()
-        {
+        for (_, z) in parent.in_service_zones() {
             assert!(
                 !z.zone_type.is_cockroach(),
                 "unexpected cockroach zone \

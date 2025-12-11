@@ -628,6 +628,8 @@ pub struct OperatorNexusConfig<'a> {
 /// TODO-john
 pub enum BlueprintExpungedZoneAccessReason {
     /// TODO-john
+    DeallocateExternalNetworkingResources,
+    /// TODO-john
     Test,
 }
 

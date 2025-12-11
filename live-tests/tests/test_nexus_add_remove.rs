@@ -307,7 +307,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // We don't need to check this here.  It just provides a better error
     // message if something has gone wrong up to this point.
     let (_, expunged_zone_config) = new_blueprint
-        .danger_all_omicron_zones(|_| true)
+        .expunged_zones(BlueprintExpungedZoneAccessReason::Test)
         .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
         .expect("expunged zone in new blueprint");
     assert!(expunged_zone_config.disposition.is_ready_for_cleanup());

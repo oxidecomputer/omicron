@@ -1018,7 +1018,6 @@ mod tests {
     use internal_dns_resolver::Resolver;
     use internal_dns_types::names::ServiceName;
     use nexus_types::deployment::BlueprintZoneConfig;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::execution::blueprint_internal_dns_config;
     use nexus_types::deployment::execution::overridables;
     use nexus_types::internal_api::params::DnsConfigParams;
@@ -1446,9 +1445,7 @@ mod tests {
                 }
                 ServiceName::Crucible(_) => {
                     // Each Crucible zone should be queryable.
-                    for (_, zone) in blueprint.danger_all_omicron_zones(
-                        BlueprintZoneDisposition::is_in_service,
-                    ) {
+                    for (_, zone) in blueprint.in_service_zones() {
                         if zone.kind() == ZoneKind::Crucible {
                             out.insert(ServiceName::Crucible(zone.id), Ok(()));
                         }
@@ -1471,7 +1468,7 @@ mod tests {
         kind: ZoneKind,
     ) -> Vec<&BlueprintZoneConfig> {
         blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::any)
+            .in_service_zones()
             .filter_map(|(_, zone)| {
                 (zone.zone_type.kind() == kind).then_some(zone)
             })

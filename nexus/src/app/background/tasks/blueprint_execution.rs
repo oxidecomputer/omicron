@@ -520,9 +520,7 @@ mod test {
         .await;
 
         // Insert records for the zpools backing the datasets in these zones.
-        for (sled_id, config) in
-            loaded.blueprint.danger_all_omicron_zones(BlueprintZoneDisposition::any)
-        {
+        for (sled_id, config) in loaded.blueprint.in_service_zones() {
             let Some(dataset) = config.zone_type.durable_dataset() else {
                 continue;
             };

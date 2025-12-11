@@ -2012,7 +2012,7 @@ fn test_single_node_clickhouse() {
 
     // We should start with one ClickHouse zone. Find out which sled it's on.
     let clickhouse_sleds = blueprint1
-        .danger_all_omicron_zones(BlueprintZoneDisposition::any)
+        .in_service_zones()
         .filter_map(|(sled, zone)| {
             zone.zone_type.is_clickhouse().then(|| Some(sled))
         })
