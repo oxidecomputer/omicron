@@ -5,11 +5,16 @@
 //! Re-exports of the latest versions of all published types.
 
 pub mod caboose {
+    pub use crate::v1::caboose::ComponentCabooseSlot;
     pub use crate::v1::caboose::SpComponentCaboose;
 }
 
 pub mod component {
+    pub use crate::v1::component::PathSp;
+    pub use crate::v1::component::PathSpComponent;
+    pub use crate::v1::component::PathSpComponentFirmwareSlot;
     pub use crate::v1::component::PowerState;
+    pub use crate::v1::component::SetComponentActiveSlotParams;
     pub use crate::v1::component::SpComponentFirmwareSlot;
     pub use crate::v1::component::SpComponentInfo;
     pub use crate::v1::component::SpComponentList;
@@ -48,6 +53,7 @@ pub mod host {
 
 pub mod ignition {
     pub use crate::v1::ignition::IgnitionCommand;
+    pub use crate::v1::ignition::PathSpIgnitionCommand;
 
     pub use crate::v2::ignition::SpIgnition;
     pub use crate::v2::ignition::SpIgnitionInfo;
@@ -55,6 +61,8 @@ pub mod ignition {
 }
 
 pub mod rot {
+    pub use crate::v1::rot::GetCfpaParams;
+    pub use crate::v1::rot::GetRotBootInfoParams;
     pub use crate::v1::rot::ImageVersion;
     pub use crate::v1::rot::RotCfpa;
     pub use crate::v1::rot::RotCfpaSlot;
@@ -66,19 +74,23 @@ pub mod rot {
 }
 
 pub mod sensor {
+    pub use crate::v1::sensor::PathSpSensorId;
     pub use crate::v1::sensor::SpSensorReading;
     pub use crate::v1::sensor::SpSensorReadingResult;
 }
 
 pub mod task_dump {
+    pub use crate::v1::task_dump::PathSpTaskDumpIndex;
     pub use crate::v1::task_dump::TaskDump;
 }
 
 pub mod update {
+    pub use crate::v1::update::ComponentUpdateIdSlot;
     pub use crate::v1::update::HostPhase2Progress;
     pub use crate::v1::update::HostPhase2RecoveryImageId;
     pub use crate::v1::update::InstallinatorImageId;
     pub use crate::v1::update::SpComponentResetError;
     pub use crate::v1::update::SpUpdateStatus;
+    pub use crate::v1::update::UpdateAbortBody;
     pub use crate::v1::update::UpdatePreparationProgress;
 }

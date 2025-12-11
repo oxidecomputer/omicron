@@ -169,3 +169,31 @@ pub enum HostPhase2Progress {
 pub struct HostPhase2RecoveryImageId {
     pub sha256_hash: ArtifactHash,
 }
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ComponentUpdateIdSlot {
+    /// An identifier for this update.
+    ///
+    /// This ID applies to this single instance of the API call; it is not an
+    /// ID of `image` itself. Multiple API calls with the same `image` should
+    /// use different IDs.
+    pub id: Uuid,
+    /// The update slot to apply this image to. Supply 0 if the component only
+    /// has one update slot.
+    pub firmware_slot: u16,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct UpdateAbortBody {
+    /// The ID of the update to abort.
+    ///
+    /// If the SP is currently receiving an update with this ID, it will be
+    /// aborted.
+    ///
+    /// If the SP is currently receiving an update with a different ID, the
+    /// abort request will fail.
+    ///
+    /// If the SP is not currently receiving any update, the request to abort
+    /// should succeed but will not have actually done anything.
+    pub id: Uuid,
+}

@@ -5,6 +5,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::v1::component::SpIdentifier;
+
 #[derive(
     Debug,
     Clone,
@@ -31,4 +33,14 @@ pub struct TaskDump {
     pub vers: Option<String>,
     /// Base64-encoded zip file containing dehydrated task dump.
     pub base64_zip: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PathSpTaskDumpIndex {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    /// The index of the task dump to be read.
+    pub task_dump_index: u32,
 }

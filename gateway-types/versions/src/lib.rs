@@ -10,5 +10,7 @@
 //! 619](https://rfd.shared.oxide.computer/rfd/0619).
 
 pub mod latest;
+#[path = "initial/mod.rs"]
 pub mod v1;
+#[path = "cosmo/mod.rs"]
 pub mod v2;

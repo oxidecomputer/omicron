@@ -401,3 +401,17 @@ pub struct RotCfpa {
     pub base64_data: String,
     pub slot: RotCfpaSlot,
 }
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, JsonSchema,
+)]
+pub struct GetCfpaParams {
+    pub slot: RotCfpaSlot,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, JsonSchema,
+)]
+pub struct GetRotBootInfoParams {
+    pub version: u8,
+}

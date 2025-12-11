@@ -314,3 +314,41 @@ impl From<gateway_messages::DevicePresence> for SpComponentPresence {
 pub struct SpComponentFirmwareSlot {
     pub slot: u16,
 }
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PathSp {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PathSpComponent {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    /// ID for the component of the SP; this is the internal identifier used by
+    /// the SP itself to identify its components.
+    pub component: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PathSpComponentFirmwareSlot {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    /// ID for the component of the SP; this is the internal identifier used by
+    /// the SP itself to identify its components.
+    pub component: String,
+    /// Firmware slot of the component.
+    pub firmware_slot: u16,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SetComponentActiveSlotParams {
+    /// Persist this choice of active slot.
+    pub persist: bool,
+}

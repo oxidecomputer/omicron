@@ -140,3 +140,13 @@ impl From<IgnitionCommand> for gateway_messages::IgnitionCommand {
         }
     }
 }
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PathSpIgnitionCommand {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    /// Ignition command to perform on the targeted SP.
+    pub command: IgnitionCommand,
+}

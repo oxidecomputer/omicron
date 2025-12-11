@@ -5,6 +5,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::v1::component::SpIdentifier;
+
 /// Result of reading an SP sensor.
 #[derive(
     Debug,
@@ -71,4 +73,14 @@ impl From<gateway_messages::SensorDataMissing> for SpSensorReadingResult {
             SensorDataMissing::DeviceTimeout => Self::DeviceTimeout,
         }
     }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PathSpSensorId {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    /// ID for the sensor on the SP.
+    pub sensor_id: u32,
 }

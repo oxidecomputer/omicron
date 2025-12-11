@@ -15,3 +15,9 @@ pub struct SpComponentCaboose {
     pub sign: Option<String>,
     pub epoch: Option<String>,
 }
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ComponentCabooseSlot {
+    /// The firmware slot to for which we want to request caboose information.
+    pub firmware_slot: u16,
+}
