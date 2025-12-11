@@ -9,7 +9,7 @@
 use std::net::IpAddr;
 
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_project, object_create, object_get,
+    create_default_ip_pools, create_project, object_create, object_get,
 };
 use nexus_types::external_api::params::MulticastGroupCreate;
 use nexus_types::external_api::views::MulticastGroup;
@@ -44,7 +44,7 @@ async fn test_multicast_enablement() {
     let client = &cptestctx.external_client;
 
     // Set up project and multicast infrastructure
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     create_project(client, PROJECT_NAME).await;
     let _pool = create_multicast_ip_pool(client, "test-pool").await;
 

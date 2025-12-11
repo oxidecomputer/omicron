@@ -40,6 +40,7 @@ use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpVersion;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -142,12 +143,17 @@ impl DataStore {
             return Ok((eip, false));
         }
         let temp_ip = temp_ip?;
+        let ip_version = match temp_ip.ip {
+            ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
+            ipnetwork::IpNetwork::V6(_) => IpVersion::V6,
+        };
 
         match self
             .begin_attach_ip(
                 opctx,
                 temp_ip.id,
                 instance_id,
+                ip_version,
                 IpKind::Ephemeral,
                 creating_instance,
             )
@@ -427,6 +433,7 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         instance_id: InstanceUuid,
+        ip_version: IpVersion,
         kind: IpKind,
         creating_instance: bool,
     ) -> Result<Option<(ExternalIp, bool)>, Error> {
@@ -436,6 +443,8 @@ impl DataStore {
         use nexus_db_schema::schema::external_ip::table;
         use nexus_db_schema::schema::instance::dsl as inst_dsl;
         use nexus_db_schema::schema::instance::table as inst_table;
+        use nexus_db_schema::schema::network_interface::dsl as nic_dsl;
+        use nexus_db_schema::schema::network_interface::table as nic_table;
 
         let safe_states = if creating_instance {
             &SAFE_TO_ATTACH_INSTANCE_STATES_CREATING[..]
@@ -443,7 +452,17 @@ impl DataStore {
             &SAFE_TO_ATTACH_INSTANCE_STATES[..]
         };
 
-        let query = Instance::attach_resource(
+        let base_nic_query = nic_table
+            .into_boxed()
+            .filter(nic_dsl::parent_id.eq(instance_id.into_untyped_uuid()))
+            .filter(nic_dsl::time_deleted.is_null())
+            .filter(nic_dsl::kind.eq(NetworkInterfaceKind::Instance));
+        let has_matching_ip_stack = match ip_version {
+            IpVersion::V4 => base_nic_query.select(nic_dsl::ip.is_not_null()),
+            IpVersion::V6 => base_nic_query.select(nic_dsl::ipv6.is_not_null()),
+        };
+
+        let query = Instance::attach_resource_with_update_condition(
             instance_id.into_untyped_uuid(),
             ip_id,
             inst_table
@@ -461,6 +480,7 @@ impl DataStore {
                 dsl::time_modified.eq(Utc::now()),
                 dsl::state.eq(IpAttachState::Attaching),
             )),
+            has_matching_ip_stack,
         );
 
         let mut do_saga = true;
@@ -484,7 +504,7 @@ impl DataStore {
                     )
                 })
             },
-            AttachError::NoUpdate { attached_count, resource, collection } => {
+            AttachError::NoUpdate { attached_count, update_condition_satisfied, resource, collection } => {
                 match resource.state {
                     // Idempotent errors: is in progress or complete for same resource pair -- this is fine.
                     IpAttachState::Attaching if resource.parent_id == Some(instance_id.into_untyped_uuid()) =>
@@ -511,6 +531,7 @@ impl DataStore {
                     IpAttachState::Detached => {},
                 }
 
+                // Attempt to attach during a migration.
                 if collection.runtime_state.migration_id.is_some() {
                     return Err(Error::unavail(&format!(
                         "tried to attach {kind} IP while instance was migrating: \
@@ -518,21 +539,40 @@ impl DataStore {
                     )))
                 }
 
-                Err(match &collection.runtime_state.nexus_state {
-                    state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
-                        if attached_count >= i64::from(MAX_EXTERNAL_IPS_PLUS_SNAT) {
-                            Error::invalid_request(&format!(
-                                "an instance may not have more than \
-                                {MAX_EXTERNAL_IPS_PER_INSTANCE} external IP addresses",
-                            ))
-                        } else {
-                            Error::internal_error(&format!("failed to attach {kind} IP"))
-                        }
-                    },
-                    state => Error::invalid_request(&format!(
+                // Attach while instance is in an unsafe state.
+                let state = &collection.runtime_state.nexus_state;
+                if !safe_states.contains(state) {
+                    return Err(Error::invalid_request(&format!(
                         "cannot attach {kind} IP to instance in {state} state"
-                    )),
-                })
+                    )));
+                }
+
+                // Too many attached external IP addresses.
+                if attached_count >= i64::from(MAX_EXTERNAL_IPS_PLUS_SNAT) {
+                    return Err(Error::invalid_request(&format!(
+                        "an instance may not have more than \
+                        {MAX_EXTERNAL_IPS_PER_INSTANCE} external IP addresses",
+                    )));
+                }
+
+                // Primary NIC Missing an IP stack for this external IP.
+                if !update_condition_satisfied {
+                    return Err(Error::invalid_request(&format!(
+                        "The {} external IP is an IP{} address, but \
+                        the instance with ID {} does not have a \
+                        primary network interface with a VPC-private IP{} \
+                        address. Add a VPC-private IP{} address to the \
+                        interface, or attach a different IP address",
+                        kind,
+                        ip_version,
+                        instance_id,
+                        ip_version,
+                        ip_version,
+                    )));
+                }
+
+                // Anything else, just report a generic error.
+                Err(Error::internal_error(&format!("failed to attach {kind} IP")))
             },
             // This case occurs for both currently attaching and attached ephemeral IPs:
             AttachError::DatabaseError(DatabaseError(UniqueViolation, ..))
@@ -973,6 +1013,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
+        ip_version: IpVersion,
         instance_id: InstanceUuid,
         creating_instance: bool,
     ) -> UpdateResult<(ExternalIp, bool)> {
@@ -988,6 +1029,7 @@ impl DataStore {
             opctx,
             authz_fip.id(),
             instance_id,
+            ip_version,
             IpKind::Floating,
             creating_instance,
         )

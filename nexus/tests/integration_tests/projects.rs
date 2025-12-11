@@ -12,7 +12,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::resource_helpers::create_affinity_group;
 use nexus_test_utils::resource_helpers::create_anti_affinity_group;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_local_user;
@@ -147,7 +147,7 @@ async fn test_project_deletion_with_instance(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
@@ -240,7 +240,7 @@ async fn test_project_deletion_with_floating_ip(
     let name = "springfield-squidport";
     let url = format!("/v1/projects/{}", name);
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     create_project(&client, &name).await;
     delete_project_default_subnet(&name, &client).await;

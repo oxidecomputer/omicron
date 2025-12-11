@@ -28,6 +28,7 @@ use nexus_db_model::InstanceIntendedState as IntendedState;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::IpVersion;
 use nexus_db_model::Vmm as DbVmm;
 use nexus_db_model::VmmRuntimeState;
 use nexus_db_model::VmmState as DbVmmState;
@@ -40,6 +41,7 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
 use nexus_types::external_api::views;
+use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -58,7 +60,6 @@ use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
 use omicron_common::api::internal::shared::ExternalIps;
-use omicron_common::api::internal::shared::external_ip::ConcreteIp;
 use omicron_common::api::internal::shared::external_ip::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -2203,12 +2204,13 @@ impl super::Nexus {
         .await
     }
 
-    /// Attach an ephemeral IP to an instance.
+    /// Attach a Floating IP to an instance.
     pub(crate) async fn instance_attach_floating_ip(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         authz_fip: authz::FloatingIp,
+        ip_version: IpVersion,
         authz_fip_project: authz::Project,
     ) -> UpdateResult<views::ExternalIp> {
         let (.., authz_project, authz_instance) =
@@ -2224,7 +2226,7 @@ impl super::Nexus {
             opctx,
             authz_instance,
             authz_project.id(),
-            ExternalIpAttach::Floating { floating_ip: authz_fip },
+            ExternalIpAttach::Floating { floating_ip: authz_fip, ip_version },
         )
         .await
     }

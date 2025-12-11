@@ -6,6 +6,7 @@
 
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 
 use crate::integration_tests::instances::fetch_instance_external_ips;
 use crate::integration_tests::instances::instance_simulate;
@@ -19,7 +20,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_ip_pool;
@@ -37,6 +38,7 @@ use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::views;
@@ -115,7 +117,7 @@ pub fn get_floating_ip_by_id_url(fip_id: &Uuid) -> String {
 async fn test_floating_ip_access(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create a floating IP from the default pool.
@@ -163,10 +165,12 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // automatically linked to current silo
-    let default_pool = create_default_ip_pool(&client).await;
+    let (default_pool, _default_v6_pool) =
+        create_default_ip_pools(&client).await;
 
     const CAPACITY: f64 = 65536.0;
-    assert_ip_pool_utilization(client, "default", 0, CAPACITY).await;
+    let pool_name = default_pool.identity.name.as_str();
+    assert_ip_pool_utilization(client, pool_name, 0, CAPACITY).await;
 
     let ipv4_range =
         Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
@@ -197,7 +201,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)));
     assert_eq!(fip.ip_pool_id, default_pool.identity.id);
 
-    assert_ip_pool_utilization(client, "default", 1, CAPACITY).await;
+    assert_ip_pool_utilization(client, pool_name, 1, CAPACITY).await;
 
     // Create with chosen IP and fallback to default pool.
     let fip_name = FIP_NAMES[1];
@@ -216,7 +220,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.ip, ip_addr);
     assert_eq!(fip.ip_pool_id, default_pool.identity.id);
 
-    assert_ip_pool_utilization(client, "default", 2, CAPACITY).await;
+    assert_ip_pool_utilization(client, pool_name, 2, CAPACITY).await;
 
     // Creating with other-pool fails with 404 until it is linked to the current silo
     let fip_name = FIP_NAMES[2];
@@ -454,7 +458,7 @@ async fn test_floating_ip_create_ip_in_use(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     let project = create_project(client, PROJECT_NAME).await;
     let contested_ip = "10.0.0.0".parse().unwrap();
@@ -502,7 +506,7 @@ async fn test_floating_ip_create_name_in_use(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     let project = create_project(client, PROJECT_NAME).await;
     let contested_name = FIP_NAMES[0];
@@ -551,7 +555,7 @@ async fn test_floating_ip_create_name_in_use(
 async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create the Floating IP
@@ -603,7 +607,7 @@ async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
 async fn test_floating_ip_delete(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    let (v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     let fip = create_floating_ip(
@@ -617,8 +621,10 @@ async fn test_floating_ip_delete(cptestctx: &ControlPlaneTestContext) {
 
     // unlink fails because there are outstanding IPs
     let silo_id = DEFAULT_SILO.id();
-    let silo_link_url =
-        format!("/v1/system/ip-pools/default/silos/{}", silo_id);
+    let silo_link_url = format!(
+        "/v1/system/ip-pools/{}/silos/{}",
+        v4_pool.identity.name, silo_id
+    );
     let error =
         object_delete_error(client, &silo_link_url, StatusCode::BAD_REQUEST)
             .await;
@@ -643,7 +649,7 @@ async fn test_floating_ip_create_attachment(
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     let fip = create_floating_ip(
@@ -742,11 +748,12 @@ async fn test_external_ip_live_attach_detach(
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
-    create_default_ip_pool(&client).await;
+    let (v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
+    let pool_name = v4_pool.identity.name.as_str();
     let project = create_project(client, PROJECT_NAME).await;
 
     const CAPACITY: f64 = 65536.0;
-    assert_ip_pool_utilization(client, "default", 0, CAPACITY).await;
+    assert_ip_pool_utilization(client, pool_name, 0, CAPACITY).await;
 
     // Create 2 instances, and a floating IP for each instance.
     // One instance will be started, and one will be stopped.
@@ -765,7 +772,7 @@ async fn test_external_ip_live_attach_detach(
     }
 
     // 2 floating IPs have been allocated
-    assert_ip_pool_utilization(client, "default", 2, CAPACITY).await;
+    assert_ip_pool_utilization(client, pool_name, 2, CAPACITY).await;
 
     let mut instances = vec![];
     for (i, start) in [false, true].iter().enumerate() {
@@ -802,7 +809,7 @@ async fn test_external_ip_live_attach_detach(
 
     // the two instances above were deliberately not given ephemeral IPs, but
     // they still always get SNAT IPs, but they share one, so we go from 2 to 3
-    assert_ip_pool_utilization(client, "default", 3, CAPACITY).await;
+    assert_ip_pool_utilization(client, pool_name, 3, CAPACITY).await;
 
     // Attach a floating IP and ephemeral IP to each instance.
     let mut recorded_ephs = vec![];
@@ -850,7 +857,7 @@ async fn test_external_ip_live_attach_detach(
 
     // now 5 because an ephemeral IP was added for each instance. floating IPs
     // were attached, but they were already allocated
-    assert_ip_pool_utilization(client, "default", 5, CAPACITY).await;
+    assert_ip_pool_utilization(client, pool_name, 5, CAPACITY).await;
 
     // Detach a floating IP and ephemeral IP from each instance.
     for (instance, fip) in instances.iter().zip(&fips) {
@@ -884,7 +891,7 @@ async fn test_external_ip_live_attach_detach(
     }
 
     // 2 ephemeral go away on detachment but still 2 floating and 1 SNAT
-    assert_ip_pool_utilization(client, "default", 3, CAPACITY).await;
+    assert_ip_pool_utilization(client, pool_name, 3, CAPACITY).await;
 
     // Finally, two kind of funny tests. There is special logic in the handler
     // for the case where the floating IP is specified by name but the instance
@@ -972,7 +979,7 @@ async fn test_external_ip_live_attach_detach(
     );
 
     // none of that changed the number of allocated IPs
-    assert_ip_pool_utilization(client, "default", 3, CAPACITY).await;
+    assert_ip_pool_utilization(client, pool_name, 3, CAPACITY).await;
 }
 
 #[nexus_test]
@@ -983,7 +990,7 @@ async fn test_floating_ip_attach_fail_between_projects(
     let apictx = &cptestctx.server.server_context();
     let _nexus = &apictx.nexus;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     let _project = create_project(client, PROJECT_NAME).await;
     let _project2 = create_project(client, "proj2").await;
 
@@ -1034,7 +1041,7 @@ async fn test_floating_ip_attach_fail_between_projects(
                     .to_vec(),
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::Default,
+                params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![params::ExternalIpCreate::Floating {
                 floating_ip: fip.identity.id.into(),
             }],
@@ -1063,7 +1070,7 @@ async fn test_external_ip_attach_fail_if_in_use_by_other(
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create 2 instances, bind a FIP to each.
@@ -1121,7 +1128,7 @@ async fn test_external_ip_attach_fails_after_maximum(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create 33 floating IPs, and bind the first 32 to an instance.
@@ -1199,7 +1206,7 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     let other_pool_range = IpRange::V4(
         Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 1))
             .unwrap(),
@@ -1260,10 +1267,220 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
 }
 
 #[nexus_test]
+async fn cannot_attach_floating_ipv4_to_instance_missing_ipv4_stack(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let (v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
+    create_project(client, PROJECT_NAME).await;
+
+    // Create an instance with only a private IPv6 address.
+    let instance_name = &INSTANCE_NAMES[0];
+    create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &InstanceNetworkInterfaceAttachment::DefaultIpv6,
+        vec![],
+        vec![],
+        false,
+        None,
+        None,
+        vec![],
+    )
+    .await;
+
+    // Create and attempt to attach a Floating IPv4 address.
+    let fip_name = "my-fip";
+    let _fip = create_floating_ip(
+        client,
+        fip_name,
+        PROJECT_NAME,
+        None,
+        Some(v4_pool.identity.name.as_str()),
+    )
+    .await;
+    let url = attach_floating_ip_url(fip_name, PROJECT_NAME);
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::FloatingIpAttach {
+                kind: params::FloatingIpParentKind::Instance,
+                parent: instance_name.parse::<Name>().unwrap().into(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect_err(
+        "Should fail to attach IPv4 Floating IP to instance without private IPv4 stack"
+    );
+    todo!("TODO(ben): Finish this test");
+}
+
+#[nexus_test]
+async fn cannot_attach_floating_ipv6_to_instance_missing_ipv6_stack(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let (_v4_pool, v6_pool) = create_default_ip_pools(&client).await;
+    create_project(client, PROJECT_NAME).await;
+
+    // Create an instance with only a private IPv4 address.
+    let instance_name = &INSTANCE_NAMES[0];
+    let inst = create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        vec![],
+        vec![],
+        false,
+        None,
+        None,
+        vec![],
+    )
+    .await;
+
+    // Create and attempt to attach a Floating IPv6 address.
+    let fip_name = "my-fip";
+    let _fip = create_floating_ip(
+        client,
+        fip_name,
+        PROJECT_NAME,
+        None,
+        Some(v6_pool.identity.name.as_str()),
+    )
+    .await;
+    let url = attach_floating_ip_url(fip_name, PROJECT_NAME);
+    let result = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::FloatingIpAttach {
+                kind: params::FloatingIpParentKind::Instance,
+                parent: instance_name.parse::<Name>().unwrap().into(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .expect("an HTTP error making this API call");
+    assert_eq!(
+        result.message,
+        format!(
+            "The floating external IP is an IPv6 address, but \
+            the instance with ID {} does not have a primary \
+            network interface with a VPC-private IPv6 address. \
+            Add a VPC-private IPv6 address to the interface, \
+            or attach a different IP address",
+            inst.identity.id,
+        ),
+    );
+}
+
+#[nexus_test]
+async fn cannot_attach_ephemeral_ipv4_to_instance_missing_ipv4_stack(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let (v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
+    create_project(client, PROJECT_NAME).await;
+
+    // Create an instance with only a private IPv6 address.
+    let instance_name = &INSTANCE_NAMES[0];
+    create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &InstanceNetworkInterfaceAttachment::DefaultIpv6,
+        vec![],
+        vec![],
+        false,
+        None,
+        None,
+        vec![],
+    )
+    .await;
+
+    // Now try to attach an Ephemeral IPv4 address.
+    let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
+    let _err = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::EphemeralIpCreate {
+                pool: Some(v4_pool.identity.name.clone().into()),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect_err("Should fail attaching Ephemeral IPv4 address");
+    todo!("TODO(ben): Finish this test");
+}
+
+#[nexus_test]
+async fn cannot_attach_ephemeral_ipv6_to_instance_missing_ipv6_stack(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let (_v4_pool, v6_pool) = create_default_ip_pools(&client).await;
+    create_project(client, PROJECT_NAME).await;
+
+    // Create an instance with only a private IPv4 address.
+    let instance_name = &INSTANCE_NAMES[0];
+    let inst = create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        vec![],
+        vec![],
+        false,
+        None,
+        None,
+        vec![],
+    )
+    .await;
+
+    // Now try to attach an Ephemeral IPv4 address.
+    let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
+    let result = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::EphemeralIpCreate {
+                pool: Some(v6_pool.identity.name.clone().into()),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        result.message,
+        format!(
+            "The ephemeral external IP is an IPv6 address, but \
+            the instance with ID {} does not have a primary \
+            network interface with a VPC-private IPv6 address. \
+            Add a VPC-private IPv6 address to the interface, \
+            or attach a different IP address",
+            inst.identity.id,
+        ),
+    );
+}
+
+#[nexus_test]
 async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let pool = create_default_ip_pool(&client).await;
+    let (pool, _v6_pool) = create_default_ip_pools(&client).await;
     let _project = create_project(client, PROJECT_NAME).await;
 
     // Get the first address in the pool.
@@ -1327,6 +1544,219 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(*last_port, NUM_SOURCE_NAT_PORTS - 1);
 }
 
+// Sanity check that we can just attach an IPv6 Ephemeral address to an instance
+// with a private IPv6 stack.
+#[nexus_test]
+async fn can_create_instance_with_ephemeral_ipv6_address(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let (_pool, v6_pool) = create_default_ip_pools(&client).await;
+    let _project = create_project(client, PROJECT_NAME).await;
+
+    // Get the first address in the IPv6 pool.
+    let range = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/ip-pools/{}/ranges", v6_pool.identity.id),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|e| panic!("failed to get IP pool range: {e}"))
+    .parsed_body::<IpPoolRangeResultsPage>()
+    .unwrap_or_else(|e| panic!("failed to parse IP pool range: {e}"));
+    assert_eq!(range.items.len(), 1, "Should have 1 range in the pool");
+    let oxide_client::types::IpRange::V6(oxide_client::types::Ipv6Range {
+        first,
+        ..
+    }) = &range.items[0].range
+    else {
+        panic!("Expected IPv6 range, found {:?}", &range.items[0]);
+    };
+    let expected_ip = IpAddr::V6(*first);
+
+    // Create a running instance with an Ephemeral IPv6 address.
+    let instance_name = INSTANCE_NAMES[0];
+    let instance = create_instance_with(
+        &client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::DefaultIpv6,
+        /* disks = */ vec![],
+        vec![params::ExternalIpCreate::Ephemeral {
+            pool: Some(v6_pool.identity.id.into()),
+        }],
+        /* start = */ false,
+        /* auto_restart_policy = */ Default::default(),
+        /* instance_cpu_platform = */ None,
+        /* multicast_groups = */ vec![],
+    )
+    .await;
+
+    // First, sanity check the SNAT IPv6 address. These are currently created
+    // unconditionally, but see
+    // https://github.com/oxidecomputer/omicron/issues/4317 for more details.
+    let url = format!("/v1/instances/{}/external-ips", instance.identity.id);
+    let page = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"get\" request to {url}: {e}")
+        })
+        .parsed_body::<ExternalIpResultsPage>()
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"get\" request to {url}: {e}")
+        });
+    let ips = page.items;
+    assert_eq!(
+        ips.len(),
+        2,
+        "Instance should have been created with exactly 2 external IPs"
+    );
+    let oxide_client::types::ExternalIp::Snat {
+        ip,
+        ip_pool_id,
+        first_port,
+        last_port,
+    } = &ips[0]
+    else {
+        panic!("Expected an SNAT external IP, found {:?}", &ips[0]);
+    };
+    assert_eq!(ip_pool_id, &v6_pool.identity.id);
+    assert_eq!(ip, &expected_ip);
+
+    // Port ranges are half-open on the right, e.g., [0, 16384).
+    assert_eq!(*first_port, 0);
+    assert_eq!(*last_port, NUM_SOURCE_NAT_PORTS - 1);
+
+    // Now check the Ephemeral IPv6 address.
+    let oxide_client::types::ExternalIp::Ephemeral { ip, ip_pool_id } = &ips[1]
+    else {
+        panic!("Expected an Ephemeral external IP, found {:?}", &ips[1]);
+    };
+    assert_eq!(ip_pool_id, &v6_pool.identity.id);
+    let expected_ip = IpAddr::V6(Ipv6Addr::from_bits(first.to_bits() + 1));
+    assert_eq!(ip, &expected_ip);
+}
+
+// Sanity check that we can just attach an IPv6 Floating address to an instance
+// with a private IPv6 stack.
+#[nexus_test]
+async fn can_create_instance_with_floating_ipv6_address(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let (_pool, v6_pool) = create_default_ip_pools(&client).await;
+    let project = create_project(client, PROJECT_NAME).await;
+
+    // Get the first address in the IPv6 pool.
+    let range = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/ip-pools/{}/ranges", v6_pool.identity.id),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|e| panic!("failed to get IP pool range: {e}"))
+    .parsed_body::<IpPoolRangeResultsPage>()
+    .unwrap_or_else(|e| panic!("failed to parse IP pool range: {e}"));
+    assert_eq!(range.items.len(), 1, "Should have 1 range in the pool");
+    let oxide_client::types::IpRange::V6(oxide_client::types::Ipv6Range {
+        first,
+        ..
+    }) = &range.items[0].range
+    else {
+        panic!("Expected IPv6 range, found {:?}", &range.items[0]);
+    };
+    let expected_ip = IpAddr::V6(*first);
+
+    // Create a floating IP, from the IPv6 Pool.
+    let fip_name = FIP_NAMES[0];
+    let fip = create_floating_ip(
+        client,
+        fip_name,
+        &project.identity.id.to_string(),
+        None,
+        Some(v6_pool.identity.name.as_str()),
+    )
+    .await;
+
+    // Create a running instance with that Floating IPv6 address.
+    let instance_name = INSTANCE_NAMES[0];
+    let instance = create_instance_with(
+        &client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::DefaultIpv6,
+        /* disks = */ vec![],
+        vec![params::ExternalIpCreate::Floating {
+            floating_ip: NameOrId::Id(fip.identity.id),
+        }],
+        /* start = */ false,
+        /* auto_restart_policy = */ Default::default(),
+        /* instance_cpu_platform = */ None,
+        /* multicast_groups = */ vec![],
+    )
+    .await;
+
+    // First, sanity check the SNAT IPv6 address. These are currently created
+    // unconditionally, but see
+    // https://github.com/oxidecomputer/omicron/issues/4317 for more details.
+    let url = format!("/v1/instances/{}/external-ips", instance.identity.id);
+    let page = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"get\" request to {url}: {e}")
+        })
+        .parsed_body::<ExternalIpResultsPage>()
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"get\" request to {url}: {e}")
+        });
+    let ips = page.items;
+    assert_eq!(
+        ips.len(),
+        2,
+        "Instance should have been created with exactly 2 external IPs"
+    );
+    let oxide_client::types::ExternalIp::Snat {
+        ip,
+        ip_pool_id,
+        first_port,
+        last_port,
+    } = &ips[0]
+    else {
+        panic!("Expected an SNAT external IP, found {:?}", &ips[0]);
+    };
+    assert_eq!(ip_pool_id, &v6_pool.identity.id);
+    assert_eq!(ip, &expected_ip);
+
+    // Port ranges are half-open on the right, e.g., [0, 16384).
+    assert_eq!(*first_port, 0);
+    assert_eq!(*last_port, NUM_SOURCE_NAT_PORTS - 1);
+
+    // Now check the Floating IPv6 address.
+    let oxide_client::types::ExternalIp::Floating {
+        id,
+        instance_id,
+        ip,
+        ip_pool_id,
+        ..
+    } = &ips[1]
+    else {
+        panic!("Expected a Floating external IP, found {:?}", &ips[1]);
+    };
+    assert_eq!(id, &fip.identity.id);
+    assert_eq!(instance_id, &Some(instance.identity.id));
+    assert_eq!(ip_pool_id, &v6_pool.identity.id);
+    let expected_ip = IpAddr::V6(Ipv6Addr::from_bits(first.to_bits() + 1));
+    assert_eq!(ip, &expected_ip);
+}
+
 pub async fn floating_ip_get(
     client: &ClientTestContext,
     fip_url: &str,
@@ -1372,7 +1802,7 @@ async fn instance_for_external_ips(
         &client,
         PROJECT_NAME,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::Default,
+        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         vec![],
         fips,
         start,
