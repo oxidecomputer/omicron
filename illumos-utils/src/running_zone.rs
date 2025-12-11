@@ -353,30 +353,30 @@ impl RunningZone {
         Ok(network)
     }
 
-    // TODO-completeness: Handle dual-stack OPTE ports here. This works for
-    // either IPv4 or IPv6 addresses, but not both.
-    // See https://github.com/oxidecomputer/omicron/issues/9247.
     pub async fn ensure_address_for_port(
         &self,
         name: &str,
         port_idx: usize,
-    ) -> Result<IpNetwork, EnsureAddressError> {
+    ) -> Result<(), EnsureAddressError> {
         info!(self.inner.log, "Ensuring address for OPTE port");
+
         let port = self.opte_ports().nth(port_idx).ok_or_else(|| {
             EnsureAddressError::MissingOptePort {
                 zone: self.inner.name.clone(),
                 port_idx,
             }
         })?;
-        let addrobj = AddrObject::new(port.name(), name).map_err(|err| {
-            EnsureAddressError::AddrObject {
-                request: AddressRequest::Dhcp,
-                zone: self.inner.name.clone(),
-                err,
-            }
-        })?;
         let zone = Some(self.inner.name.as_ref());
         if let Some(gateway) = port.gateway().ipv4_addr() {
+            let v4_name = format!("{}4", name);
+            let addrobj =
+                AddrObject::new(port.name(), &v4_name).map_err(|err| {
+                    EnsureAddressError::AddrObject {
+                        request: AddressRequest::Dhcp,
+                        zone: self.inner.name.clone(),
+                        err,
+                    }
+                })?;
             let addr =
                 Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)
                     .await?;
@@ -403,8 +403,17 @@ impl RunningZone {
                 "default",
                 &gateway_ip,
             ])?;
-            Ok(addr)
-        } else {
+        }
+        if port.gateway().ipv6_addr().is_some() {
+            let v6_name = format!("{}6", name);
+            let addrobj =
+                AddrObject::new(port.name(), &v6_name).map_err(|err| {
+                    EnsureAddressError::AddrObject {
+                        request: AddressRequest::Dhcp,
+                        zone: self.inner.name.clone(),
+                        err,
+                    }
+                })?;
             // If the port is using IPv6 addressing we still want it to use
             // DHCP(v6) which requires first creating a link-local address.
             Zones::ensure_has_link_local_v6_address(zone, &addrobj)
@@ -430,15 +439,13 @@ impl RunningZone {
                             )
                         })?;
 
-                    // Ipv6Addr::is_unicast_link_local is sadly not stable
-                    let is_ll =
-                        |ip: Ipv6Addr| (ip.segments()[0] & 0xffc0) == 0xfe80;
-
                     // Look for a non link-local addr
                     addrs
                         .into_iter()
                         .find(|addr| match addr {
-                            IpNetwork::V6(ip) => !is_ll(ip.ip()),
+                            IpNetwork::V6(ip) => {
+                                !ip.ip().is_unicast_link_local()
+                            }
                             _ => false,
                         })
                         .ok_or_else(|| {
@@ -458,8 +465,9 @@ impl RunningZone {
                     );
                 },
             )
-            .await
+            .await?;
         }
+        Ok(())
     }
 
     pub fn add_default_route(

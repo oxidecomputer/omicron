@@ -95,22 +95,6 @@ impl DataStore {
                 let found_blocks: Vec<AddressLotBlock> =
                     block_dsl::address_lot_block
                         .filter(block_dsl::address_lot_id.eq(db_lot.id()))
-                        .filter(
-                            block_dsl::first_address.eq_any(
-                                desired_blocks
-                                    .iter()
-                                    .map(|b| b.first_address)
-                                    .collect::<Vec<_>>(),
-                            ),
-                        )
-                        .filter(
-                            block_dsl::last_address.eq_any(
-                                desired_blocks
-                                    .iter()
-                                    .map(|b| b.last_address)
-                                    .collect::<Vec<_>>(),
-                            ),
-                        )
                         .get_results_async(&conn)
                         .await?;
 
@@ -118,7 +102,7 @@ impl DataStore {
 
                 // If the block is found in the database, use the found block.
                 // If the block is not found in the database, insert it.
-                for desired_block in desired_blocks {
+                for desired_block in &desired_blocks {
                     let block = match found_blocks.iter().find(|db_b| {
                         db_b.first_address == desired_block.first_address
                             && db_b.last_address == desired_block.last_address
@@ -126,7 +110,7 @@ impl DataStore {
                         Some(block) => block.clone(),
                         None => {
                             diesel::insert_into(block_dsl::address_lot_block)
-                                .values(desired_block)
+                                .values(desired_block.clone())
                                 .returning(AddressLotBlock::as_returning())
                                 .get_results_async(&conn)
                                 .await?[0]
@@ -134,6 +118,21 @@ impl DataStore {
                         }
                     };
                     blocks.push(block);
+                }
+
+                // If the block is found in the database, but not desired,
+                // remove it.
+                for found_block in &found_blocks {
+                    if !desired_blocks.iter().any(|x| {
+                        x.first_address == found_block.first_address
+                            && x.last_address == found_block.last_address
+                    }) {
+                        diesel::delete(block_dsl::address_lot_block)
+                            .filter(block_dsl::address_lot_id.eq(db_lot.id()))
+                            .filter(block_dsl::id.eq(found_block.id))
+                            .execute_async(&conn)
+                            .await?;
+                    }
                 }
 
                 Ok(AddressLotCreateResult { lot: db_lot, blocks })

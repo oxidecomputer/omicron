@@ -1696,7 +1696,7 @@ pub trait NexusExternalApi {
 
     /// Create instance
     #[endpoint {
-        operation_id = "disk_create",
+        operation_id = "instance_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],

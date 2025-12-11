@@ -275,7 +275,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
                 };
 
                 for (_location, client) in dpd_clients {
-                    if let Err(e) = client.ipv4_nat_trigger_update().await {
+                    if let Err(e) = client.nat_trigger_update().await {
                         error!(
                             &log,
                             "failed to trigger dpd rpw workflow";
