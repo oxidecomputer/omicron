@@ -5765,11 +5765,7 @@ pub(in crate::db::datastore) mod test {
             .expect("disk must exist");
 
         datastore
-            .instance_detach_disk(
-                &opctx,
-                &authz_instance,
-                &authz_disk,
-            )
+            .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
             .await
             .unwrap();
 
