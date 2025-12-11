@@ -11,7 +11,7 @@ use crate::InternalDisks;
 use crate::ResolverStatusExt;
 use crate::SledAgentFacilities;
 use crate::TimeSyncConfig;
-use crate::debug_collector_task::FormerZoneRootArchiver;
+use crate::debug_collector::FormerZoneRootArchiver;
 use camino::Utf8PathBuf;
 use futures::FutureExt as _;
 use futures::future;

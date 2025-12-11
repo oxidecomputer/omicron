@@ -163,7 +163,7 @@ pub async fn cross_version_works() -> Result<(), anyhow::Error> {
         Err(dns_service_client::Error::ErrorResponse(rv)) => {
             assert_eq!(
                 rv.message,
-                dns_service_client::ERROR_CODE_INCOMPATIBLE_RECORD
+                internal_dns_types::config::ERROR_CODE_INCOMPATIBLE_RECORD
             );
         }
         o => {
