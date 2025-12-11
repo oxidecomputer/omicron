@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::datastore::CollectorReassignment;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
@@ -24,7 +23,6 @@ use nexus_types::trust_quorum::{
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
@@ -33,6 +31,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use trust_quorum_protocol::{
     BaseboardId, EncryptedRackSecrets, Epoch, Salt, Sha3_256Digest, Threshold,
 };
+
+macro_rules! bail_txn {
+    ($err:ident, $($arg:tt),*) => {
+        return Err($err.bail(
+            omicron_common::api::external::Error::internal_error(&format!(
+                $($arg),*
+            ))
+            .into()
+        ));
+    }
+}
 
 impl DataStore {
     /// Return all `HwBaseboardId`s for a given rack that has run LRTQ
@@ -60,7 +69,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn tq_latest_config(
+    pub async fn tq_get_latest_config(
         &self,
         opctx: &OpContext,
         rack_id: RackUuid,
@@ -68,39 +77,17 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
-        use nexus_db_schema::schema::hw_baseboard_id::dsl as hw_baseboard_id_dsl;
-        use nexus_db_schema::schema::trust_quorum_configuration::dsl as tq_config_dsl;
-        use nexus_db_schema::schema::trust_quorum_member::dsl as tq_member_dsl;
-
         // First, retrieve our configuration if there is one.
-        let Some(latest) = tq_config_dsl::trust_quorum_configuration
-            .filter(tq_config_dsl::rack_id.eq(rack_id.into_untyped_uuid()))
-            .order_by(tq_config_dsl::epoch.desc())
-            .first_async::<DbTrustQuorumConfiguration>(&*conn)
-            .await
-            .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+        let Some(latest) =
+            self.tq_get_latest_config_conn(opctx, conn, rack_id).await?
         else {
             return Ok(None);
         };
 
         // Then get any members associated with the configuration
-        let members: Vec<(DbTrustQuorumMember, HwBaseboardId)> =
-            tq_member_dsl::trust_quorum_member
-                .filter(tq_member_dsl::rack_id.eq(rack_id.into_untyped_uuid()))
-                .filter(tq_member_dsl::epoch.eq(latest.epoch))
-                .inner_join(hw_baseboard_id_dsl::hw_baseboard_id.on(
-                    hw_baseboard_id_dsl::id.eq(tq_member_dsl::hw_baseboard_id),
-                ))
-                .select((
-                    DbTrustQuorumMember::as_select(),
-                    HwBaseboardId::as_select(),
-                ))
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+        let members = self
+            .tq_get_members_conn(opctx, conn, rack_id, latest.epoch)
+            .await?;
 
         let mut tq_members: BTreeMap<BaseboardId, TrustQuorumMemberData> =
             BTreeMap::new();
@@ -109,13 +96,12 @@ impl DataStore {
             let digest = if let Some(digest_str) = member.share_digest {
                 let mut data = [0u8; 32];
                 hex::decode_to_slice(&digest_str, &mut data).map_err(|e| {
-                    Error::InternalError {
-                        internal_message: format!(
-                            "failed to decode share digest for {}:{} : {e}",
-                            hw_baseboard_id.part_number,
-                            hw_baseboard_id.serial_number
-                        ),
-                    }
+                    Error::internal_error(&format!(
+                        "Failed to decode share digest for trust quorum member \
+                        {}:{} : {e}",
+                        hw_baseboard_id.part_number,
+                        hw_baseboard_id.serial_number
+                    ))
                 })?;
                 Some(Sha3_256Digest(data))
             } else {
@@ -136,13 +122,11 @@ impl DataStore {
         let salt = if let Some(salt_str) = latest.encrypted_rack_secrets_salt {
             let mut data = [0u8; 32];
             hex::decode_to_slice(&salt_str, &mut data).map_err(|e| {
-                Error::InternalError {
-                    internal_message: format!(
-                        "failed to decode salt for TQ: \
-                        rack_id: {}, epoch: {}: {e}",
-                        latest.rack_id, latest.epoch
-                    ),
-                }
+                Error::internal_error(&format!(
+                    "Failed to decode salt for trust quorum config: \
+                    rack_id: {}, epoch: {}: {e}",
+                    latest.rack_id, latest.epoch
+                ))
             })?;
             Some(Salt(data))
         } else {
@@ -152,13 +136,11 @@ impl DataStore {
         let encrypted_rack_secrets = if salt.is_some() {
             let Some(secrets) = latest.encrypted_rack_secrets else {
                 // This should never happend due to constraint checks
-                return Err(Error::InternalError {
-                    internal_message: format!(
-                        "salt exists, but secrets do not for TQ:\
-                             rack_id: {}, epoch: {}",
-                        latest.rack_id, latest.epoch
-                    ),
-                });
+                return Err(Error::internal_error(&format!(
+                    "Salt exists, but secrets do not for trust quorum config: \
+                    rack_id: {}, epoch: {}",
+                    latest.rack_id, latest.epoch
+                )));
             };
             Some(EncryptedRackSecrets::new(
                 salt.unwrap(),
@@ -171,7 +153,8 @@ impl DataStore {
         let Some(coordinator) = coordinator else {
             return Err(Error::InternalError {
                 internal_message: format!(
-                    "Failed to find coordinator for id: {}",
+                    "Failed to find coordinator for hw_baseboard_id: \
+                     {} in trust quorum config.",
                     latest.coordinator
                 ),
             });
@@ -227,7 +210,7 @@ impl DataStore {
                         return Err(err.bail(TransactionError::CustomError(
                             Error::conflict(format!(
                                 "expected current TQ epoch for rack_id \
-                            {} to be {:?}, found {:?}",
+                                {} to be {:?}, found {:?}",
                                 config.rack_id,
                                 config.epoch.previous(),
                                 current
@@ -245,6 +228,84 @@ impl DataStore {
                 Some(err) => err.into(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
+    }
+
+    pub async fn tq_update_prepare_status(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+        epoch: Epoch,
+        config: trust_quorum_protocol::Configuration,
+        acked_prepares: BTreeSet<BaseboardId>,
+    ) -> Result<(), Error> {
+        // Fill in key share digests and EncryptedRackSecrets if needed
+        //
+        // Merge the current set of acks with the provided set here and insert
+        //
+        // Decide to commit if we have enough acks
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+
+        let epoch: i64 = epoch.0.try_into().unwrap();
+
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("tq_update_prepare_status")
+            .transaction(&conn, |c| {
+                let err = err.clone();
+                let config = config.clone();
+                async move {
+                    // First, retrieve our configuration if there is one.
+                    let latest = self
+                        .tq_get_latest_config_conn(opctx, conn, rack_id)
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                    let Some(latest) = latest else {
+                        bail_txn!(
+                            err,
+                            "No trust quorum config for rack_id {} at epoch {}",
+                            rack_id,
+                            epoch
+                        );
+                    };
+
+                    if latest.epoch != epoch {
+                        let actual = latest.epoch;
+                        bail_txn!(
+                            err,
+                            "Cannot update trust quorum config. \
+                             Latest epoch does not match. Expected {}, Got {}",
+                            epoch,
+                            actual
+                        );
+                    }
+
+                    // Then get any members associated with the configuration
+                    /*                    let members = self
+                    .tq_get_members_conn(opctx, conn, rack_id, latest.epoch)
+                    .await?;
+                    */
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err.into(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
+    }
+
+    pub async fn tq_update_commit_status(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+        epoch: Epoch,
+        acked_commits: BTreeSet<BaseboardId>,
+    ) {
+        todo!()
     }
 
     // Unconditional insert that should only run inside a transaction
@@ -362,6 +423,59 @@ impl DataStore {
             .map(|epoch| Epoch(epoch.try_into().unwrap()));
         Ok(latest_epoch)
     }
+
+    async fn tq_get_latest_config_conn(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+    ) -> Result<Option<DbTrustQuorumConfiguration>, TransactionError<Error>>
+    {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+
+        let latest = dsl::trust_quorum_configuration
+            .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+            .order_by(dsl::epoch.desc())
+            .first_async::<DbTrustQuorumConfiguration>(conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(latest)
+    }
+
+    async fn tq_get_members_conn(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+        epoch: i64,
+    ) -> Result<
+        Vec<(DbTrustQuorumMember, HwBaseboardId)>,
+        TransactionError<Error>,
+    > {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::hw_baseboard_id::dsl as hw_baseboard_id_dsl;
+        use nexus_db_schema::schema::trust_quorum_member::dsl;
+
+        let members = dsl::trust_quorum_member
+            .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+            .filter(dsl::epoch.eq(epoch))
+            .inner_join(
+                hw_baseboard_id_dsl::hw_baseboard_id
+                    .on(hw_baseboard_id_dsl::id.eq(dsl::hw_baseboard_id)),
+            )
+            .select((
+                DbTrustQuorumMember::as_select(),
+                HwBaseboardId::as_select(),
+            ))
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(members)
+    }
 }
 
 #[cfg(test)]
@@ -473,7 +587,7 @@ mod tests {
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
         let read_config = datastore
-            .tq_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, rack_id)
             .await
             .expect("no error")
             .expect("returned config");
@@ -491,7 +605,7 @@ mod tests {
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
         let read_config = datastore
-            .tq_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, rack_id)
             .await
             .expect("no error")
             .expect("returned config");
@@ -513,7 +627,7 @@ mod tests {
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
         let read_config = datastore
-            .tq_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, rack_id)
             .await
             .expect("no error")
             .expect("returned config");
