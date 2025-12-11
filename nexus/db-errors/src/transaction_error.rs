@@ -68,6 +68,24 @@ impl<T> TransactionError<T> {
             _ => NotRetryable(self),
         }
     }
+
+    /// Maps a `TransactionError<T>` to a `TransactionError<T2>`
+    ///
+    /// Applyies an operation transforming `T` to `T2`.
+    /// The API here resembles [Result::map_err] intentionally.
+    pub fn map<T2, O>(self, op: O) -> TransactionError<T2>
+    where
+        O: FnOnce(T) -> T2,
+    {
+        match self {
+            TransactionError::CustomError(err) => {
+                TransactionError::CustomError(op(err))
+            }
+            TransactionError::Database(db_err) => {
+                TransactionError::Database(db_err)
+            }
+        }
+    }
 }
 
 impl<T: std::fmt::Debug> TransactionError<T> {

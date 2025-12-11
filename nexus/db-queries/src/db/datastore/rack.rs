@@ -29,10 +29,8 @@ use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
-use nexus_db_errors::MaybeRetryable::*;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
-use nexus_db_errors::retryable;
 use nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET;
@@ -115,19 +113,14 @@ enum RackInitError {
     DnsSerialization(Error),
     Silo(Error),
     RoleAssignment(Error),
-    // Retryable database error
-    Retryable(DieselError),
-    // Other non-retryable database error
     Database(DieselError),
     // Error adding initial allowed source IP list
     AllowedSourceIpError(Error),
 }
 
-// Catch-all for Diesel error conversion into RackInitError, which
-// can also label errors as retryable.
 impl From<DieselError> for RackInitError {
     fn from(e: DieselError) -> Self {
-        if retryable(&e) { Self::Retryable(e) } else { Self::Database(e) }
+        Self::Database(e)
     }
 }
 
@@ -179,10 +172,6 @@ impl From<RackInitError> for Error {
             RackInitError::RoleAssignment(err) => {
                 err.internal_context("failed to assign role to initial user")
             }
-            RackInitError::Retryable(err) => Error::unavail(&format!(
-                "failed operation due to database contention: {:#}",
-                err
-            )),
             RackInitError::Database(err) => Error::internal_error(&format!(
                 "failed operation due to database error: {:#}",
                 err
@@ -464,11 +453,8 @@ impl DataStore {
                 dns_update,
             )
             .await
-            .map_err(|err| match err.retryable() {
-                NotRetryable(err) => {
-                    RackInitError::Silo(err.into_public_ignore_retries())
-                }
-                Retryable(err) => RackInitError::Retryable(err),
+            .map_err(|err| {
+                RackInitError::Silo(err.into_public_ignore_retries())
             })?;
         info!(log, "Created recovery silo");
 
@@ -681,12 +667,7 @@ impl DataStore {
                      zone_report_str;
                     "err" => %err,
                 );
-                match err.retryable() {
-                    Retryable(e) => RackInitError::Retryable(e),
-                    NotRetryable(e) => {
-                        RackInitError::AddingIp(e.into_public_ignore_retries())
-                    }
-                }
+                RackInitError::AddingIp(err.into_public_ignore_retries())
             },
         )?;
 
@@ -696,14 +677,18 @@ impl DataStore {
             .or_else(|e| {
                 use db::queries::network_interface::InsertError;
                 match e {
-                    InsertError::InterfaceAlreadyExists(
-                        _,
-                        db::model::NetworkInterfaceKind::Service,
+                    TransactionError::CustomError(
+                        InsertError::InterfaceAlreadyExists(
+                            _,
+                            db::model::NetworkInterfaceKind::Service,
+                        ),
                     ) => Ok(()),
-                    InsertError::Retryable(err) => {
-                        Err(RackInitError::Retryable(err))
+                    TransactionError::CustomError(e) => {
+                        Err(RackInitError::AddingNic(e.into_external()))
                     }
-                    _ => Err(RackInitError::AddingNic(e.into_external())),
+                    TransactionError::Database(err) => {
+                        Err(RackInitError::Database(err))
+                    }
                 }
             })?;
         info!(
@@ -975,12 +960,9 @@ impl DataStore {
                         rack_init.dns_update,
                     )
                     .await
-                    .map_err(|e| match e {
-                        RackInitError::Retryable(e) => e,
-                        _ => {
-                            err.set(e).unwrap();
-                            DieselError::RollbackTransaction
-                        }
+                    .map_err(|e| {
+                        err.set(e).unwrap();
+                        DieselError::RollbackTransaction
                     })?;
 
                     // Insert the initial source IP allowlist for requests to
@@ -1004,9 +986,6 @@ impl DataStore {
                         .get_result_async::<Rack>(&conn)
                         .await
                         .map_err(|e| {
-                            if retryable(&e) {
-                                return e;
-                            }
                             err.set(RackInitError::RackUpdate {
                                 err: e,
                                 rack_id,

@@ -1962,7 +1962,7 @@ impl DataStore {
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .map_err(|e| err.bail(e.into()))?;
+                .map_err(|e| err.bail(e))?;
                 self.ensure_zone_external_networking_allocated_on_connection(
                     &conn,
                     opctx,
