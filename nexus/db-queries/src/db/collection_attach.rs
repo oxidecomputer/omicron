@@ -26,7 +26,7 @@ use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::result::Error as DieselError;
-use diesel::sql_types::{BigInt, Nullable, SingleValue};
+use diesel::sql_types::{BigInt, Bool, Nullable, SingleValue};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DatastoreAttachTargetConfig;
 use std::fmt::Debug;
@@ -75,6 +75,22 @@ pub(crate) mod aliases {
         <ResourcePrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
     pub type SerializedResourceForeignKey<ResourceType, C> =
         <ResourceForeignKey<ResourceType, C> as diesel::Expression>::SqlType;
+
+    pub trait BooleanCondition:
+        super::Query<SqlType = super::Bool>
+        + super::QueryFragment<super::Pg>
+        + Send
+        + 'static
+    {
+    }
+
+    impl<T> BooleanCondition for T where
+        T: super::Query<SqlType = super::Bool>
+            + super::QueryFragment<super::Pg>
+            + Send
+            + 'static
+    {
+    }
 }
 
 use aliases::*;
@@ -181,6 +197,96 @@ pub trait DatastoreAttachTarget<ResourceType>:
         // Necessary to actually select the resource in the output type.
         ResourceType: Selectable<Pg>,
     {
+        Self::attach_resource_with_update_condition(
+            collection_id,
+            resource_id,
+            collection_query,
+            resource_query,
+            max_attached_resources,
+            update,
+            diesel::select(true.into_sql::<Bool>()),
+        )
+    }
+
+    fn attach_resource_with_update_condition<V, Cond>(
+        collection_id: Self::Id,
+        resource_id: Self::Id,
+
+        collection_query: BoxedQuery<CollectionTable<ResourceType, Self>>,
+        resource_query: BoxedQuery<ResourceTable<ResourceType, Self>>,
+
+        max_attached_resources: u32,
+
+        // We are intentionally picky about this update statement:
+        // - The second argument - the WHERE clause - must match the default
+        // for the table. This encourages the "resource_query" filter to be
+        // used instead, and makes it possible for the CTE to modify the
+        // filter here (ensuring "resource_id" is selected).
+        // - Additionally, UpdateStatement's fourth argument defaults to Ret =
+        // NoReturningClause. This enforces that the given input statement does
+        // not have a RETURNING clause, and also lets the CTE control this
+        // value.
+        update: UpdateStatement<
+            ResourceTable<ResourceType, Self>,
+            ResourceTableDefaultWhereClause<ResourceType, Self>,
+            V,
+        >,
+
+        update_condition: Cond,
+    ) -> AttachToCollectionStatement<ResourceType, V, Self>
+    where
+        // Treat the collection and resource as boxed tables.
+        CollectionTable<ResourceType, Self>: BoxableTable,
+        ResourceTable<ResourceType, Self>: BoxableTable,
+        // Allows treating "collection_exists_query" as a boxed "dyn QueryFragment<Pg>".
+        QueryFromClause<CollectionTable<ResourceType, Self>>:
+            QueryFragment<Pg> + Send,
+        // Allows treating "resource_exists_query" as a boxed "dyn QueryFragment<Pg>".
+        QueryFromClause<ResourceTable<ResourceType, Self>>:
+            QueryFragment<Pg> + Send,
+        // Allows sending "collection_exists_query" between threads.
+        QuerySqlType<CollectionTable<ResourceType, Self>>: Send,
+        // Allows sending "resource_exists_query" between threads.
+        QuerySqlType<ResourceTable<ResourceType, Self>>: Send,
+        // Allows calling ".filter()" on the boxed collection table.
+        BoxedQuery<CollectionTable<ResourceType, Self>>: FilterBy<Eq<CollectionPrimaryKey<ResourceType, Self>, Self::Id>>
+            + FilterBy<IsNull<Self::CollectionTimeDeletedColumn>>,
+        // Allows calling ".filter()" on the boxed resource table.
+        BoxedQuery<ResourceTable<ResourceType, Self>>: FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>>
+            + FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>>
+            + FilterBy<IsNull<Self::ResourceCollectionIdColumn>>
+            + FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
+        // Allows calling "update.into_boxed()"
+        UpdateStatement<
+            ResourceTable<ResourceType, Self>,
+            ResourceTableDefaultWhereClause<ResourceType, Self>,
+            V,
+        >: BoxableUpdateStatement<ResourceTable<ResourceType, Self>, V>,
+        // Allows calling
+        // ".filter(resource_table().primary_key().eq(resource_id)" on the
+        // boxed update statement.
+        BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, Self>, V>:
+            FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>>,
+        // Allows using "id" in expressions (e.g. ".eq(...)") with...
+        Self::Id: AsExpression<
+                // ... The Collection table's PK
+                SerializedCollectionPrimaryKey<ResourceType, Self>,
+            > + AsExpression<
+                // ... The Resource table's PK
+                SerializedResourcePrimaryKey<ResourceType, Self>,
+            > + AsExpression<
+                // ... The Resource table's FK to the Collection table
+                SerializedResourceForeignKey<ResourceType, Self>,
+            >,
+        ExprSqlType<CollectionPrimaryKey<ResourceType, Self>>: SingleValue,
+        ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
+        ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
+        // Necessary to actually select the resource in the output type.
+        ResourceType: Selectable<Pg>,
+        // The condition evaluates to a boolean and can be inserted in an actual
+        // SQL query.
+        Cond: BooleanCondition,
+    {
         let collection_table =
             || <CollectionTable<ResourceType, Self> as HasTable>::table();
         let resource_table =
@@ -254,15 +360,17 @@ pub trait DatastoreAttachTarget<ResourceType>:
             .filter(resource_table().primary_key().eq(resource_id));
 
         let resource_returning_clause = ResourceType::as_returning();
+        let update_condition = Box::new(update_condition);
         AttachToCollectionStatement {
             collection_exists_query,
             resource_exists_query,
             resource_count_query,
             collection_query,
             resource_query,
-            max_attached_resources,
+            max_attached_resources: i64::from(max_attached_resources),
             update_resource_statement,
             resource_returning_clause,
+            update_condition,
         }
     }
 }
@@ -289,13 +397,15 @@ where
     // A (mostly) user-provided query for validating the resource.
     resource_query: Box<dyn QueryFragment<Pg> + Send>,
     // The maximum number of resources which may be attached to the collection.
-    max_attached_resources: u32,
+    max_attached_resources: i64,
 
     // Update statement for the resource.
     update_resource_statement:
         BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>,
     // Describes what should be returned after UPDATE-ing the resource.
     resource_returning_clause: AsSelect<ResourceType, Pg>,
+    // Extra boolean condition gating the actual update.
+    update_condition: Box<dyn BooleanCondition>,
 }
 
 impl<ResourceType, V, C> QueryId
@@ -526,9 +636,12 @@ where
         out.push_sql(" FROM collection_info) AND EXISTS(SELECT ");
         out.push_identifier(ResourceIdColumn::<ResourceType, C>::NAME)?;
         out.push_sql(
-            &format!(" FROM resource_info) AND (SELECT * FROM resource_count) < {}, TRUE,FALSE)), ",
-            self.max_attached_resources)
+            " FROM resource_info) AND (SELECT * FROM resource_count) < ",
         );
+        out.push_bind_param::<BigInt, _>(&self.max_attached_resources)?;
+        out.push_sql(" AND EXISTS(");
+        self.update_condition.walk_ast(out.reborrow())?;
+        out.push_sql("), TRUE, FALSE)), ");
 
         out.push_sql("updated_resource AS (");
         self.update_resource_statement.walk_ast(out.reborrow())?;

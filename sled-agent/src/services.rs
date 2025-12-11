@@ -60,7 +60,11 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneConfig, OmicronZoneType, ZoneKind,
+};
 use omicron_common::address::AZ_PREFIX;
+use omicron_common::address::ConcreteIp;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MAX_PORT;
@@ -78,7 +82,6 @@ use omicron_common::address::{
 };
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::external_ip::ConcreteIp;
 use omicron_common::api::internal::shared::{
     ExternalIpConfig, ExternalIpConfigBuilder, ExternalIps, HostPortConfig,
     PrivateIpConfig, RackNetworkConfig, SledIdentifiers,

@@ -40,6 +40,8 @@ use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpVersion;
+use nexus_db_model::NetworkInterfaceKind;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -142,12 +144,17 @@ impl DataStore {
             return Ok((eip, false));
         }
         let temp_ip = temp_ip?;
+        let ip_version = match temp_ip.ip {
+            ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
+            ipnetwork::IpNetwork::V6(_) => IpVersion::V6,
+        };
 
         match self
             .begin_attach_ip(
                 opctx,
                 temp_ip.id,
                 instance_id,
+                ip_version,
                 IpKind::Ephemeral,
                 creating_instance,
             )
@@ -427,6 +434,7 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         instance_id: InstanceUuid,
+        ip_version: IpVersion,
         kind: IpKind,
         creating_instance: bool,
     ) -> Result<Option<(ExternalIp, bool)>, Error> {
@@ -436,6 +444,8 @@ impl DataStore {
         use nexus_db_schema::schema::external_ip::table;
         use nexus_db_schema::schema::instance::dsl as inst_dsl;
         use nexus_db_schema::schema::instance::table as inst_table;
+        use nexus_db_schema::schema::network_interface::dsl as nic_dsl;
+        use nexus_db_schema::schema::network_interface::table as nic_table;
 
         let safe_states = if creating_instance {
             &SAFE_TO_ATTACH_INSTANCE_STATES_CREATING[..]
@@ -443,7 +453,17 @@ impl DataStore {
             &SAFE_TO_ATTACH_INSTANCE_STATES[..]
         };
 
-        let query = Instance::attach_resource(
+        let base_nic_query = nic_table
+            .into_boxed()
+            .filter(nic_dsl::parent_id.eq(instance_id.into_untyped_uuid()))
+            .filter(nic_dsl::time_deleted.is_null())
+            .filter(nic_dsl::kind.eq(NetworkInterfaceKind::Instance));
+        let has_matching_ip_stack = match ip_version {
+            IpVersion::V4 => base_nic_query.select(nic_dsl::ip.is_not_null()),
+            IpVersion::V6 => base_nic_query.select(nic_dsl::ipv6.is_not_null()),
+        };
+
+        let query = Instance::attach_resource_with_update_condition(
             instance_id.into_untyped_uuid(),
             ip_id,
             inst_table
@@ -461,6 +481,7 @@ impl DataStore {
                 dsl::time_modified.eq(Utc::now()),
                 dsl::state.eq(IpAttachState::Attaching),
             )),
+            has_matching_ip_stack,
         );
 
         let mut do_saga = true;
@@ -973,6 +994,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
+        ip_version: IpVersion,
         instance_id: InstanceUuid,
         creating_instance: bool,
     ) -> UpdateResult<(ExternalIp, bool)> {
@@ -988,6 +1010,7 @@ impl DataStore {
             opctx,
             authz_fip.id(),
             instance_id,
+            ip_version,
             IpKind::Floating,
             creating_instance,
         )

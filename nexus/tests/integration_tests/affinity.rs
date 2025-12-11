@@ -10,7 +10,7 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
@@ -466,7 +466,7 @@ async fn test_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&external_client).await;
+    create_default_ip_pools(&external_client).await;
     api.create_project(PROJECT_NAME).await;
 
     let project_api = api.use_project::<AffinityType>(PROJECT_NAME);
@@ -577,7 +577,7 @@ async fn test_anti_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&external_client).await;
+    create_default_ip_pools(&external_client).await;
     api.create_project(PROJECT_NAME).await;
 
     let project_api = api.use_project::<AntiAffinityType>(PROJECT_NAME);
@@ -689,7 +689,7 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
     let api = ApiHelper::new(client);
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     api.create_project(PROJECT_NAME).await;
 
     let project_api = api.use_project::<T>(PROJECT_NAME);
@@ -797,7 +797,7 @@ async fn test_instance_group_list<T: AffinityGroupish>(
     let api = ApiHelper::new(client);
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     api.create_project(PROJECT_NAME).await;
 
     let project_api = api.use_project::<T>(PROJECT_NAME);
@@ -841,7 +841,7 @@ async fn test_group_project_selector<T: AffinityGroupish>(
     let api = ApiHelper::new(client);
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     api.create_project(PROJECT_NAME).await;
 
     // All requests use the "?project={PROJECT_NAME}" query parameter
