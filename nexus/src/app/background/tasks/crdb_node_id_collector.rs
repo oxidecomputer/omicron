@@ -148,7 +148,7 @@ impl CockroachAdminFromBlueprint for CockroachAdminFromBlueprintViaFixedPort {
         // collected, we have to wait until they're running.
         let zone_filter = BlueprintZoneDisposition::is_in_service;
 
-        blueprint.all_omicron_zones(zone_filter).filter_map(
+        blueprint.danger_all_omicron_zones(zone_filter).filter_map(
             |(_sled_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb { address, .. },
@@ -269,7 +269,7 @@ mod tests {
         // `ExampleSystemBuilder` doesn't place any cockroach nodes; assert so
         // we bail out early if that changes.
         let ncockroach = bp0
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .filter(|(_, z)| z.zone_type.is_cockroach())
             .count();
         assert_eq!(ncockroach, 0);

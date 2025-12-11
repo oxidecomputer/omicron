@@ -74,7 +74,7 @@ pub(crate) async fn deploy_nodes(
     // This is tracked in https://github.com/oxidecomputer/omicron/issues/7724
     deploy_nodes_impl(
         opctx,
-        blueprint.all_omicron_zones(BlueprintZoneDisposition::any),
+        blueprint.danger_all_omicron_zones(BlueprintZoneDisposition::any),
         clickhouse_cluster_config,
     )
     .await
@@ -235,7 +235,7 @@ pub(crate) async fn deploy_single_node(
     deploy_single_node_impl(
         opctx,
         blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .filter(|(_, z)| z.zone_type.is_clickhouse()),
     )
     .await

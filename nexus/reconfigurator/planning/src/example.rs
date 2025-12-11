@@ -1446,7 +1446,7 @@ mod tests {
                 }
                 ServiceName::Crucible(_) => {
                     // Each Crucible zone should be queryable.
-                    for (_, zone) in blueprint.all_omicron_zones(
+                    for (_, zone) in blueprint.danger_all_omicron_zones(
                         BlueprintZoneDisposition::is_in_service,
                     ) {
                         if zone.kind() == ZoneKind::Crucible {
@@ -1471,7 +1471,7 @@ mod tests {
         kind: ZoneKind,
     ) -> Vec<&BlueprintZoneConfig> {
         blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .danger_all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_, zone)| {
                 (zone.zone_type.kind() == kind).then_some(zone)
             })

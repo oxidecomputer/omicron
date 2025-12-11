@@ -227,7 +227,7 @@ impl DataStore {
         // For this blueprint: The set of all expunged Nexus zones that are
         // ready for cleanup
         let invalid_nexus_zones = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
+            .danger_all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
             .filter_map(|(_sled, zone)| {
                 if zone.zone_type.is_nexus() {
                     Some(zone.id.into_untyped_uuid())

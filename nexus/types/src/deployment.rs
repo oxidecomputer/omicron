@@ -309,7 +309,9 @@ impl Blueprint {
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
     /// that match the provided filter, along with the associated sled id.
-    pub fn all_omicron_zones<F>(
+    ///
+    /// TODO-john Explain danger? Add reason arg?
+    pub fn danger_all_omicron_zones<F>(
         &self,
         mut filter: F,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
@@ -334,7 +336,7 @@ impl Blueprint {
     where
         F: FnMut(BlueprintZoneDisposition) -> bool,
     {
-        self.all_omicron_zones(filter).filter_map(|(sled_id, zone)| {
+        self.danger_all_omicron_zones(filter).filter_map(|(sled_id, zone)| {
             if let BlueprintZoneType::Nexus(nexus_config) = &zone.zone_type {
                 Some((sled_id, zone, nexus_config))
             } else {
@@ -418,7 +420,7 @@ impl Blueprint {
         nexus_id: OmicronZoneUuid,
     ) -> Result<bool, anyhow::Error> {
         let zone = self
-            .all_omicron_zones(|_z| true)
+            .danger_all_omicron_zones(|_z| true)
             .find(|(_sled_id, zone_config)| zone_config.id == nexus_id)
             .ok_or_else(|| {
                 anyhow!("zone {} does not exist in blueprint", nexus_id)

@@ -3246,7 +3246,7 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
             for (_, z) in
-                parent.all_omicron_zones(BlueprintZoneDisposition::any)
+                parent.danger_all_omicron_zones(BlueprintZoneDisposition::any)
             {
                 if let Some((external_ip, _)) =
                     z.zone_type.external_networking()
@@ -3317,7 +3317,7 @@ pub mod test {
         // provisions CRDB; this check makes sure we update our use of it if
         // that changes).
         for (_, z) in
-            parent.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            parent.danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
             assert!(
                 !z.zone_type.is_cockroach(),
@@ -3361,7 +3361,7 @@ pub mod test {
         verify_blueprint(&blueprint, &input);
         assert_eq!(
             blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(sled_id, z)| {
                     *sled_id == target_sled_id
                         && z.zone_type.kind() == ZoneKind::CockroachDb

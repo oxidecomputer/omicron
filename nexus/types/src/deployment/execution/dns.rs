@@ -41,7 +41,7 @@ pub fn blueprint_internal_dns_config(
     let mut dns_builder = DnsConfigBuilder::new();
 
     'all_zones: for (_, zone) in
-        blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        blueprint.danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     {
         let (service_name, &address) = match &zone.zone_type {
             BlueprintZoneType::BoundaryNtp(

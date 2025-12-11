@@ -67,7 +67,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
 
     for (sled_id, zone) in blippy
         .blueprint()
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     {
         let ip = zone.underlay_ip();
 
@@ -160,7 +160,7 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
 
     for (sled_id, zone, external_ip, nic) in blippy
         .blueprint()
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .filter_map(|(sled_id, zone)| {
             zone.zone_type
                 .external_networking()
@@ -265,7 +265,7 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
     // kind.
     for (sled_id, zone) in blippy
         .blueprint()
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     {
         // Check "one kind per zpool" for transient datasets...
         let filesystem_dataset = zone.filesystem_dataset();
@@ -691,7 +691,7 @@ fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
     // Collect all Nexus zones and their generations
     for (sled_id, zone) in blippy
         .blueprint()
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     {
         if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
             generation_info.entry(nexus.nexus_generation).or_default().push((
@@ -2143,7 +2143,7 @@ fn check_planning_input_network_records_appear_in_blueprint(
     // check for duplicates here: we could very well see reuse of IPs
     // between expunged zones or between expunged -> running zones.
     for (_, z) in
-        blippy.blueprint().all_omicron_zones(BlueprintZoneDisposition::any)
+        blippy.blueprint().danger_all_omicron_zones(BlueprintZoneDisposition::any)
     {
         let zone_type = &z.zone_type;
         match zone_type {

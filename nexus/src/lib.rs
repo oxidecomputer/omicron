@@ -358,7 +358,7 @@ impl nexus_test_interface::NexusServer for Server {
         // system services.  But here, we fake up IP pool ranges based on the
         // external addresses of services that we start or mock.
         let internal_services_ip_pool_ranges = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .filter_map(|(_, zc)| match &zc.zone_type {
                 BlueprintZoneType::BoundaryNtp(
                     blueprint_zone_type::BoundaryNtp { external_ip, .. },

@@ -352,7 +352,7 @@ async fn check_all_sagas_drained(
     // This doesn't ever change once we've determined it once.  But we don't
     // know what the value is until we see our first blueprint.
     let Some(my_generation) = current_blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .find_map(|(_sled_id, zone)| {
             if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
                 (zone.id == my_nexus_id).then_some(nexus.nexus_generation)
@@ -441,7 +441,7 @@ async fn check_all_sagas_drained(
     // were all drained up to the same point, which is good enough for us to
     // proceed, too.
     let our_gen_nexus_ids: BTreeSet<OmicronZoneUuid> = current_blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .filter_map(|(_sled_id, zone)| {
             if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
                 (nexus.nexus_generation == my_generation).then_some(zone.id)
@@ -854,7 +854,7 @@ mod test {
                 "test_quiesce_multi",
             );
         let nexus_ids = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .filter_map(|(_sled_id, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<Vec<_>>();
         // The example system creates three sleds.  Each sled gets a Nexus zone.

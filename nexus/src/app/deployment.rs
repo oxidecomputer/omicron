@@ -368,7 +368,7 @@ fn is_target_release_change_allowed(
 
     // Now check zone configs.
     for (_, zone_config) in current_blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     {
         match &zone_config.image_source {
             BlueprintZoneImageSource::InstallDataset => {

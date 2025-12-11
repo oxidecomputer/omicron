@@ -69,7 +69,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     // there exist no Nexus zones with a generation newer than the blueprint's
     // `nexus_generation`.
     let new_zones = blueprint_initial
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .filter_map(|(_sled_id, z)| {
             let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 nexus_generation,
@@ -102,7 +102,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         cfg: &'a blueprint_zone_type::Nexus,
     }
     let current_nexus_zones: BTreeMap<OmicronZoneUuid, _> = blueprint_initial
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .filter_map(|(sled_id, z)| {
             let BlueprintZoneType::Nexus(
                 cfg @ blueprint_zone_type::Nexus { nexus_generation, .. },
@@ -504,7 +504,7 @@ async fn check_internal_dns(
 
     // Find the DNS server based on what's currently in the blueprint.
     let dns_sockaddr = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .find_map(|(_sled_id, zone_cfg)| {
             if let BlueprintZoneType::InternalDns(
                 blueprint_zone_type::InternalDns { dns_address, .. },
@@ -568,7 +568,7 @@ async fn check_external_dns(
 
     // Find the DNS server based on what's currently in the blueprint.
     let dns_http_sockaddr = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .find_map(|(_sled_id, zone_cfg)| {
             if let BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { http_address, .. },

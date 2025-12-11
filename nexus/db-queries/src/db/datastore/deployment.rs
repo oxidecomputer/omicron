@@ -1956,7 +1956,7 @@ impl DataStore {
                     &conn,
                     &opctx.log,
                     blueprint
-                        .all_omicron_zones(|disposition| {
+                        .danger_all_omicron_zones(|disposition| {
                             !disposition.is_in_service()
                         })
                         .map(|(_sled_id, zone)| zone),
@@ -1967,7 +1967,7 @@ impl DataStore {
                     &conn,
                     opctx,
                     blueprint
-                        .all_omicron_zones(|disposition| {
+                        .danger_all_omicron_zones(|disposition| {
                             disposition.is_in_service()
                         })
                         .map(|(_sled_id, zone)| zone),
@@ -3312,7 +3312,7 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len(), collection.sled_agents.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
+            blueprint1.danger_all_omicron_zones(BlueprintZoneDisposition::any).count(),
             collection.all_ledgered_omicron_zones().count()
         );
         // All zones should be in service.
@@ -3644,9 +3644,9 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len() + 1, blueprint2.sleds.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count()
+            blueprint1.danger_all_omicron_zones(BlueprintZoneDisposition::any).count()
                 + num_new_sled_zones,
-            blueprint2.all_omicron_zones(BlueprintZoneDisposition::any).count()
+            blueprint2.danger_all_omicron_zones(BlueprintZoneDisposition::any).count()
         );
 
         // All zones should be in service.
@@ -4296,7 +4296,7 @@ mod tests {
 
         // Insert an IP pool range covering the one Nexus IP.
         let nexus_ip = blueprint1
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .find_map(|(_, zone_config)| {
                 zone_config
                     .zone_type
@@ -4516,7 +4516,7 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .all_omicron_zones(|disposition| !disposition.is_in_service())
+            .danger_all_omicron_zones(|disposition| !disposition.is_in_service())
             .collect::<Vec<_>>();
         assert!(
             not_in_service.is_empty(),
