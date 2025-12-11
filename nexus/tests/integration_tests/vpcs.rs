@@ -464,7 +464,7 @@ async fn test_limited_collaborator_can_create_instance(
             user_data: vec![],
             ssh_public_keys: None,
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::Default,
+                params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![],
             multicast_groups: vec![],
             disks: vec![],

@@ -94,7 +94,7 @@ async fn test_multicast_with_external_ip_basic(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![], // Start without external IP
         multicast_groups: vec![],
         disks: vec![],
@@ -285,7 +285,7 @@ async fn test_multicast_external_ip_lifecycle(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -472,7 +472,7 @@ async fn test_multicast_with_external_ip_at_creation(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![external_ip_param], // External IP at creation
         multicast_groups: vec![], // Will add to multicast group after creation
         disks: vec![],
@@ -610,7 +610,7 @@ async fn test_multicast_with_floating_ip_basic(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![], // Start without external IP
         multicast_groups: vec![],
         disks: vec![],

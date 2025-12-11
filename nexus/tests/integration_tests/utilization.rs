@@ -229,7 +229,8 @@ async fn create_resources_in_test_suite_silo(client: &ClientTestContext) {
         hostname: "test-inst".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces:
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,

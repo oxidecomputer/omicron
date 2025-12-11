@@ -976,7 +976,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],

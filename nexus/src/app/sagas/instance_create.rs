@@ -11,13 +11,12 @@ use crate::app::{
 };
 use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::{
-    ExternalIp, IpConfig, Ipv4Assignment, Ipv4Config, NetworkInterfaceKind,
-};
+use nexus_db_model::ExternalIp;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
-use nexus_types::external_api::params::InstanceDiskAttachment;
+use nexus_types::external_api::params::{InstanceDiskAttachment, IpConfig};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
@@ -35,7 +34,6 @@ use slog::{info, warn};
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
-use std::net::IpAddr;
 use steno::ActionError;
 use steno::Node;
 use steno::{DagBuilder, SagaName};
@@ -501,6 +499,23 @@ async fn sic_add_to_anti_affinity_group(
     Ok(())
 }
 
+/// Convert an `InstanceNetworkInterfaceAttachment` to an `IpConfig`.
+///
+/// # Panics
+///
+/// This panics if the attachment isn't one of the "default" variants.
+fn nic_attachment_to_ip_config(
+    attachment: &params::InstanceNetworkInterfaceAttachment,
+) -> IpConfig {
+    use params::InstanceNetworkInterfaceAttachment::*;
+    match attachment {
+        DefaultIpv4 => IpConfig::auto_ipv4(),
+        DefaultIpv6 => IpConfig::auto_ipv6(),
+        DefaultDualStack => IpConfig::auto_dual_stack(),
+        Create(_) | None => panic!("Only works for default variants"),
+    }
+}
+
 /// Create a network interface for an instance, using the parameters at index
 /// `nic_index`, returning the UUID for the NIC (or None).
 async fn sic_create_network_interface(
@@ -514,13 +529,17 @@ async fn sic_create_network_interface(
     let interface_params = &saga_params.create_params.network_interfaces;
     match interface_params {
         params::InstanceNetworkInterfaceAttachment::None => Ok(()),
-        params::InstanceNetworkInterfaceAttachment::Default => {
+        params::InstanceNetworkInterfaceAttachment::DefaultIpv4
+        | params::InstanceNetworkInterfaceAttachment::DefaultIpv6
+        | params::InstanceNetworkInterfaceAttachment::DefaultDualStack => {
+            let ip_config = nic_attachment_to_ip_config(interface_params);
             create_default_primary_network_interface(
                 &sagactx,
                 &saga_params,
                 nic_index,
                 instance_id,
                 interface_id,
+                ip_config,
             )
             .await
         }
@@ -641,40 +660,12 @@ async fn create_custom_network_interface(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // TODO-completeness: Support IPv6 addressing in the public API, see
-    // https://github.com/oxidecomputer/omicron/issues/9248.
-    let ipv4_assignment = match interface_params.ip {
-        Some(IpAddr::V4(ip)) => Ipv4Assignment::Explicit(ip),
-        Some(IpAddr::V6(_)) => {
-            return Err(ActionError::action_failed(Error::invalid_request(
-                "IPv6 addressing is not yet suported for network interfaces",
-            )));
-        }
-        None => Ipv4Assignment::Auto,
-    };
-    let transit_ips = interface_params
-        .transit_ips
-        .iter()
-        .map(|ipnet| {
-            let oxnet::IpNet::V4(net) = ipnet else {
-                return Err(ActionError::action_failed(
-                    Error::invalid_request(
-                        "IPv6 transit IPs are not yet supported \
-                    for network interfaces",
-                    ),
-                ));
-            };
-            Ok(*net)
-        })
-        .collect::<Result<_, _>>()?;
-    let ip_config =
-        IpConfig::V4(Ipv4Config { ip: ipv4_assignment, transit_ips });
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
         db_subnet.clone(),
         interface_params.identity.clone(),
-        ip_config,
+        interface_params.ip_config.clone(),
     )
     .map_err(ActionError::action_failed)?;
     datastore
@@ -703,12 +694,16 @@ async fn create_custom_network_interface(
 
 /// Create a default primary network interface for an instance during the create
 /// saga.
+///
+/// Note that this is used to create any of the possible "default" interface
+/// types, IPv4-only, IPv6-only, and dual-stack.
 async fn create_default_primary_network_interface(
     sagactx: &NexusActionContext,
     saga_params: &Params,
     nic_index: usize,
     instance_id: InstanceUuid,
     interface_id: Uuid,
+    ip_config: IpConfig,
 ) -> Result<(), ActionError> {
     // We're statically creating up to MAX_NICS_PER_INSTANCE saga nodes, but
     // this method only applies to the case where there's exactly one parameter
@@ -746,8 +741,7 @@ async fn create_default_primary_network_interface(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip: None,            // Request an IP address allocation
-        transit_ips: vec![], // Default interfaces don't use transit IPs
+        ip_config,
     };
 
     // Lookup authz objects, used in the call to actually create the NIC.
@@ -763,41 +757,12 @@ async fn create_default_primary_network_interface(
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
-
-    // TODO-completeness: Support IPv6 addressing in the public API, see
-    // https://github.com/oxidecomputer/omicron/issues/9248.
-    let ipv4_assignment = match interface_params.ip {
-        Some(IpAddr::V4(ip)) => Ipv4Assignment::Explicit(ip),
-        Some(IpAddr::V6(_)) => {
-            return Err(ActionError::action_failed(Error::invalid_request(
-                "IPv6 addressing is not yet suported for network interfaces",
-            )));
-        }
-        None => Ipv4Assignment::Auto,
-    };
-    let transit_ips = interface_params
-        .transit_ips
-        .iter()
-        .map(|ipnet| {
-            let oxnet::IpNet::V4(net) = ipnet else {
-                return Err(ActionError::action_failed(
-                    Error::invalid_request(
-                        "IPv6 transit IPs are not yet supported \
-                    for network interfaces",
-                    ),
-                ));
-            };
-            Ok(*net)
-        })
-        .collect::<Result<_, _>>()?;
-    let ip_config =
-        IpConfig::V4(Ipv4Config { ip: ipv4_assignment, transit_ips });
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
         db_subnet.clone(),
         interface_params.identity.clone(),
-        ip_config,
+        interface_params.ip_config.clone(),
     )
     .map_err(ActionError::action_failed)?;
     datastore
@@ -1509,7 +1474,7 @@ pub mod test {
                 user_data: vec![],
                 ssh_public_keys: None,
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::Default,
+                    params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {
                     pool: None,
                 }],
