@@ -7,19 +7,30 @@
 
 use crate::ReconfiguratorSim;
 use anyhow::Context;
+use nexus_inventory::CollectionBuilder;
+use nexus_inventory::now_db_precision;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
+use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::system::SledBuilder;
+use nexus_reconfigurator_planning::system::SystemDescription;
 use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_reconfigurator_simulation::CollectionId;
+use nexus_reconfigurator_simulation::SimState;
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::errors::KeyError;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintSource;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
+use std::sync::Arc;
 
+#[derive(Debug, Clone)]
 pub struct ReconfiguratorCliTestState {
     sim: ReconfiguratorSim,
 }
@@ -53,9 +64,19 @@ impl ReconfiguratorCliTestState {
     }
 
     /// Get the specified blueprint.
-    pub fn blueprint(&self, id: BlueprintId) -> Result<&Blueprint, KeyError> {
+    pub fn blueprint(
+        &self,
+        id: BlueprintId,
+    ) -> Result<&Arc<Blueprint>, KeyError> {
         let state = self.sim.current_state();
         state.system().resolve_and_get_blueprint(id)
+    }
+
+    /// Get the specified inventory collection.
+    pub fn inventory(&self, id: CollectionId) -> Result<&Collection, KeyError> {
+        let system = self.current_state().system();
+        let id = system.resolve_collection_id(id)?;
+        system.get_collection(&id)
     }
 
     /// Run the blueprint planner, using the latest blueprint and inventory
@@ -74,7 +95,7 @@ impl ReconfiguratorCliTestState {
     /// "blippy clean" blueprints, and since this is used throughout the
     /// planner's tests, we want to assert that any blueprint we plan is indeed
     /// blippy clean.
-    pub fn run_planner(&mut self) -> anyhow::Result<Blueprint> {
+    pub fn run_planner(&mut self) -> anyhow::Result<Arc<Blueprint>> {
         let output =
             self.sim.run_planner(BlueprintId::Latest, CollectionId::Latest)?;
         println!("{output}");
@@ -103,7 +124,7 @@ impl ReconfiguratorCliTestState {
     ///
     /// Panics if the latest blueprint and current planning input have any
     /// blippy notes.
-    pub fn assert_latest_blueprint_is_blippy_clean(&self) -> Blueprint {
+    pub fn assert_latest_blueprint_is_blippy_clean(&self) -> Arc<Blueprint> {
         let blueprint = self
             .blueprint(BlueprintId::Latest)
             .expect("always have a latest blueprint");
@@ -120,7 +141,17 @@ impl ReconfiguratorCliTestState {
             panic!("expected blippy report for blueprint to have no notes");
         }
 
-        blueprint.clone()
+        Arc::clone(blueprint)
+    }
+
+    /// Read the current internal simulator state.
+    pub fn current_state(&self) -> &SimState {
+        self.sim.current_state()
+    }
+
+    /// Read the current system description.
+    pub fn current_description(&self) -> &SystemDescription {
+        self.current_state().system().description()
     }
 
     /// Change the internal simulator state.
@@ -138,6 +169,20 @@ impl ReconfiguratorCliTestState {
         Ok(ret)
     }
 
+    /// State change helper: change only the system description.
+    pub fn change_description<F, T>(
+        &mut self,
+        description: &str,
+        f: F,
+    ) -> anyhow::Result<T>
+    where
+        F: FnOnce(&mut SystemDescription) -> anyhow::Result<T>,
+    {
+        self.change_state(description, |state| {
+            f(state.system_mut().description_mut())
+        })
+    }
+
     /// State change helper: generate a new inventory collection from the
     /// current simulator state.
     pub fn generate_inventory(
@@ -151,15 +196,139 @@ impl ReconfiguratorCliTestState {
         })
     }
 
+    /// State change helper: generate a new inventory collection from the
+    /// current simulator state.
+    ///
+    /// `f` provides an opportunity to customize the collection.
+    pub fn generate_inventory_customized<F, T>(
+        &mut self,
+        description: &str,
+        f: F,
+    ) -> anyhow::Result<T>
+    where
+        F: FnOnce(&mut CollectionBuilder) -> anyhow::Result<T>,
+    {
+        self.change_state(description, |state| {
+            let mut builder = state.to_collection_builder()?;
+            let result = f(&mut builder)?;
+            state.system_mut().add_collection(builder.build())?;
+            Ok(result)
+        })
+    }
+
+    /// State change helper: create a new latest inventory collection, then pass
+    /// it to `f` which is allowed to edit it in abnormal ways that cannot be
+    /// done via `CollectionBuilder`.
+    pub fn inventory_edit_latest_raw<F, T>(
+        &mut self,
+        description: &str,
+        f: F,
+    ) -> anyhow::Result<T>
+    where
+        F: FnOnce(&mut Collection) -> anyhow::Result<T>,
+    {
+        self.change_state(description, |state| {
+            let mut collection = state.to_collection_builder()?.build();
+            let result = f(&mut collection)?;
+            state.system_mut().add_collection(collection)?;
+            Ok(result)
+        })
+    }
+
+    /// State change helper: set the Clickhouse cluster policy.
+    pub fn set_clickhouse_policy(
+        &mut self,
+        description: &str,
+        policy: ClickhousePolicy,
+    ) {
+        self.change_description(description, |desc| {
+            desc.clickhouse_policy(policy);
+            Ok(())
+        })
+        .expect("closure can't fail");
+    }
+
+    /// State change helper: edit the latest blueprint, inserting a new latest
+    /// blueprint.
+    pub fn blueprint_edit_latest<F>(
+        &mut self,
+        description: &str,
+        f: F,
+    ) -> anyhow::Result<Arc<Blueprint>>
+    where
+        F: FnOnce(&mut BlueprintBuilder<'_>) -> anyhow::Result<()>,
+    {
+        let log = self.sim.log.clone();
+        self.change_state(description, |state| {
+            let rng = state.rng_mut().next_planner_rng();
+            let system = state.system_mut();
+            let blueprint = system
+                .get_blueprint(
+                    &system.resolve_blueprint_id(BlueprintId::Latest),
+                )
+                .expect("always have a latest blueprint");
+            let mut builder = BlueprintBuilder::new_based_on(
+                &log,
+                blueprint,
+                "ReconfiguratorCliTestState",
+                rng,
+            )?;
+            f(&mut builder)?;
+            let blueprint = Arc::new(builder.build(BlueprintSource::Test));
+            system.add_blueprint(Arc::clone(&blueprint))?;
+            Ok(blueprint)
+        })
+    }
+
+    /// State change helper: create a new latest blueprint that is a clone of
+    /// the current latest blueprint (but with a new ID and correct parent ID),
+    /// then pass it to `f` which is allowed to edit it in abnormal ways that
+    /// cannot be done via `BlueprintBuilder`.
+    pub fn blueprint_edit_latest_raw<F>(
+        &mut self,
+        description: &str,
+        f: F,
+    ) -> anyhow::Result<Arc<Blueprint>>
+    where
+        F: FnOnce(&mut Blueprint) -> anyhow::Result<()>,
+    {
+        self.change_state(description, |state| {
+            let mut rng = state.rng_mut().next_planner_rng();
+            let system = state.system_mut();
+            let parent_blueprint = system
+                .get_blueprint(
+                    &system.resolve_blueprint_id(BlueprintId::Latest),
+                )
+                .expect("always have a latest blueprint");
+            let mut blueprint = Arc::clone(parent_blueprint);
+
+            {
+                let blueprint = Arc::make_mut(&mut blueprint);
+
+                // Update metadata fields to make this a new blueprint.
+                blueprint.id = rng.next_blueprint();
+                blueprint.parent_blueprint_id = Some(parent_blueprint.id);
+                blueprint.time_created = now_db_precision();
+
+                // Perform whatever modifications the caller wants.
+                f(blueprint)?;
+            }
+
+            system.add_blueprint(Arc::clone(&blueprint))?;
+
+            Ok(blueprint)
+        })
+    }
+
     /// State change helper: add a new sled, returning its ID.
-    pub fn add_sled(&mut self, description: &str) -> anyhow::Result<SledUuid> {
-        self.add_sled_customized(description, |sled| sled)
+    pub fn sled_add(&mut self, description: &str) -> anyhow::Result<SledUuid> {
+        self.sled_add_customized(description, |sled| sled)
     }
 
     /// State change helper: add a new sled, returning its ID.
     ///
     /// `f` provides an opportunity to customize the sled.
-    pub fn add_sled_customized<F>(
+    pub fn sled_add_customized<F>(
         &mut self,
         description: &str,
         f: F,
@@ -172,6 +341,21 @@ impl ReconfiguratorCliTestState {
             let new_sled = f(SledBuilder::new().id(sled_id));
             state.system_mut().description_mut().sled(new_sled)?;
             Ok(sled_id)
+        })
+    }
+
+    /// State change helper: expunge a sled.
+    pub fn sled_expunge(
+        &mut self,
+        description: &str,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<()> {
+        self.change_state(description, |state| {
+            state
+                .system_mut()
+                .description_mut()
+                .sled_set_policy(sled_id, SledPolicy::Expunged)?;
+            Ok(())
         })
     }
 

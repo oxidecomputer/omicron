@@ -88,7 +88,7 @@ mod log_capture;
 pub mod test_utils;
 
 /// REPL state
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ReconfiguratorSim {
     // The simulator currently being used.
     sim: Simulator,
