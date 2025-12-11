@@ -244,11 +244,16 @@ impl NodeTaskHandle {
 
     /// Return a [`proxy::Proxy`] that allows callers to proxy certain API requests
     /// to other nodes.
+    ///
+    /// Each of these operations on `Proxy` should be accessible via its own
+    /// sled agent API endpoint
     pub fn proxy(&self) -> proxy::Proxy {
         proxy::Proxy::new(self.tx.clone())
     }
 
     /// Initiate a trust quorum reconfiguration at this node
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn reconfigure(
         &self,
         msg: ReconfigureMsg,
@@ -260,6 +265,8 @@ impl NodeTaskHandle {
     }
 
     /// Initiate an LRTQ upgrade at this node
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn upgrade_from_lrtq(
         &self,
         msg: LrtqUpgradeMsg,
@@ -273,6 +280,8 @@ impl NodeTaskHandle {
     /// Return the status of this node if it is coordinating the `Prepare` phase
     /// of a reconfiguration or LRTQ upgrade. Return `Ok(None)` or an error
     /// otherwise.
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn coordinator_status(
         &self,
     ) -> Result<Option<CoordinatorStatus>, NodeApiError> {
@@ -294,6 +303,8 @@ impl NodeTaskHandle {
     }
 
     /// Attempt to prepare and commit the given configuration
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn prepare_and_commit(
         &self,
         config: Configuration,
@@ -305,6 +316,8 @@ impl NodeTaskHandle {
     }
 
     /// Attempt to commit the configuration at epoch `epoch`
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn commit(
         &self,
         rack_id: RackUuid,
@@ -344,6 +357,8 @@ impl NodeTaskHandle {
     }
 
     /// Return internal information for the [`Node`]
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn status(&self) -> Result<NodeStatus, NodeApiError> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(NodeApiRequest::NodeStatus { tx }).await?;
@@ -358,6 +373,8 @@ impl NodeTaskHandle {
     }
 
     /// Update network config needed for bringing up the control plane
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn update_network_config(
         &self,
         config: NetworkConfig,
@@ -371,6 +388,8 @@ impl NodeTaskHandle {
     }
 
     /// Retrieve the current network config
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn network_config(
         &self,
     ) -> Result<Option<NetworkConfig>, NodeApiError> {

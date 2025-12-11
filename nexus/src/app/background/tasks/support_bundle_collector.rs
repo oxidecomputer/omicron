@@ -78,6 +78,8 @@ use zip::ZipArchive;
 use zip::ZipWriter;
 use zip::write::FullFileOptions;
 
+use super::support_bundle::perfetto;
+
 // We use "/var/tmp" to use Nexus' filesystem for temporary storage,
 // rather than "/tmp", which would keep this collected data in-memory.
 const TEMPDIR: &str = "/var/tmp";
@@ -712,15 +714,6 @@ impl CompletedCollectionStep {
                 report.ereports = Some(status);
                 Status::Ok
             }
-            CollectionStepOutput::SavingSpDumps { listed_sps } => {
-                report.listed_sps = listed_sps;
-                Status::Ok
-            }
-            CollectionStepOutput::SpawnSleds { extra_steps } => {
-                report.listed_in_service_sleds = true;
-                steps.extend(extra_steps);
-                Status::Ok
-            }
             CollectionStepOutput::Spawn { extra_steps } => {
                 steps.extend(extra_steps);
                 Status::Ok
@@ -747,14 +740,7 @@ enum CollectionStepOutput {
     // It may have still saved a partial set of data to the bundle.
     Failed(anyhow::Error),
     Ereports(SupportBundleEreportStatus),
-    SavingSpDumps { listed_sps: bool },
-    // NOTE: The distinction between this and "Spawn" is pretty artificial -
-    // it's just to preserve a part of the report which says "we tried to
-    // list in-service sleds".
-    //
-    // If we changed the collection report, this could easily be combined
-    // with the "Spawn" variant.
-    SpawnSleds { extra_steps: Vec<CollectionStep> },
+    // The step spawned additional steps to execute
     Spawn { extra_steps: Vec<CollectionStep> },
     // The step completed with nothing to report, and no follow-up steps
     None,
@@ -1053,9 +1039,92 @@ impl BundleCollection {
             //
             // Only finish if we've exhausted all possible steps and joined all spawned work.
             if steps.is_empty() {
+                // Write trace file before returning
+                if let Err(err) = self.write_trace_file(output, &report).await {
+                    warn!(
+                        self.log,
+                        "Failed to write trace file";
+                        "error" => ?err
+                    );
+                }
                 return report;
             }
         }
+    }
+
+    // Write a Perfetto Event format JSON file for visualization
+    async fn write_trace_file(
+        &self,
+        output: &Utf8TempDir,
+        report: &SupportBundleCollectionReport,
+    ) -> anyhow::Result<()> {
+        let meta_dir = output.path().join("meta");
+        tokio::fs::create_dir_all(&meta_dir).await.with_context(|| {
+            format!("Failed to create meta directory {meta_dir}")
+        })?;
+
+        let trace_path = meta_dir.join("trace.json");
+
+        // Convert steps to Perfetto Trace Event format.
+        // Sort steps by start time and assign each a unique sequential ID.
+        //
+        // This is necessary because the trace event format does not like
+        // multiple slices to overlap - so we make each slice distinct.
+        //
+        // Ideally we'd be able to correlate these with actual tokio tasks,
+        // but it's hard to convert tokio::task::Id to a u64 because
+        // of https://github.com/tokio-rs/tokio/issues/7430
+        let mut sorted_steps: Vec<_> = report.steps.iter().collect();
+        sorted_steps.sort_by_key(|s| s.start);
+
+        // Generate trace events - each step gets a unique ID (1, 2, 3, ...)
+        // based on its start time order
+        let trace_events: Vec<_> = sorted_steps
+            .iter()
+            .enumerate()
+            .map(|(i, step)| {
+                let start_us = step.start.timestamp_micros();
+                let duration_us = (step.end - step.start)
+                    .num_microseconds()
+                    .unwrap_or(0)
+                    .max(0);
+                let step_id = i + 1;
+
+                perfetto::TraceEvent {
+                    name: step.name.clone(),
+                    cat: "bundle_collection".to_string(),
+                    ph: "X".to_string(),
+                    ts: start_us,
+                    dur: duration_us,
+                    pid: 1,
+                    tid: step_id,
+                    args: json!({
+                        "status": step.status.to_string(),
+                    }),
+                }
+            })
+            .collect();
+
+        let trace = perfetto::Trace {
+            trace_events,
+            display_time_unit: "ms".to_string(),
+        };
+
+        let trace_content = serde_json::to_string_pretty(&trace)
+            .context("Failed to serialize trace JSON")?;
+
+        tokio::fs::write(&trace_path, trace_content).await.with_context(
+            || format!("Failed to write trace file to {trace_path}"),
+        )?;
+
+        info!(
+            self.log,
+            "Wrote trace file";
+            "path" => %trace_path,
+            "num_events" => trace.trace_events.len()
+        );
+
+        Ok(())
     }
 
     async fn collect_bundle_id(
@@ -1232,7 +1301,7 @@ impl BundleCollection {
             format!("failed to save SP dump from: {} {}", sp.type_, sp.slot)
         })?;
 
-        Ok(CollectionStepOutput::SavingSpDumps { listed_sps: true })
+        Ok(CollectionStepOutput::None)
     }
 
     // Perform the work of collecting the support bundle into a temporary directory
@@ -1268,25 +1337,25 @@ impl BundleCollection {
 
         let steps: Vec<CollectionStep> = vec![
             CollectionStep::new(
-                "bundle id",
+                SupportBundleCollectionStep::STEP_BUNDLE_ID,
                 Box::new(|collection, dir| {
                     collection.collect_bundle_id(dir).boxed()
                 }),
             ),
             CollectionStep::new(
-                "reconfigurator state",
+                SupportBundleCollectionStep::STEP_RECONFIGURATOR_STATE,
                 Box::new(|collection, dir| {
                     collection.collect_reconfigurator_state(dir).boxed()
                 }),
             ),
             CollectionStep::new(
-                "ereports",
+                SupportBundleCollectionStep::STEP_EREPORTS,
                 Box::new(|collection, dir| {
                     collection.collect_ereports(dir).boxed()
                 }),
             ),
             CollectionStep::new(
-                "sled cubby info",
+                SupportBundleCollectionStep::STEP_SLED_CUBBY_INFO,
                 Box::new({
                     let all_sleds = all_sleds.clone();
                     let mgs_client = mgs_client.clone();
@@ -1305,7 +1374,7 @@ impl BundleCollection {
                 }),
             ),
             CollectionStep::new(
-                "spawn steps to query all SP dumps",
+                SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS,
                 Box::new({
                     let mgs_client = mgs_client.clone();
                     move |collection, dir| {
@@ -1319,7 +1388,7 @@ impl BundleCollection {
                 }),
             ),
             CollectionStep::new(
-                "spawn steps to query all sleds",
+                SupportBundleCollectionStep::STEP_SPAWN_SLEDS,
                 Box::new({
                     let all_sleds = all_sleds.clone();
                     move |collection, _| {
@@ -1369,7 +1438,7 @@ impl BundleCollection {
             ));
         }
 
-        return Ok(CollectionStepOutput::SpawnSleds { extra_steps });
+        return Ok(CollectionStepOutput::Spawn { extra_steps });
     }
 
     // Collect data from a sled, storing it into a directory that will
@@ -2509,8 +2578,16 @@ mod test {
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle.id.into());
-        assert!(report.listed_in_service_sleds);
-        assert!(report.listed_sps);
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
         assert_eq!(
             report.ereports,
@@ -2534,6 +2611,117 @@ mod test {
             .await
             .expect("Collection should be a no-op the second time");
         assert!(report.is_none());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_trace_file_generated(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // Create a bundle to collect
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                "For trace file testing",
+                nexus.id(),
+                None,
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
+
+        // Collect the bundle
+        let mut request = BundleRequest::default();
+        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        let report = collector
+            .collect_bundle(&opctx, &request)
+            .await
+            .expect("Collection should have succeeded")
+            .expect("Should have generated a report");
+
+        // Download the trace file from the bundle
+        let head = false;
+        let range = None;
+        let response = nexus
+            .support_bundle_download(
+                &opctx,
+                bundle.id.into(),
+                SupportBundleQueryType::Path {
+                    file_path: "meta/trace.json".to_string(),
+                },
+                head,
+                range,
+            )
+            .await
+            .expect("Should be able to download trace file");
+
+        // Parse the trace file using our Perfetto structs
+        let body_bytes =
+            response.into_body().collect().await.unwrap().to_bytes();
+        let trace: perfetto::Trace = serde_json::from_slice(&body_bytes)
+            .expect("Trace file should be valid Perfetto JSON");
+
+        // Verify display time unit
+        assert_eq!(
+            trace.display_time_unit, "ms",
+            "Display time unit should be milliseconds"
+        );
+
+        // We should have at least the main collection steps
+        assert!(
+            !trace.trace_events.is_empty(),
+            "Should have at least one trace event"
+        );
+
+        // Verify each event has the expected structure
+        for event in &trace.trace_events {
+            // Verify category
+            assert_eq!(
+                event.cat, "bundle_collection",
+                "Event should have category 'bundle_collection'"
+            );
+            // Verify phase type
+            assert_eq!(event.ph, "X", "Event should be Complete event type");
+            // Verify timestamps are positive
+            assert!(event.ts >= 0, "Event timestamp should be non-negative");
+            assert!(event.dur >= 0, "Event duration should be non-negative");
+            // Verify process and thread IDs are set
+            assert_eq!(event.pid, 1, "All events should have pid=1");
+            assert!(event.tid > 0, "Event thread ID should be positive");
+        }
+
+        // Verify we have the same number of events as steps in the report
+        assert_eq!(
+            trace.trace_events.len(),
+            report.steps.len(),
+            "Number of events should match number of steps"
+        );
+
+        // Verify step names match between report and trace
+        let trace_names: std::collections::HashSet<_> =
+            trace.trace_events.iter().map(|e| e.name.as_str()).collect();
+        let report_names: std::collections::HashSet<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            trace_names, report_names,
+            "Trace event names should match report step names"
+        );
     }
 
     #[nexus_test(server = crate::Server)]
@@ -2591,8 +2779,16 @@ mod test {
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle.id.into());
-        assert!(report.listed_in_service_sleds);
-        assert!(report.listed_sps);
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
 
         let observed_bundle = datastore
@@ -2678,8 +2874,16 @@ mod test {
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle1.id.into());
-        assert!(report.listed_in_service_sleds);
-        assert!(report.listed_sps);
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
 
         // This is observable by checking the state of bundle1 and bundle2:
@@ -2701,8 +2905,16 @@ mod test {
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle2.id.into());
-        assert!(report.listed_in_service_sleds);
-        assert!(report.listed_sps);
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
 
         // After another collection request, we'll see that both bundles have
@@ -2827,8 +3039,16 @@ mod test {
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle.id.into());
-        assert!(report.listed_in_service_sleds);
-        assert!(report.listed_sps);
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
 
         // Cancel the bundle after collection has completed

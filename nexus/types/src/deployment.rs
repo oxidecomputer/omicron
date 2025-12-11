@@ -15,7 +15,7 @@
 use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
-pub use crate::inventory::SourceNatConfig;
+pub use crate::inventory::SourceNatConfigGeneric;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
@@ -384,11 +384,13 @@ impl Blueprint {
     /// Iterate over the sled configs of all active (not decommissioned) sleds.
     pub fn active_sled_configs(
         &self,
-    ) -> impl Iterator<Item = &BlueprintSledConfig> {
-        self.sleds.values().filter(|sled_config| match sled_config.state {
-            SledState::Active => true,
-            SledState::Decommissioned => false,
-        })
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintSledConfig)> {
+        self.sleds.iter().filter_map(
+            |(&sled_id, sled_config)| match sled_config.state {
+                SledState::Active => Some((sled_id, sled_config)),
+                SledState::Decommissioned => None,
+            },
+        )
     }
 
     /// Summarize the difference between two blueprints.
