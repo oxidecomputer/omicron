@@ -438,7 +438,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
-        self.instance_list_disks_impl_unauth(
+        self.instance_list_disks_on_conn(
             &conn,
             authz_instance.id(),
             pagparams,
@@ -447,7 +447,7 @@ impl DataStore {
     }
 
     /// List disks associated with a given instance by name.
-    pub async fn instance_list_disks_impl_unauth(
+    pub async fn instance_list_disks_on_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         instance_id: Uuid,

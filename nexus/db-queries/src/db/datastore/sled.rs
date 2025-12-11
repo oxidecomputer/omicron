@@ -488,7 +488,7 @@ impl DataStore {
 
         // Get a list of local storage disks attached to this instance
         let local_storage_disks: Vec<LocalStorageDisk> = self
-            .instance_list_disks_impl_unauth(
+            .instance_list_disks_on_conn(
                 &conn,
                 instance_id.into_untyped_uuid(),
                 &PaginatedBy::Name(DataPageParams {
