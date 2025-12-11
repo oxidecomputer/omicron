@@ -538,9 +538,25 @@ impl DataStore {
             } else {
                 if local_storage_allocation_sleds.len() != 1 {
                     // It's an error for multiple sleds to host local storage
-                    // disks, that makes no sense!
+                    // disks for a single VMM, so return a conflict error here.
+                    //
+                    // This case can happen if a local storage disk was
+                    // allocated on a sled, and then is detached from the
+                    // instance whose VMM was on that sled, and then is attached
+                    // to another instance that has some local storage disks
+                    // that already have some allocations on another sled.
+                    //
+                    // TODO by the time this query has run that detach + attach
+                    // has already occurred. Nexus should disallow attaching
+                    // local storage disks to an instance that already has local
+                    // storage disks if the allocations are on different sleds.
+                    //
+                    // TODO for clients to prevent such a scenario they would
+                    // need to be aware of which sled a local storage disk's
+                    // allocation is on, which means that information has to be
+                    // exposed somehow in the Disk view.
                     return Err(SledReservationTransactionError::Connection(
-                        Error::internal_error(&format!(
+                        Error::conflict(&format!(
                             "local storage disks for instance {instance_id} \
                             allocated on multiple sleds \
                             {local_storage_allocation_sleds:?}"
