@@ -17,7 +17,7 @@ use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::{HostIdentifier, VmmRuntimeState};
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_common::api::internal::shared::{DhcpConfig, SourceNatConfig};
-use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use propolis_client::instance_spec::{
     ComponentV0, CrucibleStorageBackend, FileStorageBackend, InstanceSpecV0,
     SpecKey, VirtioNetworkBackend,
@@ -25,6 +25,37 @@ use propolis_client::instance_spec::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// Path parameters for VMM requests.
+#[derive(Deserialize, JsonSchema)]
+pub struct VmmPathParam {
+    pub propolis_id: PropolisUuid,
+}
+
+/// Path parameters for VMM disk snapshot requests.
+#[derive(Deserialize, JsonSchema)]
+pub struct VmmIssueDiskSnapshotRequestPathParam {
+    pub propolis_id: PropolisUuid,
+    pub disk_id: Uuid,
+}
+
+/// Request body for VMM disk snapshot requests.
+#[derive(Deserialize, JsonSchema)]
+pub struct VmmIssueDiskSnapshotRequestBody {
+    pub snapshot_id: Uuid,
+}
+
+/// Response for VMM disk snapshot requests.
+#[derive(Serialize, JsonSchema)]
+pub struct VmmIssueDiskSnapshotRequestResponse {
+    pub snapshot_id: Uuid,
+}
+
+/// Path parameters for VPC requests.
+#[derive(Deserialize, JsonSchema)]
+pub struct VpcPathParam {
+    pub vpc_id: Uuid,
+}
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.

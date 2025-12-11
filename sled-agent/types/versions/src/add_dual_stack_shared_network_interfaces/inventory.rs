@@ -42,7 +42,7 @@ use crate::v1::inventory::{
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
     SledRole, ZoneImageResolverInventory, ZoneKind,
 };
-pub use sled_hardware_types::{Baseboard, SledCpuFamily};
+use sled_hardware_types::{Baseboard, SledCpuFamily};
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

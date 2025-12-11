@@ -3,16 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Re-exports of the latest versions of all types.
-//!
-//! This module provides floating identifiers that always point to the latest
-//! version of each type. Business logic should generally use these re-exports
-//! rather than version-specific imports.
-//!
-//! The sled-agent-api crate should not use this module; it should instead use
-//! fixed identifiers from the version-specific modules directly.
 
 pub mod artifact {
     pub use crate::v1::artifact::ArtifactConfig;
+    pub use crate::v1::artifact::ArtifactCopyFromDepotBody;
+    pub use crate::v1::artifact::ArtifactCopyFromDepotResponse;
+    pub use crate::v1::artifact::ArtifactListResponse;
+    pub use crate::v1::artifact::ArtifactPathParam;
+    pub use crate::v1::artifact::ArtifactPutResponse;
+    pub use crate::v1::artifact::ArtifactQueryParam;
 }
 
 pub mod bootstore {
@@ -20,9 +19,29 @@ pub mod bootstore {
     pub use crate::v1::bootstore::EstablishedConnection;
 }
 
+pub mod dataset {
+    pub use crate::v9::dataset::LocalStorageDatasetEnsureRequest;
+    pub use crate::v9::dataset::LocalStoragePathParam;
+}
+
+pub mod debug {
+    pub use crate::v1::debug::ChickenSwitchDestroyOrphanedDatasets;
+
+    pub use crate::v3::debug::OperatorSwitchZonePolicy;
+}
+
+pub mod diagnostics {
+    pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParam;
+    pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParm;
+    pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
+}
+
 pub mod disk {
     pub use crate::v1::disk::DiskEnsureBody;
+    pub use crate::v1::disk::DiskPathParam;
     pub use crate::v1::disk::DiskStateRequested;
+    pub use crate::v1::disk::DiskType;
+    pub use crate::v1::disk::Zpool;
 }
 
 pub mod early_networking {
@@ -34,12 +53,17 @@ pub mod instance {
     pub use crate::v1::instance::InstanceExternalIpBody;
     pub use crate::v1::instance::InstanceMetadata;
     pub use crate::v1::instance::InstanceMigrationTargetParams;
+    pub use crate::v1::instance::VmmIssueDiskSnapshotRequestBody;
+    pub use crate::v1::instance::VmmIssueDiskSnapshotRequestPathParam;
+    pub use crate::v1::instance::VmmIssueDiskSnapshotRequestResponse;
+    pub use crate::v1::instance::VmmPathParam;
     pub use crate::v1::instance::VmmPutStateBody;
     pub use crate::v1::instance::VmmPutStateResponse;
     pub use crate::v1::instance::VmmSpec;
     pub use crate::v1::instance::VmmSpecExt;
     pub use crate::v1::instance::VmmStateRequested;
     pub use crate::v1::instance::VmmUnregisterResponse;
+    pub use crate::v1::instance::VpcPathParam;
 
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
@@ -108,13 +132,20 @@ pub mod sled {
 }
 
 pub mod support_bundle {
+    pub use crate::v1::support_bundle::RangeRequestHeaders;
+    pub use crate::v1::support_bundle::SupportBundleFilePathParam;
+    pub use crate::v1::support_bundle::SupportBundleFinalizeQueryParams;
+    pub use crate::v1::support_bundle::SupportBundleListPathParam;
     pub use crate::v1::support_bundle::SupportBundleMetadata;
+    pub use crate::v1::support_bundle::SupportBundlePathParam;
     pub use crate::v1::support_bundle::SupportBundleState;
+    pub use crate::v1::support_bundle::SupportBundleTransferQueryParams;
 }
 
 pub mod zone_bundle {
     pub use crate::v1::zone_bundle::BundleUtilization;
     pub use crate::v1::zone_bundle::CleanupContext;
+    pub use crate::v1::zone_bundle::CleanupContextUpdate;
     pub use crate::v1::zone_bundle::CleanupCount;
     pub use crate::v1::zone_bundle::CleanupPeriod;
     pub use crate::v1::zone_bundle::CleanupPeriodCreateError;
@@ -124,6 +155,8 @@ pub mod zone_bundle {
     pub use crate::v1::zone_bundle::StorageLimit;
     pub use crate::v1::zone_bundle::StorageLimitCreateError;
     pub use crate::v1::zone_bundle::ZoneBundleCause;
+    pub use crate::v1::zone_bundle::ZoneBundleFilter;
     pub use crate::v1::zone_bundle::ZoneBundleId;
     pub use crate::v1::zone_bundle::ZoneBundleMetadata;
+    pub use crate::v1::zone_bundle::ZonePathParam;
 }

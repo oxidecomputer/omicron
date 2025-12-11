@@ -43,7 +43,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
-use sled_agent_types_versions::v9::params::LocalStorageDatasetEnsureRequest;
+use sled_agent_types_versions::latest::dataset::LocalStorageDatasetEnsureRequest;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;

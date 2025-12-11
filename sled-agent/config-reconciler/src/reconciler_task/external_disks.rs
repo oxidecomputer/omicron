@@ -45,7 +45,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::watch;
 
-use crate::debug_collector_task::FormerZoneRootArchiver;
+use crate::debug_collector::FormerZoneRootArchiver;
 use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
 use camino::Utf8PathBuf;

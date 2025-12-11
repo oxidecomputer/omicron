@@ -34,7 +34,7 @@ use crate::v1::inventory::{
     OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
     RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
 };
-pub use sled_hardware_types::{Baseboard, SledCpuFamily};
+use sled_hardware_types::{Baseboard, SledCpuFamily};
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

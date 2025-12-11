@@ -333,7 +333,7 @@ mod api_impl {
 
         async fn zone_bundle_list_all(
             _rqctx: RequestContext<Self::Context>,
-            _query: Query<v1::params::ZoneBundleFilter>,
+            _query: Query<v1::zone_bundle::ZoneBundleFilter>,
         ) -> Result<
             HttpResponseOk<Vec<v1::zone_bundle::ZoneBundleMetadata>>,
             HttpError,
@@ -343,7 +343,7 @@ mod api_impl {
 
         async fn zone_bundle_list(
             _rqctx: RequestContext<Self::Context>,
-            _params: Path<v1::params::ZonePathParam>,
+            _params: Path<v1::zone_bundle::ZonePathParam>,
         ) -> Result<
             HttpResponseOk<Vec<v1::zone_bundle::ZoneBundleMetadata>>,
             HttpError,
@@ -386,7 +386,7 @@ mod api_impl {
 
         async fn zone_bundle_cleanup_context_update(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<v1::params::CleanupContextUpdate>,
+            _body: TypedBody<v1::zone_bundle::CleanupContextUpdate>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -410,7 +410,7 @@ mod api_impl {
 
         async fn support_bundle_list(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::SupportBundleListPathParam>,
+            _path_params: Path<v1::support_bundle::SupportBundleListPathParam>,
         ) -> Result<
             HttpResponseOk<Vec<v1::support_bundle::SupportBundleMetadata>>,
             HttpError,
@@ -420,7 +420,7 @@ mod api_impl {
 
         async fn support_bundle_start_creation(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::SupportBundlePathParam>,
+            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
         ) -> Result<
             HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
             HttpError,
@@ -430,8 +430,10 @@ mod api_impl {
 
         async fn support_bundle_transfer(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::SupportBundlePathParam>,
-            _query_params: Query<v1::params::SupportBundleTransferQueryParams>,
+            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
+            _query_params: Query<
+                v1::support_bundle::SupportBundleTransferQueryParams,
+            >,
             _body: StreamingBody,
         ) -> Result<
             HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
@@ -442,8 +444,10 @@ mod api_impl {
 
         async fn support_bundle_finalize(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::SupportBundlePathParam>,
-            _query_params: Query<v1::params::SupportBundleFinalizeQueryParams>,
+            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
+            _query_params: Query<
+                v1::support_bundle::SupportBundleFinalizeQueryParams,
+            >,
         ) -> Result<
             HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
             HttpError,
@@ -453,55 +457,55 @@ mod api_impl {
 
         async fn support_bundle_download(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::params::RangeRequestHeaders>,
-            _path_params: Path<v1::params::SupportBundlePathParam>,
+            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
+            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_download_file(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::params::RangeRequestHeaders>,
-            _path_params: Path<v1::params::SupportBundleFilePathParam>,
+            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
+            _path_params: Path<v1::support_bundle::SupportBundleFilePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_index(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::params::RangeRequestHeaders>,
-            _path_params: Path<v1::params::SupportBundlePathParam>,
+            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
+            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_head(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::params::RangeRequestHeaders>,
-            _path_params: Path<v1::params::SupportBundlePathParam>,
+            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
+            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_head_file(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::params::RangeRequestHeaders>,
-            _path_params: Path<v1::params::SupportBundleFilePathParam>,
+            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
+            _path_params: Path<v1::support_bundle::SupportBundleFilePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_head_index(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::params::RangeRequestHeaders>,
-            _path_params: Path<v1::params::SupportBundlePathParam>,
+            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
+            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_delete(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::SupportBundlePathParam>,
+            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
         ) -> Result<HttpResponseDeleted, HttpError> {
             unimplemented!()
         }
@@ -522,7 +526,7 @@ mod api_impl {
 
         async fn vmm_register(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::VmmPathParam>,
+            _path_params: Path<v1::instance::VmmPathParam>,
             _body: TypedBody<v10::instance::InstanceEnsureBody>,
         ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
             unimplemented!()
@@ -530,7 +534,7 @@ mod api_impl {
 
         async fn vmm_unregister(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::VmmPathParam>,
+            _path_params: Path<v1::instance::VmmPathParam>,
         ) -> Result<
             HttpResponseOk<v1::instance::VmmUnregisterResponse>,
             HttpError,
@@ -540,7 +544,7 @@ mod api_impl {
 
         async fn vmm_put_state(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::VmmPathParam>,
+            _path_params: Path<v1::instance::VmmPathParam>,
             _body: TypedBody<v1::instance::VmmPutStateBody>,
         ) -> Result<HttpResponseOk<v1::instance::VmmPutStateResponse>, HttpError>
         {
@@ -549,14 +553,14 @@ mod api_impl {
 
         async fn vmm_get_state(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::VmmPathParam>,
+            _path_params: Path<v1::instance::VmmPathParam>,
         ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
             unimplemented!()
         }
 
         async fn vmm_put_external_ip(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::VmmPathParam>,
+            _path_params: Path<v1::instance::VmmPathParam>,
             _body: TypedBody<v1::instance::InstanceExternalIpBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
@@ -564,7 +568,7 @@ mod api_impl {
 
         async fn vmm_delete_external_ip(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::VmmPathParam>,
+            _path_params: Path<v1::instance::VmmPathParam>,
             _body: TypedBody<v1::instance::InstanceExternalIpBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
@@ -572,7 +576,7 @@ mod api_impl {
 
         async fn vmm_join_multicast_group(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::VmmPathParam>,
+            _path_params: Path<v1::instance::VmmPathParam>,
             body: TypedBody<v7::instance::InstanceMulticastBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             let body_args = body.into_inner();
@@ -594,7 +598,7 @@ mod api_impl {
 
         async fn vmm_leave_multicast_group(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::VmmPathParam>,
+            _path_params: Path<v1::instance::VmmPathParam>,
             body: TypedBody<v7::instance::InstanceMulticastBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             let body_args = body.into_inner();
@@ -616,7 +620,7 @@ mod api_impl {
 
         async fn disk_put(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::DiskPathParam>,
+            _path_params: Path<v1::disk::DiskPathParam>,
             _body: TypedBody<v1::disk::DiskEnsureBody>,
         ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
             unimplemented!()
@@ -638,18 +642,18 @@ mod api_impl {
 
         async fn artifact_list(
             _rqctx: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<v1::views::ArtifactListResponse>, HttpError>
+        ) -> Result<HttpResponseOk<v1::artifact::ArtifactListResponse>, HttpError>
         {
             unimplemented!()
         }
 
         async fn artifact_copy_from_depot(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::ArtifactPathParam>,
-            _query_params: Query<v1::params::ArtifactQueryParam>,
-            _body: TypedBody<v1::params::ArtifactCopyFromDepotBody>,
+            _path_params: Path<v1::artifact::ArtifactPathParam>,
+            _query_params: Query<v1::artifact::ArtifactQueryParam>,
+            _body: TypedBody<v1::artifact::ArtifactCopyFromDepotBody>,
         ) -> Result<
-            HttpResponseAccepted<v1::views::ArtifactCopyFromDepotResponse>,
+            HttpResponseAccepted<v1::artifact::ArtifactCopyFromDepotResponse>,
             HttpError,
         > {
             unimplemented!()
@@ -657,10 +661,10 @@ mod api_impl {
 
         async fn artifact_put(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::ArtifactPathParam>,
-            _query_params: Query<v1::params::ArtifactQueryParam>,
+            _path_params: Path<v1::artifact::ArtifactPathParam>,
+            _query_params: Query<v1::artifact::ArtifactQueryParam>,
             _body: StreamingBody,
-        ) -> Result<HttpResponseOk<v1::views::ArtifactPutResponse>, HttpError>
+        ) -> Result<HttpResponseOk<v1::artifact::ArtifactPutResponse>, HttpError>
         {
             unimplemented!()
         }
@@ -668,11 +672,11 @@ mod api_impl {
         async fn vmm_issue_disk_snapshot_request(
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<
-                v1::params::VmmIssueDiskSnapshotRequestPathParam,
+                v1::instance::VmmIssueDiskSnapshotRequestPathParam,
             >,
-            _body: TypedBody<v1::params::VmmIssueDiskSnapshotRequestBody>,
+            _body: TypedBody<v1::instance::VmmIssueDiskSnapshotRequestBody>,
         ) -> Result<
-            HttpResponseOk<v1::views::VmmIssueDiskSnapshotRequestResponse>,
+            HttpResponseOk<v1::instance::VmmIssueDiskSnapshotRequestResponse>,
             HttpError,
         > {
             unimplemented!()
@@ -680,7 +684,7 @@ mod api_impl {
 
         async fn vpc_firewall_rules_put(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::VpcPathParam>,
+            _path_params: Path<v1::instance::VpcPathParam>,
             _body: TypedBody<v10::instance::VpcFirewallRulesEnsureBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
@@ -849,9 +853,11 @@ mod api_impl {
 
         async fn support_logs_download(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<v1::params::SledDiagnosticsLogsDownloadPathParm>,
+            _path_params: Path<
+                v1::diagnostics::SledDiagnosticsLogsDownloadPathParm,
+            >,
             _query_params: dropshot::Query<
-                v1::params::SledDiagnosticsLogsDownloadQueryParam,
+                v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
             >,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
@@ -860,7 +866,7 @@ mod api_impl {
         async fn chicken_switch_destroy_orphaned_datasets_get(
             _request_context: RequestContext<Self::Context>,
         ) -> Result<
-            HttpResponseOk<v1::shared::ChickenSwitchDestroyOrphanedDatasets>,
+            HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
             HttpError,
         > {
             unimplemented!()
@@ -868,7 +874,7 @@ mod api_impl {
 
         async fn chicken_switch_destroy_orphaned_datasets_put(
             _request_context: RequestContext<Self::Context>,
-            _body: TypedBody<v1::shared::ChickenSwitchDestroyOrphanedDatasets>,
+            _body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -876,7 +882,7 @@ mod api_impl {
         async fn debug_operator_switch_zone_policy_get(
             _request_context: RequestContext<Self::Context>,
         ) -> Result<
-            HttpResponseOk<v3::shared::OperatorSwitchZonePolicy>,
+            HttpResponseOk<v3::debug::OperatorSwitchZonePolicy>,
             HttpError,
         > {
             unimplemented!()
@@ -884,7 +890,7 @@ mod api_impl {
 
         async fn debug_operator_switch_zone_policy_put(
             _request_context: RequestContext<Self::Context>,
-            _body: TypedBody<v3::shared::OperatorSwitchZonePolicy>,
+            _body: TypedBody<v3::debug::OperatorSwitchZonePolicy>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -898,15 +904,15 @@ mod api_impl {
 
         async fn local_storage_dataset_ensure(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<v9::params::LocalStoragePathParam>,
-            _body: TypedBody<v9::params::LocalStorageDatasetEnsureRequest>,
+            _path_params: Path<v9::dataset::LocalStoragePathParam>,
+            _body: TypedBody<v9::dataset::LocalStorageDatasetEnsureRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
         async fn local_storage_dataset_delete(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<v9::params::LocalStoragePathParam>,
+            _path_params: Path<v9::dataset::LocalStoragePathParam>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

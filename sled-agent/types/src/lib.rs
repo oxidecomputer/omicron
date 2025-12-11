@@ -7,6 +7,9 @@
 pub mod artifact;
 pub mod boot_disk;
 pub mod bootstore;
+pub mod dataset;
+pub mod debug;
+pub mod diagnostics;
 pub mod disk;
 pub mod early_networking;
 pub mod firewall_rules;

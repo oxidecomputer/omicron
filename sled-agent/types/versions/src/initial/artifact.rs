@@ -2,23 +2,33 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Response types for Sled Agent API v1.
-//!
-//! This module contains response-only types used by the Sled Agent API.
-//!
-//! Per RFD 619, high-level response types (views) are defined in the earliest
-//! version they appear in. These types are used directly by the API crate with
-//! fixed identifiers.
+//! Artifact types for Sled Agent API v1.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskVariant;
-use omicron_uuid_kinds::ZpoolUuid;
+use omicron_common::ledger::Ledgerable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tufaceous_artifact::ArtifactHash;
-use uuid::Uuid;
+
+/// Path parameters for Artifact requests.
+#[derive(Deserialize, JsonSchema)]
+pub struct ArtifactPathParam {
+    pub sha256: ArtifactHash,
+}
+
+/// Query parameters for artifact requests.
+#[derive(Deserialize, JsonSchema)]
+pub struct ArtifactQueryParam {
+    pub generation: Generation,
+}
+
+/// Request body for copying artifacts from a depot.
+#[derive(Deserialize, JsonSchema)]
+pub struct ArtifactCopyFromDepotBody {
+    pub depot_base_url: String,
+}
 
 /// Response for listing artifacts.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -43,31 +53,20 @@ pub struct ArtifactPutResponse {
     pub successful_writes: usize,
 }
 
-/// Response for VMM disk snapshot requests.
-#[derive(Serialize, JsonSchema)]
-pub struct VmmIssueDiskSnapshotRequestResponse {
-    pub snapshot_id: Uuid,
+/// Artifact configuration.
+///
+/// This type is used in both GET (response) and PUT (request) operations.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct ArtifactConfig {
+    pub generation: Generation,
+    pub artifacts: BTreeSet<ArtifactHash>,
 }
 
-/// Information about a zpool.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct Zpool {
-    pub id: ZpoolUuid,
-    pub disk_type: DiskType,
-}
-
-/// Disk type classification.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub enum DiskType {
-    U2,
-    M2,
-}
-
-impl From<DiskVariant> for DiskType {
-    fn from(v: DiskVariant) -> Self {
-        match v {
-            DiskVariant::U2 => Self::U2,
-            DiskVariant::M2 => Self::M2,
-        }
+impl Ledgerable for ArtifactConfig {
+    fn is_newer_than(&self, other: &ArtifactConfig) -> bool {
+        self.generation > other.generation
     }
+
+    // No need to do this, the generation number is provided externally.
+    fn generation_bump(&mut self) {}
 }

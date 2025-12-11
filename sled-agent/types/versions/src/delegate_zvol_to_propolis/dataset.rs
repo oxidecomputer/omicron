@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Request parameters for Sled Agent API version 9.
-//!
-//! This module contains types introduced in v9 (DELEGATE_ZVOL_TO_PROPOLIS).
+//! Dataset types for Sled Agent API version 9.
 
 use omicron_common::api::external::ByteCount;
 use omicron_uuid_kinds::{DatasetUuid, ExternalZpoolUuid};

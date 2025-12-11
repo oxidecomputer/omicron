@@ -13,6 +13,31 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Path parameters for zone requests.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct ZonePathParam {
+    /// The name of the zone.
+    pub zone_name: String,
+}
+
+/// Query parameters for zone bundle list filtering.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneBundleFilter {
+    /// An optional substring used to filter zone bundles.
+    pub filter: Option<String>,
+}
+
+/// Parameters used to update the zone bundle cleanup context.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct CleanupContextUpdate {
+    /// The new period on which automatic cleanups are run.
+    pub period: Option<Duration>,
+    /// The priority ordering for preserving old zone bundles.
+    pub priority: Option<PriorityOrder>,
+    /// The new limit on the underlying dataset quota allowed for bundles.
+    pub storage_limit: Option<u8>,
+}
+
 /// An identifier for a zone bundle.
 #[derive(
     Clone,
