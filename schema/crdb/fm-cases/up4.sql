@@ -1,5 +1,11 @@
 CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
-    -- The ereport's identity.
+    -- ID of this association. When an ereport is assigned to a case, that
+    -- association is assigned a UUID. These are used primarily to aid in
+    -- paginating queries to this table, which would otherwise require a
+    -- three-column pagination utility in order to paginate by (case_id,
+    -- restart_id, ena).
+    id UUID NOT NULL,
+    --  The ereport's identity.
     restart_id UUID NOT NULL,
     ena INT8 NOT NULL,
 
@@ -14,5 +20,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
 
     comment TEXT NOT NULL,
 
-    PRIMARY KEY (sitrep_id, case_id, restart_id, ena)
+    PRIMARY KEY (sitrep_id, id)
 );

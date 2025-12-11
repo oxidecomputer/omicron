@@ -5,7 +5,7 @@
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
 use iddqd::{IdOrdItem, IdOrdMap};
-use omicron_uuid_kinds::{CaseUuid, SitrepUuid};
+use omicron_uuid_kinds::{CaseEreportUuid, CaseUuid, SitrepUuid};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
@@ -54,6 +54,7 @@ impl IdOrdItem for Case {
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct CaseEreport {
+    pub id: CaseEreportUuid,
     pub ereport: Arc<Ereport>,
     pub assigned_sitrep_id: SitrepUuid,
     pub comment: String,
@@ -146,14 +147,22 @@ impl fmt::Display for DisplayCase<'_> {
             writeln!(f, "{:>indent$}---------", "")?;
 
             let indent = indent + 2;
-            for CaseEreport { ereport, assigned_sitrep_id, comment } in ereports
+            for CaseEreport { id, ereport, assigned_sitrep_id, comment } in
+                ereports
             {
                 const CLASS: &str = "class:";
                 const REPORTED_BY: &str = "reported by:";
                 const ADDED_IN: &str = "added in:";
+                const ASSIGNMENT_ID: &str = "assignment ID:";
                 const COMMENT: &str = "comment:";
-                const WIDTH: usize =
-                    const_max_len(&[CLASS, REPORTED_BY, ADDED_IN, COMMENT]);
+
+                const WIDTH: usize = const_max_len(&[
+                    CLASS,
+                    REPORTED_BY,
+                    ADDED_IN,
+                    ASSIGNMENT_ID,
+                    COMMENT,
+                ]);
 
                 let pn = ereport.part_number.as_deref().unwrap_or("<UNKNOWN>");
                 let sn =
@@ -176,7 +185,7 @@ impl fmt::Display for DisplayCase<'_> {
                     "",
                     this_sitrep(*assigned_sitrep_id)
                 )?;
-
+                writeln!(f, "{:>indent$}{ASSIGNMENT_ID:<WIDTH$} {id}", "")?;
                 writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "",)?;
             }
         }
@@ -223,6 +232,10 @@ mod tests {
         let time_collected = chrono::DateTime::<chrono::Utc>::MIN_UTC;
 
         let ereport1 = CaseEreport {
+            id: CaseEreportUuid::from_str(
+                "89f650fd-c67c-4dcc-9acc-0ce02d43a62b",
+            )
+            .unwrap(),
             ereport: Arc::new(Ereport {
                 data: crate::fm::ereport::EreportData {
                     id: EreportId { restart_id, ena: Ena::from(2u64) },
@@ -244,6 +257,10 @@ mod tests {
         ereports.insert_unique(ereport1).unwrap();
 
         let ereport2 = CaseEreport {
+            id: CaseEreportUuid::from_str(
+                "7b923ffc-f5fc-4001-acf4-1224dad7d3ef",
+            )
+            .unwrap(),
             ereport: Arc::new(Ereport {
                 data: crate::fm::ereport::EreportData {
                     id: EreportId { restart_id, ena: Ena::from(3u64) },

@@ -16,10 +16,8 @@ use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model;
 use crate::db::model::DbTypedUuid;
 use crate::db::model::SqlU32;
-use crate::db::model::ereport::DbEna;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::db::pagination::paginated_multicolumn;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -31,6 +29,7 @@ use dropshot::PaginationOrder;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
@@ -40,9 +39,12 @@ use nexus_types::fm::Sitrep;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_uuid_kinds::CaseEreportKind;
 use omicron_uuid_kinds::CaseKind;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -149,7 +151,93 @@ impl DataStore {
         let metadata =
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
-        let mut all_ereports = iddqd::IdOrdMap::<Arc<fm::Ereport>>::new();
+        // Fetch all ereports assigned to cases in this sitrep. We do this by
+        // querying the `fm_ereport_in_case` table for all entries with this
+        // sitrep ID, paginated by the ereport assignment's UUID. This query is
+        // `INNER JOIN`ed with the `fm_ereport` table to fetch the ereport's
+        // data for that assignment.
+        //
+        // We use the results of this query to populate a map of case UUIDs to
+        // the map of ereports assigned to that case. Ereports are de-duplicated
+        // using an additional map of `Arc`ed ereports, to reduce the in-memory
+        // size of the sitrep when an ereport is assigned to multiple cases. the
+        // JOINed query *will* potentially load the same ereport multiple times
+        // in that case, but this is still probably much more efficient than
+        // issuing a bunch of smaller queries to load ereports individually.
+        let mut case_ereports =
+            {
+                // TODO(eliza): as a potential optimization, since ereport
+                // records are immutable, we might consider hanging onto this
+                // map of all ereports in the `Sitrep` structure. Then, when we
+                // load the next sitrep, we could first check if the ereports in
+                // that sitrep are contained in the map before loading them
+                // again. That would require changing the rest of this code to
+                // not `JOIN` with the ereports table here, and instead populate
+                // a list of additional ereports we need to load, and issue a
+                // separate query for that. But, it's worth considering maybe if
+                // this becomes a bottleneck...
+                let mut ereports = iddqd::IdOrdMap::<Arc<fm::Ereport>>::new();
+                let mut map = HashMap::<CaseUuid, iddqd::IdOrdMap<_>>::new();
+
+                let mut paginator =
+                    Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+                while let Some(p) = paginator.next() {
+                    let batch = DataStore::fm_sitrep_read_ereports_query(
+                        id,
+                        &p.current_pagparams(),
+                    )
+                    .load_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(
+                                "failed to load case ereport assignments",
+                            )
+                    })?;
+
+                    paginator =
+                        p.found_batch(&batch, &|(assignment, _)| assignment.id);
+                    for (assignment, ereport) in batch {
+                        let ereport_id = fm::EreportId {
+                            restart_id: ereport.restart_id.into(),
+                            ena: ereport.ena.into(),
+                        };
+                        let ereport = match ereports.entry(&ereport_id) {
+                            iddqd::id_ord_map::Entry::Occupied(entry) => {
+                                entry.get().clone()
+                            }
+                            iddqd::id_ord_map::Entry::Vacant(entry) => {
+                                let ereport =
+                                    Arc::new(fm::Ereport::try_from(ereport)?);
+                                entry.insert(ereport.clone());
+                                ereport
+                            }
+                        };
+                        let id = assignment.id.into();
+                        let case_id = assignment.case_id.into();
+                        map.entry(case_id).or_default().insert_unique(
+                    fm::case::CaseEreport {
+                        id,
+                        ereport,
+                        assigned_sitrep_id: assignment
+                            .assigned_sitrep_id
+                            .into(),
+                        comment: assignment.comment,
+                    },
+                ).map_err(|_| Error::InternalError { internal_message:
+                    format!(
+                        "encountered multiple case ereports for case \
+                            {case_id} with the same UUID {id}. this should \
+                            really not be possible, as the assignment UUID \
+                            is a primary key!",
+                    )})?;
+                    }
+                }
+
+                map
+            };
+        // Next, load the case metadata entries and marry them to the sets of
+        // ereports assigned to those cases that we loaded in the previous step.
         let cases = {
             let mut cases = iddqd::IdOrdMap::new();
             let mut paginator =
@@ -166,51 +254,7 @@ impl DataStore {
                         e.internal_context("failed to list sitrep cases")
                     })?;
                 paginator = p.found_batch(&batch, &|case| case.id);
-
-                for case in batch {
-                    // TODO(eliza): consider using a `ParallelTaskSet` to fetch the
-                    // cases in parallel here.
-                    let case = self.fm_case_read_on_conn(case, conn).await?;
-
-                    // Fetch ereports assigned to this case.
-                    let mut ereports =
-                        iddqd::IdOrdMap::with_capacity(case.ereports.len());
-                    for model::fm::CaseEreport {
-                        restart_id,
-                        ena: DbEna(ena),
-                        comment,
-                        assigned_sitrep_id,
-                        ..
-                    } in case.ereports
-                    {
-                        let ereport_id = fm::EreportId {
-                            restart_id: restart_id.into(),
-                            ena,
-                        };
-                        let ereport = match all_ereports.entry(&ereport_id) {
-                            iddqd::id_ord_map::Entry::Occupied(entry) => {
-                                entry.get().clone()
-                            }
-                            iddqd::id_ord_map::Entry::Vacant(entry) => {
-                                let ereport: fm::Ereport = self.ereport_fetch_on_conn(conn, ereport_id)
-                                    .await
-                                    .map_err(|e| e.internal_context(format!(
-                                        "failed to fetch ereport {ereport_id} for case {}",
-                                        case.metadata.id,
-                                    )))?
-                                    .try_into()?;
-                                entry.insert(Arc::new(ereport)).clone()
-                            }
-                        };
-                        ereports
-                            .insert_unique(fm::case::CaseEreport {
-                                ereport,
-                                assigned_sitrep_id: assigned_sitrep_id.into(),
-                                comment,
-                            })
-                            .unwrap();
-                    }
-
+                cases.extend(batch.into_iter().map(|case| {
                     let model::fm::CaseMetadata {
                         id,
                         sitrep_id: _,
@@ -218,18 +262,26 @@ impl DataStore {
                         closed_sitrep_id,
                         comment,
                         de,
-                    } = case.metadata;
-                    cases
-                        .insert_unique(fm::Case {
-                            id: id.into(),
-                            created_sitrep_id: created_sitrep_id.into(),
-                            closed_sitrep_id: closed_sitrep_id.map(Into::into),
-                            de: de.into(),
-                            comment,
-                            ereports,
-                        })
-                        .expect("case UUIDs should be unique");
-                }
+                    } = case;
+                    let id = id.into();
+
+                    // Take all the case ereport assignments we've collected for this case.
+                    let ereports = case_ereports
+                        .remove(&id)
+                        // If there's no entry in the map of case ereport
+                        // assignments for this case, then that just means that the
+                        // case has no ereports assigned to it, so insert an empty
+                        // map here.
+                        .unwrap_or_default();
+                    fm::Case {
+                        id,
+                        created_sitrep_id: created_sitrep_id.into(),
+                        closed_sitrep_id: closed_sitrep_id.map(Into::into),
+                        de: de.into(),
+                        comment,
+                        ereports,
+                    }
+                }));
             }
 
             cases
@@ -252,44 +304,26 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    async fn fm_case_read_on_conn(
-        &self,
-        case: model::fm::CaseMetadata,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<model::fm::Case, Error> {
-        // Read ereports assigned to this case.
-        let ereports = {
-            let mut ereports = Vec::new();
-            let mut paginator =
-                Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-            while let Some(p) = paginator.next() {
-                let batch = paginated_multicolumn(
-                    case_ereport_dsl::fm_ereport_in_case,
-                    (case_ereport_dsl::restart_id, case_ereport_dsl::ena),
-                    &p.current_pagparams(),
-                )
-                .filter(case_ereport_dsl::case_id.eq(case.id))
-                .filter(case_ereport_dsl::sitrep_id.eq(case.sitrep_id))
-                .select(model::fm::CaseEreport::as_select())
-                .load_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(format!(
-                            "failed to list ereports assigned to case {}",
-                            case.id
-                        ))
-                })?;
-
-                paginator = p.found_batch(&batch, &|ereport| {
-                    (ereport.restart_id, ereport.ena)
-                });
-                ereports.extend(batch);
-            }
-            ereports
-        };
-
-        Ok(model::fm::Case { metadata: case, ereports })
+    fn fm_sitrep_read_ereports_query(
+        sitrep_id: SitrepUuid,
+        pagparams: &DataPageParams<'_, DbTypedUuid<CaseEreportKind>>,
+    ) -> impl RunnableQuery<(model::fm::CaseEreport, model::Ereport)> + use<>
+    {
+        paginated(
+            case_ereport_dsl::fm_ereport_in_case,
+            case_ereport_dsl::id,
+            pagparams,
+        )
+        .filter(case_ereport_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+        .inner_join(
+            ereport_dsl::ereport.on(ereport_dsl::restart_id
+                .eq(case_ereport_dsl::restart_id)
+                .and(ereport_dsl::ena.eq(case_ereport_dsl::ena))),
+        )
+        .select((
+            model::fm::CaseEreport::as_select(),
+            model::Ereport::as_select(),
+        ))
     }
 
     /// Insert the provided [`Sitrep`] into the database, and attempt to mark it
@@ -952,6 +986,39 @@ mod tests {
             .await
             .expect("Failed to explain query - is it valid SQL?");
         eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_sitrep_read_ereports_query() {
+        let logctx = dev::test_setup_log("explain_sitrep_read_ereports_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams = DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(420).unwrap(),
+            direction: dropshot::PaginationOrder::Descending,
+        };
+        let query = DataStore::fm_sitrep_read_ereports_query(
+            SitrepUuid::nil(),
+            &pagparams,
+        );
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+
         assert!(
             !explanation.contains("FULL SCAN"),
             "Found an unexpected FULL SCAN: {}",

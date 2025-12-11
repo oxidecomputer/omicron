@@ -2969,7 +2969,8 @@ table! {
 }
 
 table! {
-    fm_ereport_in_case (sitrep_id, restart_id, ena) {
+    fm_ereport_in_case (sitrep_id, id) {
+        id -> Uuid,
         restart_id -> Uuid,
         ena -> Int8,
         case_id -> Uuid,
@@ -2980,4 +2981,5 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);

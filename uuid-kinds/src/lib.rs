@@ -46,6 +46,7 @@ impl_typed_uuid_kinds! {
         Blueprint = {},
         BuiltInUser = {},
         Case = {},
+        CaseEreport = {},
         Collection = {},
         ConsoleSession = {},
         Dataset = {},

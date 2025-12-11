@@ -10,7 +10,7 @@ use crate::ereport;
 use nexus_db_schema::schema::{fm_case, fm_ereport_in_case};
 use nexus_types::fm;
 use omicron_uuid_kinds::{
-    CaseKind, EreporterRestartKind, SitrepKind, SitrepUuid,
+    CaseEreportKind, CaseKind, EreporterRestartKind, SitrepKind, SitrepUuid,
 };
 
 /// Metadata describing a fault management case.
@@ -49,6 +49,8 @@ pub struct CaseMetadata {
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_ereport_in_case)]
 pub struct CaseEreport {
+    /// The ID of this association. This is used primarily for pagination.
+    pub id: DbTypedUuid<CaseEreportKind>,
     /// The restart ID of the reporter that produced this ereport.
     pub restart_id: DbTypedUuid<EreporterRestartKind>,
     /// The ENA of the ereport within that reporter restart.
@@ -98,6 +100,7 @@ impl Case {
             .into_iter()
             .map(
                 |fm::case::CaseEreport {
+                     id,
                      ereport,
                      assigned_sitrep_id,
                      comment,
@@ -105,6 +108,7 @@ impl Case {
                     let restart_id = ereport.id().restart_id.into();
                     let ena = ereport.id().ena.into();
                     CaseEreport {
+                        id: id.into(),
                         case_id,
                         restart_id,
                         ena,
