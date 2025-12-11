@@ -777,46 +777,6 @@ impl DataStore {
                     continue;
                 }
 
-                // If there's an existing local storage allocation on a zpool,
-                // remove that from the list of candidates. Local storage for
-                // the same Instance should not share any zpools.
-                let local_storage_zpools_used: HashSet<ZpoolUuid> =
-                    local_storage_disks
-                        .iter()
-                        .filter_map(|disk| {
-                            disk.local_storage_dataset_allocation.as_ref().map(
-                                |allocation| {
-                                    ZpoolUuid::from_untyped_uuid(
-                                        allocation
-                                            .pool_id()
-                                            .into_untyped_uuid(),
-                                    )
-                                },
-                            )
-                        })
-                        .collect();
-
-                let zpools_for_sled: Vec<_> = zpools_for_sled
-                    .into_iter()
-                    .filter(|zpool_get_result| {
-                        !local_storage_zpools_used
-                            .contains(&zpool_get_result.pool.id())
-                    })
-                    .collect();
-
-                if local_storage_allocation_required.len()
-                    > zpools_for_sled.len()
-                {
-                    // Not enough zpools to satisfy the number of allocations
-                    // required. Find another sled!
-                    sled_targets.remove(&sled_target);
-                    banned.remove(&sled_target);
-                    unpreferred.remove(&sled_target);
-                    preferred.remove(&sled_target);
-
-                    continue;
-                }
-
                 let mut allocations_to_perform =
                     Vec::with_capacity(local_storage_allocation_required.len());
 
