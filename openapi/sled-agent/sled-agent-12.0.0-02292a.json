@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "11.0.0"
+    "version": "12.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -4612,6 +4612,80 @@
           "last_port"
         ]
       },
+      "ExternalIpConfig": {
+        "description": "A single- or dual-stack external IP configuration.",
+        "oneOf": [
+          {
+            "description": "Single-stack IPv4 external IP configuration.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "v4"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/ExternalIpv4Config"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Single-stack IPv6 external IP configuration.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "v6"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/ExternalIpv6Config"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Both IPv4 and IPv6 external IP configuration.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dual_stack"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "v4": {
+                    "$ref": "#/components/schemas/ExternalIpv4Config"
+                  },
+                  "v6": {
+                    "$ref": "#/components/schemas/ExternalIpv6Config"
+                  }
+                },
+                "required": [
+                  "v4",
+                  "v6"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "ExternalIpGatewayMap": {
         "description": "Per-NIC mappings from external IP addresses to the Internet Gateways which can choose them as a source.",
         "type": "object",
@@ -4633,6 +4707,70 @@
         },
         "required": [
           "mappings"
+        ]
+      },
+      "ExternalIpv4Config": {
+        "description": "External IP address configuration.\n\nThis encapsulates all the external addresses of a single IP version, including source NAT, Ephemeral, and Floating IPs. Note that not all of these need to be specified, but this type can only be constructed if _at least one_ of them is.",
+        "type": "object",
+        "properties": {
+          "ephemeral_ip": {
+            "nullable": true,
+            "description": "An Ephemeral address for in- and outbound connectivity.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "floating_ips": {
+            "description": "Additional Floating IPs for in- and outbound connectivity.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          },
+          "source_nat": {
+            "nullable": true,
+            "description": "Source NAT configuration, for outbound-only connectivity.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourceNatConfigV4"
+              }
+            ]
+          }
+        },
+        "required": [
+          "floating_ips"
+        ]
+      },
+      "ExternalIpv6Config": {
+        "description": "External IP address configuration.\n\nThis encapsulates all the external addresses of a single IP version, including source NAT, Ephemeral, and Floating IPs. Note that not all of these need to be specified, but this type can only be constructed if _at least one_ of them is.",
+        "type": "object",
+        "properties": {
+          "ephemeral_ip": {
+            "nullable": true,
+            "description": "An Ephemeral address for in- and outbound connectivity.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "floating_ips": {
+            "description": "Additional Floating IPs for in- and outbound connectivity.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          "source_nat": {
+            "nullable": true,
+            "description": "Source NAT configuration, for outbound-only connectivity.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourceNatConfigV6"
+              }
+            ]
+          }
+        },
+        "required": [
+          "floating_ips"
         ]
       },
       "ExternalZpoolUuid": {
@@ -5203,23 +5341,18 @@
           "dhcp_config": {
             "$ref": "#/components/schemas/DhcpConfig"
           },
-          "ephemeral_ip": {
+          "external_ips": {
             "nullable": true,
-            "description": "Zero or more external IP addresses (either floating or ephemeral), provided to an instance to allow inbound connectivity.",
-            "type": "string",
-            "format": "ip"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExternalIpConfig"
+              }
+            ]
           },
           "firewall_rules": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
-            }
-          },
-          "floating_ips": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
             }
           },
           "hostname": {
@@ -5236,20 +5369,15 @@
             "items": {
               "$ref": "#/components/schemas/NetworkInterface"
             }
-          },
-          "source_nat": {
-            "$ref": "#/components/schemas/SourceNatConfig"
           }
         },
         "required": [
           "delegated_zvols",
           "dhcp_config",
           "firewall_rules",
-          "floating_ips",
           "hostname",
           "multicast_groups",
-          "nics",
-          "source_nat"
+          "nics"
         ]
       },
       "InstanceSpecV0": {
@@ -6397,7 +6525,7 @@
                 "description": "The SNAT configuration for outbound connections.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/SourceNatConfig"
+                    "$ref": "#/components/schemas/SourceNatConfigGeneric"
                   }
                 ]
               },
@@ -7965,7 +8093,7 @@
         ],
         "additionalProperties": false
       },
-      "SourceNatConfig": {
+      "SourceNatConfigGeneric": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
         "properties": {
@@ -7979,6 +8107,62 @@
             "description": "The external address provided to the instance or service.",
             "type": "string",
             "format": "ip"
+          },
+          "last_port": {
+            "description": "The last port used for source NAT, also inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "last_port"
+        ]
+      },
+      "SourceNatConfigV4": {
+        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "description": "The first port used for source NAT, inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "description": "The external address provided to the instance or service.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "last_port": {
+            "description": "The last port used for source NAT, also inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "last_port"
+        ]
+      },
+      "SourceNatConfigV6": {
+        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "description": "The first port used for source NAT, inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "description": "The external address provided to the instance or service.",
+            "type": "string",
+            "format": "ipv6"
           },
           "last_port": {
             "description": "The last port used for source NAT, also inclusive.",

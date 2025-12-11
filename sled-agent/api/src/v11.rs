@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Sled-agent API types that changed from v10 to v11.
+//! Sled-agent API types that changed from v11 to v12.
 
 use nexus_sled_agent_shared::inventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;

@@ -99,6 +99,7 @@ impl TryFrom<inventory::Inventory> for Inventory {
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
+            health_monitor: _,
         } = value;
         let ledgered_sled_config =
             ledgered_sled_config.map(TryInto::try_into).transpose()?;
