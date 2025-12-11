@@ -48,7 +48,7 @@ pub struct EreporterRestartBySerial {
 }
 
 /// A set of filters for fetching ereports.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct EreportFilters {
     /// If present, include only ereports that were collected at the specified
     /// timestamp or later.

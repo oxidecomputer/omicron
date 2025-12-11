@@ -50,6 +50,31 @@ impl std::fmt::Display for BaseboardId {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Baseboard is of unknown type")]
+pub struct UnknownBaseboardError;
+
+impl TryFrom<sled_hardware_types::Baseboard> for BaseboardId {
+    type Error = UnknownBaseboardError;
+
+    fn try_from(
+        value: sled_hardware_types::Baseboard,
+    ) -> Result<Self, Self::Error> {
+        use sled_hardware_types::Baseboard;
+        match value {
+            Baseboard::Gimlet { identifier, model, .. } => Ok(BaseboardId {
+                part_number: model,
+                serial_number: identifier,
+            }),
+            Baseboard::Pc { identifier, model } => Ok(BaseboardId {
+                part_number: model,
+                serial_number: identifier,
+            }),
+            Baseboard::Unknown => Err(UnknownBaseboardError),
+        }
+    }
+}
+
 /// A request to Add a given sled after rack initialization has occurred
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct AddSledRequest {

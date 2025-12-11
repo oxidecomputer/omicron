@@ -8,6 +8,7 @@
 use anyhow::{Context, anyhow, bail, ensure};
 use chrono::DateTime;
 use chrono::Utc;
+use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
@@ -123,7 +124,10 @@ pub struct SystemDescription {
     internal_dns_version: Generation,
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
+    clickhouse_keeper_cluster_membership:
+        BTreeSet<ClickhouseKeeperClusterMembership>,
     oximeter_read_policy: OximeterReadPolicy,
+    cockroachdb_settings: CockroachDbSettings,
     tuf_repo: TufRepoPolicy,
     old_repo: TufRepoPolicy,
     planner_config: PlannerConfig,
@@ -216,7 +220,9 @@ impl SystemDescription {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
+            clickhouse_keeper_cluster_membership: BTreeSet::new(),
             oximeter_read_policy: OximeterReadPolicy::new(1),
+            cockroachdb_settings: CockroachDbSettings::empty(),
             tuf_repo: TufRepoPolicy::initial(),
             old_repo: TufRepoPolicy::initial(),
             planner_config: PlannerConfig::default(),
@@ -327,6 +333,22 @@ impl SystemDescription {
     /// Set the clickhouse policy
     pub fn clickhouse_policy(&mut self, policy: ClickhousePolicy) -> &mut Self {
         self.clickhouse_policy = Some(policy);
+        self
+    }
+
+    pub fn add_clickhouse_keeper_cluster_membership(
+        &mut self,
+        membership: ClickhouseKeeperClusterMembership,
+    ) -> &mut Self {
+        self.clickhouse_keeper_cluster_membership.insert(membership);
+        self
+    }
+
+    pub fn set_cockroachdb_settings(
+        &mut self,
+        settings: CockroachDbSettings,
+    ) -> &mut Self {
+        self.cockroachdb_settings = settings;
         self
     }
 
@@ -519,6 +541,17 @@ impl SystemDescription {
         Ok(self)
     }
 
+    /// Set the state for a sled in the system.
+    pub fn sled_set_state(
+        &mut self,
+        sled_id: SledUuid,
+        state: SledState,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.state = state;
+        Ok(self)
+    }
+
     /// Set the policy for a sled in the system.
     pub fn sled_set_policy(
         &mut self,
@@ -527,6 +560,21 @@ impl SystemDescription {
     ) -> anyhow::Result<&mut Self> {
         let sled = self.get_sled_mut(sled_id)?;
         sled.policy = policy;
+        Ok(self)
+    }
+
+    /// Expunge a sled and all its disks.
+    pub fn sled_expunge(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+
+        sled.policy = SledPolicy::Expunged;
+        for disk in sled.resources_mut().zpools.values_mut() {
+            disk.policy = PhysicalDiskPolicy::Expunged;
+        }
+
         Ok(self)
     }
 
@@ -1078,6 +1126,11 @@ impl SystemDescription {
             }
         }
 
+        for membership in &self.clickhouse_keeper_cluster_membership {
+            builder
+                .found_clickhouse_keeper_cluster_membership(membership.clone());
+        }
+
         Ok(builder)
     }
 
@@ -1109,7 +1162,7 @@ impl SystemDescription {
             policy,
             self.internal_dns_version,
             self.external_dns_version,
-            CockroachDbSettings::empty(),
+            self.cockroachdb_settings.clone(),
         );
         builder.set_active_nexus_zones(self.active_nexus_zones.clone());
         builder.set_not_yet_nexus_zones(self.not_yet_nexus_zones.clone());
@@ -1633,6 +1686,10 @@ impl Sled {
             reservation: config.inner.reservation,
             compression: config.inner.compression.to_string(),
         });
+    }
+
+    pub fn resources_mut(&mut self) -> &mut SledResources {
+        &mut self.resources
     }
 
     pub fn sp_state(&self) -> Option<&(u16, SpState)> {

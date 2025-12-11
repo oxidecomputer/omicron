@@ -149,7 +149,11 @@ async fn create_base_disk(
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -409,7 +413,11 @@ async fn test_snapshot_prevents_other_disk(
             name: next_disk_name.clone(),
             description: String::from("will fail"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -475,8 +483,10 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
             name: first_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -517,8 +527,10 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
             name: second_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -610,8 +622,10 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
             name: first_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -652,8 +666,10 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
             name: second_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -740,8 +756,10 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             name: layer_1_disk_name.clone(),
             description: String::from("layer 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -782,8 +800,10 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             name: layer_2_disk_name.clone(),
             description: String::from("layer 2"),
         },
-        disk_source: params::DiskSource::Snapshot {
-            snapshot_id: layer_1_snapshot.identity.id,
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Snapshot {
+                snapshot_id: layer_1_snapshot.identity.id,
+            },
         },
         size: disk_size,
     };
@@ -824,8 +844,10 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             name: layer_3_disk_name.clone(),
             description: String::from("layer 3"),
         },
-        disk_source: params::DiskSource::Snapshot {
-            snapshot_id: layer_2_snapshot.identity.id,
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Snapshot {
+                snapshot_id: layer_2_snapshot.identity.id,
+            },
         },
         size: disk_size,
     };
@@ -1177,8 +1199,10 @@ async fn delete_image_test(
             name: base_disk_name.clone(),
             description: String::from("all your base disk are belong to us"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -2472,8 +2496,10 @@ async fn test_disk_create_saga_unwinds_correctly(
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -2516,8 +2542,10 @@ async fn test_snapshot_create_saga_unwinds_correctly(
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -3316,8 +3344,10 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
             name: "disk".parse().unwrap(),
             description: String::from("disk"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(2),
     };
@@ -3345,7 +3375,10 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
     let Disk::Crucible(db_disk) = datastore
         .disk_get(&opctx, disk_id)
         .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -3930,7 +3963,10 @@ async fn test_read_only_region_reference_counting(
     let Disk::Crucible(db_disk) = datastore
         .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -3984,7 +4020,10 @@ async fn test_read_only_region_reference_counting(
                 "disk_from_snapshot {:?} should exist",
                 disk_from_snapshot.identity.id
             )
-        });
+        })
+    else {
+        unreachable!()
+    };
 
     let read_only_region_address: SocketAddrV6 =
         nexus.region_addr(&opctx.log, read_only_region.id()).await.unwrap();
@@ -4196,7 +4235,10 @@ async fn test_read_only_region_reference_counting_layers(
     let Disk::Crucible(db_disk) = datastore
         .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -4245,7 +4287,10 @@ async fn test_read_only_region_reference_counting_layers(
                 "disk_from_snapshot {:?} should exist",
                 disk_from_snapshot.identity.id
             )
-        });
+        })
+    else {
+        unreachable!()
+    };
 
     let read_only_region_address: SocketAddrV6 =
         nexus.region_addr(&opctx.log, read_only_region.id()).await.unwrap();
@@ -4427,7 +4472,10 @@ async fn test_volume_replace_snapshot_respects_accounting(
     let Disk::Crucible(db_disk) = datastore
         .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -4632,7 +4680,10 @@ async fn test_volume_remove_rop_respects_accounting(
     let Disk::Crucible(db_disk) = datastore
         .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -4666,7 +4717,10 @@ async fn test_volume_remove_rop_respects_accounting(
                 "disk_from_snapshot {:?} should exist",
                 disk_from_snapshot.identity.id
             )
-        });
+        })
+    else {
+        unreachable!()
+    };
 
     // Assert the correct volume resource usage records before the removal:
     // both the snapshot volume and disk_from_snapshot volume should have usage
@@ -4793,7 +4847,10 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     let Disk::Crucible(db_disk) = datastore
         .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -4827,7 +4884,10 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
                 "disk_from_snapshot {:?} should exist",
                 disk_from_snapshot.identity.id
             )
-        });
+        })
+    else {
+        unreachable!()
+    };
 
     let another_disk_from_snapshot = create_disk_from_snapshot(
         &client,
@@ -4845,7 +4905,10 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
                 "another_disk_from_snapshot {:?} should exist",
                 another_disk_from_snapshot.identity.id
             )
-        });
+        })
+    else {
+        unreachable!()
+    };
 
     // Assert the correct volume resource usage records before the removal: the
     // snapshot volume, disk_from_snapshot volume, and
@@ -5446,7 +5509,10 @@ async fn test_double_layer_with_read_only_region_delete(
     let Disk::Crucible(db_disk) = datastore
         .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -5554,7 +5620,10 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     let Disk::Crucible(db_disk) = datastore
         .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
