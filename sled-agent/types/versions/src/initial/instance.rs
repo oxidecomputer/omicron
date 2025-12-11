@@ -18,9 +18,12 @@ use omicron_common::api::internal::nexus::{HostIdentifier, VmmRuntimeState};
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_common::api::internal::shared::{DhcpConfig, SourceNatConfig};
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
-use propolis_client::instance_spec::{
-    ComponentV0, CrucibleStorageBackend, FileStorageBackend, InstanceSpecV0,
-    SpecKey, VirtioNetworkBackend,
+use propolis_api_types::instance_spec::{
+    SpecKey,
+    components::backends::{
+        CrucibleStorageBackend, FileStorageBackend, VirtioNetworkBackend,
+    },
+    v0::{ComponentV0, InstanceSpecV0},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
