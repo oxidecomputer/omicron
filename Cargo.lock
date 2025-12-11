@@ -8016,6 +8016,7 @@ dependencies = [
  "http",
  "iddqd",
  "ipnetwork",
+ "itertools 0.14.0",
  "libc",
  "macaddr",
  "mg-admin-client",
