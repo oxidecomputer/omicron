@@ -38,6 +38,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::dsl::not;
+use diesel::dsl::exists;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
@@ -758,7 +760,9 @@ impl DataStore {
         authz_disk: &authz::Disk,
         max_disks: u32,
     ) -> Result<(Instance, Disk), Error> {
-        use nexus_db_schema::schema::{disk, instance};
+        use nexus_db_schema::schema::disk;
+        use nexus_db_schema::schema::instance;
+        use nexus_db_schema::schema::sled_resource_vmm;
 
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
@@ -782,6 +786,74 @@ impl DataStore {
 
         let attach_update = DiskSetClauseForAttach::new(authz_instance.id());
 
+        let disk = self.disk_get(&opctx, authz_disk.id()).await?;
+        let resource_query = match disk {
+            Disk::Crucible(_) => disk::table.into_boxed().filter(
+                disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels),
+            ),
+
+            // Attaching a local storage disk to the instance has to be blocked
+            // if sled reservation has occured for this instance: local storage
+            // allocation records are only created during sled reservation, and
+            // importantly a particular configuration of local storage
+            // allocations for an instance are only _validated_ during the sled
+            // reservation.
+            //
+            // The instance start saga perform sled reservation, creates the
+            // corresponding VMM record, and changes the instance's runtime
+            // state all in _separate saga nodes_.  This means that there could
+            // be an indeterminate amount of time between running the sled
+            // reservation query and changing the instance's state.
+            //
+            // If a client attaches a local storage disk to an instance after
+            // sled reservation occurs but before the instance's start moves to
+            // starting, and we do not block it, there are several problems that
+            // result:
+            //
+            // - if an allocation does not already exist for the local storage
+            //   disk, the instance_start saga will fail (and unwind) when
+            //   trying to ensure that the allocation's dataset and zvol exist
+            //   because the allocation_id column is None.
+            //
+            // - if an allocation does already exist for the local storage disk,
+            //   _it may not be for the same sled the VMM is on_. the sled
+            //   reservation query would prevent this, but this attach (if not
+            //   blocked) happened afterwards. This would mean Nexus would
+            //   construct a InstanceSledLocalConfig that contains DelegatedZvol
+            //   entries that refer to different sleds.
+            //
+            // - if an allocation does exist already, and it's for the same sled
+            //   the VMM is on, it may be colocated on a zpool with another
+            //   local storage disk's allocation. again, the sled reservation
+            //   query prevents this.
+            //
+            // - if an allocation does exist already, and it's for the same
+            //   sled the VMM is on, and it's on a distinct zpool, then it's
+            //   probably fine, but it's safer to let the sled reservation query
+            //   validate everything, and it makes a much smaller query to block
+            //   this case as well.
+            //
+            // `reserve_on_random_sled` will create an entry in
+            // `SledResourcesVmm` when the query is successful in finding a VMM
+            // reservation, so use that here: if there is a `SledResourcesVmm`
+            // record for this instance, then block attachment.
+            //
+            // Note that depending on our implementation, this may be the code
+            // path responsible for attaching disks to already-running instances
+            // when we support hot-plug. Local storage disks may never support
+            // hot-plug because running zones cannot be reconfigured (aka a new
+            // zvol rdsk device cannot be added to a running propolis zone).
+            Disk::LocalStorage(_) => disk::table
+                .into_boxed()
+                .filter(
+                    disk::dsl::disk_state
+                        .eq_any(ok_to_attach_disk_state_labels),
+                )
+                .filter(not(exists(sled_resource_vmm::table.filter(
+                    sled_resource_vmm::dsl::instance_id.eq(authz_instance.id()),
+                )))),
+        };
+
         let query = Instance::attach_resource(
             authz_instance.id(),
             authz_disk.id(),
@@ -790,9 +862,7 @@ impl DataStore {
                     .eq_any(ok_to_attach_instance_states)
                     .and(instance::dsl::active_propolis_id.is_null()),
             ),
-            disk::table.into_boxed().filter(
-                disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels),
-            ),
+            resource_query,
             max_disks,
             diesel::update(disk::dsl::disk).set(attach_update),
         );

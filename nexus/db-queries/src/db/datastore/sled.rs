@@ -5707,4 +5707,144 @@ pub(in crate::db::datastore) mod test {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    /// Ensure that after sled reservation, local storage disks cannot be
+    /// attached to instances, even if they don't yet have a VMM.
+    #[tokio::test]
+    async fn local_storage_disk_no_attach_after_reservation() {
+        let logctx = dev::test_setup_log(
+            "local_storage_disk_no_attach_after_reservation",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config = LocalStorageTest {
+            // One sled with two U2s
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled_0"),
+                u2s: vec![
+                    LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: String::from("phys0"),
+
+                        zpool_id: ZpoolUuid::new_v4(),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: "[fd00:1122:3344:101::1]:12345"
+                            .parse()
+                            .unwrap(),
+
+                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                    },
+                    LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: String::from("phys1"),
+
+                        zpool_id: ZpoolUuid::new_v4(),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: "[fd00:1122:3344:102::1]:12345"
+                            .parse()
+                            .unwrap(),
+
+                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                    },
+                ],
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            // Configure one instance with two local storage disks. One will be
+            // detached before sled reservation.
+            instances: vec![LocalStorageTestInstance {
+                id: InstanceUuid::new_v4(),
+                name: "local".to_string(),
+                affinity: None,
+                disks: vec![
+                    LocalStorageTestInstanceDisk {
+                        id: Uuid::new_v4(),
+                        name: external::Name::try_from("local1".to_string())
+                            .unwrap(),
+                        size: external::ByteCount::from_gibibytes_u32(64),
+                    },
+                    LocalStorageTestInstanceDisk {
+                        id: Uuid::new_v4(),
+                        name: external::Name::try_from("local2".to_string())
+                            .unwrap(),
+                        size: external::ByteCount::from_gibibytes_u32(64),
+                    },
+                ],
+            }],
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        let instance = Instance::new_with_id(config.instances[0].id);
+
+        // Detach the second disk from the instance
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance.id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("instance must exist");
+
+        let (.., authz_disk) = LookupPath::new(&opctx, datastore)
+            .disk_id(config.instances[0].disks[1].id)
+            .lookup_for(authz::Action::Read)
+            .await
+            .expect("disk must exist");
+
+        datastore
+            .instance_detach_disk(
+                &opctx,
+                &authz_instance,
+                &authz_disk,
+            )
+            .await
+            .unwrap();
+
+        // the output of the find targets query does not currently take required
+        // local storage allocations into account
+        assert_eq!(instance.find_targets(datastore).await.len(), 1);
+
+        datastore
+            .sled_reservation_create(
+                opctx,
+                instance.id,
+                PropolisUuid::new_v4(),
+                db::model::Resources::new(
+                    1,
+                    ByteCount::try_from(1024).unwrap(),
+                    ByteCount::try_from(1024).unwrap(),
+                ),
+                db::model::SledReservationConstraints::none(),
+            )
+            .await
+            .unwrap();
+
+        // Try to attach the second disk to the instance - it should fail.
+
+        datastore
+            .instance_attach_disk(
+                &opctx,
+                &authz_instance,
+                &authz_disk,
+                MAX_DISKS_PER_INSTANCE,
+            )
+            .await
+            .unwrap_err();
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
