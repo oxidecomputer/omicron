@@ -29,7 +29,6 @@ use sled_agent_config_reconciler::{
     TimeSyncConfig,
 };
 use sled_agent_health_monitor::HealthMonitorHandle;
-use sled_agent_health_monitor::health_checks::poll_smf_services_in_maintenance;
 use sled_agent_types::zone_bundle::CleanupContext;
 use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
@@ -279,21 +278,8 @@ async fn spawn_bootstore_tasks(
 // TODO-K: Remove pub
 pub async fn spawn_health_monitor_tasks(log: &Logger) -> HealthMonitorHandle {
     info!(log, "Starting health monitor");
-    let health_handle = HealthMonitorHandle::new();
-
-    // Spawn a task to retrieve information about services in maintenance
-    info!(log, "Starting SMF service health poller");
-    let health_handle2 = health_handle.clone();
-    let log = log.new(o!("component" => "smf_services_in_maintenance_poller"));
-    tokio::spawn(async move {
-        poll_smf_services_in_maintenance(
-            log,
-            health_handle2.smf_services_in_maintenance_tx,
-        )
-        .await
-    });
-
-    health_handle
+    let log = log.new(o!("component" => "HealthMonitor"));
+    HealthMonitorHandle::spawn(&log)
 }
 
 // `ZoneBundler::new` spawns a periodic cleanup task that runs indefinitely
