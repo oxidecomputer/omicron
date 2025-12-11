@@ -145,6 +145,9 @@ pub struct PlanningInput {
     /// Generation number in the blueprint, which triggers active Nexuses to
     /// quiesce.
     not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
+
+    /// TODO-john
+    expunged_and_unreferenced: BTreeSet<OmicronZoneUuid>,
 }
 
 impl PlanningInput {
@@ -358,6 +361,7 @@ impl PlanningInput {
                 .ignore_impossible_mgs_updates_since,
             active_nexus_zones: self.active_nexus_zones,
             not_yet_nexus_zones: self.not_yet_nexus_zones,
+            expunged_and_unreferenced: self.expunged_and_unreferenced,
         }
     }
 }
@@ -1598,6 +1602,7 @@ pub struct PlanningInputBuilder {
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
     active_nexus_zones: BTreeSet<OmicronZoneUuid>,
     not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    expunged_and_unreferenced: BTreeSet<OmicronZoneUuid>,
 }
 
 impl PlanningInputBuilder {
@@ -1620,6 +1625,7 @@ impl PlanningInputBuilder {
                 - MGS_UPDATE_SETTLE_TIMEOUT,
             active_nexus_zones: BTreeSet::new(),
             not_yet_nexus_zones: BTreeSet::new(),
+            expunged_and_unreferenced: BTreeSet::new(),
         }
     }
 
@@ -1742,6 +1748,7 @@ impl PlanningInputBuilder {
                 .ignore_impossible_mgs_updates_since,
             active_nexus_zones: self.active_nexus_zones,
             not_yet_nexus_zones: self.not_yet_nexus_zones,
+            expunged_and_unreferenced: self.expunged_and_unreferenced,
         }
     }
 }
