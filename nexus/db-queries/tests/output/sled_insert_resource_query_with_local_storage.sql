@@ -91,9 +91,9 @@ WITH
       UPDATE
         disk_type_local_storage
       SET
-        local_storage_dataset_allocation_id = CASE disk_id WHEN $9 THEN $10 END
+        local_storage_dataset_allocation_id = CASE disk_id WHEN $9 THEN $10 WHEN $11 THEN $12 END
       WHERE
-        disk_id IN ($11,)
+        disk_id IN ($13, $14)
       RETURNING
         *
     ),
@@ -103,7 +103,7 @@ WITH
       INTO
         local_storage_dataset_allocation
       VALUES
-        ($12, now(), NULL, $13, $14, $15, $16)
+        ($15, now(), NULL, $16, $17, $18, $19), ($20, now(), NULL, $21, $22, $23, $24)
       RETURNING
         *
     ),
@@ -119,7 +119,6 @@ WITH
         new_local_storage_allocation_records.local_storage_dataset_id
         = rendezvous_local_storage_dataset.id
         AND rendezvous_local_storage_dataset.time_tombstoned IS NULL
-        AND rendezvous_local_storage_dataset.no_provision = false
       RETURNING
         *
     ),
@@ -129,9 +128,9 @@ WITH
         1
       WHERE
         EXISTS(SELECT 1 FROM sled_has_space)
-        AND NOT (EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = $17))
+        AND NOT (EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = $25))
         AND (
-            EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = $18)
+            EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = $26)
             OR NOT EXISTS(SELECT 1 FROM required_sleds)
           )
         AND (
@@ -152,8 +151,7 @@ WITH
                 (crucible_dataset.size_used IS NOT NULL)
                 AND (crucible_dataset.time_deleted IS NULL)
                 AND (rendezvous_local_storage_dataset.time_tombstoned IS NULL)
-                AND rendezvous_local_storage_dataset.no_provision IS false
-                AND crucible_dataset.pool_id = $19
+                AND crucible_dataset.pool_id = $27
               GROUP BY
                 crucible_dataset.pool_id
             )
@@ -164,13 +162,13 @@ WITH
                   FROM
                     inv_zpool
                   WHERE
-                    inv_zpool.id = $20
+                    inv_zpool.id = $28
                   ORDER BY
                     inv_zpool.time_collected DESC
                   LIMIT
                     1
                 )
-                - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $21)
+                - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $29)
               )
             AND (
                 SELECT
@@ -183,7 +181,7 @@ WITH
                   JOIN sled ON zpool.sled_id = sled.id
                   JOIN physical_disk ON zpool.physical_disk_id = physical_disk.id
                 WHERE
-                  zpool.id = $22
+                  zpool.id = $30
               )
             AND (
                 SELECT
@@ -191,7 +189,64 @@ WITH
                 FROM
                   rendezvous_local_storage_dataset
                 WHERE
-                  rendezvous_local_storage_dataset.id = $23
+                  rendezvous_local_storage_dataset.id = $31
+              )
+            AND (
+                SELECT
+                  sum(
+                    crucible_dataset.size_used
+                    + rendezvous_local_storage_dataset.size_used
+                    + new_local_storage_allocation_records.dataset_size
+                  )
+                FROM
+                  crucible_dataset
+                  JOIN rendezvous_local_storage_dataset ON
+                      crucible_dataset.pool_id = rendezvous_local_storage_dataset.pool_id
+                  JOIN new_local_storage_allocation_records ON
+                      crucible_dataset.pool_id = new_local_storage_allocation_records.pool_id
+                WHERE
+                  (crucible_dataset.size_used IS NOT NULL)
+                  AND (crucible_dataset.time_deleted IS NULL)
+                  AND (rendezvous_local_storage_dataset.time_tombstoned IS NULL)
+                  AND crucible_dataset.pool_id = $32
+                GROUP BY
+                  crucible_dataset.pool_id
+              )
+              < (
+                  (
+                    SELECT
+                      total_size
+                    FROM
+                      inv_zpool
+                    WHERE
+                      inv_zpool.id = $33
+                    ORDER BY
+                      inv_zpool.time_collected DESC
+                    LIMIT
+                      1
+                  )
+                  - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $34)
+                )
+            AND (
+                SELECT
+                  sled.sled_policy = 'in_service'
+                  AND sled.sled_state = 'active'
+                  AND physical_disk.disk_policy = 'in_service'
+                  AND physical_disk.disk_state = 'active'
+                FROM
+                  zpool
+                  JOIN sled ON zpool.sled_id = sled.id
+                  JOIN physical_disk ON zpool.physical_disk_id = physical_disk.id
+                WHERE
+                  zpool.id = $35
+              )
+            AND (
+                SELECT
+                  time_tombstoned IS NULL AND no_provision IS false
+                FROM
+                  rendezvous_local_storage_dataset
+                WHERE
+                  rendezvous_local_storage_dataset.id = $36
               )
           )
     )
@@ -199,6 +254,6 @@ INSERT
 INTO
   sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id)
 SELECT
-  $24, $25, $26, $27, $28, $29
+  $37, $38, $39, $40, $41, $42
 WHERE
   EXISTS(SELECT 1 FROM insert_valid)
