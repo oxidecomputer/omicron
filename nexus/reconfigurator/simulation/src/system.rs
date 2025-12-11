@@ -297,9 +297,9 @@ impl SimSystem {
     pub fn get_blueprint(
         &self,
         id: &ResolvedBlueprintId,
-    ) -> Result<&Blueprint, KeyError> {
+    ) -> Result<&Arc<Blueprint>, KeyError> {
         match self.blueprints.get(&id.resolved()) {
-            Some(b) => Ok(&**b),
+            Some(b) => Ok(b),
             None => Err(KeyError::resolved_blueprint(id.clone())),
         }
     }
@@ -311,7 +311,7 @@ impl SimSystem {
     pub fn resolve_and_get_blueprint(
         &self,
         original: BlueprintId,
-    ) -> Result<&Blueprint, KeyError> {
+    ) -> Result<&Arc<Blueprint>, KeyError> {
         let id = self.resolve_blueprint_id(original);
         self.get_blueprint(&id)
     }
@@ -429,7 +429,7 @@ impl SimSystemBuilder {
     pub fn get_blueprint(
         &self,
         id: &ResolvedBlueprintId,
-    ) -> Result<&Blueprint, KeyError> {
+    ) -> Result<&Arc<Blueprint>, KeyError> {
         self.inner.system.get_blueprint(id)
     }
 
@@ -881,14 +881,15 @@ impl SimSystemBuilderInner {
         // XXX: it's not normal, but hypothetically possible, that the initial
         // and target blueprints have the same ID. This will panic if so. Maybe
         // we should make it not panic.
-        self.add_blueprint_inner(Arc::new(example.initial_blueprint))
-            .unwrap_or_else(|_| {
+        self.add_blueprint_inner(example.initial_blueprint).unwrap_or_else(
+            |_| {
                 panic!(
                     "possible conflict between initial blueprint \
-                 (ID {initial_blueprint_id}) and target blueprint \
-                 (ID {target_blueprint_id})"
+                     (ID {initial_blueprint_id}) and target blueprint \
+                     (ID {target_blueprint_id})"
                 )
-            });
+            },
+        );
     }
 
     // This method MUST be infallible. It should only be called after checking

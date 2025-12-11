@@ -1203,12 +1203,15 @@ mod test {
         system: &SystemDescription,
         test_name: &str,
     ) -> BlueprintBuilder<'static> {
-        static EMPTY_BLUEPRINT: LazyLock<Blueprint> = LazyLock::new(|| {
-            BlueprintBuilder::build_empty("EMPTY_BLUEPRINT static")
-        });
+        static EMPTY_BLUEPRINT: LazyLock<Arc<Blueprint>> =
+            LazyLock::new(|| {
+                Arc::new(BlueprintBuilder::build_empty(
+                    "EMPTY_BLUEPRINT static",
+                ))
+            });
 
         let planning_input = system
-            .to_planning_input_builder()
+            .to_planning_input_builder(Arc::clone(&EMPTY_BLUEPRINT))
             .expect("created planning input builder")
             .build();
 
