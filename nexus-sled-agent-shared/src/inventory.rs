@@ -129,7 +129,6 @@ pub struct Inventory {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
-    //pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
     pub health_monitor: HealthMonitorInventory,
 }
 
@@ -146,7 +145,6 @@ pub struct HealthMonitorInventory {
 }
 
 impl HealthMonitorInventory {
-    // TODO-K: Rename to new_fake?
     pub fn new() -> Self {
         Self { smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()) }
     }

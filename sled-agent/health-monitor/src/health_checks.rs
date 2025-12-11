@@ -24,7 +24,6 @@ pub(crate) async fn poll_smf_services_in_maintenance(
         interval.tick().await;
         match Svcs::in_maintenance(&log).await {
             Err(e) => smf_services_in_maintenance_tx.send_modify(|status| {
-                // TODO-K: Return a real error type instead of a string?
                 *status = Err(e.to_string());
             }),
             Ok(svcs) => smf_services_in_maintenance_tx.send_modify(|status| {

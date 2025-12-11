@@ -52,6 +52,8 @@ impl Svcs {
     }
 }
 
+/// Lists services in maintenance status if any, and the time the health check
+/// for SMF services ran
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SvcsInMaintenanceResult {
