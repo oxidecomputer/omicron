@@ -9,8 +9,9 @@ use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::collection_attach;
 use crate::db::collection_attach::AttachError;
-use crate::db::collection_attach::DatastoreAttachTarget;
+use crate::db::collection_attach::AttachQuery;
 use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
 use crate::db::collection_insert::AsyncInsertError;
@@ -31,7 +32,7 @@ use crate::db::model::VirtualProvisioningResource;
 use crate::db::model::Volume;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
-use crate::db::queries::disk::DiskSetClauseForAttach;
+use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -61,6 +62,75 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
+
+/// Creates a database query template for attaching disks to instances.
+///
+/// This defines the complete SQL structure for the attach operation,
+/// including the SET clause and filters.
+fn disk_attach_query_template() -> collection_attach::AttachQueryTemplate {
+    use crate::db::queries::disk::build_next_disk_slot_subquery;
+    use diesel::sql_types;
+
+    let ok_to_attach_disk_states = [
+        api::external::DiskState::Creating,
+        api::external::DiskState::Detached,
+    ];
+    let ok_to_attach_disk_state_labels: Vec<_> =
+        ok_to_attach_disk_states.iter().map(|s| s.label()).collect();
+
+    // TODO(https://github.com/oxidecomputer/omicron/issues/811):
+    // This list of instance attach states is more restrictive than it
+    // plausibly could be.
+    //
+    // We currently only permit attaching disks to stopped instances.
+    let ok_to_attach_instance_states =
+        [db::model::InstanceState::Creating, db::model::InstanceState::NoVmm];
+
+    collection_attach::AttachQueryTemplate::new(
+        collection_attach::Collection::new(
+            "instance",     // collection table
+            "id",           // collection id column
+            "time_deleted", // collection time_deleted
+        ),
+        collection_attach::Resource::new(
+            "disk",               // resource table
+            "id",                 // resource id column
+            "attach_instance_id", // resource FK column
+            "time_deleted",       // resource time_deleted
+        ),
+        false, // allow_from_attached
+        |builder: &mut QueryBuilder, instance_id: Uuid| {
+            // Build SET clause: attach_instance_id, disk_state, slot
+            let attached_label =
+                api::external::DiskState::Attached(instance_id).label();
+            builder.sql("attach_instance_id = ");
+            builder.param().bind::<sql_types::Uuid, _>(instance_id);
+            builder.sql(", disk_state = ");
+            builder.param().bind::<sql_types::Text, _>(attached_label);
+            builder.sql(", slot = (");
+            build_next_disk_slot_subquery(builder, instance_id);
+            builder.sql(")");
+        },
+        Some(move |builder: &mut QueryBuilder| {
+            // Collection (instance) filter: state and active_propolis_id
+            builder.sql(" AND state = ANY(");
+            builder.param().bind::<sql_types::Array<
+                nexus_db_schema::enums::InstanceStateEnum,
+            >, _>(
+                ok_to_attach_instance_states.to_vec()
+            );
+            builder.sql(") AND active_propolis_id IS NULL");
+        }),
+        Some(move |builder: &mut QueryBuilder| {
+            // Resource (disk) filter: disk_state
+            builder.sql(" AND disk_state = ANY(");
+            builder.param().bind::<sql_types::Array<sql_types::Text>, _>(
+                ok_to_attach_disk_state_labels,
+            );
+            builder.sql(")");
+        }),
+    )
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Disk {
@@ -747,44 +817,18 @@ impl DataStore {
         authz_disk: &authz::Disk,
         max_disks: u32,
     ) -> Result<(Instance, Disk), Error> {
-        use nexus_db_schema::schema::{disk, instance};
-
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
-        let ok_to_attach_disk_states = [
-            api::external::DiskState::Creating,
-            api::external::DiskState::Detached,
-        ];
-        let ok_to_attach_disk_state_labels: Vec<_> =
-            ok_to_attach_disk_states.iter().map(|s| s.label()).collect();
+        let instance_id = authz_instance.id();
+        let disk_id = authz_disk.id();
 
-        // TODO(https://github.com/oxidecomputer/omicron/issues/811):
-        // This list of instance attach states is more restrictive than it
-        // plausibly could be.
-        //
-        // We currently only permit attaching disks to stopped instances.
-        let ok_to_attach_instance_states = vec![
-            db::model::InstanceState::Creating,
-            db::model::InstanceState::NoVmm,
-        ];
+        // Create the query template with all SQL structure
+        let template = disk_attach_query_template();
 
-        let attach_update = DiskSetClauseForAttach::new(authz_instance.id());
-
-        let query = Instance::attach_resource(
-            authz_instance.id(),
-            authz_disk.id(),
-            instance::table.into_boxed().filter(
-                instance::dsl::state
-                    .eq_any(ok_to_attach_instance_states)
-                    .and(instance::dsl::active_propolis_id.is_null()),
-            ),
-            disk::table.into_boxed().filter(
-                disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels),
-            ),
-            max_disks,
-            diesel::update(disk::dsl::disk).set(attach_update),
-        );
+        // Build the query with runtime parameter values
+        let query: AttachQuery<model::Disk, model::Instance> =
+            template.build(instance_id, disk_id, max_disks);
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
