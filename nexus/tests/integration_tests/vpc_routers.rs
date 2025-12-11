@@ -26,6 +26,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
 use nexus_types::external_api::params::InstanceNetworkInterfaceCreate;
+use nexus_types::external_api::params::IpConfig;
 use nexus_types::external_api::params::VpcSubnetUpdate;
 use nexus_types::external_api::views::VpcRouter;
 use nexus_types::external_api::views::VpcRouterKind;
@@ -509,8 +510,9 @@ async fn test_vpc_routers_custom_delivered_to_instance(
                     },
                     vpc_name: vpc.name().clone(),
                     subnet_name: subnet_name.parse().unwrap(),
-                    ip: Some(format!("192.168.{i}.10").parse().unwrap()),
-                    transit_ips: vec![],
+                    ip_config: IpConfig::from_ipv4(
+                        format!("192.168.{i}.10").parse().unwrap(),
+                    ),
                 },
             ]),
             vec![],

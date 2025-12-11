@@ -5479,8 +5479,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?
                 .into_iter()
-                .map(|d| d.into())
-                .collect();
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?;
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 interfaces,
@@ -5513,7 +5513,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &interface_params.into_inner(),
                 )
                 .await?;
-            Ok(HttpResponseCreated(iface.into()))
+            iface.try_into().map(HttpResponseCreated).map_err(HttpError::from)
         };
         apictx
             .context
@@ -5576,7 +5576,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_network_interface_lookup(&opctx, interface_selector)?
                 .fetch()
                 .await?;
-            Ok(HttpResponseOk(interface.into()))
+            interface.try_into().map(HttpResponseOk).map_err(HttpError::from)
         };
         apictx
             .context
@@ -5617,7 +5617,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     updated_iface,
                 )
                 .await?;
-            Ok(HttpResponseOk(InstanceNetworkInterface::from(interface)))
+            interface.try_into().map(HttpResponseOk).map_err(HttpError::from)
         };
         apictx
             .context
@@ -6297,8 +6297,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?
                 .into_iter()
-                .map(|interfaces| interfaces.into())
-                .collect();
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?;
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 interfaces,

@@ -26,10 +26,13 @@ use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel, retryable};
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::{Ip, IpAssignment, Ipv4Addr, SqlU8};
+use nexus_db_model::Ipv4Addr;
+use nexus_db_model::SqlU8;
 use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
 use nexus_db_schema::enums::NetworkInterfaceKindEnum;
 use nexus_db_schema::schema::network_interface::dsl;
+use nexus_types::external_api::params::IpAssignment;
+use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{self, Error};
 use slog_error_chain::SlogInlineError;
@@ -1069,7 +1072,7 @@ where
 {
     fn new<T>(assignment: Option<&IpAssignment<T>>, auto: Q) -> Self
     where
-        T: Ip,
+        T: ConcreteIp,
     {
         match assignment {
             None => AutoOrOptionalIp::Nullable(None),
@@ -1969,13 +1972,13 @@ mod tests {
     use dropshot::test_util::LogContext;
     use model::NetworkInterfaceKind;
     use nexus_db_lookup::LookupPath;
-    use nexus_db_model::IpConfig;
     use nexus_db_model::IpVersion;
-    use nexus_db_model::Ipv4Assignment;
-    use nexus_db_model::Ipv4Config;
     use nexus_types::external_api::params;
     use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
+    use nexus_types::external_api::params::IpConfig;
+    use nexus_types::external_api::params::Ipv4Assignment;
+    use nexus_types::external_api::params::Ipv4Config;
     use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::Error;

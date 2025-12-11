@@ -697,7 +697,7 @@ pub async fn create_instance(
         client,
         project_name,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::Default,
+        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         // Disks=
         Vec::<params::InstanceDiskAttachment>::new(),
         // External IPs=
