@@ -43,6 +43,25 @@ macro_rules! bail_txn {
     }
 }
 
+fn i64_to_epoch(val: i64) -> Result<Epoch, Error> {
+    let Ok(epoch) = val.try_into() else {
+        return Err(Error::internal_error(&format!(
+            "Failed to convert i64 from database: {val} \
+                into trust quroum epoch",
+        )));
+    };
+    Ok(Epoch(epoch))
+}
+
+fn epoch_to_i64(epoch: Epoch) -> Result<i64, Error> {
+    epoch.0.try_into().map_err(|_| {
+        Error::internal_error(&format!(
+            "Failed to convert trust quorum epoch to i64 in attempt to insert \
+            into database: {epoch}"
+        ))
+    })
+}
+
 impl DataStore {
     /// Return all `HwBaseboardId`s for a given rack that has run LRTQ
     ///
@@ -151,18 +170,16 @@ impl DataStore {
         };
 
         let Some(coordinator) = coordinator else {
-            return Err(Error::InternalError {
-                internal_message: format!(
-                    "Failed to find coordinator for hw_baseboard_id: \
-                     {} in trust quorum config.",
-                    latest.coordinator
-                ),
-            });
+            return Err(Error::internal_error(&format!(
+                "Failed to find coordinator for hw_baseboard_id: {} \
+                in trust quorum config.",
+                latest.coordinator
+            )));
         };
 
         Ok(Some(TrustQuorumConfig {
             rack_id: latest.rack_id.into(),
-            epoch: Epoch(latest.epoch.try_into().unwrap()),
+            epoch: i64_to_epoch(latest.epoch)?,
             state: latest.state.into(),
             threshold: Threshold(latest.threshold.into()),
             commit_crash_tolerance: latest.commit_crash_tolerance.into(),
@@ -247,7 +264,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
-        let epoch: i64 = epoch.0.try_into().unwrap();
+        let epoch = epoch_to_i64(epoch)?;
 
         let err = OptionalError::new();
 
@@ -345,12 +362,15 @@ impl DataStore {
         );
         let coordinator_id = coordinator_id.unwrap().id;
 
+        let epoch = epoch_to_i64(config.epoch)
+            .map_err(|e| TransactionError::from(e))?;
+
         // Insert the configuration
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
         diesel::insert_into(dsl::trust_quorum_configuration)
             .values(DbTrustQuorumConfiguration {
                 rack_id: config.rack_id.into(),
-                epoch: config.epoch.0.try_into().unwrap(),
+                epoch,
                 state: config.state.into(),
                 threshold: config.threshold.0.into(),
                 commit_crash_tolerance: config.commit_crash_tolerance.into(),
@@ -366,7 +386,7 @@ impl DataStore {
             .into_iter()
             .map(|m| DbTrustQuorumMember {
                 rack_id: config.rack_id.into(),
-                epoch: config.epoch.0.try_into().unwrap(),
+                epoch,
                 hw_baseboard_id: m.id,
                 state: nexus_db_model::DbTrustQuorumMemberState::Unacked,
                 share_digest: None,
@@ -413,15 +433,18 @@ impl DataStore {
     ) -> Result<Option<Epoch>, TransactionError<Error>> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
-        let latest_epoch = dsl::trust_quorum_configuration
+        let Some(latest_epoch) = dsl::trust_quorum_configuration
             .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
             .order_by(dsl::epoch.desc())
             .select(dsl::epoch)
             .first_async::<i64>(conn)
             .await
             .optional()?
-            .map(|epoch| Epoch(epoch.try_into().unwrap()));
-        Ok(latest_epoch)
+        else {
+            return Ok(None);
+        };
+        let latest_epoch = i64_to_epoch(latest_epoch)?;
+        Ok(Some(latest_epoch))
     }
 
     async fn tq_get_latest_config_conn(
