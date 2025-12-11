@@ -7,7 +7,7 @@
 
 // XXX-dap current status:
 // - write battery of automated tests
-// - finish cleanup
+// - lots of cleanup to do
 
 use anyhow::Context;
 use anyhow::anyhow;
@@ -185,7 +185,7 @@ trait NamingRule {
         source_file_metadata: &std::fs::Metadata,
         lister: &dyn FileLister,
         output_directory: &Utf8Path,
-    ) -> Filename;
+    ) -> Result<Filename, anyhow::Error>;
 }
 
 struct ArchiveGroup<'a> {
@@ -274,34 +274,31 @@ impl NamingRule for NameRotatedLogFile {
         source_file_metadata: &std::fs::Metadata,
         lister: &dyn FileLister,
         output_directory: &Utf8Path,
-    ) -> Filename {
+    ) -> Result<Filename, anyhow::Error> {
         // XXX-dap TODO-doc
         let filename_base = match source_file_name.as_ref().rsplit_once('.') {
             Some((base, _extension)) => base,
             None => source_file_name.as_ref(),
         };
 
-        let mut n = source_file_metadata
+        let mtime_as_seconds = source_file_metadata
             .modified()
             .unwrap_or_else(|_| SystemTime::now())
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let mut rv = format!("{filename_base}.{n}");
-        // XXX-dap we should bound this loop and return an error
-        // What if we don't have permissions?
-        loop {
-            let dest = output_directory.join(format!("{filename_base}.{n}"));
-            if lister.file_exists(&dest) {
-                n += 1;
-                rv = format!("{filename_base}.{n}");
-            } else {
-                break;
+        for i in 0..30 {
+            let rv = format!("{filename_base}.{}", mtime_as_seconds + i);
+            let dest = output_directory.join(&rv);
+            if !lister.file_exists(&dest)? {
+                // unwrap(): we started with a valid `Filename` and did not add
+                // any slashes here.
+                return Ok(Filename::try_from(rv).unwrap());
             }
         }
-        // unwrap(): we started with a valid `Filename` and did not add any
-        // slashes here.
-        Filename::try_from(rv).unwrap()
+
+        // XXX-dap better message
+        Err(anyhow!("too many files with the same mtime"))
     }
 }
 
@@ -327,40 +324,63 @@ impl NamingRule for NameIdentity {
         _source_file_metadata: &std::fs::Metadata,
         _lister: &dyn FileLister,
         _output_directory: &Utf8Path,
-    ) -> Filename {
-        source_file_name.clone()
+    ) -> Result<Filename, anyhow::Error> {
+        Ok(source_file_name.clone())
     }
 }
 
 trait FileLister {
-    fn list_files(&self, path: &Utf8Path) -> Vec<Filename>;
-    fn file_metadata(&self, path: &Utf8Path) -> Option<Metadata>;
-    fn file_exists(&self, path: &Utf8Path) -> bool;
+    fn list_files(
+        &self,
+        path: &Utf8Path,
+    ) -> Vec<Result<Filename, anyhow::Error>>;
+    fn file_metadata(&self, path: &Utf8Path)
+    -> Result<Metadata, anyhow::Error>;
+    fn file_exists(&self, path: &Utf8Path) -> Result<bool, anyhow::Error>;
 }
 
 struct FilesystemLister;
 impl FileLister for FilesystemLister {
-    fn list_files(&self, path: &Utf8Path) -> Vec<Filename> {
-        // XXX-dap need a place to store errors
-        let Ok(entry_iter) = path.read_dir_utf8() else {
-            return Vec::new();
+    fn list_files(
+        &self,
+        path: &Utf8Path,
+    ) -> Vec<Result<Filename, anyhow::Error>> {
+        let entry_iter = match path
+            .read_dir_utf8()
+            .with_context(|| format!("readdir {path:?}"))
+        {
+            Ok(entry_iter) => entry_iter,
+            Err(error) => return vec![Err(error)],
         };
 
         entry_iter
-            .filter_map(|entry| entry.ok())
-            .filter_map(|entry| {
-                Filename::try_from(entry.file_name().to_owned()).ok()
+            .map(|entry| {
+                entry.context("reading directory entry").and_then(|entry| {
+                    // It should be impossible for this `try_from()` to fail,
+                    // but it's easy enough to handle gracefully.
+                    Filename::try_from(entry.file_name().to_owned())
+                        .with_context(|| {
+                            format!(
+                                "processing as a file name: {:?}",
+                                entry.file_name(),
+                            )
+                        })
+                })
             })
             .collect()
     }
 
-    fn file_metadata(&self, path: &Utf8Path) -> Option<Metadata> {
-        // XXX-dap need a place to store errors
-        path.symlink_metadata().ok()
+    fn file_metadata(
+        &self,
+        path: &Utf8Path,
+    ) -> Result<Metadata, anyhow::Error> {
+        path.symlink_metadata()
+            .with_context(|| format!("loading metadata for {path:?}"))
     }
 
-    fn file_exists(&self, path: &Utf8Path) -> bool {
-        path.exists()
+    fn file_exists(&self, path: &Utf8Path) -> Result<bool, anyhow::Error> {
+        path.try_exists()
+            .with_context(|| format!("checking existence of {path:?}"))
     }
 }
 
@@ -374,7 +394,9 @@ struct ArchivePlan {
 
 impl ArchivePlan {
     // XXX-dap cfg(test)
-    fn to_steps(&self) -> impl Iterator<Item = ArchiveStep<'_>> {
+    fn to_steps(
+        &self,
+    ) -> impl Iterator<Item = Result<ArchiveStep<'_>, anyhow::Error>> {
         Self::to_steps_generic(
             &self.log,
             &self.groups,
@@ -388,12 +410,12 @@ impl ArchivePlan {
         groups: &'a [ArchiveGroup<'static>],
         debug_dir: &'a Utf8Path,
         lister: &'a (dyn FileLister + Send + Sync),
-    ) -> impl Iterator<Item = ArchiveStep<'a>> {
+    ) -> impl Iterator<Item = Result<ArchiveStep<'a>, anyhow::Error>> {
         groups
             .iter()
             .map(|group| {
                 let output_directory = group.output_directory(debug_dir);
-                ArchiveStep::Mkdir { output_directory }
+                Ok(ArchiveStep::Mkdir { output_directory })
             })
             .chain(
                 groups
@@ -406,37 +428,46 @@ impl ArchivePlan {
                             "listing directory";
                             "input_directory" => %input_directory
                         );
-                        lister
-                            .list_files(&input_directory)
-                            .into_iter()
-                            .map(move |filename| (group, filename))
+                        lister.list_files(&input_directory).into_iter().map(
+                            move |item| item.map(|filename| (group, filename)),
+                        )
                     })
-                    .filter(move |(group, filename)| {
-                        debug!(
-                            log,
-                            "checking file";
-                            "file" => %filename.as_ref(),
-                        );
-                        group.rule.include_file(filename)
-                    })
-                    .filter_map(|(group, filename)| {
-                        let input_path =
-                            group.input_directory().join(filename.as_ref());
-                        lister
-                            .file_metadata(&input_path)
-                            .map(|metadata| (group, input_path, metadata))
-                    })
-                    .map(|(group, input_path, metadata)| {
-                        let output_directory =
-                            group.output_directory(debug_dir);
-                        ArchiveStep::ArchiveFile {
-                            input_path,
-                            metadata,
-                            output_directory,
-                            lister,
-                            namer: &*group.rule.naming,
-                            delete_original: group.rule.delete_original,
+                    .filter(move |entry| match entry {
+                        Err(_) => true,
+                        Ok((group, filename)) => {
+                            debug!(
+                                log,
+                                "checking file";
+                                "file" => %filename.as_ref(),
+                            );
+                            group.rule.include_file(&filename)
                         }
+                    })
+                    .filter_map(|entry| match entry {
+                        Ok((group, filename)) => {
+                            let input_path =
+                                group.input_directory().join(filename.as_ref());
+                            Some(
+                                lister.file_metadata(&input_path).map(
+                                    |metadata| (group, input_path, metadata),
+                                ),
+                            )
+                        }
+                        Err(error) => Some(Err(error)),
+                    })
+                    .map(|entry| {
+                        entry.and_then(|(group, input_path, metadata)| {
+                            let output_directory =
+                                group.output_directory(debug_dir);
+                            Ok(ArchiveStep::ArchiveFile {
+                                input_path,
+                                metadata,
+                                output_directory,
+                                lister,
+                                namer: &*group.rule.naming,
+                                delete_original: group.rule.delete_original,
+                            })
+                        })
                     }),
             )
     }
@@ -449,7 +480,8 @@ impl ArchivePlan {
         let lister = self.lister;
         for step in Self::to_steps_generic(log, &groups, &debug_dir, &*lister) {
             let result = match step {
-                ArchiveStep::Mkdir { output_directory } => {
+                Err(error) => Err(error),
+                Ok(ArchiveStep::Mkdir { output_directory }) => {
                     // We assume that the parent of all output directories
                     // already exists. XXX-dap document better
                     debug!(
@@ -469,15 +501,15 @@ impl ArchivePlan {
                         })
                         .with_context(|| format!("mkdir {output_directory:?}"))
                 }
-                ArchiveStep::ArchiveFile {
+                Ok(ArchiveStep::ArchiveFile {
                     input_path,
                     delete_original,
                     metadata,
                     output_directory,
                     namer,
                     lister,
-                } => {
-                    let output_filename = namer.archived_file_name(
+                }) => {
+                    match namer.archived_file_name(
                         // XXX-dap
                         &input_path
                             .file_name()
@@ -488,21 +520,31 @@ impl ArchivePlan {
                         &metadata,
                         lister,
                         &output_directory,
-                    );
-                    let output_path =
-                        output_directory.join(output_filename.as_ref());
-                    debug!(
-                        log,
-                        "archive file";
-                        "input_path" => %input_path,
-                        "output_path" => %output_path,
-                        "delete_original" => delete_original,
-                    );
-                    archive_one(&input_path, &output_path, delete_original)
-                        .await
-                        .with_context(|| {
-                            format!("archive {input_path:?} to {output_path:?}")
-                        })
+                    ) {
+                        Err(error) => Err(error),
+                        Ok(output_filename) => {
+                            let output_path =
+                                output_directory.join(output_filename.as_ref());
+                            debug!(
+                                log,
+                                "archive file";
+                                "input_path" => %input_path,
+                                "output_path" => %output_path,
+                                "delete_original" => delete_original,
+                            );
+                            archive_one(
+                                &input_path,
+                                &output_path,
+                                delete_original,
+                            )
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "archive {input_path:?} to {output_path:?}"
+                                )
+                            })
+                        }
+                    }
                 }
             };
 
