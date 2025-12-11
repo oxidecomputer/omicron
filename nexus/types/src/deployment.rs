@@ -311,10 +311,18 @@ impl Blueprint {
     /// blueprint, along with the associated sled id.
     pub fn in_service_zones(
         &self,
-    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
-    {
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
         // TODO-john explain
         self.danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+    }
+
+    /// TODO-john
+    pub fn expunged_zones(
+        &self,
+        _reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        // TODO-john explain
+        self.danger_all_omicron_zones(BlueprintZoneDisposition::is_expunged)
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
@@ -615,6 +623,12 @@ pub struct UpstreamNtpConfig<'a> {
 pub struct OperatorNexusConfig<'a> {
     pub external_tls: bool,
     pub external_dns_servers: &'a [IpAddr],
+}
+
+/// TODO-john
+pub enum BlueprintExpungedZoneAccessReason {
+    /// TODO-john
+    Test,
 }
 
 /// Description of the source of a blueprint.

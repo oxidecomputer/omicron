@@ -19,6 +19,7 @@ use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
@@ -207,7 +208,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     .await
     .expect("editing blueprint to expunge zone");
     let (_, expunged_zone_config) = blueprint3
-        .danger_all_omicron_zones(|_| true)
+        .expunged_zones(BlueprintExpungedZoneAccessReason::Test)
         .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
         .expect("expunged zone in new blueprint");
     let BlueprintZoneDisposition::Expunged {
@@ -215,7 +216,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         ..
     } = expunged_zone_config.disposition
     else {
-        panic!("expected expunged zone to have disposition Expunged");
+        unreachable!("expunged_zones() returned a non-expunged zone");
     };
 
     // At some point, we should be unable to reach this Nexus any more.
