@@ -438,12 +438,8 @@ impl DataStore {
 
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
-        self.instance_list_disks_on_conn(
-            &conn,
-            authz_instance.id(),
-            pagparams,
-        )
-        .await
+        self.instance_list_disks_on_conn(&conn, authz_instance.id(), pagparams)
+            .await
     }
 
     /// List disks associated with a given instance by name.
