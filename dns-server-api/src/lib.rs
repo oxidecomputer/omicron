@@ -91,6 +91,11 @@
 
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
 use dropshot_api_manager_types::api_versions;
+use internal_dns_types::config::ERROR_CODE_INCOMPATIBLE_RECORD;
+use internal_dns_types_versions::{
+    latest, v1,
+    v2::config::{V1ToV2TranslationError, V2ToV1TranslationError},
+};
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -127,28 +132,42 @@ pub trait DnsServerApi {
     #[endpoint(
         method = GET,
         path = "/config",
-        operation_id = "dns_config_get",
-        versions = VERSION_INITIAL..VERSION_SOA_AND_NS
+        versions = VERSION_SOA_AND_NS..
     )]
-    async fn dns_config_get_v1(
+    async fn dns_config_get(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<internal_dns_types::v1::config::DnsConfig>,
-        HttpError,
-    >;
+    ) -> Result<HttpResponseOk<latest::config::DnsConfig>, HttpError>;
 
     #[endpoint(
         method = GET,
         path = "/config",
         operation_id = "dns_config_get",
+        versions = VERSION_INITIAL..VERSION_SOA_AND_NS
+    )]
+    async fn dns_config_get_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::config::DnsConfig>, HttpError> {
+        Self::dns_config_get(rqctx).await?.try_map(|config| {
+            config.try_into().map_err(
+                |V2ToV1TranslationError::IncompatibleRecord| {
+                    HttpError::for_bad_request(
+                        None,
+                        ERROR_CODE_INCOMPATIBLE_RECORD.to_string(),
+                    )
+                },
+            )
+        })
+    }
+
+    #[endpoint(
+        method = PUT,
+        path = "/config",
         versions = VERSION_SOA_AND_NS..
     )]
-    async fn dns_config_get_v2(
+    async fn dns_config_put(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<internal_dns_types::v2::config::DnsConfig>,
-        HttpError,
-    >;
+        rq: dropshot::TypedBody<latest::config::DnsConfigParams>,
+    ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>;
 
     #[endpoint(
         method = PUT,
@@ -158,21 +177,19 @@ pub trait DnsServerApi {
     )]
     async fn dns_config_put_v1(
         rqctx: RequestContext<Self::Context>,
-        rq: dropshot::TypedBody<
-            internal_dns_types::v1::config::DnsConfigParams,
-        >,
-    ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>;
-
-    #[endpoint(
-        method = PUT,
-        path = "/config",
-        operation_id = "dns_config_put",
-        versions = VERSION_SOA_AND_NS..
-    )]
-    async fn dns_config_put_v2(
-        rqctx: RequestContext<Self::Context>,
-        rq: dropshot::TypedBody<
-            internal_dns_types::v2::config::DnsConfigParams,
-        >,
-    ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>;
+        rq: dropshot::TypedBody<v1::config::DnsConfigParams>,
+    ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>
+    {
+        let rq = rq.try_map(|params| {
+            params.try_into().map_err(
+                |V1ToV2TranslationError::GenerationTooLarge| {
+                    HttpError::for_bad_request(
+                        None,
+                        ERROR_CODE_INCOMPATIBLE_RECORD.to_string(),
+                    )
+                },
+            )
+        })?;
+        Self::dns_config_put(rqctx, rq).await
+    }
 }
