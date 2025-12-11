@@ -467,6 +467,14 @@ impl DataStore {
         constraints: db::model::SledReservationConstraints,
     ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
     {
+        let log = opctx.log.new(o!(
+            "query" => "sled_reservation",
+            "instance_id" => instance_id.to_string(),
+            "propolis_id" => propolis_id.to_string(),
+        ));
+
+        info!(&log, "sled reservation starting");
+
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // Check if resource ID already exists - if so, return it.
@@ -483,6 +491,7 @@ impl DataStore {
             .await?;
 
         if !old_resource.is_empty() {
+            info!(&log, "sled reservation already occurred, returning");
             return Ok(old_resource[0].clone());
         }
 
@@ -510,7 +519,9 @@ impl DataStore {
         // arguments to this function.
         let maybe_must_use_sleds: Option<HashSet<SledUuid>> =
             if let Some(must_select_from) = constraints.must_select_from() {
-                Some(must_select_from.into_iter().cloned().collect())
+                let set = must_select_from.into_iter().cloned().collect();
+                info!(&log, "reservation constrained to sleds {set:?}");
+                Some(set)
             } else {
                 None
             };
@@ -534,8 +545,15 @@ impl DataStore {
             if local_storage_allocation_sleds.is_empty() {
                 // None of this instance's local storage disks have been
                 // allocated yet.
+                info!(&log, "no existing local storage allocations");
                 maybe_must_use_sleds
             } else {
+                info!(
+                    &log,
+                    "existing local storage allocations on sleds
+                        {local_storage_allocation_sleds:?}"
+                );
+
                 if local_storage_allocation_sleds.len() != 1 {
                     // It's an error for multiple sleds to host local storage
                     // disks for a single VMM, so return a conflict error here.
@@ -583,6 +601,7 @@ impl DataStore {
         } else {
             // `local_storage_disks` is empty, so that does not have an impact
             // on the existing hash set
+            info!(&log, "no attached local storage disks");
             maybe_must_use_sleds
         };
 
@@ -590,11 +609,7 @@ impl DataStore {
         // cannot satisfy this allocation.
         if let Some(must_use_sleds) = &maybe_must_use_sleds {
             if must_use_sleds.is_empty() {
-                error!(
-                    &opctx.log,
-                    "no sleds available after filtering for instance \
-                    {instance_id}",
-                );
+                error!(&log, "no sleds available after filtering");
 
                 // Nothing will satisfy this allocation, return an error here.
                 return Err(SledReservationTransactionError::Reservation(
@@ -675,11 +690,19 @@ impl DataStore {
             }
         }
 
+        info!(&log, "sled targets: {sled_targets:?}");
+
         let local_storage_allocation_required: Vec<&LocalStorageDisk> =
             local_storage_disks
                 .iter()
                 .filter(|disk| disk.local_storage_dataset_allocation.is_none())
                 .collect();
+
+        info!(
+            &log,
+            "local_storage_allocation_required: \
+                {local_storage_allocation_required:?}"
+        );
 
         // We loop here because our attempts to INSERT may be violated by
         // concurrent operations. We'll respond by looking through a slightly
@@ -699,6 +722,8 @@ impl DataStore {
                 &preferred,
             )?;
 
+            info!(&log, "trying sled target {sled_target}");
+
             // Create a SledResourceVmm record, associate it with the target
             // sled.
             let resource = SledResourceVmm::new(
@@ -709,6 +734,11 @@ impl DataStore {
             );
 
             if local_storage_allocation_required.is_empty() {
+                info!(
+                    &log,
+                    "calling insert (no local storage allocation requred)"
+                );
+
                 // If no local storage allocation is required, then simply try
                 // allocating a VMM to this sled.
                 //
@@ -723,8 +753,10 @@ impl DataStore {
                 .await?;
 
                 if rows_inserted > 0 {
+                    info!(&log, "reservation succeeded!");
                     return Ok(resource);
                 }
+                info!(&log, "reservation failed");
             } else {
                 // If local storage allocation is required, match the requests
                 // with all the zpools of this sled that have available space.
@@ -779,6 +811,8 @@ impl DataStore {
                             .contains(&zpool_get_result.pool.id())
                     })
                     .collect();
+
+                info!(&log, "filtered zpools for sled: {zpools_for_sled:?}");
 
                 if local_storage_allocation_required.len()
                     > zpools_for_sled.len()
@@ -1020,6 +1054,12 @@ impl DataStore {
                 for valid_allocation in validated_allocations {
                     let ValidatedAllocations { allocations } = valid_allocation;
 
+                    info!(
+                        &log,
+                        "calling insert with local storage allocations";
+                        "allocations" => ?allocations,
+                    );
+
                     // Try to INSERT the record plus the new local storage
                     // allocations. If this is still a valid target and the new
                     // local storage allocations still fit, we'll use it. If it
@@ -1033,8 +1073,10 @@ impl DataStore {
                     .await?;
 
                     if rows_inserted > 0 {
+                        info!(&log, "reservation succeeded!");
                         return Ok(resource);
                     }
+                    info!(&log, "reservation failed");
                 }
             }
 

@@ -20,7 +20,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct LocalStorageAllocation {
     pub disk_id: Uuid,
     pub local_storage_dataset_allocation_id: DatasetUuid,
