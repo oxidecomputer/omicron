@@ -172,9 +172,6 @@ impl SledAgent {
         // now. Eventually, we'll want to have the ability to "turn on" the real
         // health monitor on simulated systems
         let health_monitor = HealthMonitorHandle::new();
-        // TODO-K: removeme
-        //crate::long_running_tasks::spawn_health_monitor_tasks(&log)
-        //    .await;
 
         Arc::new(SledAgent {
             id,
