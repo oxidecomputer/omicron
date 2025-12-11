@@ -5,11 +5,6 @@
 //! Instance types for Sled Agent API version 7.
 //!
 //! This version adds multicast_groups to InstanceSledLocalConfig.
-//!
-//! Types that are unchanged from v1 are referenced from there:
-//! - VmmSpec
-//! - InstanceMetadata
-//! - ResolvedVpcFirewallRule
 
 use std::net::{IpAddr, SocketAddr};
 

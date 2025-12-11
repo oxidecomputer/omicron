@@ -3,11 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Instance types for Sled Agent API versions 1-6.
-//!
-//! This is the original version of InstanceEnsureBody and related types.
-//! - Does NOT have multicast_groups (added in v7)
-//! - Does NOT have delegated_zvols (added in v9)
-//! - Uses NetworkInterface v1
 
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};

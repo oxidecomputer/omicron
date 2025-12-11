@@ -3,16 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Inventory types for Sled Agent API versions 1-3.
-//!
-//! This module contains:
-//! - v1-specific types: `Inventory`, `OmicronSledConfig`, `OmicronZoneConfig`,
-//!   `OmicronZoneType` (without `lockstep_port` in Nexus variant), and related
-//!   types that use NetworkInterface v1 (single IP, not dual-stack).
-//! - Shared types that are identical across all versions: `InventoryDisk`,
-//!   `InventoryZpool`, `InventoryDataset`, `SledRole`, `ZoneKind`, etc.
-//!
-//! Per RFD 619, types are defined in the earliest version they appear in.
-//! Later versions (v9, v10) re-export unchanged types from here.
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Write};
