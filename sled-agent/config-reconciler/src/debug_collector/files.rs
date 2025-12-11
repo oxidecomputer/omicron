@@ -14,6 +14,7 @@ use anyhow::anyhow;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use derive_more::AsRef;
+use either::Either;
 use slog::Logger;
 use slog::debug;
 use slog::o;
@@ -74,19 +75,13 @@ impl ArchivePlanner {
             output_prefix: self.debug_dir.join(zone_name),
         };
 
-        // XXX-dap TODO-cleanup
-        let mut iter1;
-        let mut iter2;
-        let rules: &mut dyn Iterator<Item = &Rule> = match self.what {
+        let rules = match self.what {
             ArchiveWhat::ImmutableOnly => {
-                iter1 = ZONE_RULES_IMMUTABLE.iter();
-                &mut iter1
+                Either::Left(ZONE_RULES_IMMUTABLE.iter())
             }
-            ArchiveWhat::Everything => {
-                iter2 =
-                    ZONE_RULES_IMMUTABLE.iter().chain(ZONE_RULES_LIVE.iter());
-                &mut iter2
-            }
+            ArchiveWhat::Everything => Either::Right(
+                ZONE_RULES_IMMUTABLE.iter().chain(ZONE_RULES_LIVE.iter()),
+            ),
         };
 
         for rule in rules {
@@ -103,7 +98,7 @@ impl ArchivePlanner {
 
         let source = Source {
             input_prefix: cores_dir.to_owned(),
-            output_prefix: self.debug_dir.clone(), // XXX-dap check this
+            output_prefix: self.debug_dir.clone(),
         };
         self.groups.push(ArchiveGroup { source, rule: &CORES_RULE })
     }
@@ -141,7 +136,6 @@ pub enum ArchiveWhat {
     Everything,
 }
 
-// XXX-dap copied from copy_sync_and_remove()
 pub async fn archive_one(
     source: &Utf8Path,
     dest: &Utf8Path,
