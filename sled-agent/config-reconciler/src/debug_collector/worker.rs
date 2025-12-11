@@ -212,9 +212,8 @@ use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
+use std::time::{Duration, SystemTimeError, UNIX_EPOCH};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot;
 use zone::ZoneError;
@@ -898,8 +897,11 @@ impl DebugCollectorWorker {
 
         info!(&log, "Archiving files");
         // XXX-dap log clone
-        let mut archiver =
-            Archiver::new(log.clone(), ArchiveWhat::ImmutableOnly);
+        let mut archiver = Archiver::new(
+            log.clone(),
+            ArchiveWhat::ImmutableOnly,
+            &debug_dir.as_ref(),
+        );
         if self.known_core_dirs.is_empty() {
             warn!(self.log, "No core dump locations yet known.");
         }
@@ -923,27 +925,7 @@ impl DebugCollectorWorker {
             }
         };
 
-        archiver.to_plan().execute(debug_dir.as_ref()).await
-    }
-
-    async fn copy_sync_and_remove(
-        source: impl AsRef<Path>,
-        dest: impl AsRef<Path>,
-    ) -> tokio::io::Result<()> {
-        let source = source.as_ref();
-        let dest = dest.as_ref();
-        let mut dest_f = tokio::fs::File::create(&dest).await?;
-        let mut src_f = tokio::fs::File::open(&source).await?;
-
-        tokio::io::copy(&mut src_f, &mut dest_f).await?;
-
-        dest_f.sync_all().await?;
-
-        drop(src_f);
-        drop(dest_f);
-
-        tokio::fs::remove_file(source).await?;
-        Ok(())
+        archiver.execute().await
     }
 
     async fn do_archive_former_zone_root(
@@ -957,14 +939,13 @@ impl DebugCollectorWorker {
             .as_ref()
             .ok_or(ArchiveLogsError::NoDebugDirYet)?;
         // XXX-dap log clone
-        let mut archiver =
-            Archiver::new(self.log.clone(), ArchiveWhat::Everything);
+        let mut archiver = Archiver::new(
+            self.log.clone(),
+            ArchiveWhat::Everything,
+            &debug_dir.as_ref(),
+        );
         archiver.include_zone(zone_name, zone_root);
-        archiver
-            .to_plan()
-            .execute(debug_dir.as_ref())
-            .await
-            .map_err(ArchiveLogsError::Archiver)?;
+        archiver.execute().await.map_err(ArchiveLogsError::Archiver)?;
         if let Err(()) = completion_tx.send(()) {
             // In practice, it would be surprising for our caller to have
             // dropped this channel.  Make a note.
@@ -1283,6 +1264,7 @@ mod tests {
     use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
     use std::collections::HashMap;
     use std::str::FromStr;
+    use std::time::SystemTime;
     use tokio::io::AsyncWriteExt;
     use zone::Zone;
 

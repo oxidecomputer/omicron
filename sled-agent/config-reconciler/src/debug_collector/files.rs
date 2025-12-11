@@ -5,68 +5,164 @@
 //! Configuration and implementation for archiving ordinary files as debug data
 //! (e.g., log files)
 
+// XXX-dap current status:
+// - flesh out regular implementation (see XXX-daps, todos)
+// - run the existing test in worker.rs to make sure it works
+// - write battery of automated tests
+// - finish cleanup
+
 use anyhow::anyhow;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use derive_more::AsRef;
 use slog::Logger;
+use std::sync::LazyLock;
 use thiserror::Error;
 
 pub struct Archiver {
     log: Logger,
     what: ArchiveWhat,
-    glob_groups: Vec<GlobGroup>,
+    debug_dir: Utf8PathBuf,
+    groups: Vec<ArchiveGroup<'static>>,
 }
 
 impl Archiver {
-    pub fn new(log: Logger, what: ArchiveWhat) -> Archiver {
-        Archiver { log, what, glob_groups: Vec::new() }
+    pub fn new(
+        log: Logger,
+        what: ArchiveWhat,
+        debug_dir: &Utf8Path,
+    ) -> Archiver {
+        Archiver {
+            log,
+            what,
+            debug_dir: debug_dir.to_owned(),
+            groups: Vec::new(),
+        }
     }
 
     pub fn include_zone(&mut self, zone_name: &str, zone_root: &Utf8Path) {
-        let zone_name = zone_name.to_owned();
-        let smf_log_dir = format!("{}/var/svc/log", zone_root);
-        self.glob_groups.push(GlobGroup {
-            label: format!("zone {zone_name}: rotated SMF logs"),
-            // XXX-dap digits
-            glob_pattern: format!("{smf_log_dir}/*.log.*"),
-            kind: DebugFileKind::LogRotated(zone_name.clone()),
-        });
+        let source = Source {
+            input_prefix: zone_root.to_owned(),
+            output_prefix: self.debug_dir.join(zone_name),
+        };
 
-        let syslog_dir = format!("{}/var/adm", zone_root);
-        self.glob_groups.push(GlobGroup {
-            label: format!("zone {zone_name}: rotated syslog"),
-            // XXX-dap digits
-            glob_pattern: format!("{syslog_dir}/messages.*"),
-            kind: DebugFileKind::LogRotated(zone_name.clone()),
-        });
-
-        match self.what {
-            ArchiveWhat::ImmutableOnly => (),
-            ArchiveWhat::Everything => {
-                self.glob_groups.push(GlobGroup {
-                    label: format!("zone {zone_name}: live SMF logs"),
-                    glob_pattern: format!("{smf_log_dir}/*.log"),
-                    kind: DebugFileKind::LogLive(zone_name.clone()),
-                });
-                self.glob_groups.push(GlobGroup {
-                    label: format!("zone {zone_name}: live syslog"),
-                    glob_pattern: format!("{syslog_dir}/messages"),
-                    kind: DebugFileKind::LogLive(zone_name.clone()),
-                });
+        // XXX-dap TODO-cleanup
+        let mut iter1;
+        let mut iter2;
+        let rules: &mut dyn Iterator<Item = &Rule> = match self.what {
+            ArchiveWhat::ImmutableOnly => {
+                iter1 = ZONE_RULES_IMMUTABLE.iter();
+                &mut iter1
             }
+            ArchiveWhat::Everything => {
+                iter2 =
+                    ZONE_RULES_IMMUTABLE.iter().chain(ZONE_RULES_LIVE.iter());
+                &mut iter2
+            }
+        };
+
+        for rule in rules {
+            self.groups.push(ArchiveGroup { source: source.clone(), rule });
         }
     }
 
     pub fn include_cores_directory(&mut self, cores_dir: &Utf8Path) {
-        self.glob_groups.push(GlobGroup {
-            label: format!("core files in {cores_dir}"),
-            glob_pattern: format!("{cores_dir}/*"),
-            kind: DebugFileKind::Core,
-        });
+        let source = Source {
+            input_prefix: cores_dir.to_owned(),
+            output_prefix: self.debug_dir.clone(), // XXX-dap check this
+        };
+        self.groups.push(ArchiveGroup { source, rule: &CORES_RULE })
     }
 
-    pub fn to_plan(&self) -> ArchivePlan<'_> {
-        ArchivePlan::new(&self.log, &self.glob_groups)
+    // XXX-dap error type
+    pub async fn execute(self) -> Result<(), anyhow::Error> {
+        let mut rv = Vec::new();
+
+        // XXX-dap refactor into subfunctions so we can use `?`
+        // XXX-dap refactor so it can be streaming so that we can see all the
+        // specific archive calls that pop out?
+        for group in self.groups {
+            let input_directory = group.input_directory();
+            let output_directory = group.output_directory(&self.debug_dir);
+
+            let files =
+                match input_directory.read_dir_utf8() {
+                    Ok(files) => files,
+                    Err(error) => {
+                        rv.push(anyhow!(error).context(format!(
+                            "processing {:?}",
+                            input_directory
+                        )));
+                        continue;
+                    }
+                };
+
+            for maybe_file in files {
+                let file = match maybe_file {
+                    Ok(file) => file,
+                    Err(error) => {
+                        rv.push(anyhow!(error).context(format!(
+                            "processing file in {:?}",
+                            input_directory,
+                        )));
+                        continue;
+                    }
+                };
+
+                let filename_str = file.file_name();
+                let filename =
+                    match Filename::try_from(file.file_name().to_owned()) {
+                        Ok(filename) => filename,
+                        Err(error) => {
+                            rv.push(anyhow!(error).context(format!(
+                                "processing {filename_str}",
+                            )));
+                            continue;
+                        }
+                    };
+
+                if !group.rule.include_file(&filename) {
+                    continue;
+                }
+
+                let file_metadata = match file.metadata() {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        rv.push(anyhow!(error).context(format!(
+                            "processing {filename_str}: reading metadata",
+                        )));
+                        continue;
+                    }
+                };
+
+                let output_filename = group
+                    .rule
+                    .naming
+                    .archived_file_name(&filename, &file_metadata);
+                let output_path =
+                    output_directory.join(output_filename.as_ref());
+
+                if let Err(error) = archive_one(
+                    file.path(),
+                    &output_path,
+                    group.rule.delete_original,
+                )
+                .await
+                {
+                    rv.push(anyhow!(error).context(format!(
+                        "processing {filename_str}: archiving",
+                    )));
+                    continue;
+                }
+            }
+        }
+
+        // XXX-dap
+        if rv.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!("one or more archiving errors"))
+        }
     }
 }
 
@@ -84,125 +180,12 @@ pub enum ArchiveWhat {
     Everything,
 }
 
-/// Basic unit of archival: a group of files of kind `kind` identified by
-/// `glob_pattern`
-#[derive(Debug, Clone)]
-struct GlobGroup {
-    label: String,
-    glob_pattern: String,
-    kind: DebugFileKind,
-}
-
-/// Describes what type of debug file this is
-///
-/// This is used to determine where in the debug dataset the file will be
-/// archived and whether the original should be deleted.
-#[derive(Debug, Clone)]
-enum DebugFileKind {
-    /// a rotated (now-immutable) log file in the given zone
-    LogRotated(String),
-    /// a live log file in the given zone
-    LogLive(String),
-    /// a user process core dump
-    Core,
-}
-
-impl DebugFileKind {
-    /// Returns whether the original file should be deleted when the file is
-    /// archived
-    ///
-    /// Live log files are never deleted.  Rotated log files and core dumps are.
-    fn should_delete_original(&self) -> bool {
-        match self {
-            DebugFileKind::LogRotated(_) | DebugFileKind::Core => true,
-            DebugFileKind::LogLive(_) => false,
-        }
-    }
-}
-
-pub struct ArchiveStep<'a> {
-    source: Utf8PathBuf,
-    kind: &'a DebugFileKind,
-}
-
-impl ArchiveStep<'_> {
-    fn destination(&self, debug_dir: &Utf8Path) -> Utf8PathBuf {
-        match self.kind {
-            DebugFileKind::LogRotated(zone_info) => todo!(),
-            DebugFileKind::LogLive(zone_info) => todo!(),
-            DebugFileKind::Core => todo!(),
-        }
-    }
-}
-
-pub struct ArchivePlan<'a> {
-    log: &'a Logger,
-    glob_groups: &'a [GlobGroup],
-    steps: Box<dyn Iterator<Item = ArchiveStep<'a>> + Send + Sync + 'a>,
-}
-
-impl<'a> ArchivePlan<'a> {
-    pub fn new(
-        log: &'a Logger,
-        glob_groups: &'a [GlobGroup],
-    ) -> ArchivePlan<'a> {
-        // XXX-dap this really ought to work in a streaming way
-        let mut rv = Vec::new();
-
-        for glob_group in glob_groups {
-            // XXX-dap warn instead of ignoring these errors with flatten
-            let files = match glob::glob(&glob_group.glob_pattern) {
-                Ok(files) => files.flatten(),
-                Err(error) => {
-                    // XXX-dap log error -- this should never happen
-                    continue;
-                }
-            };
-            for file in files {
-                // XXX-dap unwrap()
-                let path = Utf8PathBuf::try_from(file).unwrap();
-                rv.push(ArchiveStep { source: path, kind: &glob_group.kind });
-            }
-        }
-
-        let steps = Box::new(rv.into_iter());
-        ArchivePlan { log, glob_groups, steps }
-    }
-
-    #[cfg(test)]
-    fn into_steps(self) -> Box<dyn Iterator<Item = ArchiveStep<'a>> + 'a> {
-        self.steps
-    }
-
-    pub async fn execute(
-        self,
-        debug_dir: &Utf8Path,
-    ) -> Result<(), anyhow::Error> {
-        let log = self.log;
-        let steps = self.steps;
-        // XXX-dap logging
-        let mut rv = Ok(());
-        for step in steps {
-            match archive_one(debug_dir, step).await {
-                Ok(()) => (),
-                Err(error) => {
-                    // XXX-dap warning
-                    rv = Err(anyhow!("failed to archive some files"));
-                }
-            }
-        }
-
-        rv
-    }
-}
-
 // XXX-dap copied from copy_sync_and_remove()
 pub async fn archive_one(
-    debug_dir: &Utf8Path,
-    step: ArchiveStep<'_>,
+    source: &Utf8Path,
+    dest: &Utf8Path,
+    delete_original: bool,
 ) -> tokio::io::Result<()> {
-    let dest = step.destination(debug_dir);
-    let source = &step.source;
     let mut dest_f = tokio::fs::File::create(&dest).await?;
     let mut src_f = tokio::fs::File::open(&source).await?;
 
@@ -213,9 +196,148 @@ pub async fn archive_one(
     drop(src_f);
     drop(dest_f);
 
-    if step.kind.should_delete_original() {
+    if delete_original {
         tokio::fs::remove_file(source).await?;
     }
 
     Ok(())
+}
+
+#[derive(Clone)]
+struct Source {
+    input_prefix: Utf8PathBuf,
+    output_prefix: Utf8PathBuf,
+}
+
+struct Rule {
+    label: &'static str,
+    directory: Utf8PathBuf,
+    glob_pattern: glob::Pattern, // XXX-dap consider regex?
+    delete_original: bool,
+    naming: Box<dyn NamingRule + Send + Sync>,
+}
+
+impl Rule {
+    fn include_file(&self, filename: &Filename) -> bool {
+        self.glob_pattern.matches(filename.as_ref())
+    }
+}
+
+trait NamingRule {
+    fn archived_file_name(
+        &self,
+        source_file_name: &Filename,
+        source_file_metadata: &std::fs::Metadata,
+    ) -> Filename;
+}
+
+struct ArchiveGroup<'a> {
+    source: Source,
+    rule: &'a Rule,
+}
+
+#[derive(AsRef, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct Filename(String);
+#[derive(Debug, Error)]
+#[error("string is not a valid filename (has slashes or is '.' or '..')")]
+struct BadFilename;
+impl TryFrom<String> for Filename {
+    type Error = BadFilename;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value == "." || value == ".." || value.contains('/') {
+            Err(BadFilename)
+        } else {
+            Ok(Filename(value))
+        }
+    }
+}
+
+impl<'a> ArchiveGroup<'a> {
+    fn input_directory(&self) -> Utf8PathBuf {
+        self.source.input_prefix.join(&self.rule.directory)
+    }
+
+    fn output_directory(&self, debug_dir: &Utf8Path) -> Utf8PathBuf {
+        debug_dir.join(&self.source.output_prefix)
+    }
+}
+
+static VAR_SVC_LOG: &str = "var/svc/log";
+static VAR_ADM: &str = "var/adm";
+static ZONE_RULES_IMMUTABLE: LazyLock<Vec<Rule>> = LazyLock::new(|| {
+    vec![
+        Rule {
+            label: "rotated SMF log files",
+            directory: VAR_SVC_LOG.parse().unwrap(),
+            glob_pattern: "*.log.*".parse().unwrap(), // XXX-dap digits
+            delete_original: true,
+            naming: Box::new(NameRotatedLogFile),
+        },
+        Rule {
+            label: "rotated syslog files",
+            directory: VAR_ADM.parse().unwrap(),
+            glob_pattern: "messages.*".parse().unwrap(), // XXX-dap digits
+            delete_original: true,
+            naming: Box::new(NameRotatedLogFile),
+        },
+    ]
+});
+static ZONE_RULES_LIVE: LazyLock<Vec<Rule>> = LazyLock::new(|| {
+    vec![
+        Rule {
+            label: "live SMF log files",
+            directory: VAR_SVC_LOG.parse().unwrap(),
+            glob_pattern: "*.log".parse().unwrap(),
+            delete_original: false,
+            naming: Box::new(NameLiveLogFile),
+        },
+        Rule {
+            label: "live syslog files",
+            directory: VAR_ADM.parse().unwrap(),
+            glob_pattern: "*.log".parse().unwrap(),
+            delete_original: false,
+            naming: Box::new(NameLiveLogFile),
+        },
+    ]
+});
+
+static CORES_RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    label: "process core files",
+    directory: ".".parse().unwrap(),
+    glob_pattern: "core.*".parse().unwrap(),
+    delete_original: true,
+    naming: Box::new(NameIdentity),
+});
+
+struct NameRotatedLogFile;
+impl NamingRule for NameRotatedLogFile {
+    fn archived_file_name(
+        &self,
+        source_file_name: &Filename,
+        source_file_metadata: &std::fs::Metadata,
+    ) -> Filename {
+        todo!() // XXX-dap
+    }
+}
+
+struct NameLiveLogFile;
+impl NamingRule for NameLiveLogFile {
+    fn archived_file_name(
+        &self,
+        source_file_name: &Filename,
+        source_file_metadata: &std::fs::Metadata,
+    ) -> Filename {
+        todo!() // XXX-dap
+    }
+}
+
+struct NameIdentity;
+impl NamingRule for NameIdentity {
+    fn archived_file_name(
+        &self,
+        source_file_name: &Filename,
+        _source_file_metadata: &std::fs::Metadata,
+    ) -> Filename {
+        source_file_name.clone()
+    }
 }
