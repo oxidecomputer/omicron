@@ -465,7 +465,9 @@ impl DataStore {
             )
             .await
             .map_err(|err| match err.retryable() {
-                NotRetryable(err) => RackInitError::Silo(err.into()),
+                NotRetryable(err) => {
+                    RackInitError::Silo(err.into_public_ignore_retries())
+                }
                 Retryable(err) => RackInitError::Retryable(err),
             })?;
         info!(log, "Created recovery silo");
@@ -681,7 +683,9 @@ impl DataStore {
                 );
                 match err.retryable() {
                     Retryable(e) => RackInitError::Retryable(e),
-                    NotRetryable(e) => RackInitError::AddingIp(e.into()),
+                    NotRetryable(e) => {
+                        RackInitError::AddingIp(e.into_public_ignore_retries())
+                    }
                 }
             },
         )?;
@@ -889,7 +893,7 @@ impl DataStore {
                             .await {
                             if !matches!(e, TransactionError::CustomError(Error::ObjectAlreadyExists { .. })) {
                                 error!(log, "Failed to upsert physical disk"; "err" => #%e);
-                                err.set(RackInitError::PhysicalDiskInsert(e.into()))
+                                err.set(RackInitError::PhysicalDiskInsert(e.into_public_ignore_retries()))
                                     .unwrap();
                                 return Err(DieselError::RollbackTransaction);
                             }
@@ -902,7 +906,7 @@ impl DataStore {
                         if let Err(e) = Self::zpool_insert_on_connection(&conn, &opctx, zpool).await {
                             if !matches!(e, TransactionError::CustomError(Error::ObjectAlreadyExists { .. })) {
                                 error!(log, "Failed to upsert zpool"; "err" => #%e);
-                                err.set(RackInitError::ZpoolInsert(e.into())).unwrap();
+                                err.set(RackInitError::ZpoolInsert(e.into_public_ignore_retries())).unwrap();
                                 return Err(DieselError::RollbackTransaction);
                             }
                         }

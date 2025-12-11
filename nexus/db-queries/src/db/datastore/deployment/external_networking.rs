@@ -10,6 +10,7 @@ use crate::db::DataStore;
 use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
+use nexus_db_errors::TransactionError;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::IpConfig;
@@ -89,7 +90,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         zones_to_allocate: impl Iterator<Item = &BlueprintZoneConfig>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         // Looking up the service pool IDs requires an opctx; we'll do this at
         // most once inside the loop below, when we first encounter an address
         // of the same IP version.
@@ -354,7 +355,7 @@ impl DataStore {
         zone_id: OmicronZoneUuid,
         external_ip: OmicronZoneExternalIp,
         log: &Logger,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         // Only attempt to allocate `external_ip` if it isn't already assigned
         // to this zone.
         //
@@ -395,7 +396,7 @@ impl DataStore {
         service_id: OmicronZoneUuid,
         nic: &NetworkInterface,
         log: &Logger,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         // We don't pass `nic.kind` into the database below, but instead
         // explicitly call `service_create_network_interface`. Ensure this is
         // indeed a service NIC.
@@ -403,12 +404,14 @@ impl DataStore {
             NetworkInterfaceKind::Instance { .. } => {
                 return Err(Error::invalid_request(
                     "invalid NIC kind (expected service, got instance)",
-                ));
+                )
+                .into());
             }
             NetworkInterfaceKind::Probe { .. } => {
                 return Err(Error::invalid_request(
                     "invalid NIC kind (expected service, got probe)",
-                ));
+                )
+                .into());
             }
             NetworkInterfaceKind::Service { .. } => (),
         }
@@ -429,7 +432,8 @@ impl DataStore {
                 return Err(Error::invalid_request(format!(
                     "no VPC subnet available for {} zone",
                     zone_kind.report_str()
-                )));
+                ))
+                .into());
             }
         };
 
@@ -496,7 +500,8 @@ impl DataStore {
                 "database cleanup required: unexpected NIC ({created_nic:?}) \
                  allocated for {} {service_id}",
                 zone_kind.report_str(),
-            )));
+            ))
+            .into());
         }
 
         info!(log, "successfully allocated service vNIC");

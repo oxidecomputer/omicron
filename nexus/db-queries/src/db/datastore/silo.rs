@@ -164,7 +164,8 @@ impl DataStore {
                 new_silo_dns_names,
                 dns_update,
             )
-            .await?;
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
         Ok(silo)
     }
 
