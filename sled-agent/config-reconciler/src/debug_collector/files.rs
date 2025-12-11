@@ -6,8 +6,6 @@
 //! (e.g., log files)
 
 // XXX-dap current status:
-// - flesh out regular implementation (see XXX-daps, todos)
-// - run the existing test in worker.rs to make sure it works
 // - write battery of automated tests
 // - finish cleanup
 
@@ -17,6 +15,10 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use derive_more::AsRef;
 use slog::Logger;
+use slog::debug;
+use slog::o;
+use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::fs::Metadata;
 use std::sync::LazyLock;
 use std::time::SystemTime;
@@ -42,6 +44,13 @@ impl ArchivePlanner {
         what: ArchiveWhat,
         debug_dir: &Utf8Path,
     ) -> ArchivePlanner {
+        let log = log.new(o!(
+            "component" => "DebugCollectorArchiver",
+            "debug_dir" => debug_dir.to_string(),
+            "what" => format!("{what:?}"),
+        ));
+        debug!(&log, "planning archival");
+
         ArchivePlanner {
             log,
             what,
@@ -53,6 +62,13 @@ impl ArchivePlanner {
     }
 
     pub fn include_zone(&mut self, zone_name: &str, zone_root: &Utf8Path) {
+        debug!(
+            &self.log,
+            "archiving debug data from zone";
+            "zonename" => zone_name,
+            "zone_root" => %zone_root,
+        );
+
         let source = Source {
             input_prefix: zone_root.to_owned(),
             output_prefix: self.debug_dir.join(zone_name),
@@ -79,6 +95,12 @@ impl ArchivePlanner {
     }
 
     pub fn include_cores_directory(&mut self, cores_dir: &Utf8Path) {
+        debug!(
+            &self.log,
+            "archiving debug data from cores directory";
+            "cores_dir" => %cores_dir,
+        );
+
         let source = Source {
             input_prefix: cores_dir.to_owned(),
             output_prefix: self.debug_dir.clone(), // XXX-dap check this
@@ -359,10 +381,16 @@ struct ArchivePlan {
 impl ArchivePlan {
     // XXX-dap cfg(test)
     fn to_steps(&self) -> impl Iterator<Item = ArchiveStep<'_>> {
-        Self::to_steps_generic(&self.groups, &self.debug_dir, &*self.lister)
+        Self::to_steps_generic(
+            &self.log,
+            &self.groups,
+            &self.debug_dir,
+            &*self.lister,
+        )
     }
 
     fn to_steps_generic<'a>(
+        log: &Logger,
         groups: &'a [ArchiveGroup<'static>],
         debug_dir: &'a Utf8Path,
         lister: &'a (dyn FileLister + Send + Sync),
@@ -376,15 +404,25 @@ impl ArchivePlan {
             .chain(
                 groups
                     .iter()
-                    .flat_map(|group| {
+                    .flat_map(move |group| {
                         let input_directory = group.input_directory();
 
+                        debug!(
+                            log,
+                            "listing directory";
+                            "input_directory" => %input_directory
+                        );
                         lister
                             .list_files(&input_directory)
                             .into_iter()
                             .map(move |filename| (group, filename))
                     })
-                    .filter(|(group, filename)| {
+                    .filter(move |(group, filename)| {
+                        debug!(
+                            log,
+                            "checking file";
+                            "file" => %filename.as_ref(),
+                        );
                         group.rule.include_file(filename)
                     })
                     .filter_map(|(group, filename)| {
@@ -411,14 +449,20 @@ impl ArchivePlan {
 
     async fn execute(self) -> Vec<anyhow::Error> {
         let mut errors = self.errors;
+        let log = &self.log;
         let groups = self.groups;
         let debug_dir = self.debug_dir;
         let lister = self.lister;
-        for step in Self::to_steps_generic(&groups, &debug_dir, &*lister) {
+        for step in Self::to_steps_generic(log, &groups, &debug_dir, &*lister) {
             let result = match step {
                 ArchiveStep::Mkdir { output_directory } => {
                     // We assume that the parent of all output directories
                     // already exists. XXX-dap document better
+                    debug!(
+                        log,
+                        "create directory";
+                        "directory" => %output_directory
+                    );
                     tokio::fs::create_dir(&output_directory)
                         .await
                         .or_else(|error| {
@@ -453,6 +497,13 @@ impl ArchivePlan {
                     );
                     let output_path =
                         output_directory.join(output_filename.as_ref());
+                    debug!(
+                        log,
+                        "archive file";
+                        "input_path" => %input_path,
+                        "output_path" => %output_path,
+                        "delete_original" => delete_original,
+                    );
                     archive_one(&input_path, &output_path, delete_original)
                         .await
                         .with_context(|| {
@@ -462,6 +513,11 @@ impl ArchivePlan {
             };
 
             if let Err(error) = result {
+                warn!(
+                    log,
+                    "error during archival";
+                    InlineErrorChain::new(&*error)
+                );
                 errors.errors.push(error);
             }
         }
@@ -483,90 +539,3 @@ enum ArchiveStep<'a> {
         delete_original: bool,
     },
 }
-
-// XXX-dap refactor into subfunctions so we can use `?`
-// XXX-dap refactor so it can be streaming so that we can see all the
-// specific archive calls that pop out?
-//        for group in self.groups {
-//            let input_directory = group.input_directory();
-//            let output_directory = group.output_directory(&self.debug_dir);
-//
-//            let files =
-//                match input_directory.read_dir_utf8() {
-//                    Ok(files) => files,
-//                    Err(error) => {
-//                        rv.push(anyhow!(error).context(format!(
-//                            "processing {:?}",
-//                            input_directory
-//                        )));
-//                        continue;
-//                    }
-//                };
-//
-//            for maybe_file in files {
-//                let file = match maybe_file {
-//                    Ok(file) => file,
-//                    Err(error) => {
-//                        rv.push(anyhow!(error).context(format!(
-//                            "processing file in {:?}",
-//                            input_directory,
-//                        )));
-//                        continue;
-//                    }
-//                };
-//
-//                let filename_str = file.file_name();
-//                let filename =
-//                    match Filename::try_from(file.file_name().to_owned()) {
-//                        Ok(filename) => filename,
-//                        Err(error) => {
-//                            rv.push(anyhow!(error).context(format!(
-//                                "processing {filename_str}",
-//                            )));
-//                            continue;
-//                        }
-//                    };
-//
-//                if !group.rule.include_file(&filename) {
-//                    continue;
-//                }
-//
-//                let file_metadata = match file.metadata() {
-//                    Ok(metadata) => metadata,
-//                    Err(error) => {
-//                        rv.push(anyhow!(error).context(format!(
-//                            "processing {filename_str}: reading metadata",
-//                        )));
-//                        continue;
-//                    }
-//                };
-//
-//                let output_filename = group
-//                    .rule
-//                    .naming
-//                    .archived_file_name(&filename, &file_metadata);
-//                let output_path =
-//                    output_directory.join(output_filename.as_ref());
-//
-//                if let Err(error) = archive_one(
-//                    file.path(),
-//                    &output_path,
-//                    group.rule.delete_original,
-//                )
-//                .await
-//                {
-//                    rv.push(anyhow!(error).context(format!(
-//                        "processing {filename_str}: archiving",
-//                    )));
-//                    continue;
-//                }
-//            }
-//        }
-//
-//        // XXX-dap
-//        if rv.is_empty() {
-//            Ok(())
-//        } else {
-//            Err(anyhow!("one or more archiving errors"))
-//        }
-//    }

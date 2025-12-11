@@ -186,8 +186,8 @@
 //! the _live_ log files are also archived, since they will not have a chance
 //! to get rotated and so would otherwise be lost.
 
-use super::files::ArchiveWhat;
 use super::files::ArchivePlanner;
+use super::files::ArchiveWhat;
 use super::helpers::CoreDumpAdmInvoker;
 use super::helpers::ZFS_PROP_AVAILABLE;
 use super::helpers::ZFS_PROP_USED;
@@ -913,10 +913,13 @@ impl DebugCollectorWorker {
             Ok(zones) => {
                 for zone in zones {
                     // XXX-dap unwrap
-                    archiver.include_zone(
-                        zone.name(),
-                        zone.path().try_into().unwrap(),
-                    );
+                    let zone_path: &Utf8Path = zone.path().try_into().unwrap();
+                    let zone_root = if zone.global() {
+                        zone_path.to_owned()
+                    } else {
+                        zone_path.join("root")
+                    };
+                    archiver.include_zone(zone.name(), &zone_root);
                 }
             }
             Err(error) => {
