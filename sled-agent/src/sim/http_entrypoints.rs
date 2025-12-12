@@ -36,8 +36,45 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use range_requests::PotentialRange;
 use sled_agent_api::*;
-// Use latest for current version, fixed identifiers for prior versions
-use sled_agent_types_versions::{latest, v1};
+use sled_agent_types::artifact::{
+    ArtifactConfig, ArtifactCopyFromDepotBody, ArtifactCopyFromDepotResponse,
+    ArtifactListResponse, ArtifactPathParam, ArtifactPutResponse,
+    ArtifactQueryParam,
+};
+use sled_agent_types::bootstore::BootstoreStatus;
+use sled_agent_types::dataset::{
+    LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
+};
+use sled_agent_types::debug::{
+    ChickenSwitchDestroyOrphanedDatasets, OperatorSwitchZonePolicy,
+};
+use sled_agent_types::diagnostics::{
+    SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
+};
+use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
+use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::instance::{
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
+    VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
+    VmmPutStateResponse, VmmUnregisterResponse, VpcFirewallRulesEnsureBody,
+    VpcPathParam,
+};
+use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::probes::ProbeSet;
+use sled_agent_types::sled::AddSledRequest;
+use sled_agent_types::support_bundle::{
+    RangeRequestHeaders, SupportBundleFilePathParam,
+    SupportBundleFinalizeQueryParams, SupportBundleListPathParam,
+    SupportBundleMetadata, SupportBundlePathParam,
+    SupportBundleTransferQueryParams,
+};
+use sled_agent_types::zone_bundle::{
+    BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
+    ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
+};
+// Fixed identifiers for prior versions only
+use sled_agent_types_versions::v1;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -69,8 +106,8 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<latest::instance::InstanceEnsureBody>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
@@ -80,11 +117,8 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn vmm_unregister(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
-    ) -> Result<
-        HttpResponseOk<latest::instance::VmmUnregisterResponse>,
-        HttpError,
-    > {
+        path_params: Path<VmmPathParam>,
+    ) -> Result<HttpResponseOk<VmmUnregisterResponse>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         Ok(HttpResponseOk(sa.instance_unregister(id).await?))
@@ -92,10 +126,9 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn vmm_put_state(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<latest::instance::VmmPutStateBody>,
-    ) -> Result<HttpResponseOk<latest::instance::VmmPutStateResponse>, HttpError>
-    {
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<VmmPutStateBody>,
+    ) -> Result<HttpResponseOk<VmmPutStateResponse>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
@@ -104,7 +137,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn vmm_get_state(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
+        path_params: Path<VmmPathParam>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
@@ -113,8 +146,8 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn vmm_put_external_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<latest::instance::InstanceExternalIpBody>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
@@ -125,8 +158,8 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn vmm_delete_external_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<latest::instance::InstanceExternalIpBody>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
@@ -137,19 +170,19 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn vmm_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<latest::instance::InstanceMulticastBody>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
 
         match body_args {
-            latest::instance::InstanceMulticastBody::Join(membership) => {
+            InstanceMulticastBody::Join(membership) => {
                 sa.instance_join_multicast_group(propolis_id, &membership)
                     .await?;
             }
-            latest::instance::InstanceMulticastBody::Leave(_) => {
+            InstanceMulticastBody::Leave(_) => {
                 // This endpoint is for joining - reject leave operations
                 return Err(HttpError::for_bad_request(
                     None,
@@ -163,19 +196,19 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn vmm_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<latest::instance::InstanceMulticastBody>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
 
         match body_args {
-            latest::instance::InstanceMulticastBody::Leave(membership) => {
+            InstanceMulticastBody::Leave(membership) => {
                 sa.instance_leave_multicast_group(propolis_id, &membership)
                     .await?;
             }
-            latest::instance::InstanceMulticastBody::Join(_) => {
+            InstanceMulticastBody::Join(_) => {
                 // This endpoint is for leaving - reject join operations
                 return Err(HttpError::for_bad_request(
                     None,
@@ -189,8 +222,8 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn disk_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::disk::DiskPathParam>,
-        body: TypedBody<latest::disk::DiskEnsureBody>,
+        path_params: Path<DiskPathParam>,
+        body: TypedBody<DiskEnsureBody>,
     ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
         let sa = rqctx.context();
         let disk_id = path_params.into_inner().disk_id;
@@ -207,8 +240,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn artifact_config_get(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::artifact::ArtifactConfig>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError> {
         match rqctx.context().artifact_store().get_config() {
             Some(config) => Ok(HttpResponseOk(config)),
             None => Err(HttpError::for_not_found(
@@ -220,7 +252,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn artifact_config_put(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<latest::artifact::ArtifactConfig>,
+        body: TypedBody<ArtifactConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         rqctx.context().artifact_store().put_config(body.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
@@ -228,20 +260,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::artifact::ArtifactListResponse>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<ArtifactListResponse>, HttpError> {
         Ok(HttpResponseOk(rqctx.context().artifact_store().list().await?))
     }
 
     async fn artifact_copy_from_depot(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::artifact::ArtifactPathParam>,
-        query_params: Query<latest::artifact::ArtifactQueryParam>,
-        body: TypedBody<latest::artifact::ArtifactCopyFromDepotBody>,
-    ) -> Result<
-        HttpResponseAccepted<latest::artifact::ArtifactCopyFromDepotResponse>,
-        HttpError,
-    > {
+        path_params: Path<ArtifactPathParam>,
+        query_params: Query<ArtifactQueryParam>,
+        body: TypedBody<ArtifactCopyFromDepotBody>,
+    ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>
+    {
         let sha256 = path_params.into_inner().sha256;
         let generation = query_params.into_inner().generation;
         let depot_base_url = body.into_inner().depot_base_url;
@@ -250,18 +279,15 @@ impl SledAgentApi for SledAgentSimImpl {
             .artifact_store()
             .copy_from_depot(sha256, generation, &depot_base_url)
             .await?;
-        Ok(HttpResponseAccepted(
-            latest::artifact::ArtifactCopyFromDepotResponse {},
-        ))
+        Ok(HttpResponseAccepted(ArtifactCopyFromDepotResponse {}))
     }
 
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::artifact::ArtifactPathParam>,
-        query_params: Query<latest::artifact::ArtifactQueryParam>,
+        path_params: Path<ArtifactPathParam>,
+        query_params: Query<ArtifactQueryParam>,
         body: StreamingBody,
-    ) -> Result<HttpResponseOk<latest::artifact::ArtifactPutResponse>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError> {
         let sha256 = path_params.into_inner().sha256;
         let generation = query_params.into_inner().generation;
         Ok(HttpResponseOk(
@@ -275,14 +301,10 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn vmm_issue_disk_snapshot_request(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<
-            latest::instance::VmmIssueDiskSnapshotRequestPathParam,
-        >,
-        body: TypedBody<latest::instance::VmmIssueDiskSnapshotRequestBody>,
-    ) -> Result<
-        HttpResponseOk<latest::instance::VmmIssueDiskSnapshotRequestResponse>,
-        HttpError,
-    > {
+        path_params: Path<VmmIssueDiskSnapshotRequestPathParam>,
+        body: TypedBody<VmmIssueDiskSnapshotRequestBody>,
+    ) -> Result<HttpResponseOk<VmmIssueDiskSnapshotRequestResponse>, HttpError>
+    {
         let sa = rqctx.context();
         let path_params = path_params.into_inner();
         let body = body.into_inner();
@@ -294,17 +316,15 @@ impl SledAgentApi for SledAgentSimImpl {
         )
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        Ok(HttpResponseOk(
-            latest::instance::VmmIssueDiskSnapshotRequestResponse {
-                snapshot_id: body.snapshot_id,
-            },
-        ))
+        Ok(HttpResponseOk(VmmIssueDiskSnapshotRequestResponse {
+            snapshot_id: body.snapshot_id,
+        }))
     }
 
     async fn vpc_firewall_rules_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VpcPathParam>,
-        body: TypedBody<latest::instance::VpcFirewallRulesEnsureBody>,
+        path_params: Path<VpcPathParam>,
+        body: TypedBody<VpcFirewallRulesEnsureBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let _sa = rqctx.context();
         let _vpc_id = path_params.into_inner().vpc_id;
@@ -359,10 +379,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<latest::early_networking::EarlyNetworkConfig>,
-        HttpError,
-    > {
+    ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
         let config =
             rqctx.context().bootstore_network_config.lock().unwrap().clone();
         Ok(HttpResponseOk(config))
@@ -370,7 +387,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<latest::early_networking::EarlyNetworkConfig>,
+        body: TypedBody<EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let mut config =
             rqctx.context().bootstore_network_config.lock().unwrap();
@@ -381,7 +398,7 @@ impl SledAgentApi for SledAgentSimImpl {
     /// Fetch basic information about this sled
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError> {
+    ) -> Result<HttpResponseOk<Inventory>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(
             sa.inventory(rqctx.server.local_addr).map_err(|e| {
@@ -392,7 +409,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<latest::inventory::OmicronSledConfig>,
+        body: TypedBody<OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
@@ -402,7 +419,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn sled_add(
         _rqctx: RequestContext<Self::Context>,
-        _body: TypedBody<latest::sled::AddSledRequest>,
+        _body: TypedBody<AddSledRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Ok(HttpResponseUpdatedNoContent())
     }
@@ -425,17 +442,12 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::support_bundle::SupportBundleListPathParam>,
-    ) -> Result<
-        HttpResponseOk<Vec<latest::support_bundle::SupportBundleMetadata>>,
-        HttpError,
-    > {
+        path_params: Path<SupportBundleListPathParam>,
+    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError> {
         let sa = rqctx.context();
 
-        let latest::support_bundle::SupportBundleListPathParam {
-            zpool_id,
-            dataset_id,
-        } = path_params.into_inner();
+        let SupportBundleListPathParam { zpool_id, dataset_id } =
+            path_params.into_inner();
 
         let bundles = sa.support_bundle_list(zpool_id, dataset_id).await?;
         Ok(HttpResponseOk(bundles))
@@ -443,18 +455,12 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_start_creation(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
-    ) -> Result<
-        HttpResponseCreated<latest::support_bundle::SupportBundleMetadata>,
-        HttpError,
-    > {
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
 
-        let latest::support_bundle::SupportBundlePathParam {
-            zpool_id,
-            dataset_id,
-            support_bundle_id,
-        } = path_params.into_inner();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
 
         Ok(HttpResponseCreated(
             sa.support_bundle_start_creation(
@@ -468,23 +474,15 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_transfer(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
-        query_params: Query<
-            latest::support_bundle::SupportBundleTransferQueryParams,
-        >,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleTransferQueryParams>,
         body: StreamingBody,
-    ) -> Result<
-        HttpResponseCreated<latest::support_bundle::SupportBundleMetadata>,
-        HttpError,
-    > {
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
 
-        let latest::support_bundle::SupportBundlePathParam {
-            zpool_id,
-            dataset_id,
-            support_bundle_id,
-        } = path_params.into_inner();
-        let latest::support_bundle::SupportBundleTransferQueryParams { offset } =
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleTransferQueryParams { offset } =
             query_params.into_inner();
 
         Ok(HttpResponseCreated(
@@ -501,22 +499,14 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_finalize(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
-        query_params: Query<
-            latest::support_bundle::SupportBundleFinalizeQueryParams,
-        >,
-    ) -> Result<
-        HttpResponseCreated<latest::support_bundle::SupportBundleMetadata>,
-        HttpError,
-    > {
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleFinalizeQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
 
-        let latest::support_bundle::SupportBundlePathParam {
-            zpool_id,
-            dataset_id,
-            support_bundle_id,
-        } = path_params.into_inner();
-        let latest::support_bundle::SupportBundleFinalizeQueryParams { hash } =
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleFinalizeQueryParams { hash } =
             query_params.into_inner();
 
         Ok(HttpResponseCreated(
@@ -532,15 +522,12 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<latest::support_bundle::RangeRequestHeaders>,
-        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+        headers: Header<RangeRequestHeaders>,
+        path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
-        let latest::support_bundle::SupportBundlePathParam {
-            zpool_id,
-            dataset_id,
-            support_bundle_id,
-        } = path_params.into_inner();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
 
         let range = headers
             .into_inner()
@@ -558,17 +545,13 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<latest::support_bundle::RangeRequestHeaders>,
-        path_params: Path<latest::support_bundle::SupportBundleFilePathParam>,
+        headers: Header<RangeRequestHeaders>,
+        path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
-        let latest::support_bundle::SupportBundleFilePathParam {
+        let SupportBundleFilePathParam {
             parent:
-                latest::support_bundle::SupportBundlePathParam {
-                    zpool_id,
-                    dataset_id,
-                    support_bundle_id,
-                },
+                SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
             file,
         } = path_params.into_inner();
 
@@ -588,15 +571,12 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<latest::support_bundle::RangeRequestHeaders>,
-        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+        headers: Header<RangeRequestHeaders>,
+        path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
-        let latest::support_bundle::SupportBundlePathParam {
-            zpool_id,
-            dataset_id,
-            support_bundle_id,
-        } = path_params.into_inner();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
 
         let range = headers
             .into_inner()
@@ -614,15 +594,12 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<latest::support_bundle::RangeRequestHeaders>,
-        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+        headers: Header<RangeRequestHeaders>,
+        path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
-        let latest::support_bundle::SupportBundlePathParam {
-            zpool_id,
-            dataset_id,
-            support_bundle_id,
-        } = path_params.into_inner();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
 
         let range = headers
             .into_inner()
@@ -640,17 +617,13 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<latest::support_bundle::RangeRequestHeaders>,
-        path_params: Path<latest::support_bundle::SupportBundleFilePathParam>,
+        headers: Header<RangeRequestHeaders>,
+        path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
-        let latest::support_bundle::SupportBundleFilePathParam {
+        let SupportBundleFilePathParam {
             parent:
-                latest::support_bundle::SupportBundlePathParam {
-                    zpool_id,
-                    dataset_id,
-                    support_bundle_id,
-                },
+                SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
             file,
         } = path_params.into_inner();
 
@@ -670,15 +643,12 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head_index(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<latest::support_bundle::RangeRequestHeaders>,
-        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+        headers: Header<RangeRequestHeaders>,
+        path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
-        let latest::support_bundle::SupportBundlePathParam {
-            zpool_id,
-            dataset_id,
-            support_bundle_id,
-        } = path_params.into_inner();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
 
         let range = headers
             .into_inner()
@@ -696,15 +666,12 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+        path_params: Path<SupportBundlePathParam>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let sa = rqctx.context();
 
-        let latest::support_bundle::SupportBundlePathParam {
-            zpool_id,
-            dataset_id,
-            support_bundle_id,
-        } = path_params.into_inner();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
 
         sa.support_bundle_delete(zpool_id, dataset_id, support_bundle_id)
             .await?;
@@ -714,12 +681,12 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn local_storage_dataset_ensure(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::dataset::LocalStoragePathParam>,
-        body: TypedBody<latest::dataset::LocalStorageDatasetEnsureRequest>,
+        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetEnsureRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
 
-        let latest::dataset::LocalStoragePathParam { zpool_id, dataset_id } =
+        let LocalStoragePathParam { zpool_id, dataset_id } =
             path_params.into_inner();
 
         sa.ensure_local_storage_dataset(
@@ -733,11 +700,11 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn local_storage_dataset_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::dataset::LocalStoragePathParam>,
+        path_params: Path<LocalStoragePathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
 
-        let latest::dataset::LocalStoragePathParam { zpool_id, dataset_id } =
+        let LocalStoragePathParam { zpool_id, dataset_id } =
             path_params.into_inner();
 
         sa.drop_dataset(
@@ -761,27 +728,21 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn zone_bundle_list_all(
         _rqctx: RequestContext<Self::Context>,
-        _query: Query<latest::zone_bundle::ZoneBundleFilter>,
-    ) -> Result<
-        HttpResponseOk<Vec<latest::zone_bundle::ZoneBundleMetadata>>,
-        HttpError,
-    > {
+        _query: Query<ZoneBundleFilter>,
+    ) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError> {
         method_unimplemented()
     }
 
     async fn zone_bundle_list(
         _rqctx: RequestContext<Self::Context>,
-        _params: Path<latest::zone_bundle::ZonePathParam>,
-    ) -> Result<
-        HttpResponseOk<Vec<latest::zone_bundle::ZoneBundleMetadata>>,
-        HttpError,
-    > {
+        _params: Path<ZonePathParam>,
+    ) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError> {
         method_unimplemented()
     }
 
     async fn zone_bundle_get(
         _rqctx: RequestContext<Self::Context>,
-        _params: Path<latest::zone_bundle::ZoneBundleId>,
+        _params: Path<ZoneBundleId>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
     {
         method_unimplemented()
@@ -789,7 +750,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn zone_bundle_delete(
         _rqctx: RequestContext<Self::Context>,
-        _params: Path<latest::zone_bundle::ZoneBundleId>,
+        _params: Path<ZoneBundleId>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         method_unimplemented()
     }
@@ -797,9 +758,7 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn zone_bundle_utilization(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<
-            BTreeMap<Utf8PathBuf, latest::zone_bundle::BundleUtilization>,
-        >,
+        HttpResponseOk<BTreeMap<Utf8PathBuf, BundleUtilization>>,
         HttpError,
     > {
         method_unimplemented()
@@ -807,26 +766,21 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn zone_bundle_cleanup_context(
         _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::zone_bundle::CleanupContext>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<CleanupContext>, HttpError> {
         method_unimplemented()
     }
 
     async fn zone_bundle_cleanup_context_update(
         _rqctx: RequestContext<Self::Context>,
-        _body: TypedBody<latest::zone_bundle::CleanupContextUpdate>,
+        _body: TypedBody<CleanupContextUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
 
     async fn zone_bundle_cleanup(
         _rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<
-            BTreeMap<Utf8PathBuf, latest::zone_bundle::CleanupCount>,
-        >,
-        HttpError,
-    > {
+    ) -> Result<HttpResponseOk<BTreeMap<Utf8PathBuf, CleanupCount>>, HttpError>
+    {
         method_unimplemented()
     }
 
@@ -850,8 +804,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn bootstore_status(
         _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::bootstore::BootstoreStatus>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<BootstoreStatus>, HttpError> {
         method_unimplemented()
     }
 
@@ -930,51 +883,42 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_logs_download(
         _request_context: RequestContext<Self::Context>,
-        _path_params: Path<
-            latest::diagnostics::SledDiagnosticsLogsDownloadPathParam,
-        >,
-        _query_params: Query<
-            latest::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
-        >,
+        _path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
+        _query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         method_unimplemented()
     }
 
     async fn chicken_switch_destroy_orphaned_datasets_get(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<latest::debug::ChickenSwitchDestroyOrphanedDatasets>,
-        HttpError,
-    > {
+    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
+    {
         method_unimplemented()
     }
 
     async fn chicken_switch_destroy_orphaned_datasets_put(
         _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<latest::debug::ChickenSwitchDestroyOrphanedDatasets>,
+        _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
 
     async fn debug_operator_switch_zone_policy_get(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<latest::debug::OperatorSwitchZonePolicy>,
-        HttpError,
-    > {
+    ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError> {
         method_unimplemented()
     }
 
     async fn debug_operator_switch_zone_policy_put(
         _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<latest::debug::OperatorSwitchZonePolicy>,
+        _body: TypedBody<OperatorSwitchZonePolicy>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
 
     async fn probes_put(
         _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<latest::probes::ProbeSet>,
+        _body: TypedBody<ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Ok(HttpResponseUpdatedNoContent())
     }
@@ -1003,7 +947,7 @@ fn method_unimplemented<T>() -> Result<T, HttpError> {
 }]
 async fn instance_poke_post(
     rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<latest::instance::VmmPathParam>,
+    path_params: Path<VmmPathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let id = path_params.into_inner().propolis_id;
@@ -1017,7 +961,7 @@ async fn instance_poke_post(
 }]
 async fn instance_poke_single_step_post(
     rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<latest::instance::VmmPathParam>,
+    path_params: Path<VmmPathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let id = path_params.into_inner().propolis_id;
@@ -1031,7 +975,7 @@ async fn instance_poke_single_step_post(
 }]
 async fn instance_post_sim_migration_source(
     rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<latest::instance::VmmPathParam>,
+    path_params: Path<VmmPathParam>,
     body: TypedBody<super::instance::SimulateMigrationSource>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
@@ -1046,7 +990,7 @@ async fn instance_post_sim_migration_source(
 }]
 async fn disk_poke_post(
     rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<latest::disk::DiskPathParam>,
+    path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let disk_id = path_params.into_inner().disk_id;

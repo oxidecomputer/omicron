@@ -10,6 +10,7 @@ use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::sync::Arc;
 
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_editor::ExternalNetworkingAllocator;
@@ -182,7 +183,7 @@ pub struct ExampleSystem {
     pub input: PlanningInput,
     pub collection: Collection,
     /// The initial blueprint that was used to describe the system.
-    pub initial_blueprint: Blueprint,
+    pub initial_blueprint: Arc<Blueprint>,
 }
 
 /// Returns a collection, planning input, and blueprint describing a pretty
@@ -531,16 +532,17 @@ impl ExampleSystemBuilder {
         }
 
         let mut input_builder = system
-            .to_planning_input_builder()
+            .to_planning_input_builder(Arc::new(
+                // Start with an empty blueprint.
+                BlueprintBuilder::build_empty_seeded(
+                    "test suite",
+                    rng.blueprint1_rng,
+                ),
+            ))
             .expect("failed to make planning input builder");
 
         let base_input = input_builder.clone().build();
-
-        // Start with an empty blueprint.
-        let initial_blueprint = BlueprintBuilder::build_empty_seeded(
-            "test suite",
-            rng.blueprint1_rng,
-        );
+        let initial_blueprint = Arc::clone(&base_input.parent_blueprint());
 
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(

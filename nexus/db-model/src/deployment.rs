@@ -896,7 +896,7 @@ impl BpOmicronZone {
                     self.snat_last_port,
                 ) {
                     (Some(ip), Some(first_port), Some(last_port)) => {
-                        nexus_types::inventory::SourceNatConfig::new(
+                        nexus_types::inventory::SourceNatConfigGeneric::new(
                             ip.ip(),
                             *first_port,
                             *last_port,

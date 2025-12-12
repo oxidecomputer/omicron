@@ -68,9 +68,9 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v10::instance::InstanceEnsureBody;
-    pub use crate::v10::instance::InstanceSledLocalConfig;
-    pub use crate::v10::instance::VpcFirewallRulesEnsureBody;
+    pub use crate::v11::instance::InstanceEnsureBody;
+    pub use crate::v11::instance::InstanceSledLocalConfig;
+    pub use crate::v11::instance::VpcFirewallRulesEnsureBody;
 
     pub use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 }
@@ -103,13 +103,13 @@ pub mod inventory {
     pub use crate::v1::inventory::ZoneManifestInventory;
     pub use crate::v1::inventory::ZoneManifestNonBootInventory;
 
-    pub use crate::v10::inventory::ConfigReconcilerInventory;
-    pub use crate::v10::inventory::ConfigReconcilerInventoryStatus;
-    pub use crate::v10::inventory::Inventory;
-    pub use crate::v10::inventory::OmicronSledConfig;
-    pub use crate::v10::inventory::OmicronZoneConfig;
-    pub use crate::v10::inventory::OmicronZoneType;
-    pub use crate::v10::inventory::OmicronZonesConfig;
+    pub use crate::v11::inventory::ConfigReconcilerInventory;
+    pub use crate::v11::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v11::inventory::Inventory;
+    pub use crate::v11::inventory::OmicronSledConfig;
+    pub use crate::v11::inventory::OmicronZoneConfig;
+    pub use crate::v11::inventory::OmicronZoneType;
+    pub use crate::v11::inventory::OmicronZonesConfig;
 }
 
 pub mod probes {

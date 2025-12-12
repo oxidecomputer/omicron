@@ -2,24 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Instance types for Sled Agent API version 9.
-//!
-//! This version adds delegated_zvols to InstanceSledLocalConfig.
-//!
-//! Types that are unchanged from v1 are referenced from there:
-//! - VmmSpec
-//! - InstanceMetadata
-//! - ResolvedVpcFirewallRule
-
 use std::net::{IpAddr, SocketAddr};
 
 use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
+use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
-use omicron_common::api::internal::shared::{
-    DelegatedZvol, DhcpConfig, SourceNatConfig,
-};
+use omicron_common::api::internal::shared::{DelegatedZvol, DhcpConfig};
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

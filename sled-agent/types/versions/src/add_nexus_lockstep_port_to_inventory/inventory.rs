@@ -2,11 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Inventory types for Sled Agent API versions 4-9.
-//!
-//! This version added `lockstep_port` to the Nexus zone type (v4).
-//! Uses NetworkInterface v1 (single IP, not dual-stack).
-
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
@@ -17,7 +12,7 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_common::api::external::{ByteCount, Generation};
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_common::disk::{DatasetConfig, OmicronPhysicalDiskConfig};
 use omicron_common::zpool_name::ZpoolName;

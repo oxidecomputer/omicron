@@ -2,13 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Inventory types for Sled Agent API version 10.
-//!
-//! This version uses NetworkInterface v2 (dual-stack support).
-//!
-//! Per RFD 619, shared types that don't vary by version are defined in v1
-//! and re-exported here.
-
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
@@ -17,12 +10,13 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
 use omicron_common::{
     api::{
-        external::{ByteCount, Generation},
-        internal::shared::{NetworkInterface, SourceNatConfig},
+        external::{self, ByteCount, Generation},
+        internal::shared::{
+            NetworkInterface, external_ip::v1::SourceNatConfig,
+        },
     },
     disk::{DatasetConfig, OmicronPhysicalDiskConfig},
     zpool_name::ZpoolName,
@@ -33,14 +27,12 @@ use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// Import shared types from v1 for use within this module.
-// Per RFD 619, these types are defined in v1 (the earliest version they appear in).
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SledRole, ZoneImageResolverInventory, ZoneKind,
+    SledRole, ZoneImageResolverInventory,
 };
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 
@@ -303,29 +295,6 @@ impl IdOrdItem for OmicronZoneConfig {
     id_upcast!();
 }
 
-impl OmicronZoneConfig {
-    /// Returns the underlay IP address associated with this zone.
-    ///
-    /// Assumes all zone have exactly one underlay IP address (which is
-    /// currently true).
-    pub fn underlay_ip(&self) -> Ipv6Addr {
-        self.zone_type.underlay_ip()
-    }
-
-    pub fn zone_name(&self) -> String {
-        illumos_utils::running_zone::InstalledZone::get_zone_name(
-            self.zone_type.kind().zone_prefix(),
-            Some(self.id),
-        )
-    }
-
-    pub fn dataset_name(&self) -> Option<DatasetName> {
-        self.zone_type.dataset_name()
-    }
-}
-
-// OmicronZoneDataset is now imported from v1.
-
 /// Describes what kind of zone this is (i.e., what component is running in it)
 /// as well as any type-specific configuration
 #[derive(
@@ -425,226 +394,9 @@ pub enum OmicronZoneType {
     },
 }
 
-impl OmicronZoneType {
-    /// Returns the [`ZoneKind`] corresponding to this variant.
-    pub fn kind(&self) -> ZoneKind {
-        match self {
-            OmicronZoneType::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
-            OmicronZoneType::Clickhouse { .. } => ZoneKind::Clickhouse,
-            OmicronZoneType::ClickhouseKeeper { .. } => {
-                ZoneKind::ClickhouseKeeper
-            }
-            OmicronZoneType::ClickhouseServer { .. } => {
-                ZoneKind::ClickhouseServer
-            }
-            OmicronZoneType::CockroachDb { .. } => ZoneKind::CockroachDb,
-            OmicronZoneType::Crucible { .. } => ZoneKind::Crucible,
-            OmicronZoneType::CruciblePantry { .. } => ZoneKind::CruciblePantry,
-            OmicronZoneType::ExternalDns { .. } => ZoneKind::ExternalDns,
-            OmicronZoneType::InternalDns { .. } => ZoneKind::InternalDns,
-            OmicronZoneType::InternalNtp { .. } => ZoneKind::InternalNtp,
-            OmicronZoneType::Nexus { .. } => ZoneKind::Nexus,
-            OmicronZoneType::Oximeter { .. } => ZoneKind::Oximeter,
-        }
-    }
-
-    /// Does this zone require time synchronization before it is initialized?"
-    ///
-    /// This function is somewhat conservative - the set of services
-    /// that can be launched before timesync has completed is intentionally kept
-    /// small, since it would be easy to add a service that expects time to be
-    /// reasonably synchronized.
-    pub fn requires_timesync(&self) -> bool {
-        match self {
-            // These zones can be initialized and started before time has been
-            // synchronized. For the NTP zones, this should be self-evident --
-            // we need the NTP zone to actually perform time synchronization!
-            //
-            // The DNS zone is a bit of an exception here, since the NTP zone
-            // itself may rely on DNS lookups as a dependency.
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::InternalDns { .. } => false,
-            _ => true,
-        }
-    }
-
-    /// Returns the underlay IP address associated with this zone.
-    ///
-    /// Assumes all zone have exactly one underlay IP address (which is
-    /// currently true).
-    pub fn underlay_ip(&self) -> Ipv6Addr {
-        match self {
-            OmicronZoneType::BoundaryNtp { address, .. }
-            | OmicronZoneType::Clickhouse { address, .. }
-            | OmicronZoneType::ClickhouseKeeper { address, .. }
-            | OmicronZoneType::ClickhouseServer { address, .. }
-            | OmicronZoneType::CockroachDb { address, .. }
-            | OmicronZoneType::Crucible { address, .. }
-            | OmicronZoneType::CruciblePantry { address }
-            | OmicronZoneType::ExternalDns { http_address: address, .. }
-            | OmicronZoneType::InternalNtp { address }
-            | OmicronZoneType::Nexus { internal_address: address, .. }
-            | OmicronZoneType::Oximeter { address } => *address.ip(),
-            OmicronZoneType::InternalDns {
-                http_address: address,
-                dns_address,
-                ..
-            } => {
-                // InternalDns is the only variant that carries two
-                // `SocketAddrV6`s that are both on the underlay network. We
-                // expect these to have the same IP address.
-                debug_assert_eq!(address.ip(), dns_address.ip());
-                *address.ip()
-            }
-        }
-    }
-
-    /// Identifies whether this is an NTP zone
-    pub fn is_ntp(&self) -> bool {
-        match self {
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. } => true,
-
-            OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::ExternalDns { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Nexus { .. }
-            | OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// Identifies whether this is a boundary NTP zone
-    pub fn is_boundary_ntp(&self) -> bool {
-        matches!(self, OmicronZoneType::BoundaryNtp { .. })
-    }
-
-    /// Identifies whether this is a Nexus zone
-    pub fn is_nexus(&self) -> bool {
-        match self {
-            OmicronZoneType::Nexus { .. } => true,
-
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::ExternalDns { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// Identifies whether this a Crucible (not Crucible pantry) zone
-    pub fn is_crucible(&self) -> bool {
-        match self {
-            OmicronZoneType::Crucible { .. } => true,
-
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::ExternalDns { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Nexus { .. }
-            | OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// This zone's external IP
-    pub fn external_ip(&self) -> Option<IpAddr> {
-        match self {
-            OmicronZoneType::Nexus { external_ip, .. } => Some(*external_ip),
-            OmicronZoneType::ExternalDns { dns_address, .. } => {
-                Some(dns_address.ip())
-            }
-            OmicronZoneType::BoundaryNtp { snat_cfg, .. } => Some(snat_cfg.ip),
-
-            OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Oximeter { .. } => None,
-        }
-    }
-
-    /// The service vNIC providing external connectivity to this zone
-    pub fn service_vnic(&self) -> Option<&NetworkInterface> {
-        match self {
-            OmicronZoneType::Nexus { nic, .. }
-            | OmicronZoneType::ExternalDns { nic, .. }
-            | OmicronZoneType::BoundaryNtp { nic, .. } => Some(nic),
-
-            OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Oximeter { .. } => None,
-        }
-    }
-
-    /// If this kind of zone has an associated dataset, return the dataset's
-    /// name. Otherwise, return `None`.
-    pub fn dataset_name(&self) -> Option<DatasetName> {
-        let (dataset, dataset_kind) = match self {
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Nexus { .. }
-            | OmicronZoneType::Oximeter { .. }
-            | OmicronZoneType::CruciblePantry { .. } => None,
-            OmicronZoneType::Clickhouse { dataset, .. } => {
-                Some((dataset, DatasetKind::Clickhouse))
-            }
-            OmicronZoneType::ClickhouseKeeper { dataset, .. } => {
-                Some((dataset, DatasetKind::ClickhouseKeeper))
-            }
-            OmicronZoneType::ClickhouseServer { dataset, .. } => {
-                Some((dataset, DatasetKind::ClickhouseServer))
-            }
-            OmicronZoneType::CockroachDb { dataset, .. } => {
-                Some((dataset, DatasetKind::Cockroach))
-            }
-            OmicronZoneType::Crucible { dataset, .. } => {
-                Some((dataset, DatasetKind::Crucible))
-            }
-            OmicronZoneType::ExternalDns { dataset, .. } => {
-                Some((dataset, DatasetKind::ExternalDns))
-            }
-            OmicronZoneType::InternalDns { dataset, .. } => {
-                Some((dataset, DatasetKind::InternalDns))
-            }
-        }?;
-
-        Some(DatasetName::new(dataset.pool_name, dataset_kind))
-    }
-}
-
 fn default_nexus_lockstep_port() -> u16 {
     omicron_common::address::NEXUS_LOCKSTEP_PORT
 }
-
-// ZoneKind, OmicronZoneImageSource, and path_schema are now imported from v1.
-
-use omicron_common::api::external;
 
 impl TryFrom<Inventory> for crate::v4::inventory::Inventory {
     type Error = external::Error;

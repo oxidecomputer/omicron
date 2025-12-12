@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types for Sled Agent API version 6.
+//! Version `ADD_PROBE_PUT_ENDPOINT` of the Sled Agent API.
 //!
 //! This version introduced the probe PUT endpoint.
 

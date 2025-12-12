@@ -206,8 +206,19 @@ mod api_impl {
     use omicron_common::api::internal::shared::{
         ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
     };
-    // Fixed identifiers from the migrations crate for API types
-    use sled_agent_types_versions::{v1, v3, v7, v9, v10};
+    use sled_agent_types::dataset::{
+        LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
+    };
+    use sled_agent_types::instance::{
+        InstanceEnsureBody, VmmPathParam, VpcFirewallRulesEnsureBody,
+        VpcPathParam,
+    };
+    use sled_agent_types::inventory::{
+        ConfigReconcilerInventory, ConfigReconcilerInventoryStatus, Inventory,
+        OmicronSledConfig,
+    };
+    use sled_agent_types::probes::ProbeSet;
+    use sled_agent_types_versions::{v1, v3, v7};
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::time::Duration;
@@ -219,8 +230,7 @@ mod api_impl {
 
         async fn inventory(
             rqctx: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<v10::inventory::Inventory>, HttpError>
-        {
+        ) -> Result<HttpResponseOk<Inventory>, HttpError> {
             let ctx = rqctx.context();
 
             let (
@@ -272,7 +282,7 @@ mod api_impl {
 
             // The rest of the inventory fields are irrelevant; fill them in
             // with something quasi-reasonable (or empty, if we can).
-            let config = v10::inventory::OmicronSledConfig {
+            let config = OmicronSledConfig {
                 generation: Generation::new(),
                 disks: IdOrdMap::new(),
                 datasets: IdOrdMap::new(),
@@ -284,7 +294,7 @@ mod api_impl {
                 },
             };
 
-            Ok(HttpResponseOk(v10::inventory::Inventory {
+            Ok(HttpResponseOk(Inventory {
                 sled_id: ctx.id,
                 sled_agent_address,
                 sled_role: ctx.role,
@@ -297,11 +307,11 @@ mod api_impl {
                 zpools: Vec::new(),
                 datasets: Vec::new(),
                 ledgered_sled_config: Some(config.clone()),
-                reconciler_status: v10::inventory::ConfigReconcilerInventoryStatus::Idle {
+                reconciler_status: ConfigReconcilerInventoryStatus::Idle {
                     completed_at: Utc::now(),
                     ran_for: Duration::from_secs(5),
                 },
-                last_reconciliation: Some(v10::inventory::ConfigReconcilerInventory {
+                last_reconciliation: Some(ConfigReconcilerInventory {
                     last_reconciled_config: config,
                     external_disks: BTreeMap::new(),
                     datasets: BTreeMap::new(),
@@ -512,7 +522,7 @@ mod api_impl {
 
         async fn omicron_config_put(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<v10::inventory::OmicronSledConfig>,
+            _body: TypedBody<OmicronSledConfig>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -526,8 +536,8 @@ mod api_impl {
 
         async fn vmm_register(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::instance::VmmPathParam>,
-            _body: TypedBody<v10::instance::InstanceEnsureBody>,
+            _path_params: Path<VmmPathParam>,
+            _body: TypedBody<InstanceEnsureBody>,
         ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
             unimplemented!()
         }
@@ -684,8 +694,8 @@ mod api_impl {
 
         async fn vpc_firewall_rules_put(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::instance::VpcPathParam>,
-            _body: TypedBody<v10::instance::VpcFirewallRulesEnsureBody>,
+            _path_params: Path<VpcPathParam>,
+            _body: TypedBody<VpcFirewallRulesEnsureBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -897,22 +907,22 @@ mod api_impl {
 
         async fn probes_put(
             _request_context: RequestContext<Self::Context>,
-            _body: TypedBody<v10::probes::ProbeSet>,
+            _body: TypedBody<ProbeSet>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
         async fn local_storage_dataset_ensure(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<v9::dataset::LocalStoragePathParam>,
-            _body: TypedBody<v9::dataset::LocalStorageDatasetEnsureRequest>,
+            _path_params: Path<LocalStoragePathParam>,
+            _body: TypedBody<LocalStorageDatasetEnsureRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
         async fn local_storage_dataset_delete(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<v9::dataset::LocalStoragePathParam>,
+            _path_params: Path<LocalStoragePathParam>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

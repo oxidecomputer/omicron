@@ -64,6 +64,7 @@ use sled_agent_types_versions::latest::inventory::SledCpuFamily;
 use sled_agent_types_versions::latest::inventory::SledRole;
 use sled_agent_types_versions::latest::inventory::ZoneImageResolverInventory;
 use sled_agent_types_versions::v4::inventory::OmicronZonesConfig as OmicronZonesConfigV4;
+use sled_agent_types_versions::v10::inventory::OmicronZonesConfig as OmicronZonesConfigV10;
 use sled_agent_zone_images_examples::BOOT_PATHS;
 use sled_agent_zone_images_examples::NON_BOOT_2_PATHS;
 use sled_agent_zone_images_examples::NON_BOOT_2_UUID;
@@ -382,15 +383,14 @@ pub fn representative() -> Representative {
     let sled14_data = include_str!("../example-data/madrid-sled14.json");
     let sled16_data = include_str!("../example-data/madrid-sled16.json");
     let sled17_data = include_str!("../example-data/madrid-sled17.json");
-    let sled14_v4: OmicronZonesConfigV4 =
-        serde_json::from_str(sled14_data).unwrap();
-    let sled16_v4: OmicronZonesConfigV4 =
-        serde_json::from_str(sled16_data).unwrap();
-    let sled17_v4: OmicronZonesConfigV4 =
-        serde_json::from_str(sled17_data).unwrap();
-    let sled14 = OmicronZonesConfig::try_from(sled14_v4).unwrap();
-    let sled16 = OmicronZonesConfig::try_from(sled16_v4).unwrap();
-    let sled17 = OmicronZonesConfig::try_from(sled17_v4).unwrap();
+    let extract_current_omicron_zones_config = |data: &str| {
+        let as_v4: OmicronZonesConfigV4 = serde_json::from_str(data).unwrap();
+        OmicronZonesConfigV10::try_from(as_v4)
+            .and_then(OmicronZonesConfig::try_from)
+    };
+    let sled14 = extract_current_omicron_zones_config(sled14_data).unwrap();
+    let sled16 = extract_current_omicron_zones_config(sled16_data).unwrap();
+    let sled17 = extract_current_omicron_zones_config(sled17_data).unwrap();
 
     // Convert these to `OmicronSledConfig`s. We'll start with empty disks and
     // datasets for now, and add to them below for sled14.

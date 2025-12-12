@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Dataset types for Sled Agent API version 9.
-
 use omicron_common::api::external::ByteCount;
 use omicron_uuid_kinds::{DatasetUuid, ExternalZpoolUuid};
 use schemars::JsonSchema;

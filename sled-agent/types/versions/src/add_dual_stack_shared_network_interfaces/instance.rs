@@ -2,10 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Instance types for Sled Agent API version 10+.
-//!
-//! This version uses NetworkInterface v2 (dual-stack, multiple IP addresses).
-
 use std::net::{IpAddr, SocketAddr};
 
 use omicron_common::api::external;
@@ -13,9 +9,8 @@ use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
-use omicron_common::api::internal::shared::{
-    DelegatedZvol, DhcpConfig, SourceNatConfig,
-};
+use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
+use omicron_common::api::internal::shared::{DelegatedZvol, DhcpConfig};
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

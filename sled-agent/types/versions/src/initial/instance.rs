@@ -10,8 +10,9 @@ use std::net::{IpAddr, SocketAddr};
 use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::{HostIdentifier, VmmRuntimeState};
+use omicron_common::api::internal::shared::DhcpConfig;
+use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
-use omicron_common::api::internal::shared::{DhcpConfig, SourceNatConfig};
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use propolis_api_types::instance_spec::{
     SpecKey,

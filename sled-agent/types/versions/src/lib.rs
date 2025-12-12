@@ -4,10 +4,30 @@
 
 //! Versioned types for the Sled Agent API.
 //!
-//! # Organization
+//! # Adding a new API version
 //!
-//! Types are organized based on the rules outlined in [RFD
-//! 619](https://rfd.shared.oxide.computer/rfd/0619).
+//! When adding a new API version N with added or changed types:
+//!
+//! 1. Create `<version_name>/mod.rs`, where `<version_name>` is the lowercase
+//!    form of the new version's identifier, as defined in the API trait's
+//!    `api_versions!` macro.
+//!
+//! 2. Add to the end of this list:
+//!
+//!    ```rust,ignore
+//!    #[path = "<version_name>/mod.rs"]
+//!    pub mod vN;
+//!    ```
+//!
+//! 3. Add your types to the new module, mirroring the module structure from
+//!    earlier versions.
+//!
+//! 4. Update `latest.rs` with new and updated types from the new version.
+//!
+//! For more information, see the [detailed guide] and [RFD 619].
+//!
+//! [detailed guide]: https://github.com/oxidecomputer/dropshot-api-manager/blob/main/guides/new-version.md
+//! [RFD 619]: https://rfd.shared.oxide.computer/rfd/619
 
 #[path = "bootstrap_initial/mod.rs"]
 pub mod bootstrap_v1;
@@ -16,6 +36,8 @@ pub mod latest;
 pub mod v1;
 #[path = "add_dual_stack_shared_network_interfaces/mod.rs"]
 pub mod v10;
+#[path = "add_dual_stack_external_ip_config/mod.rs"]
+pub mod v11;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]

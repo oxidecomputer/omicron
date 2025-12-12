@@ -2,11 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Probe types for Sled Agent API versions 6-9.
-//!
-//! Probes were introduced in v6 (ADD_PROBE_PUT_ENDPOINT).
-//! Uses NetworkInterface v1 (single IP, not dual-stack).
-
 use iddqd::IdHashItem;
 use iddqd::IdHashMap;
 use iddqd::id_upcast;
