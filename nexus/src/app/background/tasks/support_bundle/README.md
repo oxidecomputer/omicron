@@ -64,3 +64,23 @@ contents should be included.
   expensive operations which might be shared with other steps (e.g., reading
   from the database, creating and using progenitor clients, etc) consider adding
   that data to `support_bundle/cache`.
+
+## Bundle Directory Structure
+
+The following is the convention for Support Bundle files. It can, and should,
+change over time. However, we list it here to make sure data is located
+somewhere consistent and predictable.
+
+(Please keep this list alphabetized)
+
+* `bundle_id.txt` - UUID of the bundle itself
+* `ereports/` - All requested error reports
+* `ereports/{part number}-{serial number}/{id}.json` - Individual reports
+* `meta/` - Metadata about the bundle
+* `meta/trace.json` - Perfetto-formatted trace of the bundle's collection
+* `rack/{rack id}/sled/{sled id}/` - Sled-specific host OS info
+* `reconfigurator_state.json` - A dump of all reconfigurator state
+* `sled_info.json` - Mapping of sled identifiers to cubby location
+* `sp_task_dumps/` - All SP dumps
+* `sp_task_dumps/{SP type}_{SP slot}/dump-{id}.zip` - Individual SP dumps
+
