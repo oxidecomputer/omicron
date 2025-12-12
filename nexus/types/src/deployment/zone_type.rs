@@ -202,6 +202,11 @@ impl BlueprintZoneType {
         matches!(self, BlueprintZoneType::Clickhouse(_))
     }
 
+    /// Identifies whether this is an Oximeter zone
+    pub fn is_oximeter(&self) -> bool {
+        matches!(self, BlueprintZoneType::Oximeter(_))
+    }
+
     /// Returns the durable dataset associated with this zone, if any exists.
     pub fn durable_dataset(&self) -> Option<DurableDataset<'_>> {
         let (dataset, kind) = match self {
