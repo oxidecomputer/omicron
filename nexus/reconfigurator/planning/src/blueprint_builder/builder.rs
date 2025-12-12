@@ -49,6 +49,7 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TufRepoContentsError;
+use nexus_types::deployment::UpstreamNtpConfig;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
@@ -1750,28 +1751,6 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_add_zone(sled_id, zone)
     }
 
-    // The upstream NTP/DNS servers and domain _should_ come from Nexus and be
-    // modifiable by the operator, but currently can only be set at RSS. We can
-    // only promote a new boundary NTP zone by copying these settings from an
-    // existing one.
-    fn infer_boundary_ntp_config_from_parent_blueprint(
-        &self,
-    ) -> Result<BoundaryNtpConfig, Error> {
-        self.parent_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .find_map(|(_, z)| match &z.zone_type {
-                BlueprintZoneType::BoundaryNtp(zone_config) => {
-                    Some(BoundaryNtpConfig {
-                        ntp_servers: zone_config.ntp_servers.clone(),
-                        dns_servers: zone_config.dns_servers.clone(),
-                        domain: zone_config.domain.clone(),
-                    })
-                }
-                _ => None,
-            })
-            .ok_or(Error::NoBoundaryNtpZonesInParentBlueprint)
-    }
-
     /// Add a new boundary NTP server to a sled.
     ///
     /// This is unusual: typically during planning we promote internal NTP
@@ -1786,13 +1765,15 @@ impl<'a> BlueprintBuilder<'a> {
         image_source: BlueprintZoneImageSource,
         external_ip: ExternalSnatNetworkingChoice,
     ) -> Result<(), Error> {
-        let BoundaryNtpConfig { ntp_servers, dns_servers, domain } =
-            self.infer_boundary_ntp_config_from_parent_blueprint()?;
+        let UpstreamNtpConfig { ntp_servers, dns_servers, domain } = self
+            .parent_blueprint
+            .upstream_ntp_config()
+            .ok_or(Error::NoBoundaryNtpZonesInParentBlueprint)?;
         self.sled_add_zone_boundary_ntp_with_config(
             sled_id,
-            ntp_servers,
-            dns_servers,
-            domain,
+            ntp_servers.to_vec(),
+            dns_servers.to_vec(),
+            domain.map(str::to_string),
             image_source,
             external_ip,
         )
@@ -1885,13 +1866,15 @@ impl<'a> BlueprintBuilder<'a> {
         image_source: BlueprintZoneImageSource,
         external_ip: ExternalSnatNetworkingChoice,
     ) -> Result<(), Error> {
-        let BoundaryNtpConfig { ntp_servers, dns_servers, domain } =
-            self.infer_boundary_ntp_config_from_parent_blueprint()?;
+        let UpstreamNtpConfig { ntp_servers, dns_servers, domain } = self
+            .parent_blueprint
+            .upstream_ntp_config()
+            .ok_or(Error::NoBoundaryNtpZonesInParentBlueprint)?;
         self.sled_promote_internal_ntp_to_boundary_ntp_with_config(
             sled_id,
-            ntp_servers,
-            dns_servers,
-            domain,
+            ntp_servers.to_vec(),
+            dns_servers.to_vec(),
+            domain.map(str::to_string),
             image_source,
             external_ip,
         )
@@ -2549,12 +2532,6 @@ impl fmt::Display for BpMupdateOverrideNotClearedReason {
             }
         }
     }
-}
-
-struct BoundaryNtpConfig {
-    ntp_servers: Vec<String>,
-    dns_servers: Vec<IpAddr>,
-    domain: Option<String>,
 }
 
 #[cfg(test)]

@@ -62,6 +62,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fmt::Display;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -480,6 +481,45 @@ impl Blueprint {
             nexus_id, self.id,
         )))
     }
+
+    /// Return the configuration of upstream NTP settings (needed to configure
+    /// boundary NTP zones).
+    ///
+    /// This information should be operator-configurable, but currently is not:
+    /// we carry it forward from rack setup time onward from blueprint to
+    /// blueprint. Fixing this is
+    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
+    ///
+    /// Returns `None` if this blueprint contains no boundary NTP zones from
+    /// which we can infer the upstream configuration. (This should only be the
+    /// case for test blueprints - real systems always deploy at least one
+    /// boundary NTP zone).
+    pub fn upstream_ntp_config(&self) -> Option<UpstreamNtpConfig<'_>> {
+        // The upstream NTP config can't be changed, so it's fine to use
+        // `find()` here and include searching both in-service and expunged
+        // zones. (Real racks will always have at least one in-service boundary
+        // NTP zone, but some test or test systems may have 0 if they have only
+        // a single sled and that sled's boundary NTP zone is being upgraded.)
+        self.all_omicron_zones(BlueprintZoneDisposition::any).find_map(
+            |(_sled_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::BoundaryNtp(ntp_config) => {
+                    Some(UpstreamNtpConfig {
+                        ntp_servers: &ntp_config.ntp_servers,
+                        dns_servers: &ntp_config.dns_servers,
+                        domain: ntp_config.domain.as_deref(),
+                    })
+                }
+                _ => None,
+            },
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UpstreamNtpConfig<'a> {
+    pub ntp_servers: &'a [String],
+    pub dns_servers: &'a [IpAddr],
+    pub domain: Option<&'a str>,
 }
 
 /// Description of the source of a blueprint.
