@@ -68,6 +68,7 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
+use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
@@ -306,13 +307,16 @@ pub enum InventoryError {
     BadByteCount(#[from] ByteCountRangeError),
     #[error(transparent)]
     InventoryError(#[from] sled_agent_config_reconciler::InventoryError),
+    #[error(transparent)]
+    ExecutionError(#[from] illumos_utils::ExecutionError),
 }
 
 impl From<InventoryError> for omicron_common::api::external::Error {
     fn from(inventory_error: InventoryError) -> Self {
         match inventory_error {
             e @ (InventoryError::BadByteCount(..)
-            | InventoryError::InventoryError(_)) => {
+            | InventoryError::InventoryError(_)
+            | InventoryError::ExecutionError(_)) => {
                 omicron_common::api::external::Error::internal_error(
                     &InlineErrorChain::new(&e).to_string(),
                 )
@@ -372,6 +376,9 @@ struct SledAgentInner {
 
     // A handle to the hardware monitor.
     hardware_monitor: HardwareMonitorHandle,
+
+    // A handle to the health monitor.
+    health_monitor: HealthMonitorHandle,
 
     // Object handling production of metrics for oximeter.
     _metrics_manager: MetricsManager,
@@ -682,6 +689,9 @@ impl SledAgent {
                 bootstore: long_running_task_handles.bootstore.clone(),
                 hardware_monitor: long_running_task_handles
                     .hardware_monitor
+                    .clone(),
+                health_monitor: long_running_task_handles
+                    .health_monitor
                     .clone(),
                 _metrics_manager: metrics_manager,
                 repo_depot,
@@ -1129,6 +1139,8 @@ impl SledAgent {
         let zone_image_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
+        let health_monitor = self.inner.health_monitor.to_inventory();
+
         let ReconcilerInventory {
             disks,
             zpools,
@@ -1154,6 +1166,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
+            health_monitor,
         })
     }
 

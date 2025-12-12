@@ -1302,6 +1302,7 @@ impl ServicePortBuilder {
 mod tests {
     use super::*;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+    use nexus_sled_agent_shared::inventory::HealthMonitorInventory;
     use nexus_sled_agent_shared::inventory::SledCpuFamily;
     use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
     use omicron_common::address::IpRange;
@@ -1529,6 +1530,7 @@ mod tests {
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                health_monitor: HealthMonitorInventory::new(),
             },
             is_scrimlet,
         )];

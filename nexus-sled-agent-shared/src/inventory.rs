@@ -15,6 +15,7 @@ use daft::Diffable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use indent_write::fmt::IndentWriter;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::ledger::Ledgerable;
@@ -128,6 +129,33 @@ pub struct Inventory {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
+    pub health_monitor: HealthMonitorInventory,
+}
+
+/// Fields of sled-agent inventory reported by the health monitor subsystem.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct HealthMonitorInventory {
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<SvcsInMaintenanceResult, String>::json_schema"
+    )]
+    pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
+    // TODO: Other health check results will live here as well
+}
+
+impl HealthMonitorInventory {
+    pub fn new() -> Self {
+        Self { smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()) }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        if let Ok(svcs) = &self.smf_services_in_maintenance {
+            svcs.is_empty()
+        } else {
+            false
+        }
+    }
 }
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to

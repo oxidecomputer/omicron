@@ -675,6 +675,7 @@ impl CollectionBuilder {
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
             zone_image_resolver: inventory.zone_image_resolver,
+            health_monitor: inventory.health_monitor,
         };
 
         self.sleds

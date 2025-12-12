@@ -202,6 +202,7 @@ mod api_impl {
     use nexus_sled_agent_shared::inventory::BootPartitionDetails;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+    use nexus_sled_agent_shared::inventory::HealthMonitorInventory;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
     use nexus_sled_agent_shared::inventory::Inventory;
@@ -356,6 +357,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
+                health_monitor: HealthMonitorInventory::new(),
             }))
         }
 

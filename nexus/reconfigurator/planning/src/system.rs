@@ -19,6 +19,7 @@ use nexus_inventory::CollectionBuilder;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::HealthMonitorInventory;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
@@ -1473,6 +1474,8 @@ impl Sled {
                 ),
                 // XXX: return something more reasonable here?
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                // TODO-K: Have the ability to add failed health checks here
+                health_monitor: HealthMonitorInventory::new(),
             }
         };
 
@@ -1651,6 +1654,7 @@ impl Sled {
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
             zone_image_resolver: inv_sled_agent.zone_image_resolver.clone(),
+            health_monitor: HealthMonitorInventory::new(),
         };
 
         Sled {

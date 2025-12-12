@@ -341,8 +341,9 @@ mod test {
     use dropshot::PaginationOrder;
     use nexus_db_lookup::LookupPath;
     use nexus_sled_agent_shared::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        SledCpuFamily, SledRole, ZoneImageResolverInventory,
+        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
+        Inventory, InventoryDisk, SledCpuFamily, SledRole,
+        ZoneImageResolverInventory,
     };
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
@@ -705,6 +706,7 @@ mod test {
                         ConfigReconcilerInventoryStatus::NotYetRun,
                     last_reconciliation: None,
                     zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                    health_monitor: HealthMonitorInventory::new(),
                 },
             )
             .unwrap();

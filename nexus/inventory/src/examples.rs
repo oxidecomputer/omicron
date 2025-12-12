@@ -20,6 +20,7 @@ use nexus_sled_agent_shared::inventory::BootImageHeader;
 use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::HealthMonitorInventory;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
@@ -633,6 +634,9 @@ pub fn representative() -> Representative {
                 zone_image_resolver(ZoneImageResolverExampleKind::Mismatch {
                     has_mupdate_override: true,
                 }),
+                // TODO-K: Will want to add some services in maintenance here
+                // in a follow up PR when SMF service health information is
+                // being added to the DB.
             ),
         )
         .unwrap();
@@ -993,5 +997,9 @@ pub fn sled_agent(
         reconciler_status,
         last_reconciliation,
         zone_image_resolver,
+        // TODO-K: We'll want to have the functionality to add some services
+        // here in a future PR. This will be more useful when we add this
+        // information to the DB.
+        health_monitor: HealthMonitorInventory::new(),
     }
 }

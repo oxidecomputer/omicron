@@ -619,6 +619,7 @@ fn display_sleds(
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
+            health_monitor,
         } = sled;
 
         writeln!(
@@ -892,6 +893,32 @@ fn display_sleds(
                         /* use_z */ true,
                     )
                 )?;
+            }
+        }
+
+        if !health_monitor.is_empty() {
+            writeln!(indented, "HEALTH MONITOR")?;
+            let mut indent2 = IndentWriter::new("  ", &mut indented);
+            match &health_monitor.smf_services_in_maintenance {
+                Ok(svcs) => {
+                    if !svcs.is_empty() {
+                        writeln!(
+                            indent2,
+                            "SMF services in maintenance at {:#?}:",
+                            &svcs.time_of_status
+                        )?;
+                        let mut indent3 = IndentWriter::new("  ", &mut indent2);
+                        for svc in &svcs.services {
+                            writeln!(indent3, "{svc}")?;
+                        }
+                    }
+                }
+                Err(e) => {
+                    writeln!(
+                        indent2,
+                        "failed to retrieve SMF services in maintenance: {e}"
+                    )?;
+                }
             }
         }
 
