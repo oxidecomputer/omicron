@@ -18,7 +18,7 @@ use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -130,7 +130,7 @@ pub enum ServiceKind {
     Oximeter,
     Dendrite,
     Tfport,
-    BoundaryNtp { snat: SourceNatConfig, nic: ServiceNic },
+    BoundaryNtp { snat: SourceNatConfigGeneric, nic: ServiceNic },
     InternalNtp,
     Mgd,
 }

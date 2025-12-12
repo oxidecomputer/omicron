@@ -4,28 +4,26 @@
 
 //! Common instance-related types.
 
-use std::{
-    fmt,
-    net::{IpAddr, SocketAddr},
-};
-
-use omicron_common::api::{
-    external::Hostname,
-    internal::{
-        nexus::{SledVmmState, VmmRuntimeState},
-        shared::{
-            DelegatedZvol, DhcpConfig, NetworkInterface,
-            ResolvedVpcFirewallRule, SourceNatConfig,
-        },
-    },
-};
+use omicron_common::api::external::Hostname;
+use omicron_common::api::internal::nexus::SledVmmState;
+use omicron_common::api::internal::nexus::VmmRuntimeState;
+use omicron_common::api::internal::shared::DelegatedZvol;
+use omicron_common::api::internal::shared::DhcpConfig;
+use omicron_common::api::internal::shared::ExternalIpConfig;
+use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use omicron_uuid_kinds::InstanceUuid;
-use propolis_client::instance_spec::{
-    ComponentV0, CrucibleStorageBackend, FileStorageBackend, SpecKey,
-    VirtioNetworkBackend,
-};
+use propolis_client::instance_spec::ComponentV0;
+use propolis_client::instance_spec::CrucibleStorageBackend;
+use propolis_client::instance_spec::FileStorageBackend;
+use propolis_client::instance_spec::SpecKey;
+use propolis_client::instance_spec::VirtioNetworkBackend;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
+use std::fmt;
+use std::net::IpAddr;
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
@@ -64,11 +62,7 @@ pub struct InstanceEnsureBody {
 pub struct InstanceSledLocalConfig {
     pub hostname: Hostname,
     pub nics: Vec<NetworkInterface>,
-    pub source_nat: SourceNatConfig,
-    /// Zero or more external IP addresses (either floating or ephemeral),
-    /// provided to an instance to allow inbound connectivity.
-    pub ephemeral_ip: Option<IpAddr>,
-    pub floating_ips: Vec<IpAddr>,
+    pub external_ips: Option<ExternalIpConfig>,
     pub multicast_groups: Vec<InstanceMulticastMembership>,
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,

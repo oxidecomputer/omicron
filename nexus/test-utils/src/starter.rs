@@ -78,7 +78,7 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
@@ -1072,8 +1072,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     },
                     external_ip: OmicronZoneExternalSnatIp {
                         id: ExternalIpUuid::new_v4(),
-                        snat_cfg: SourceNatConfig::new(external_ip, 0, 16383)
-                            .unwrap(),
+                        snat_cfg: SourceNatConfigGeneric::new(
+                            external_ip,
+                            0,
+                            16383,
+                        )
+                        .unwrap(),
                     },
                 },
             ),

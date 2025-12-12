@@ -47,7 +47,6 @@
 
 mod dataset_serialization_task;
 mod debug_collector;
-mod debug_collector_task;
 mod disks_common;
 mod handle;
 mod host_phase_2;
