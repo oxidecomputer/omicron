@@ -13,7 +13,10 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_errors::public_error_from_diesel_create;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::DbTrustQuorumConfigurationState;
+use nexus_db_model::DbTrustQuorumMemberState;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
@@ -247,6 +250,10 @@ impl DataStore {
             })
     }
 
+    /// If this configuration is in the `Preparing` state, then update any members
+    /// to acknowledge the prepare.
+    ///
+    /// Also, update any digests or encrypted rack secrets if necessary.
     pub async fn tq_update_prepare_status(
         &self,
         opctx: &OpContext,
@@ -255,12 +262,6 @@ impl DataStore {
         config: trust_quorum_protocol::Configuration,
         acked_prepares: BTreeSet<BaseboardId>,
     ) -> Result<(), Error> {
-        // Fill in key share digests and EncryptedRackSecrets if needed
-        //
-        // Merge the current set of acks with the provided set here and insert
-        //
-        // Decide to commit if we have enough acks
-
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
@@ -272,14 +273,15 @@ impl DataStore {
             .transaction(&conn, |c| {
                 let err = err.clone();
                 let config = config.clone();
+                let acked_prepares = acked_prepares.clone();
                 async move {
                     // First, retrieve our configuration if there is one.
                     let latest = self
-                        .tq_get_latest_config_conn(opctx, conn, rack_id)
+                        .tq_get_latest_config_conn(opctx, &c, rack_id)
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
-                    let Some(latest) = latest else {
+                    let Some(mut db_config) = latest else {
                         bail_txn!(
                             err,
                             "No trust quorum config for rack_id {} at epoch {}",
@@ -288,8 +290,24 @@ impl DataStore {
                         );
                     };
 
-                    if latest.epoch != epoch {
-                        let actual = latest.epoch;
+                    // If we aren't preparing, then ignore this call. Multiple
+                    // Nexuses race to completion and we don't want to worry
+                    // about overwriting commits with prepares in the `state`
+                    // field of each member.
+                    if db_config.state
+                        != DbTrustQuorumConfigurationState::Preparing
+                    {
+                        info!(
+                            opctx.log,
+                            "Ignoring stale update of trust quorum prepare \
+                            status";
+                            "state" => ?db_config.state
+                        );
+                        return Ok(());
+                    }
+
+                    if db_config.epoch != epoch {
+                        let actual = db_config.epoch;
                         bail_txn!(
                             err,
                             "Cannot update trust quorum config. \
@@ -300,10 +318,85 @@ impl DataStore {
                     }
 
                     // Then get any members associated with the configuration
-                    /*                    let members = self
-                    .tq_get_members_conn(opctx, conn, rack_id, latest.epoch)
-                    .await?;
-                    */
+                    let db_members = self
+                        .tq_get_members_conn(
+                            opctx,
+                            &c,
+                            rack_id,
+                            db_config.epoch,
+                        )
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                    // We only update the configuration in the database if:
+                    //  1. This is the first time we have seen encrypted rack secrets
+                    //  2. We are transitioning from preparing to committed state.
+                    let mut secrets_changed = false;
+                    if db_config.encrypted_rack_secrets_salt.is_none() {
+                        let (salt, secrets) = config
+                            .encrypted_rack_secrets
+                            .map_or((None, None), |s| {
+                                (
+                                    Some(hex::encode(s.salt.0)),
+                                    Some(s.data.into()),
+                                )
+                            });
+                        db_config.encrypted_rack_secrets_salt = salt;
+                        db_config.encrypted_rack_secrets = secrets;
+                        secrets_changed = true;
+                    }
+
+                    let mut total_acks = 0;
+                    for (mut member, hw_id) in db_members {
+                        let baseboard_id: BaseboardId = hw_id.into();
+
+                        // Set the share digest for the member if we just learned it
+                        if member.share_digest.is_none() {
+                            let Some(digest) =
+                                config.members.get(&baseboard_id)
+                            else {
+                                bail_txn!(
+                                    err,
+                                    "Cannot update share digest for {}. Not a \
+                                    member of the trust quorum configuration.",
+                                    baseboard_id
+                                );
+                            };
+                            member.share_digest = Some(hex::encode(digest.0));
+                        }
+
+                        // Set the state of this member
+                        if acked_prepares.contains(&baseboard_id)
+                            && member.state == DbTrustQuorumMemberState::Unacked
+                        {
+                            member.state = DbTrustQuorumMemberState::Prepared
+                            // TODO: Let's update this row in the DB
+                        }
+
+                        if member.state == DbTrustQuorumMemberState::Prepared {
+                            total_acks += 1;
+                        }
+                    }
+
+                    // Do we have enough acks to commit?
+                    let mut should_commit = false;
+                    if total_acks
+                        >= (db_config.threshold.0
+                            + db_config.commit_crash_tolerance.0)
+                            as usize
+                    {
+                        db_config.state =
+                            DbTrustQuorumConfigurationState::Committed;
+                        should_commit = true;
+                    }
+
+                    if secrets_changed && should_commit {
+                        // TODO: write secrets and commit
+                    } else if secrets_changed {
+                        // TODO: write secrets
+                    } else if should_commit {
+                        // TODO: commit
+                    }
 
                     Ok(())
                 }
