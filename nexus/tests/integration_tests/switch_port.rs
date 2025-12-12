@@ -399,3 +399,104 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 }
+
+#[nexus_test]
+async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+
+    // Create a lot
+    let lot_name =
+        Name::from_str("subspace").expect("subspace should be a valid name");
+    let lot_params = AddressLotCreate {
+        identity: IdentityMetadataCreateParams {
+            name: lot_name.clone(),
+            description: "where the comms happen".into(),
+        },
+        kind: AddressLotKind::Infra,
+        blocks: vec![AddressLotBlockCreate {
+            first_address: "1701::a".parse().unwrap(),
+            last_address: "1701::e".parse().unwrap(),
+        }],
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &lot_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create port settings
+    let mut settings =
+        SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
+            name: "nacelle".parse().unwrap(),
+            description: "just a port".into(),
+        });
+
+    let link_name =
+        Name::from_str("phy0").expect("phy0 should be a valid name");
+
+    settings.links.push(LinkConfigCreate {
+        link_name: link_name.clone(),
+        mtu: 1500,
+        lldp: LldpLinkConfigCreate {
+            enabled: false,
+            link_name: None,
+            link_description: None,
+            chassis_id: None,
+            system_name: None,
+            system_description: None,
+            management_ip: None,
+        },
+        fec: None,
+        speed: LinkSpeed::Speed100G,
+        autoneg: false,
+        tx_eq: None,
+    });
+
+    settings.interfaces.push(SwitchInterfaceConfigCreate {
+        link_name: link_name.clone(),
+        v6_enabled: true,
+        kind: SwitchInterfaceKind::Primary,
+    });
+
+    settings.addresses.push(AddressConfig {
+        link_name: link_name.clone(),
+        addresses: vec![Address {
+            address: "1701::d/64".parse().unwrap(),
+            vlan_id: None,
+            address_lot: NameOrId::Name(lot_name.clone()),
+        }],
+    });
+
+    settings.routes.push(RouteConfig {
+        link_name: link_name.clone(),
+        routes: vec![Route {
+            dst: "2000::/64".parse().unwrap(),
+            gw: "2000::1".parse().unwrap(),
+            vid: None,
+            rib_priority: None,
+        }],
+    });
+
+    let created: SwitchPortSettings = NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/switch-port-settings",
+        &settings,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    let addr = &created.addresses[0];
+    assert_eq!(addr.address, IpNet::from_str("1701::d/64").unwrap());
+
+    let route = &created.routes[0];
+    assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
+    assert_eq!(&route.gw.to_string(), "2000::1");
+}

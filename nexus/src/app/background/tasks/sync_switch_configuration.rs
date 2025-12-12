@@ -12,7 +12,7 @@ use crate::app::{
     dpd_clients, switch_zone_address_mappings,
 };
 use oxnet::Ipv4Net;
-use slog::o;
+use slog::{Logger, o};
 
 use internal_dns_resolver::Resolver;
 use ipnetwork::IpNetwork;
@@ -28,9 +28,11 @@ use dpd_client::{Client as DpdClient, types as DpdTypes};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, CheckerSource,
-    DeleteStaticRoute4Request, ImportExportPolicy as MgImportExportPolicy,
-    ShaperSource, StaticRoute4, StaticRoute4List,
+    AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
+    BgpPeerConfig, CheckerSource, DeleteStaticRoute4Request,
+    DeleteStaticRoute6Request, ImportExportPolicy as MgImportExportPolicy,
+    ShaperSource, StaticRoute4, StaticRoute4List, StaticRoute6,
+    StaticRoute6List,
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -57,7 +59,7 @@ use sled_agent_client::types::{
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
     sync::Arc,
 };
@@ -73,6 +75,44 @@ const BGP_SESSION_RESOLUTION: u64 = 100;
 // This is the default RIB Priority used for static routes.  This mirrors
 // the const defined in maghemite in rdb/src/lib.rs.
 const DEFAULT_RIB_PRIORITY_STATIC: u8 = 1;
+
+/// Convenience struct for holding both v4 and v6 static route delete requests.
+#[derive(Debug)]
+struct DeleteStaticRouteRequest {
+    v4: DeleteStaticRoute4Request,
+    v6: DeleteStaticRoute6Request,
+}
+impl Default for DeleteStaticRouteRequest {
+    fn default() -> Self {
+        Self {
+            v4: DeleteStaticRoute4Request {
+                routes: StaticRoute4List { list: Vec::default() },
+            },
+            v6: DeleteStaticRoute6Request {
+                routes: StaticRoute6List { list: Vec::default() },
+            },
+        }
+    }
+}
+
+/// Convenience struct for holding both v4 and v6 static route add requests.
+#[derive(Debug)]
+struct AddStaticRouteRequest {
+    v4: AddStaticRoute4Request,
+    v6: AddStaticRoute6Request,
+}
+impl Default for AddStaticRouteRequest {
+    fn default() -> Self {
+        Self {
+            v4: AddStaticRoute4Request {
+                routes: StaticRoute4List { list: Vec::default() },
+            },
+            v6: AddStaticRoute6Request {
+                routes: StaticRoute6List { list: Vec::default() },
+            },
+        }
+    }
+}
 
 pub struct SwitchPortSettingsManager {
     datastore: Arc<DataStore>,
@@ -388,7 +428,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 info!(&log, "retrieved existing routes"; "routes" => ?current_static_routes);
 
                 // generate the complete set of static routes that should be on a given switch
-                let desired_static_routes = static_routes_in_db(&changes);
+                let desired_static_routes = static_routes_in_db(&log, &changes);
                 info!(&log, "retrieved desired routes"; "routes" => ?desired_static_routes);
 
                 // diff the current and desired routes.
@@ -409,7 +449,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // delete the unneeded routes first, just in case there is a conflicting route for
                 // one we need to add
                 if !routes_to_del.is_empty() {
-                    info!(&log, "deleting static routes"; "routes" => ?routes_to_del);
+                    info!(&log, "deleting static v4 routes"; "routes" => ?routes_to_del);
                     delete_static_routes(&mgd_clients, routes_to_del, &log).await;
                 }
 
@@ -1623,63 +1663,108 @@ fn build_sled_agent_clients(
     sled_agent_clients
 }
 
-type SwitchStaticRoutes = HashSet<(Ipv4Addr, Prefix4, Option<u16>, Option<u8>)>;
+#[derive(PartialEq, Eq, Hash, Debug)]
+struct SwitchStaticRouteV4 {
+    nexthop: Ipv4Addr,
+    prefix: Prefix4,
+    vlan: Option<u16>,
+    priority: Option<u8>,
+}
+
+#[derive(PartialEq, Eq, Hash, Debug)]
+struct SwitchStaticRouteV6 {
+    nexthop: Ipv6Addr,
+    prefix: Prefix6,
+    vlan: Option<u16>,
+    priority: Option<u8>,
+}
+
+#[derive(PartialEq, Eq, Hash, Debug)]
+enum SwitchStaticRoute {
+    V4(SwitchStaticRouteV4),
+    V6(SwitchStaticRouteV6),
+}
+
+//type SwitchStaticRoutes = HashSet<(Ipv4Addr, Prefix4, Option<u16>, Option<u8>)>;
+type SwitchStaticRoutes = HashSet<SwitchStaticRoute>;
 
 fn static_routes_to_del(
     current_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
     desired_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
-) -> HashMap<SwitchLocation, DeleteStaticRoute4Request> {
-    let mut routes_to_del: HashMap<SwitchLocation, DeleteStaticRoute4Request> =
+) -> HashMap<SwitchLocation, DeleteStaticRouteRequest> {
+    let mut routes_to_del: HashMap<SwitchLocation, DeleteStaticRouteRequest> =
         HashMap::new();
 
     // find routes to remove
     for (switch_location, routes_on_switch) in &current_static_routes {
         if let Some(routes_wanted) = desired_static_routes.get(switch_location)
         {
+            let mut result = DeleteStaticRouteRequest::default();
             // if it's on the switch but not desired (in our db), it should be removed
-            let stale_routes = routes_on_switch
-                .difference(routes_wanted)
-                .map(|(nexthop, prefix, vlan_id, rib_priority)| StaticRoute4 {
-                    nexthop: *nexthop,
-                    prefix: *prefix,
-                    vlan_id: *vlan_id,
-                    rib_priority: rib_priority
-                        .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
-                })
-                .collect::<Vec<StaticRoute4>>();
-
-            routes_to_del.insert(
-                *switch_location,
-                DeleteStaticRoute4Request {
-                    routes: StaticRoute4List { list: stale_routes },
-                },
-            );
+            let stale_routes = routes_on_switch.difference(routes_wanted);
+            for r in stale_routes.into_iter() {
+                match r {
+                    SwitchStaticRoute::V4(x) => {
+                        result.v4.routes.list.push(StaticRoute4 {
+                            nexthop: x.nexthop,
+                            prefix: x.prefix,
+                            vlan_id: x.vlan,
+                            rib_priority: x
+                                .priority
+                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                        })
+                    }
+                    SwitchStaticRoute::V6(x) => {
+                        result.v6.routes.list.push(StaticRoute6 {
+                            nexthop: x.nexthop,
+                            prefix: x.prefix,
+                            vlan_id: x.vlan,
+                            rib_priority: x
+                                .priority
+                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                        })
+                    }
+                }
+            }
+            routes_to_del.insert(*switch_location, result);
         } else {
             // if no desired routes are present, all routes on this switch should be deleted
-            let stale_routes = routes_on_switch
-                .iter()
-                .map(|(nexthop, prefix, vlan_id, rib_priority)| StaticRoute4 {
-                    nexthop: *nexthop,
-                    prefix: *prefix,
-                    vlan_id: *vlan_id,
-                    rib_priority: rib_priority
-                        .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
-                })
-                .collect::<Vec<StaticRoute4>>();
-
-            let req = DeleteStaticRoute4Request {
-                routes: StaticRoute4List { list: stale_routes },
-            };
-
-            routes_to_del.insert(*switch_location, req);
-            continue;
+            let mut result = DeleteStaticRouteRequest::default();
+            for r in routes_on_switch {
+                match r {
+                    SwitchStaticRoute::V4(x) => {
+                        result.v4.routes.list.push(StaticRoute4 {
+                            nexthop: x.nexthop,
+                            prefix: x.prefix,
+                            vlan_id: x.vlan,
+                            rib_priority: x
+                                .priority
+                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                        })
+                    }
+                    SwitchStaticRoute::V6(x) => {
+                        result.v6.routes.list.push(StaticRoute6 {
+                            nexthop: x.nexthop,
+                            prefix: x.prefix,
+                            vlan_id: x.vlan,
+                            rib_priority: x
+                                .priority
+                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                        })
+                    }
+                }
+            }
+            routes_to_del.insert(*switch_location, result);
         };
     }
 
     // filter out switches with no routes to remove
     let routes_to_del = routes_to_del
         .into_iter()
-        .filter(|(_location, request)| !request.routes.list.is_empty())
+        .filter(|(_location, request)| {
+            !(request.v4.routes.list.is_empty()
+                && request.v6.routes.list.is_empty())
+        })
         .collect();
 
     routes_to_del
@@ -1690,8 +1775,8 @@ fn static_routes_to_add(
     desired_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
     current_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
     log: &slog::Logger,
-) -> HashMap<SwitchLocation, AddStaticRoute4Request> {
-    let mut routes_to_add: HashMap<SwitchLocation, AddStaticRoute4Request> =
+) -> HashMap<SwitchLocation, AddStaticRouteRequest> {
+    let mut routes_to_add: HashMap<SwitchLocation, AddStaticRouteRequest> =
         HashMap::new();
 
     // find routes to add
@@ -1708,35 +1793,50 @@ fn static_routes_to_add(
                 continue;
             }
         };
-        let missing_routes = routes_wanted
-            .difference(routes_on_switch)
-            .map(|(nexthop, prefix, vlan_id, rib_priority)| StaticRoute4 {
-                nexthop: *nexthop,
-                prefix: *prefix,
-                vlan_id: *vlan_id,
-                rib_priority: rib_priority
-                    .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
-            })
-            .collect::<Vec<StaticRoute4>>();
+        let mut result = AddStaticRouteRequest::default();
+        let missing_routes = routes_wanted.difference(routes_on_switch);
+        for r in missing_routes.into_iter() {
+            match r {
+                SwitchStaticRoute::V4(x) => {
+                    result.v4.routes.list.push(StaticRoute4 {
+                        nexthop: x.nexthop,
+                        prefix: x.prefix,
+                        vlan_id: x.vlan,
+                        rib_priority: x
+                            .priority
+                            .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                    })
+                }
+                SwitchStaticRoute::V6(x) => {
+                    result.v6.routes.list.push(StaticRoute6 {
+                        nexthop: x.nexthop,
+                        prefix: x.prefix,
+                        vlan_id: x.vlan,
+                        rib_priority: x
+                            .priority
+                            .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                    })
+                }
+            }
+        }
 
-        routes_to_add.insert(
-            *switch_location,
-            AddStaticRoute4Request {
-                routes: StaticRoute4List { list: missing_routes },
-            },
-        );
+        routes_to_add.insert(*switch_location, result);
     }
 
     // filter out switches with no routes to add
     let routes_to_add = routes_to_add
         .into_iter()
-        .filter(|(_location, request)| !request.routes.list.is_empty())
+        .filter(|(_location, request)| {
+            !(request.v4.routes.list.is_empty()
+                && request.v6.routes.list.is_empty())
+        })
         .collect();
 
     routes_to_add
 }
 
 fn static_routes_in_db(
+    log: &Logger,
     changes: &[(
         SwitchLocation,
         nexus_db_model::SwitchPort,
@@ -1754,22 +1854,37 @@ fn static_routes_in_db(
         let mut routes = HashSet::new();
         for route in &settings.routes {
             // convert to appropriate types for comparison and insertion
-            let nexthop = match route.gw.ip() {
-                IpAddr::V4(v4) => v4,
-                IpAddr::V6(_) => continue,
-            };
-            let prefix = match route.dst.ip() {
-                IpAddr::V4(v4) => {
-                    Prefix4 { value: v4, length: route.dst.prefix() }
+
+            match (route.gw.ip(), route.dst.ip()) {
+                (IpAddr::V4(nexthop), IpAddr::V4(dst)) => {
+                    routes.insert(SwitchStaticRoute::V4(SwitchStaticRouteV4 {
+                        nexthop,
+                        prefix: Prefix4 {
+                            value: dst,
+                            length: route.dst.prefix(),
+                        },
+                        vlan: route.vid.map(|x| x.0),
+                        priority: route.rib_priority.map(|x| x.0),
+                    }));
                 }
-                IpAddr::V6(_) => continue,
+                (IpAddr::V6(nexthop), IpAddr::V6(dst)) => {
+                    routes.insert(SwitchStaticRoute::V6(SwitchStaticRouteV6 {
+                        nexthop,
+                        prefix: Prefix6 {
+                            value: dst,
+                            length: route.dst.prefix(),
+                        },
+                        vlan: route.vid.map(|x| x.0),
+                        priority: route.rib_priority.map(|x| x.0),
+                    }));
+                }
+                (nexthop, dst) => {
+                    error!(log, "encountered route with ip version mismatch";
+                        "nexthop" => nexthop.to_string(),
+                        "destination" => dst.to_string(),
+                    );
+                }
             };
-            routes.insert((
-                nexthop,
-                prefix,
-                route.vid.map(|x| x.0),
-                route.rib_priority.map(|x| x.0),
-            ));
         }
 
         match routes_from_db.entry(*location) {
@@ -1947,11 +2062,39 @@ async fn static_routes_on_switch(
     let mut routes_on_switch = HashMap::new();
 
     for (location, client) in mgd_clients {
-        let static_routes: SwitchStaticRoutes =
-            match client.static_list_v4_routes().await {
-                Ok(routes) => {
-                    let mut flattened = HashSet::new();
-                    for (destination, paths) in routes.iter() {
+        let v4_static_routes = match client.static_list_v4_routes().await {
+            Ok(routes) => routes.into_inner(),
+            Err(e) => {
+                error!(
+                    &log,
+                    "unable to retrieve v4 routes from switch";
+                    "error" => e.to_string(),
+                    "switch_location" => ?location,
+                );
+                continue;
+            }
+        };
+        let v6_static_routes = match client.static_list_v6_routes().await {
+            Ok(routes) => routes.into_inner(),
+            Err(e) => {
+                error!(
+                    &log,
+                    "unable to retrieve v6 routes from switch";
+                    "error" => e.to_string(),
+                    "switch_location" => ?location,
+                );
+                continue;
+            }
+        };
+
+        let routes: Vec<_> =
+            v4_static_routes.into_iter().chain(v6_static_routes).collect();
+
+        let mut flattened = HashSet::new();
+        for (destination, paths) in &routes {
+            for p in paths.iter() {
+                match p.nexthop {
+                    IpAddr::V4(addr) => {
                         let Ok(dst) = destination.parse() else {
                             error!(
                                 log,
@@ -1960,44 +2103,44 @@ async fn static_routes_on_switch(
                             );
                             continue;
                         };
-                        for p in paths.iter() {
-                            let nh = match p.nexthop {
-                                IpAddr::V4(addr) => addr,
-                                IpAddr::V6(addr) => {
-                                    error!(
-                                        log,
-                                        "ipv6 nexthops not supported: {addr}"
-                                    );
-                                    continue;
-                                }
-                            };
-                            flattened.insert((
-                                nh,
-                                dst,
-                                p.vlan_id,
-                                Some(p.rib_priority),
-                            ));
-                        }
+                        flattened.insert(SwitchStaticRoute::V4(
+                            SwitchStaticRouteV4 {
+                                nexthop: addr,
+                                prefix: dst,
+                                vlan: p.vlan_id,
+                                priority: Some(p.rib_priority),
+                            },
+                        ));
                     }
-                    flattened
-                }
-                Err(_) => {
-                    error!(
-                        &log,
-                        "unable to retrieve routes from switch";
-                        "switch_location" => ?location,
-                    );
-                    continue;
-                }
-            };
-        routes_on_switch.insert(*location, static_routes);
+                    IpAddr::V6(addr) => {
+                        let Ok(dst) = destination.parse() else {
+                            error!(
+                                log,
+                                "failed to parse static route destination: \
+                                 {destination}"
+                            );
+                            continue;
+                        };
+                        flattened.insert(SwitchStaticRoute::V6(
+                            SwitchStaticRouteV6 {
+                                nexthop: addr,
+                                prefix: dst,
+                                vlan: p.vlan_id,
+                                priority: Some(p.rib_priority),
+                            },
+                        ));
+                    }
+                };
+            }
+        }
+        routes_on_switch.insert(*location, flattened);
     }
     routes_on_switch
 }
 
 async fn delete_static_routes(
     mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
-    routes_to_del: HashMap<SwitchLocation, DeleteStaticRoute4Request>,
+    routes_to_del: HashMap<SwitchLocation, DeleteStaticRouteRequest>,
     log: &slog::Logger,
 ) {
     for (switch_location, request) in routes_to_del {
@@ -2015,14 +2158,23 @@ async fn delete_static_routes(
 
         info!(
             &log,
-            "removing static v4 routes";
+            "removing static routes";
             "switch_location" => ?switch_location,
             "request" => ?request,
         );
-        if let Err(e) = client.static_remove_v4_route(&request).await {
+        if let Err(e) = client.static_remove_v4_route(&request.v4).await {
             error!(
                 &log,
-                "failed to delete routes from mgd";
+                "failed to delete v4 routes from mgd";
+                "switch_location" => ?switch_location,
+                "request" => ?request,
+                "error" => format!("{:#}", e)
+            );
+        };
+        if let Err(e) = client.static_remove_v6_route(&request.v6).await {
+            error!(
+                &log,
+                "failed to delete v6 routes from mgd";
                 "switch_location" => ?switch_location,
                 "request" => ?request,
                 "error" => format!("{:#}", e)
@@ -2033,7 +2185,7 @@ async fn delete_static_routes(
 
 async fn add_static_routes(
     mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
-    routes_to_add: HashMap<SwitchLocation, AddStaticRoute4Request>,
+    routes_to_add: HashMap<SwitchLocation, AddStaticRouteRequest>,
     log: &slog::Logger,
 ) {
     for (switch_location, request) in routes_to_add {
@@ -2051,14 +2203,23 @@ async fn add_static_routes(
 
         info!(
             &log,
-            "adding static v4 routes";
+            "adding static routes";
             "switch_location" => ?switch_location,
             "request" => ?request,
         );
-        if let Err(e) = client.static_add_v4_route(&request).await {
+        if let Err(e) = client.static_add_v4_route(&request.v4).await {
             error!(
                 &log,
-                "failed to add routes to mgd";
+                "failed to add v4 routes to mgd";
+                "switch_location" => ?switch_location,
+                "request" => ?request,
+                "error" => format!("{:#}", e)
+            );
+        };
+        if let Err(e) = client.static_add_v6_route(&request.v6).await {
+            error!(
+                &log,
+                "failed to add v6 routes to mgd";
                 "switch_location" => ?switch_location,
                 "request" => ?request,
                 "error" => format!("{:#}", e)
