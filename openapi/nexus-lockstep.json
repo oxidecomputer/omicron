@@ -7976,6 +7976,7 @@
         ]
       },
       "RecoverySiloConfig": {
+        "description": "Configuration for the recovery silo created during rack setup.",
         "type": "object",
         "properties": {
           "silo_name": {
