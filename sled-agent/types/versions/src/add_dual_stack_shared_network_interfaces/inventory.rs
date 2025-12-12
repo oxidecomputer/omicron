@@ -32,8 +32,7 @@ use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
-    RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SledRole, ZoneImageResolverInventory,
+    RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
 };
 use crate::v4;
 
@@ -73,107 +72,6 @@ pub struct ConfigReconcilerInventory {
     ///
     /// `None` if `remove_mupdate_override` was not provided in the sled config.
     pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
-}
-
-impl ConfigReconcilerInventory {
-    /// Iterate over all running zones as reported by the last reconciliation
-    /// result.
-    ///
-    /// This includes zones that are both present in `last_reconciled_config`
-    /// and whose status in `zones` indicates "successfully running".
-    pub fn running_omicron_zones(
-        &self,
-    ) -> impl Iterator<Item = &OmicronZoneConfig> {
-        self.zones.iter().filter_map(|(zone_id, result)| match result {
-            ConfigReconcilerInventoryResult::Ok => {
-                self.last_reconciled_config.zones.get(zone_id)
-            }
-            ConfigReconcilerInventoryResult::Err { .. } => None,
-        })
-    }
-
-    /// Iterate over all zones contained in the most-recently-reconciled sled
-    /// config and report their status as of that reconciliation.
-    pub fn reconciled_omicron_zones(
-        &self,
-    ) -> impl Iterator<Item = (&OmicronZoneConfig, &ConfigReconcilerInventoryResult)>
-    {
-        // `self.zones` may contain zone IDs that aren't present in
-        // `last_reconciled_config` at all, if we failed to _shut down_ zones
-        // that are no longer present in the config. We use `filter_map` to
-        // strip those out, and only report on the configured zones.
-        self.zones.iter().filter_map(|(zone_id, result)| {
-            let config = self.last_reconciled_config.zones.get(zone_id)?;
-            Some((config, result))
-        })
-    }
-
-    /// Given a sled config, produce a reconciler result that sled-agent could
-    /// have emitted if reconciliation succeeded.
-    ///
-    /// This method should only be used by tests and dev tools; real code should
-    /// look at the actual `last_reconciliation` value from the parent
-    /// [`Inventory`].
-    pub fn debug_assume_success(config: OmicronSledConfig) -> Self {
-        let mut ret = Self {
-            // These fields will be filled in by `debug_update_assume_success`.
-            last_reconciled_config: OmicronSledConfig::default(),
-            external_disks: BTreeMap::new(),
-            datasets: BTreeMap::new(),
-            orphaned_datasets: IdOrdMap::new(),
-            zones: BTreeMap::new(),
-            remove_mupdate_override: None,
-
-            // These fields will not.
-            boot_partitions: BootPartitionContents::debug_assume_success(),
-        };
-
-        ret.debug_update_assume_success(config);
-
-        ret
-    }
-
-    /// Given a sled config, update an existing reconciler result to simulate an
-    /// output that sled-agent could have emitted if reconciliation succeeded.
-    ///
-    /// This method should only be used by tests and dev tools; real code should
-    /// look at the actual `last_reconciliation` value from the parent
-    /// [`Inventory`].
-    pub fn debug_update_assume_success(&mut self, config: OmicronSledConfig) {
-        let external_disks = config
-            .disks
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let datasets = config
-            .datasets
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let zones = config
-            .zones
-            .iter()
-            .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let remove_mupdate_override =
-            config.remove_mupdate_override.map(|_| {
-                RemoveMupdateOverrideInventory {
-                    boot_disk_result: Ok(
-                        RemoveMupdateOverrideBootSuccessInventory::Removed,
-                    ),
-                    non_boot_message: "mupdate override successfully removed \
-                                       on non-boot disks"
-                        .to_owned(),
-                }
-            });
-
-        self.last_reconciled_config = config;
-        self.external_disks = external_disks;
-        self.datasets = datasets;
-        self.orphaned_datasets = IdOrdMap::new();
-        self.zones = zones;
-        self.remove_mupdate_override = remove_mupdate_override;
-    }
 }
 
 /// Status of the sled-agent-config-reconciler task.
