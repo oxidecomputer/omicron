@@ -557,6 +557,30 @@ impl Blueprint {
     /// (This should only be the case for test blueprints - real systems always
     /// deploy at least one external DNS zone).
     pub fn all_external_dns_external_ips(&self) -> BTreeSet<IpAddr> {
+        // We must look for both expunged and in-service zones here: if we've
+        // expunged an external DNS zone on a given IP, the planner needs to
+        // start a new one on that same IP, and today the only way for it to
+        // know that IP is if we look for expunged zones. This also affects the
+        // planner's pruning logic: one condition on pruning external DNS zones
+        // is that the expunged zone's IP must be in use by an in-service zone.
+        //
+        // It's also important we return a set of IPs (as opposed to an iterator
+        // or a vec): we _expect_ to get some number of duplicates here, for a
+        // couple reasons:
+        //
+        // 1. Until we implement "pruning expunged zones from the blueprint",
+        //    we'll have many previously-expunged external DNS zones all using
+        //    the same IP - one for each time an external DNS zone has been
+        //    expunged and then replaced.
+        // 2. Even once we implement pruning, during an upgrade it will be
+        //    common to (a) expunge a zone, (b) add a new one reusing that
+        //    zone's IP, then (c) prune the expunged zone. In between (b) and
+        //    (c), the IP would show up twice.
+        //
+        // We never expect to get duplicates among the in-service zones, but we
+        // don't check for that here. That would be an illegal blueprint; blippy
+        // would complain, and attempting to execute it would fail due to
+        // database constraints on external IP uniqueness.
         self.all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::ExternalDns(dns) => {
