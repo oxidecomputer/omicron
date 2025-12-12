@@ -335,6 +335,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
         async move {
             let log = opctx.log.clone();
 
+            info!(log, "running switch port settings manager RPW");
+
             let racks = match self.datastore.rack_list_initialized(opctx, &DataPageParams::max_page()).await {
                 Ok(racks) => racks,
                 Err(e) => {
@@ -394,7 +396,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build mgd clients
-                let mgd_clients = build_mgd_clients(mappings, &log);
+                let mgd_clients = build_mgd_clients(mappings, &log, &self.resolver).await;
 
                 let port_list = match self.switch_ports(opctx, &log).await {
                     Ok(value) => value,

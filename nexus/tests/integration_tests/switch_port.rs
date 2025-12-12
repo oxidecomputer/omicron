@@ -20,7 +20,7 @@ use nexus_types::external_api::params::{
 use nexus_types::external_api::views::Rack;
 use omicron_common::api::external::{
     self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
-    LinkSpeed, NameOrId, SwitchPort, SwitchPortSettings,
+    LinkSpeed, NameOrId, SwitchLocation, SwitchPort, SwitchPortSettings,
 };
 use omicron_common::api::external::{ImportExportPolicy, Name};
 use oxnet::IpNet;
@@ -400,7 +400,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     let client = &ctx.external_client;
 
@@ -429,9 +429,11 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Create port settings
+    let settings_name =
+        Name::from_str("nacelle").expect("nacell should be a valid name");
     let mut settings =
         SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
-            name: "nacelle".parse().unwrap(),
+            name: settings_name.clone(),
             description: "just a port".into(),
         });
 
@@ -499,4 +501,49 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     let route = &created.routes[0];
     assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
     assert_eq!(&route.gw.to_string(), "2000::1");
+
+    let mgd = &ctx.mgd[&SwitchLocation::Switch0];
+    let mgd_client = mg_admin_client::Client::new(
+        &format!("http://localhost:{}", mgd.port),
+        ctx.logctx.log.clone(),
+    );
+
+    // apply port settings
+    let apply_settings = SwitchPortApplySettings {
+        port_settings: NameOrId::Name(settings_name.clone()),
+    };
+
+    let racks_url = "/v1/system/hardware/racks";
+    let racks: Vec<Rack> =
+        NexusRequest::iter_collection_authn(client, racks_url, "", None)
+            .await
+            .expect("failed to list racks")
+            .all_items;
+
+    let rack_id = racks[0].identity.id;
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+        )
+        .body(Some(&apply_settings))
+        .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // wait for reconciliation
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
+    // ensure that our route has landed in mgd
+    let routes = mgd_client
+        .static_list_v6_routes()
+        .await
+        .expect("list maghemite v6 routes");
+
+    assert_eq!(routes.len(), 1);
 }
