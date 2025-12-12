@@ -806,9 +806,9 @@ impl DataStore {
             // reservation query and changing the instance's state.
             //
             // If a client attaches a local storage disk to an instance after
-            // sled reservation occurs but before the instance's start moves to
-            // starting, and we do not block it, there are several problems that
-            // result:
+            // sled reservation occurs but before the instance's start saga
+            // moves to starting, and we do not block it, there are several
+            // problems that result:
             //
             // - if an allocation does not already exist for the local storage
             //   disk, the instance_start saga will fail (and unwind) when
