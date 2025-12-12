@@ -560,7 +560,7 @@ impl Blueprint {
         // zones. (Real racks will always have at least one in-service boundary
         // NTP zone, but some test or test systems may have 0 if they have only
         // a single sled and that sled's boundary NTP zone is being upgraded.)
-        self.all_omicron_zones(BlueprintZoneDisposition::any).find_map(
+        self.danger_all_omicron_zones(BlueprintZoneDisposition::any).find_map(
             |(_sled_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::BoundaryNtp(ntp_config) => {
                     Some(UpstreamNtpConfig {
@@ -590,7 +590,7 @@ impl Blueprint {
         // zones. (Real racks will always have at least one in-service Nexus
         // zone - the one calling this code - but some tests create blueprints
         // without any.)
-        self.all_omicron_zones(BlueprintZoneDisposition::any).find_map(
+        self.danger_all_omicron_zones(BlueprintZoneDisposition::any).find_map(
             |(_sled_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::Nexus(nexus_config) => {
                     Some(OperatorNexusConfig {
@@ -641,7 +641,7 @@ impl Blueprint {
         // don't check for that here. That would be an illegal blueprint; blippy
         // would complain, and attempting to execute it would fail due to
         // database constraints on external IP uniqueness.
-        self.all_omicron_zones(BlueprintZoneDisposition::any)
+        self.danger_all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::ExternalDns(dns) => {
                     Some(dns.dns_address.addr.ip())

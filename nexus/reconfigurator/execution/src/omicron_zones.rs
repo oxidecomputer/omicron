@@ -95,7 +95,9 @@ fn clean_up_expunged_nexus_zones<'a>(
     blueprint: &'a Blueprint,
 ) -> impl Stream<Item = (Logger, anyhow::Result<()>)> + 'a {
     let zones_to_clean_up = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
+        .danger_all_omicron_zones(
+            BlueprintZoneDisposition::is_ready_for_cleanup,
+        )
         .filter(|(_sled_id, zone)| zone.zone_type.is_nexus());
 
     stream::iter(zones_to_clean_up).then(move |(sled_id, zone)| async move {
@@ -119,7 +121,9 @@ fn clean_up_expunged_cockroach_zones<'a, R: CleanupResolver>(
     blueprint: &'a Blueprint,
 ) -> impl Stream<Item = (Logger, anyhow::Result<()>)> + 'a {
     let zones_to_clean_up = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
+        .danger_all_omicron_zones(
+            BlueprintZoneDisposition::is_ready_for_cleanup,
+        )
         .filter(|(_sled_id, zone)| zone.zone_type.is_cockroach());
 
     stream::iter(zones_to_clean_up).then(move |(sled_id, zone)| async move {
@@ -142,7 +146,9 @@ fn clean_up_expunged_oximeter_zones<'a>(
     blueprint: &'a Blueprint,
 ) -> impl Stream<Item = (Logger, anyhow::Result<()>)> + 'a {
     let zones_to_clean_up = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
+        .danger_all_omicron_zones(
+            BlueprintZoneDisposition::is_ready_for_cleanup,
+        )
         .filter(|(_sled_id, zone)| zone.zone_type.is_oximeter());
 
     stream::iter(zones_to_clean_up).then(move |(sled_id, zone)| async move {
