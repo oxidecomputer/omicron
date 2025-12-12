@@ -30,12 +30,14 @@ use omicron_common::{
     ledger::Ledgerable,
 };
 use omicron_uuid_kinds::{
-    DatasetUuid, ExternalZpoolUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
+    DatasetUuid, ExternalZpoolUuid, PropolisUuid, RackUuid, SupportBundleUuid,
+    ZpoolUuid,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::inventory::v9;
 use sled_agent_types::probes;
+use sled_agent_types::sled::BaseboardId;
 use sled_agent_types::{
     bootstore::BootstoreStatus,
     disk::DiskEnsureBody,
@@ -74,6 +76,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (11, ADD_TRUST_QUORUM),
     (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
     (9, DELEGATE_ZVOL_TO_PROPOLIS),
     (8, REMOVE_SLED_ROLE),
@@ -978,6 +981,17 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         path_params: Path<LocalStoragePathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate a trust quorum reconfiguration
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/reconfigure",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_reconfigure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<TrustQuorumReconfigureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -1238,4 +1252,14 @@ pub struct LocalStorageDatasetEnsureRequest {
 
     /// Size of the zvol
     pub volume_size: ByteCount,
+}
+
+/// Reconfigure message for trust quorum changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TrustQuorumReconfigureRequest {
+    pub rack_id: RackUuid,
+    pub epoch: u64,
+    pub last_committed_epoch: Option<u64>,
+    pub members: BTreeSet<BaseboardId>,
+    pub threshold: u8,
 }

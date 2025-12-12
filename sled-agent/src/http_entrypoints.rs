@@ -1155,4 +1155,12 @@ impl SledAgentApi for SledAgentImpl {
 
         Ok(HttpResponseUpdatedNoContent())
     }
+
+    #[doc = " Initiate a trust quorum reconfiguration"]
+    async fn trust_quorum_reconfigure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<TrustQuorumReconfigureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        todo!()
+    }
 }
