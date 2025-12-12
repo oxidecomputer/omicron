@@ -385,7 +385,7 @@ impl DataStore {
                                 conn,
                                 db_config.rack_id,
                                 db_config.epoch,
-                                config.encr,
+                                config.encrypted_rack_secrets.unwrap(),
                             )
                             .await
                             .map_err(|txn_error| txn_error.into_diesel(&err))?;
