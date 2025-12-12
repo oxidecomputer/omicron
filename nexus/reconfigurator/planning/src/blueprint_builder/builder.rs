@@ -44,6 +44,7 @@ use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
+use nexus_types::deployment::OperatorNexusConfig;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
@@ -1493,31 +1494,16 @@ impl<'a> BlueprintBuilder<'a> {
     ) -> Result<(), Error> {
         // Whether Nexus should use TLS and what the external DNS servers it
         // should use are currently provided at rack-setup time, and should be
-        // consistent across all Nexus instances. We'll assume we can copy them
-        // from any other Nexus zone in our parent blueprint.
-        //
-        // TODO-correctness Once these properties can be changed by a rack
-        // operator, this will need more work. At a minimum, if such a change
-        // goes through the blueprint system (which seems likely), we'll need to
-        // check that we're if this builder is being used to make such a change,
-        // that change is also reflected here in a new zone. Perhaps these
-        // settings should be part of `Policy` instead?
-        let (external_tls, external_dns_servers) = self
+        // consistent across all Nexus instances.
+        let OperatorNexusConfig { external_tls, external_dns_servers } = self
             .parent_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .find_map(|(_, z)| match &z.zone_type {
-                BlueprintZoneType::Nexus(nexus) => Some((
-                    nexus.external_tls,
-                    nexus.external_dns_servers.clone(),
-                )),
-                _ => None,
-            })
+            .operator_nexus_config()
             .ok_or(Error::NoNexusZonesInParentBlueprint)?;
 
         self.sled_add_zone_nexus_with_config(
             sled_id,
             external_tls,
-            external_dns_servers,
+            external_dns_servers.to_vec(),
             image_source,
             external_ip,
             nexus_generation,
