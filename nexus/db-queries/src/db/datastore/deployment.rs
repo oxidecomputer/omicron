@@ -1956,10 +1956,26 @@ impl DataStore {
                 self.ensure_zone_external_networking_deallocated_on_connection(
                     &conn,
                     &opctx.log,
+                    // TODO-correctness Currently the planner _does not wait_
+                    // for zones using external IPs to be ready for cleanup
+                    // before reassigning the external IP to a new zone, so we
+                    // have to deallocate IPs for both "ready for cleanup" and
+                    // "not ready for cleanup" zones. We should fix the planner,
+                    // at which point we can operate on only "ready for cleanup"
+                    // zones here.
+                    //
+                    // <https://github.com/oxidecomputer/omicron/issues/9506>
                     blueprint
-                        .expunged_zones(
+                        .expunged_zones_ready_for_cleanup(
                             BlueprintExpungedZoneAccessReason
                                 ::DeallocateExternalNetworkingResources
+                        )
+                        .chain(
+                            blueprint
+                                .expunged_zones_not_ready_for_cleanup(
+                                    BlueprintExpungedZoneAccessReason
+                                        ::DeallocateExternalNetworkingResources
+                                )
                         )
                         .map(|(_sled_id, zone)| zone),
                 )
@@ -4513,7 +4529,12 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .expunged_zones(BlueprintExpungedZoneAccessReason::Test)
+            .expunged_zones_not_ready_for_cleanup(
+                BlueprintExpungedZoneAccessReason::Test,
+            )
+            .chain(blueprint.expunged_zones_ready_for_cleanup(
+                BlueprintExpungedZoneAccessReason::Test,
+            ))
             .collect::<Vec<_>>();
         assert!(
             not_in_service.is_empty(),

@@ -2571,9 +2571,12 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
     );
     let blueprint3 = sim.run_planner().expect("planning succeeded");
 
-    // We should have expunged our single-node clickhouse zone
+    // We should have expunged our single-node clickhouse zone, but it won't be
+    // `ready_for_cleanup` yet.
     let expunged_zones: Vec<_> = blueprint3
-        .expunged_zones(BlueprintExpungedZoneAccessReason::Test)
+        .expunged_zones_not_ready_for_cleanup(
+            BlueprintExpungedZoneAccessReason::Test,
+        )
         .map(|(_, z)| z.clone())
         .collect();
 
@@ -2596,7 +2599,9 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
     // All our clickhouse keeper and server zones that we created when we
     // enabled our clickhouse policy should be expunged when we disable it.
     let expunged_zones: Vec<_> = blueprint4
-        .expunged_zones(BlueprintExpungedZoneAccessReason::Test)
+        .expunged_zones_not_ready_for_cleanup(
+            BlueprintExpungedZoneAccessReason::Test,
+        )
         .map(|(_, z)| z.clone())
         .collect();
 
@@ -3289,10 +3294,12 @@ fn test_update_crucible_pantry_before_nexus() {
         CRUCIBLE_PANTRY_REDUNDANCY
     );
 
-    // All old Pantry zones should now be expunged.
+    // All old Pantry zones should now be expunged and ready for cleanup.
     assert_eq!(
         blueprint
-            .expunged_zones(BlueprintExpungedZoneAccessReason::Test)
+            .expunged_zones_ready_for_cleanup(
+                BlueprintExpungedZoneAccessReason::Test
+            )
             .filter(|(_, z)| is_old_pantry(z))
             .count(),
         CRUCIBLE_PANTRY_REDUNDANCY

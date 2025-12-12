@@ -317,12 +317,33 @@ impl Blueprint {
     }
 
     /// TODO-john
-    pub fn expunged_zones(
+    pub fn expunged_zones_not_ready_for_cleanup(
         &self,
         _reason: BlueprintExpungedZoneAccessReason,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
         // TODO-john explain
-        self.danger_all_omicron_zones(BlueprintZoneDisposition::is_expunged)
+        self.danger_all_omicron_zones(|disposition| match disposition {
+            BlueprintZoneDisposition::InService => false,
+            BlueprintZoneDisposition::Expunged {
+                as_of_generation: _,
+                ready_for_cleanup,
+            } => !ready_for_cleanup,
+        })
+    }
+
+    /// TODO-john
+    pub fn expunged_zones_ready_for_cleanup(
+        &self,
+        _reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        // TODO-john explain
+        self.danger_all_omicron_zones(|disposition| match disposition {
+            BlueprintZoneDisposition::InService => false,
+            BlueprintZoneDisposition::Expunged {
+                as_of_generation: _,
+                ready_for_cleanup,
+            } => ready_for_cleanup,
+        })
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint

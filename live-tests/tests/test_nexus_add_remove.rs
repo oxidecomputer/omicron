@@ -208,7 +208,9 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     .await
     .expect("editing blueprint to expunge zone");
     let (_, expunged_zone_config) = blueprint3
-        .expunged_zones(BlueprintExpungedZoneAccessReason::Test)
+        .expunged_zones_not_ready_for_cleanup(
+            BlueprintExpungedZoneAccessReason::Test,
+        )
         .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
         .expect("expunged zone in new blueprint");
     let BlueprintZoneDisposition::Expunged {
@@ -307,7 +309,9 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // We don't need to check this here.  It just provides a better error
     // message if something has gone wrong up to this point.
     let (_, expunged_zone_config) = new_blueprint
-        .expunged_zones(BlueprintExpungedZoneAccessReason::Test)
+        .expunged_zones_ready_for_cleanup(
+            BlueprintExpungedZoneAccessReason::Test,
+        )
         .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
         .expect("expunged zone in new blueprint");
     assert!(expunged_zone_config.disposition.is_ready_for_cleanup());
