@@ -273,7 +273,7 @@ mod test {
             user_data: vec![],
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::Default,
+                params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![params::ExternalIpCreate::Ephemeral {
                 pool: None,
             }],

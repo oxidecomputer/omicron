@@ -480,6 +480,24 @@ impl ExternalIp {
     }
 }
 
+// TODO(ben)
+//
+// pub struct PrivateIpv4Stack {
+//     pub ip: Ipv4Addr,
+//     pub transit_ips: Vec<Ipv4Net>,
+// }
+//
+// pub struct PrivateIpv6Stack {
+//     pub ip: Ipv6Addr,
+//     pub transit_ips: Vec<Ipv6Net>,
+// }
+//
+// pub enum PrivateIpStack {
+//     V4(PrivateIpv4Stack),
+//     V6(PrivateIpv6Stack),
+//     DualStack { v4: PrivateIpv4Stack, v6: PrivateIpv6Stack },
+// }
+
 /// A source NAT IP address.
 ///
 /// SNAT addresses are ephemeral addresses used only for outbound connectivity.

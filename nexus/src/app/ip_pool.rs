@@ -152,17 +152,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pool_params: &params::IpPoolCreate,
     ) -> CreateResult<IpPool> {
-        // https://github.com/oxidecomputer/omicron/issues/8881
         let ip_version = pool_params.ip_version.into();
-
-        // IPv6 is not yet supported for unicast pools
-        if matches!(pool_params.pool_type, shared::IpPoolType::Unicast)
-            && matches!(ip_version, IpVersion::V6)
-        {
-            return Err(Error::invalid_request(
-                "IPv6 pools are not yet supported for unicast pools",
-            ));
-        }
 
         let pool = match pool_params.pool_type.clone() {
             shared::IpPoolType::Unicast => IpPool::new(

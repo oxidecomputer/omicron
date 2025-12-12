@@ -878,6 +878,51 @@ impl Iterator for IpRangeIter {
     }
 }
 
+/// Trait for any IP address type.
+pub trait Ip:
+    Clone
+    + Copy
+    + std::fmt::Debug
+    + Diffable
+    + Eq
+    + JsonSchema
+    + std::hash::Hash
+    + PartialOrd
+    + PartialEq
+    + Ord
+    + Serialize
+{
+}
+impl Ip for Ipv4Addr {}
+impl Ip for Ipv6Addr {}
+impl Ip for IpAddr {}
+
+/// An IP address of a specific version, IPv4 or IPv6.
+pub trait ConcreteIp: Ip {
+    fn into_ipaddr(self) -> IpAddr;
+    fn into_ipnet(self) -> ipnetwork::IpNetwork;
+}
+
+impl ConcreteIp for Ipv4Addr {
+    fn into_ipaddr(self) -> IpAddr {
+        IpAddr::V4(self)
+    }
+
+    fn into_ipnet(self) -> ipnetwork::IpNetwork {
+        ipnetwork::IpNetwork::V4(ipnetwork::Ipv4Network::from(self))
+    }
+}
+
+impl ConcreteIp for Ipv6Addr {
+    fn into_ipaddr(self) -> IpAddr {
+        IpAddr::V6(self)
+    }
+
+    fn into_ipnet(self) -> ipnetwork::IpNetwork {
+        ipnetwork::IpNetwork::V6(ipnetwork::Ipv6Network::from(self))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use serde_json::json;

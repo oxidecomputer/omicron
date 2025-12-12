@@ -321,7 +321,7 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
         client,
         "test-project",
         "test-instance",
-        &params::InstanceNetworkInterfaceAttachment::Default,
+        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
         false, // start=false, so instance is created in stopped state
