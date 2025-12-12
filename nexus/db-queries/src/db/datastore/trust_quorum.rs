@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::typed_uuid::DbTypedUuid;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
@@ -18,6 +17,7 @@ use nexus_db_errors::public_error_from_diesel_create;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DbTrustQuorumConfigurationState;
 use nexus_db_model::DbTrustQuorumMemberState;
+use nexus_db_model::DbTypedUuid;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
@@ -30,6 +30,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
 use std::collections::{BTreeMap, BTreeSet};
 use trust_quorum_protocol::{
@@ -499,12 +500,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        rack_id: DbTypedUuid<RackUuid>,
+        rack_id: DbTypedUuid<RackKind>,
         epoch: i64,
         encrypted_rack_secrets: EncryptedRackSecrets,
     ) -> Result<(), TransactionError<Error>> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let salt = Some(hex::encode(encrypted_rack_secrets.salt.0));
-        let secrets = Some(encrypted_rack_secrets.data.into());
+        let secrets: Option<Vec<u8>> = Some(encrypted_rack_secrets.data.into());
 
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
 
