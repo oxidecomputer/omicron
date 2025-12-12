@@ -24,6 +24,7 @@
 //! whether a zone without a known node ID ever existed.
 
 use crate::app::background::BackgroundTask;
+use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
 use anyhow::Context;
 use anyhow::ensure;
 use futures::FutureExt;
@@ -33,7 +34,6 @@ use futures::stream;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
@@ -46,15 +46,13 @@ use tokio::sync::watch;
 
 pub struct CockroachNodeIdCollector {
     datastore: Arc<DataStore>,
-    rx_blueprint: watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
+    rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
 }
 
 impl CockroachNodeIdCollector {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_blueprint: watch::Receiver<
-            Option<(BlueprintTarget, Arc<Blueprint>)>,
-        >,
+        rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
     ) -> Self {
         Self { datastore, rx_blueprint }
     }
@@ -74,7 +72,8 @@ impl CockroachNodeIdCollector {
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
 
-        let Some((_bp_target, blueprint)) = update else {
+        let Some(LoadedTargetBlueprint { blueprint, target: _ }) = update
+        else {
             warn!(
                 &opctx.log, "Blueprint execution: skipped";
                 "reason" => "no blueprint",
@@ -243,6 +242,7 @@ mod tests {
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_types::deployment::BlueprintSource;
+    use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use omicron_common::api::external::Generation;
@@ -378,7 +378,10 @@ mod tests {
         };
 
         let (_tx_blueprint, rx_blueprint) =
-            watch::channel(Some((blueprint_target, Arc::new(blueprint))));
+            watch::channel(Some(LoadedTargetBlueprint {
+                target: blueprint_target,
+                blueprint: Arc::new(blueprint),
+            }));
         let mut collector =
             CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
 
@@ -438,7 +441,10 @@ mod tests {
         };
 
         let (_tx_blueprint, rx_blueprint) =
-            watch::channel(Some((blueprint_target, Arc::new(blueprint))));
+            watch::channel(Some(LoadedTargetBlueprint {
+                target: blueprint_target,
+                blueprint: Arc::new(blueprint),
+            }));
         let mut collector =
             CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
 

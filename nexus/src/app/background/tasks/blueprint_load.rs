@@ -17,24 +17,28 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
 
+#[derive(Debug, Clone)]
+pub struct LoadedTargetBlueprint {
+    pub target: BlueprintTarget,
+    pub blueprint: Arc<Blueprint>,
+}
+
 pub struct TargetBlueprintLoader {
     datastore: Arc<DataStore>,
-    last: Option<(BlueprintTarget, Arc<Blueprint>)>,
-    tx: watch::Sender<Option<(BlueprintTarget, Arc<Blueprint>)>>,
+    last: Option<LoadedTargetBlueprint>,
+    tx: watch::Sender<Option<LoadedTargetBlueprint>>,
 }
 
 impl TargetBlueprintLoader {
     pub fn new(
         datastore: Arc<DataStore>,
-        tx: watch::Sender<Option<(BlueprintTarget, Arc<Blueprint>)>>,
+        tx: watch::Sender<Option<LoadedTargetBlueprint>>,
     ) -> TargetBlueprintLoader {
         TargetBlueprintLoader { datastore, last: None, tx }
     }
 
     /// Expose the target blueprint
-    pub fn watcher(
-        &self,
-    ) -> watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>> {
+    pub fn watcher(&self) -> watch::Receiver<Option<LoadedTargetBlueprint>> {
         self.tx.subscribe()
     }
 }
@@ -49,10 +53,13 @@ impl BackgroundTask for TargetBlueprintLoader {
             // the current target.
             let log = match &self.last {
                 None => opctx.log.clone(),
-                Some(old) => opctx.log.new(o!(
-                    "original_target_id" => old.1.id.to_string(),
-                    "original_time_created" => old.1.time_created.to_string(),
-                )),
+                Some(LoadedTargetBlueprint { blueprint, .. }) => {
+                    opctx.log.new(o!(
+                        "original_target_id" => blueprint.id.to_string(),
+                        "original_time_created" =>
+                            blueprint.time_created.to_string(),
+                    ))
+                }
             };
 
             // Retrieve the latest target blueprint
@@ -81,7 +88,10 @@ impl BackgroundTask for TargetBlueprintLoader {
 
             // Decide what to do with the new blueprint
             let enabled = new_bp_target.enabled;
-            let Some((old_bp_target, old_blueprint)) = self.last.as_ref()
+            let Some(LoadedTargetBlueprint {
+                target: old_bp_target,
+                blueprint: old_blueprint,
+            }) = self.last.as_ref()
             else {
                 // We've found a target blueprint for the first time.
                 // Save it and notify any watchers.
@@ -93,7 +103,10 @@ impl BackgroundTask for TargetBlueprintLoader {
                     "target_id" => %target_id,
                     "time_created" => %time_created
                 );
-                self.last = Some((new_bp_target, Arc::new(new_blueprint)));
+                self.last = Some(LoadedTargetBlueprint {
+                    target: new_bp_target,
+                    blueprint: Arc::new(new_blueprint),
+                });
                 self.tx.send_replace(self.last.clone());
                 return json!({
                     "target_id": target_id,
@@ -114,7 +127,10 @@ impl BackgroundTask for TargetBlueprintLoader {
                     "target_id" => %target_id,
                     "time_created" => %time_created
                 );
-                self.last = Some((new_bp_target, Arc::new(new_blueprint)));
+                self.last = Some(LoadedTargetBlueprint {
+                    target: new_bp_target,
+                    blueprint: Arc::new(new_blueprint),
+                });
                 self.tx.send_replace(self.last.clone());
                 json!({
                     "target_id": target_id,
@@ -157,7 +173,10 @@ impl BackgroundTask for TargetBlueprintLoader {
                         "time_created" => %time_created,
                         "state" => status,
                     );
-                    self.last = Some((new_bp_target, Arc::new(new_blueprint)));
+                    self.last = Some(LoadedTargetBlueprint {
+                        target: new_bp_target,
+                        blueprint: Arc::new(new_blueprint),
+                    });
                     self.tx.send_replace(self.last.clone());
                     json!({
                         "target_id": target_id,
@@ -268,7 +287,7 @@ mod test {
         let initial_blueprint =
             rx.borrow_and_update().clone().expect("no initial blueprint");
         let update = serde_json::from_value::<TargetUpdate>(value).unwrap();
-        assert_eq!(update.target_id, initial_blueprint.1.id);
+        assert_eq!(update.target_id, initial_blueprint.blueprint.id);
         assert_eq!(update.status, "first target blueprint");
 
         let (target, blueprint) = create_blueprint(update.target_id);
@@ -278,7 +297,7 @@ mod test {
         datastore.blueprint_insert(&opctx, &blueprint).await.unwrap();
         let value = task.activate(&opctx).await;
         let update = serde_json::from_value::<TargetUpdate>(value).unwrap();
-        assert_eq!(update.target_id, initial_blueprint.1.id);
+        assert_eq!(update.target_id, initial_blueprint.blueprint.id);
         assert_eq!(update.status, "target blueprint unchanged");
 
         // Setting a target blueprint makes the loader see it and broadcast it
@@ -288,8 +307,8 @@ mod test {
         assert_eq!(update.target_id, blueprint.id);
         assert_eq!(update.status, "target blueprint updated");
         let rx_update = rx.borrow_and_update().clone().unwrap();
-        assert_eq!(rx_update.0, target);
-        assert_eq!(rx_update.1, blueprint);
+        assert_eq!(rx_update.target, target);
+        assert_eq!(rx_update.blueprint, blueprint);
 
         // Activation without changing the target blueprint results in no update
         let value = task.activate(&opctx).await;
@@ -310,8 +329,8 @@ mod test {
         assert_eq!(update.target_id, new_blueprint.id);
         assert_eq!(update.status, "target blueprint updated");
         let rx_update = rx.borrow_and_update().clone().unwrap();
-        assert_eq!(rx_update.0, new_target);
-        assert_eq!(rx_update.1, new_blueprint);
+        assert_eq!(rx_update.target, new_target);
+        assert_eq!(rx_update.blueprint, new_blueprint);
 
         // Activating again without changing the target blueprint results in
         // no update
