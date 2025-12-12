@@ -21,6 +21,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -227,8 +228,10 @@ impl DataStore {
         // For this blueprint: The set of all expunged Nexus zones that are
         // ready for cleanup
         let invalid_nexus_zones = blueprint
-            .danger_all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
-            .filter_map(|(_sled, zone)| {
+            .expunged_nexus_zones_ready_for_cleanup(
+                BlueprintExpungedZoneAccessReason::NexusSupportBundleMarkFailed,
+            )
+            .filter_map(|(_sled, zone, _nexus_config)| {
                 if zone.zone_type.is_nexus() {
                     Some(zone.id.into_untyped_uuid())
                 } else {

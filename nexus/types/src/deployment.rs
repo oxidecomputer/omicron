@@ -672,6 +672,8 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// TODO-john
     NexusSagaReassignment,
     /// TODO-john
+    NexusSupportBundleMarkFailed,
+    /// TODO-john
     Test,
 }
 
