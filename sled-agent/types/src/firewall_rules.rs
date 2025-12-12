@@ -4,4 +4,4 @@
 
 //! Firewall rule types for the Sled Agent API.
 
-pub use sled_agent_types_versions::latest::instance::VpcFirewallRulesEnsureBody;
+pub use sled_agent_types_versions::latest::firewall_rules::*;

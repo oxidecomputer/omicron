@@ -14,8 +14,8 @@ omicron-rpaths.workspace = true
 async-trait.workspace = true
 nexus-config.workspace = true
 nexus-db-queries.workspace = true
-sled-agent-types-versions.workspace = true
 nexus-types.workspace = true
+sled-agent-types.workspace = true
 omicron-common.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"

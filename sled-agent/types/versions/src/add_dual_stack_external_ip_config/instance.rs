@@ -17,10 +17,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// Unchanged types from earlier versions
 use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::VmmSpec;
 use crate::v7::instance::InstanceMulticastMembership;
+use crate::v10;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
@@ -65,18 +65,11 @@ pub struct InstanceSledLocalConfig {
     pub delegated_zvols: Vec<DelegatedZvol>,
 }
 
-/// Update firewall rules for a VPC
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct VpcFirewallRulesEnsureBody {
-    pub vni: external::Vni,
-    pub rules: Vec<ResolvedVpcFirewallRule>,
-}
-
-impl TryFrom<crate::v10::instance::InstanceEnsureBody> for InstanceEnsureBody {
+impl TryFrom<v10::instance::InstanceEnsureBody> for InstanceEnsureBody {
     type Error = external::Error;
 
     fn try_from(
-        v10: crate::v10::instance::InstanceEnsureBody,
+        v10: v10::instance::InstanceEnsureBody,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
             vmm_spec: v10.vmm_spec,
@@ -90,13 +83,13 @@ impl TryFrom<crate::v10::instance::InstanceEnsureBody> for InstanceEnsureBody {
     }
 }
 
-impl TryFrom<crate::v10::instance::InstanceSledLocalConfig>
+impl TryFrom<v10::instance::InstanceSledLocalConfig>
     for InstanceSledLocalConfig
 {
     type Error = external::Error;
 
     fn try_from(
-        v10: crate::v10::instance::InstanceSledLocalConfig,
+        v10: v10::instance::InstanceSledLocalConfig,
     ) -> Result<Self, Self::Error> {
         // v10.source_nat is already a v1::SourceNatConfig, so we can use it directly
         let external_ips = ExternalIpConfig::try_from_generic(
@@ -119,32 +112,5 @@ impl TryFrom<crate::v10::instance::InstanceSledLocalConfig>
             dhcp_config: v10.dhcp_config,
             delegated_zvols: v10.delegated_zvols,
         })
-    }
-}
-
-impl TryFrom<crate::v10::instance::VpcFirewallRulesEnsureBody>
-    for VpcFirewallRulesEnsureBody
-{
-    type Error = external::Error;
-
-    fn try_from(
-        v10: crate::v10::instance::VpcFirewallRulesEnsureBody,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self { vni: v10.vni, rules: v10.rules })
-    }
-}
-
-impl TryFrom<crate::v9::instance::VpcFirewallRulesEnsureBody>
-    for VpcFirewallRulesEnsureBody
-{
-    type Error = external::Error;
-
-    fn try_from(
-        v9: crate::v9::instance::VpcFirewallRulesEnsureBody,
-    ) -> Result<Self, Self::Error> {
-        // Chain through v10
-        let v10 =
-            crate::v10::instance::VpcFirewallRulesEnsureBody::try_from(v9)?;
-        Self::try_from(v10)
     }
 }

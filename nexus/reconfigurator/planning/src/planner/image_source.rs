@@ -17,7 +17,7 @@ use nexus_types::{
 };
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_uuid_kinds::{MupdateOverrideUuid, OmicronZoneUuid, SledUuid};
-use sled_agent_types_versions::latest::inventory::{
+use sled_agent_types::inventory::{
     BootPartitionContents, BootPartitionDetails, ZoneKind,
     ZoneManifestBootInventory,
 };

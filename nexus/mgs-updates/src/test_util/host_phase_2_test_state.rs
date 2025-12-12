@@ -206,19 +206,66 @@ mod api_impl {
     use omicron_common::api::internal::shared::{
         ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
     };
-    use sled_agent_types::dataset::{
-        LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
-    };
-    use sled_agent_types::instance::{
-        InstanceEnsureBody, VmmPathParam, VpcFirewallRulesEnsureBody,
-        VpcPathParam,
-    };
-    use sled_agent_types::inventory::{
-        ConfigReconcilerInventory, ConfigReconcilerInventoryStatus, Inventory,
-        OmicronSledConfig,
-    };
+    use sled_agent_types::artifact::ArtifactConfig;
+    use sled_agent_types::artifact::ArtifactCopyFromDepotBody;
+    use sled_agent_types::artifact::ArtifactCopyFromDepotResponse;
+    use sled_agent_types::artifact::ArtifactListResponse;
+    use sled_agent_types::artifact::ArtifactPathParam;
+    use sled_agent_types::artifact::ArtifactPutResponse;
+    use sled_agent_types::artifact::ArtifactQueryParam;
+    use sled_agent_types::bootstore::BootstoreStatus;
+    use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+    use sled_agent_types::dataset::LocalStoragePathParam;
+    use sled_agent_types::debug::ChickenSwitchDestroyOrphanedDatasets;
+    use sled_agent_types::debug::OperatorSwitchZonePolicy;
+    use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadPathParm;
+    use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
+    use sled_agent_types::disk::DiskEnsureBody;
+    use sled_agent_types::disk::DiskPathParam;
+    use sled_agent_types::early_networking::EarlyNetworkConfig;
+    use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
+    use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::instance::InstanceExternalIpBody;
+    use sled_agent_types::instance::InstanceMulticastBody;
+    use sled_agent_types::instance::VmmIssueDiskSnapshotRequestBody;
+    use sled_agent_types::instance::VmmIssueDiskSnapshotRequestPathParam;
+    use sled_agent_types::instance::VmmIssueDiskSnapshotRequestResponse;
+    use sled_agent_types::instance::VmmPathParam;
+    use sled_agent_types::instance::VmmPutStateBody;
+    use sled_agent_types::instance::VmmPutStateResponse;
+    use sled_agent_types::instance::VmmUnregisterResponse;
+    use sled_agent_types::instance::VpcPathParam;
+    use sled_agent_types::inventory::BootImageHeader;
+    use sled_agent_types::inventory::BootPartitionContents;
+    use sled_agent_types::inventory::BootPartitionDetails;
+    use sled_agent_types::inventory::ConfigReconcilerInventory;
+    use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HostPhase2DesiredContents;
+    use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::Inventory;
+    use sled_agent_types::inventory::MupdateOverrideInventory;
+    use sled_agent_types::inventory::OmicronSledConfig;
+    use sled_agent_types::inventory::SledCpuFamily;
+    use sled_agent_types::inventory::SledRole;
+    use sled_agent_types::inventory::ZoneImageResolverInventory;
+    use sled_agent_types::inventory::ZoneManifestInventory;
     use sled_agent_types::probes::ProbeSet;
-    use sled_agent_types_versions::{v1, v3, v7};
+    use sled_agent_types::sled::AddSledRequest;
+    use sled_agent_types::support_bundle::RangeRequestHeaders;
+    use sled_agent_types::support_bundle::SupportBundleFilePathParam;
+    use sled_agent_types::support_bundle::SupportBundleFinalizeQueryParams;
+    use sled_agent_types::support_bundle::SupportBundleListPathParam;
+    use sled_agent_types::support_bundle::SupportBundleMetadata;
+    use sled_agent_types::support_bundle::SupportBundlePathParam;
+    use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
+    use sled_agent_types::zone_bundle::BundleUtilization;
+    use sled_agent_types::zone_bundle::CleanupContext;
+    use sled_agent_types::zone_bundle::CleanupContextUpdate;
+    use sled_agent_types::zone_bundle::CleanupCount;
+    use sled_agent_types::zone_bundle::ZoneBundleFilter;
+    use sled_agent_types::zone_bundle::ZoneBundleId;
+    use sled_agent_types::zone_bundle::ZoneBundleMetadata;
+    use sled_agent_types::zone_bundle::ZonePathParam;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::time::Duration;
@@ -261,10 +308,10 @@ mod api_impl {
             // Construct the `boot_partitions` inventory field (the one our
             // tests really care about) from our current state.
             let make_details = |artifact_hash| {
-                Ok(v1::inventory::BootPartitionDetails {
+                Ok(BootPartitionDetails {
                     artifact_hash,
                     artifact_size: 1000,
-                    header: v1::inventory::BootImageHeader {
+                    header: BootImageHeader {
                         flags: 0,
                         data_size: 1000,
                         image_size: 1000,
@@ -274,7 +321,7 @@ mod api_impl {
                     },
                 })
             };
-            let boot_partitions = v1::inventory::BootPartitionContents {
+            let boot_partitions = BootPartitionContents {
                 boot_disk: Ok(boot_disk),
                 slot_a: make_details(slot_a_artifact),
                 slot_b: make_details(slot_b_artifact),
@@ -288,9 +335,9 @@ mod api_impl {
                 datasets: IdOrdMap::new(),
                 zones: IdOrdMap::new(),
                 remove_mupdate_override: None,
-                host_phase_2: v1::inventory::HostPhase2DesiredSlots {
-                    slot_a: v1::inventory::HostPhase2DesiredContents::CurrentContents,
-                    slot_b: v1::inventory::HostPhase2DesiredContents::CurrentContents,
+                host_phase_2: HostPhase2DesiredSlots {
+                    slot_a: HostPhase2DesiredContents::CurrentContents,
+                    slot_b: HostPhase2DesiredContents::CurrentContents,
                 },
             };
 
@@ -302,7 +349,7 @@ mod api_impl {
                 usable_hardware_threads: 64,
                 usable_physical_ram: (1 << 30).into(),
                 reservoir_size: (1 << 29).into(),
-                cpu_family: v1::inventory::SledCpuFamily::AmdMilan,
+                cpu_family: SledCpuFamily::AmdMilan,
                 disks: Vec::new(),
                 zpools: Vec::new(),
                 datasets: Vec::new(),
@@ -320,8 +367,8 @@ mod api_impl {
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
-                zone_image_resolver: v1::inventory::ZoneImageResolverInventory {
-                    zone_manifest: v1::inventory::ZoneManifestInventory {
+                zone_image_resolver: ZoneImageResolverInventory {
+                    zone_manifest: ZoneManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
                         boot_inventory: Err(
                             "not implemented by HostPhase2SledAgentImpl"
@@ -329,7 +376,7 @@ mod api_impl {
                         ),
                         non_boot_status: IdOrdMap::new(),
                     },
-                    mupdate_override: v1::inventory::MupdateOverrideInventory {
+                    mupdate_override: MupdateOverrideInventory {
                         boot_disk_path: Utf8PathBuf::new(),
                         boot_override: Err(
                             "not implemented by HostPhase2SledAgentImpl"
@@ -343,27 +390,23 @@ mod api_impl {
 
         async fn zone_bundle_list_all(
             _rqctx: RequestContext<Self::Context>,
-            _query: Query<v1::zone_bundle::ZoneBundleFilter>,
-        ) -> Result<
-            HttpResponseOk<Vec<v1::zone_bundle::ZoneBundleMetadata>>,
-            HttpError,
-        > {
+            _query: Query<ZoneBundleFilter>,
+        ) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError>
+        {
             unimplemented!()
         }
 
         async fn zone_bundle_list(
             _rqctx: RequestContext<Self::Context>,
-            _params: Path<v1::zone_bundle::ZonePathParam>,
-        ) -> Result<
-            HttpResponseOk<Vec<v1::zone_bundle::ZoneBundleMetadata>>,
-            HttpError,
-        > {
+            _params: Path<ZonePathParam>,
+        ) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError>
+        {
             unimplemented!()
         }
 
         async fn zone_bundle_get(
             _rqctx: RequestContext<Self::Context>,
-            _params: Path<v1::zone_bundle::ZoneBundleId>,
+            _params: Path<ZoneBundleId>,
         ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
         {
             unimplemented!()
@@ -371,7 +414,7 @@ mod api_impl {
 
         async fn zone_bundle_delete(
             _rqctx: RequestContext<Self::Context>,
-            _params: Path<v1::zone_bundle::ZoneBundleId>,
+            _params: Path<ZoneBundleId>,
         ) -> Result<HttpResponseDeleted, HttpError> {
             unimplemented!()
         }
@@ -379,9 +422,7 @@ mod api_impl {
         async fn zone_bundle_utilization(
             _rqctx: RequestContext<Self::Context>,
         ) -> Result<
-            HttpResponseOk<
-                BTreeMap<Utf8PathBuf, v1::zone_bundle::BundleUtilization>,
-            >,
+            HttpResponseOk<BTreeMap<Utf8PathBuf, BundleUtilization>>,
             HttpError,
         > {
             unimplemented!()
@@ -389,14 +430,13 @@ mod api_impl {
 
         async fn zone_bundle_cleanup_context(
             _rqctx: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<v1::zone_bundle::CleanupContext>, HttpError>
-        {
+        ) -> Result<HttpResponseOk<CleanupContext>, HttpError> {
             unimplemented!()
         }
 
         async fn zone_bundle_cleanup_context_update(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<v1::zone_bundle::CleanupContextUpdate>,
+            _body: TypedBody<CleanupContextUpdate>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -404,9 +444,7 @@ mod api_impl {
         async fn zone_bundle_cleanup(
             _rqctx: RequestContext<Self::Context>,
         ) -> Result<
-            HttpResponseOk<
-                BTreeMap<Utf8PathBuf, v1::zone_bundle::CleanupCount>,
-            >,
+            HttpResponseOk<BTreeMap<Utf8PathBuf, CleanupCount>>,
             HttpError,
         > {
             unimplemented!()
@@ -420,102 +458,90 @@ mod api_impl {
 
         async fn support_bundle_list(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::support_bundle::SupportBundleListPathParam>,
-        ) -> Result<
-            HttpResponseOk<Vec<v1::support_bundle::SupportBundleMetadata>>,
-            HttpError,
-        > {
+            _path_params: Path<SupportBundleListPathParam>,
+        ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError>
+        {
             unimplemented!()
         }
 
         async fn support_bundle_start_creation(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
-        ) -> Result<
-            HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
-            HttpError,
-        > {
+            _path_params: Path<SupportBundlePathParam>,
+        ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>
+        {
             unimplemented!()
         }
 
         async fn support_bundle_transfer(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
-            _query_params: Query<
-                v1::support_bundle::SupportBundleTransferQueryParams,
-            >,
+            _path_params: Path<SupportBundlePathParam>,
+            _query_params: Query<SupportBundleTransferQueryParams>,
             _body: StreamingBody,
-        ) -> Result<
-            HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
-            HttpError,
-        > {
+        ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>
+        {
             unimplemented!()
         }
 
         async fn support_bundle_finalize(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
-            _query_params: Query<
-                v1::support_bundle::SupportBundleFinalizeQueryParams,
-            >,
-        ) -> Result<
-            HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
-            HttpError,
-        > {
+            _path_params: Path<SupportBundlePathParam>,
+            _query_params: Query<SupportBundleFinalizeQueryParams>,
+        ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>
+        {
             unimplemented!()
         }
 
         async fn support_bundle_download(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
-            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
+            _headers: Header<RangeRequestHeaders>,
+            _path_params: Path<SupportBundlePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_download_file(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
-            _path_params: Path<v1::support_bundle::SupportBundleFilePathParam>,
+            _headers: Header<RangeRequestHeaders>,
+            _path_params: Path<SupportBundleFilePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_index(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
-            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
+            _headers: Header<RangeRequestHeaders>,
+            _path_params: Path<SupportBundlePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_head(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
-            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
+            _headers: Header<RangeRequestHeaders>,
+            _path_params: Path<SupportBundlePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_head_file(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
-            _path_params: Path<v1::support_bundle::SupportBundleFilePathParam>,
+            _headers: Header<RangeRequestHeaders>,
+            _path_params: Path<SupportBundleFilePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_head_index(
             _rqctx: RequestContext<Self::Context>,
-            _headers: Header<v1::support_bundle::RangeRequestHeaders>,
-            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
+            _headers: Header<RangeRequestHeaders>,
+            _path_params: Path<SupportBundlePathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
         async fn support_bundle_delete(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::support_bundle::SupportBundlePathParam>,
+            _path_params: Path<SupportBundlePathParam>,
         ) -> Result<HttpResponseDeleted, HttpError> {
             unimplemented!()
         }
@@ -527,10 +553,9 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn sled_role_get(
+        async fn sled_role_get_v1(
             _rqctx: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError>
-        {
+        ) -> Result<HttpResponseOk<SledRole>, HttpError> {
             unimplemented!()
         }
 
@@ -544,58 +569,54 @@ mod api_impl {
 
         async fn vmm_unregister(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::instance::VmmPathParam>,
-        ) -> Result<
-            HttpResponseOk<v1::instance::VmmUnregisterResponse>,
-            HttpError,
-        > {
+            _path_params: Path<VmmPathParam>,
+        ) -> Result<HttpResponseOk<VmmUnregisterResponse>, HttpError> {
             unimplemented!()
         }
 
         async fn vmm_put_state(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::instance::VmmPathParam>,
-            _body: TypedBody<v1::instance::VmmPutStateBody>,
-        ) -> Result<HttpResponseOk<v1::instance::VmmPutStateResponse>, HttpError>
-        {
+            _path_params: Path<VmmPathParam>,
+            _body: TypedBody<VmmPutStateBody>,
+        ) -> Result<HttpResponseOk<VmmPutStateResponse>, HttpError> {
             unimplemented!()
         }
 
         async fn vmm_get_state(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::instance::VmmPathParam>,
+            _path_params: Path<VmmPathParam>,
         ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
             unimplemented!()
         }
 
         async fn vmm_put_external_ip(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::instance::VmmPathParam>,
-            _body: TypedBody<v1::instance::InstanceExternalIpBody>,
+            _path_params: Path<VmmPathParam>,
+            _body: TypedBody<InstanceExternalIpBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
         async fn vmm_delete_external_ip(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::instance::VmmPathParam>,
-            _body: TypedBody<v1::instance::InstanceExternalIpBody>,
+            _path_params: Path<VmmPathParam>,
+            _body: TypedBody<InstanceExternalIpBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
         async fn vmm_join_multicast_group(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::instance::VmmPathParam>,
-            body: TypedBody<v7::instance::InstanceMulticastBody>,
+            _path_params: Path<VmmPathParam>,
+            body: TypedBody<InstanceMulticastBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             let body_args = body.into_inner();
             match body_args {
-                v7::instance::InstanceMulticastBody::Join(_) => {
+                InstanceMulticastBody::Join(_) => {
                     // MGS test utility - just return success for test compatibility
                     Ok(HttpResponseUpdatedNoContent())
                 }
-                v7::instance::InstanceMulticastBody::Leave(_) => {
+                InstanceMulticastBody::Leave(_) => {
                     // This endpoint is for joining - reject leave operations
                     Err(HttpError::for_bad_request(
                         None,
@@ -608,16 +629,16 @@ mod api_impl {
 
         async fn vmm_leave_multicast_group(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::instance::VmmPathParam>,
-            body: TypedBody<v7::instance::InstanceMulticastBody>,
+            _path_params: Path<VmmPathParam>,
+            body: TypedBody<InstanceMulticastBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             let body_args = body.into_inner();
             match body_args {
-                v7::instance::InstanceMulticastBody::Leave(_) => {
+                InstanceMulticastBody::Leave(_) => {
                     // MGS test utility - just return success for test compatibility
                     Ok(HttpResponseUpdatedNoContent())
                 }
-                v7::instance::InstanceMulticastBody::Join(_) => {
+                InstanceMulticastBody::Join(_) => {
                     // This endpoint is for leaving - reject join operations
                     Err(HttpError::for_bad_request(
                         None,
@@ -630,40 +651,38 @@ mod api_impl {
 
         async fn disk_put(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::disk::DiskPathParam>,
-            _body: TypedBody<v1::disk::DiskEnsureBody>,
+            _path_params: Path<DiskPathParam>,
+            _body: TypedBody<DiskEnsureBody>,
         ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
             unimplemented!()
         }
 
         async fn artifact_config_get(
             _rqctx: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<v1::artifact::ArtifactConfig>, HttpError>
-        {
+        ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError> {
             unimplemented!()
         }
 
         async fn artifact_config_put(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<v1::artifact::ArtifactConfig>,
+            _body: TypedBody<ArtifactConfig>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
         async fn artifact_list(
             _rqctx: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<v1::artifact::ArtifactListResponse>, HttpError>
-        {
+        ) -> Result<HttpResponseOk<ArtifactListResponse>, HttpError> {
             unimplemented!()
         }
 
         async fn artifact_copy_from_depot(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::artifact::ArtifactPathParam>,
-            _query_params: Query<v1::artifact::ArtifactQueryParam>,
-            _body: TypedBody<v1::artifact::ArtifactCopyFromDepotBody>,
+            _path_params: Path<ArtifactPathParam>,
+            _query_params: Query<ArtifactQueryParam>,
+            _body: TypedBody<ArtifactCopyFromDepotBody>,
         ) -> Result<
-            HttpResponseAccepted<v1::artifact::ArtifactCopyFromDepotResponse>,
+            HttpResponseAccepted<ArtifactCopyFromDepotResponse>,
             HttpError,
         > {
             unimplemented!()
@@ -671,22 +690,19 @@ mod api_impl {
 
         async fn artifact_put(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<v1::artifact::ArtifactPathParam>,
-            _query_params: Query<v1::artifact::ArtifactQueryParam>,
+            _path_params: Path<ArtifactPathParam>,
+            _query_params: Query<ArtifactQueryParam>,
             _body: StreamingBody,
-        ) -> Result<HttpResponseOk<v1::artifact::ArtifactPutResponse>, HttpError>
-        {
+        ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError> {
             unimplemented!()
         }
 
         async fn vmm_issue_disk_snapshot_request(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<
-                v1::instance::VmmIssueDiskSnapshotRequestPathParam,
-            >,
-            _body: TypedBody<v1::instance::VmmIssueDiskSnapshotRequestBody>,
+            _path_params: Path<VmmIssueDiskSnapshotRequestPathParam>,
+            _body: TypedBody<VmmIssueDiskSnapshotRequestBody>,
         ) -> Result<
-            HttpResponseOk<v1::instance::VmmIssueDiskSnapshotRequestResponse>,
+            HttpResponseOk<VmmIssueDiskSnapshotRequestResponse>,
             HttpError,
         > {
             unimplemented!()
@@ -730,23 +746,20 @@ mod api_impl {
 
         async fn read_network_bootstore_config_cache(
             _rqctx: RequestContext<Self::Context>,
-        ) -> Result<
-            HttpResponseOk<v1::early_networking::EarlyNetworkConfig>,
-            HttpError,
-        > {
+        ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
             unimplemented!()
         }
 
         async fn write_network_bootstore_config(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
+            _body: TypedBody<EarlyNetworkConfig>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
         async fn sled_add(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<v1::sled::AddSledRequest>,
+            _body: TypedBody<AddSledRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -759,8 +772,7 @@ mod api_impl {
 
         async fn bootstore_status(
             _request_context: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<v1::bootstore::BootstoreStatus>, HttpError>
-        {
+        ) -> Result<HttpResponseOk<BootstoreStatus>, HttpError> {
             unimplemented!()
         }
 
@@ -863,44 +875,40 @@ mod api_impl {
 
         async fn support_logs_download(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<
-                v1::diagnostics::SledDiagnosticsLogsDownloadPathParm,
-            >,
+            _path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
             _query_params: dropshot::Query<
-                v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
+                SledDiagnosticsLogsDownloadQueryParam,
             >,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
 
-        async fn chicken_switch_destroy_orphaned_datasets_get(
+        async fn chicken_switch_destroy_orphaned_datasets_get_v1(
             _request_context: RequestContext<Self::Context>,
         ) -> Result<
-            HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
+            HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>,
             HttpError,
         > {
             unimplemented!()
         }
 
-        async fn chicken_switch_destroy_orphaned_datasets_put(
+        async fn chicken_switch_destroy_orphaned_datasets_put_v1(
             _request_context: RequestContext<Self::Context>,
-            _body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
+            _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
         async fn debug_operator_switch_zone_policy_get(
             _request_context: RequestContext<Self::Context>,
-        ) -> Result<
-            HttpResponseOk<v3::debug::OperatorSwitchZonePolicy>,
-            HttpError,
-        > {
+        ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError>
+        {
             unimplemented!()
         }
 
         async fn debug_operator_switch_zone_policy_put(
             _request_context: RequestContext<Self::Context>,
-            _body: TypedBody<v3::debug::OperatorSwitchZonePolicy>,
+            _body: TypedBody<OperatorSwitchZonePolicy>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

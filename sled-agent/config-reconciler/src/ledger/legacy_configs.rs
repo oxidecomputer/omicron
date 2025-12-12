@@ -28,7 +28,7 @@ const LEGACY_DISKS_LEDGER_FILENAME: &str = "omicron-physical-disks.json";
 const LEGACY_DATASETS_LEDGER_FILENAME: &str = "omicron-datasets.json";
 const LEGACY_ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
 
-/// Convert from version 8 of the sled-configuration to the current, if
+/// Convert from version 4 of the sled-configuration to the current, if
 /// possible. The later version includes dual-stack private IP configuration in
 /// our internal network interface types.
 ///
@@ -40,7 +40,7 @@ const LEGACY_ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
 /// we do encounter that. Returning `None` is not correct, since that would
 /// incorrectly indicate that we have no config at all. We _must_ panic and rely
 /// on support correcting this (believed-to-be-impossible) situation.
-pub(super) async fn try_convert_v9_sled_config(
+pub(super) async fn try_convert_v4_sled_config(
     log: &Logger,
     datasets: Vec<Utf8PathBuf>,
 ) -> Option<OmicronSledConfig> {
@@ -395,7 +395,7 @@ pub(super) mod tests {
 
         // Convert, which will rewrite the config as well.
         let converted =
-            try_convert_v9_sled_config(&logctx.log, vec![dst_file.clone()])
+            try_convert_v4_sled_config(&logctx.log, vec![dst_file.clone()])
                 .await
                 .expect("Should have found and converted v9 config");
 

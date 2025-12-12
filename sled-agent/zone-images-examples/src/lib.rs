@@ -21,12 +21,12 @@ use omicron_common::update::{
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
+use sled_agent_types::inventory::ZoneKind;
 use sled_agent_types::zone_images::{
     ArcIoError, ArcSerdeJsonError, ArtifactReadResult,
     InstallMetadataReadError, ZoneManifestArtifactResult,
     ZoneManifestArtifactsResult, ZoneManifestZoneHashError,
 };
-use sled_agent_types_versions::latest::inventory::ZoneKind;
 use tufaceous_artifact::ArtifactHash;
 
 pub struct OverridePaths {

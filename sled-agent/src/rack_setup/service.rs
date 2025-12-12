@@ -109,6 +109,10 @@ use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
+use sled_agent_types::inventory::{
+    ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
+};
 use sled_agent_types::rack_init::{
     BootstrapAddressDiscovery, RackInitializeRequest as Config,
     RackInitializeRequestParams,
@@ -116,10 +120,6 @@ use sled_agent_types::rack_init::{
 use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::BaseboardId;
 use sled_agent_types::sled::StartSledAgentRequest;
-use sled_agent_types_versions::latest::inventory::{
-    ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-};
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -1729,7 +1729,7 @@ mod test {
         disk::{DiskIdentity, DiskVariant},
     };
     use omicron_uuid_kinds::SledUuid;
-    use sled_agent_types_versions::latest::inventory::{
+    use sled_agent_types::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
         OmicronZoneType, SledCpuFamily, SledRole, ZoneImageResolverInventory,
     };

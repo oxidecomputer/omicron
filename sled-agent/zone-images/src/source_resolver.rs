@@ -10,9 +10,9 @@ use camino::Utf8PathBuf;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
+use sled_agent_types::inventory::OmicronZoneImageSource;
 use sled_agent_types::zone_images::RemoveMupdateOverrideResult;
 use sled_agent_types::zone_images::ResolverStatus;
-use sled_agent_types_versions::latest::inventory::OmicronZoneImageSource;
 use slog::o;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -124,13 +124,11 @@ mod tests {
     use sled_agent_config_reconciler::{
         HostPhase2PreparedContents, ResolverStatusExt,
     };
+    use sled_agent_types::inventory::{HostPhase2DesiredContents, ZoneKind};
     use sled_agent_types::zone_images::{
         MupdateOverrideReadError, OmicronZoneFileSource,
         OmicronZoneImageLocation, RAMDISK_IMAGE_PATH, ZoneImageLocationError,
         ZoneManifestReadError, ZoneManifestZoneHashError,
-    };
-    use sled_agent_types_versions::latest::inventory::{
-        HostPhase2DesiredContents, ZoneKind,
     };
     use sled_agent_zone_images_examples::{
         BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext, deserialize_error,

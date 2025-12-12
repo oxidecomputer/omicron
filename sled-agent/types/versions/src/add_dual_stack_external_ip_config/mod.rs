@@ -7,5 +7,6 @@
 //! This version changes `SourceNatConfig` to `SourceNatConfigGeneric` to
 //! support dual-stack external IP configuration.
 
+pub mod firewall_rules;
 pub mod instance;
 pub mod inventory;

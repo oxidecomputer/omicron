@@ -30,7 +30,7 @@ use omicron_uuid_kinds::VnicUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
-use sled_agent_types_versions::latest::inventory::ZoneKind;
+use sled_agent_types::inventory::ZoneKind;
 use std::net::IpAddr;
 use uuid::Uuid;
 

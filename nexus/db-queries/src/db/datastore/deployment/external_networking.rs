@@ -10,6 +10,7 @@ use crate::db::DataStore;
 use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
+use nexus_db_errors::TransactionError;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::IpConfig;
@@ -26,7 +27,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use sled_agent_types_versions::latest::inventory::ZoneKind;
+use sled_agent_types::inventory::ZoneKind;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -89,7 +90,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         zones_to_allocate: impl Iterator<Item = &BlueprintZoneConfig>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         // Looking up the service pool IDs requires an opctx; we'll do this at
         // most once inside the loop below, when we first encounter an address
         // of the same IP version.
@@ -150,7 +151,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         log: &Logger,
         zones_to_deallocate: impl Iterator<Item = &BlueprintZoneConfig>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         for z in zones_to_deallocate {
             let Some((external_ip, nic)) = z.zone_type.external_networking()
             else {
@@ -185,7 +186,7 @@ impl DataStore {
                     nic.id,
                 )
                 .await
-                .map_err(|err| err.into_external())?;
+                .map_err(|txn_err| txn_err.map(|err| err.into_external()))?;
             if deleted_nic {
                 info!(log, "successfully deleted Omicron zone vNIC");
             } else {
@@ -204,7 +205,7 @@ impl DataStore {
         zone_id: OmicronZoneUuid,
         external_ip: OmicronZoneExternalIp,
         log: &Logger,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, TransactionError<Error>> {
         // localhost is used by many components in the test suite.  We can't use
         // the normal path because normally a given external IP must only be
         // used once.  Just treat localhost in the test suite as though it's
@@ -240,7 +241,8 @@ impl DataStore {
                 return Err(Error::invalid_request(format!(
                     "zone {zone_id} already has {} IPs allocated (expected 1)",
                     allocated_ips.len()
-                )));
+                ))
+                .into());
             }
         };
 
@@ -254,7 +256,8 @@ impl DataStore {
                 return Err(Error::invalid_request(format!(
                     "zone {zone_id} has invalid IP database record: {}",
                     InlineErrorChain::new(&err)
-                )));
+                ))
+                .into());
             }
         };
 
@@ -268,7 +271,8 @@ impl DataStore {
             );
             return Err(Error::invalid_request(format!(
                 "zone {zone_id} has a different IP allocated ({existing_ip:?})",
-            )));
+            ))
+            .into());
         }
     }
 
@@ -280,7 +284,7 @@ impl DataStore {
         zone_id: OmicronZoneUuid,
         nic: &NetworkInterface,
         log: &Logger,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, TransactionError<Error>> {
         // See the comment in is_external_ip_already_allocated().
         //
         // TODO-completeness: Ensure this works for dual-stack Omicron service
@@ -338,7 +342,8 @@ impl DataStore {
             return Err(Error::invalid_request(format!(
                 "zone {zone_id} already has {} non-matching NIC(s) allocated",
                 allocated_nics.len()
-            )));
+            ))
+            .into());
         }
 
         info!(log, "NIC allocation required for zone");
@@ -354,7 +359,7 @@ impl DataStore {
         zone_id: OmicronZoneUuid,
         external_ip: OmicronZoneExternalIp,
         log: &Logger,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         // Only attempt to allocate `external_ip` if it isn't already assigned
         // to this zone.
         //
@@ -395,7 +400,7 @@ impl DataStore {
         service_id: OmicronZoneUuid,
         nic: &NetworkInterface,
         log: &Logger,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         // We don't pass `nic.kind` into the database below, but instead
         // explicitly call `service_create_network_interface`. Ensure this is
         // indeed a service NIC.
@@ -403,12 +408,14 @@ impl DataStore {
             NetworkInterfaceKind::Instance { .. } => {
                 return Err(Error::invalid_request(
                     "invalid NIC kind (expected service, got instance)",
-                ));
+                )
+                .into());
             }
             NetworkInterfaceKind::Probe { .. } => {
                 return Err(Error::invalid_request(
                     "invalid NIC kind (expected service, got probe)",
-                ));
+                )
+                .into());
             }
             NetworkInterfaceKind::Service { .. } => (),
         }
@@ -429,7 +436,8 @@ impl DataStore {
                 return Err(Error::invalid_request(format!(
                     "no VPC subnet available for {} zone",
                     zone_kind.report_str()
-                )));
+                ))
+                .into());
             }
         };
 
@@ -465,7 +473,7 @@ impl DataStore {
         let created_nic = self
             .create_network_interface_raw_conn(conn, nic_arg)
             .await
-            .map_err(|err| err.into_external())?;
+            .map_err(|txn_err| txn_err.map(|err| err.into_external()))?;
 
         // We don't pass all the properties of `nic` into the create request
         // above. Double-check that the properties the DB assigned match
@@ -496,7 +504,8 @@ impl DataStore {
                 "database cleanup required: unexpected NIC ({created_nic:?}) \
                  allocated for {} {service_id}",
                 zone_kind.report_str(),
-            )));
+            ))
+            .into());
         }
 
         info!(log, "successfully allocated service vNIC");
@@ -545,7 +554,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
+    use sled_agent_types::inventory::OmicronZoneDataset;
     use std::collections::BTreeSet;
     use std::net::IpAddr;
     use std::net::SocketAddr;

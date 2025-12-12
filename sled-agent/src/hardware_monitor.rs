@@ -9,7 +9,7 @@
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
 use sled_agent_config_reconciler::RawDisksSender;
-use sled_agent_types_versions::latest::debug::OperatorSwitchZonePolicy;
+use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_hardware::{HardwareManager, HardwareUpdate};
 use sled_hardware_types::Baseboard;
 use sled_storage::disk::RawDisk;

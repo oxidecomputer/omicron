@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::v6;
 use iddqd::IdHashItem;
 use iddqd::IdHashMap;
 use iddqd::id_upcast;
@@ -63,12 +64,10 @@ pub struct ProbeSet {
     pub probes: IdHashMap<ProbeCreate>,
 }
 
-impl TryFrom<crate::v6::probes::ProbeCreate> for ProbeCreate {
+impl TryFrom<v6::probes::ProbeCreate> for ProbeCreate {
     type Error = ExternalError;
 
-    fn try_from(
-        v6: crate::v6::probes::ProbeCreate,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(v6: v6::probes::ProbeCreate) -> Result<Self, Self::Error> {
         Ok(Self {
             id: v6.id,
             external_ips: v6.external_ips.into_iter().map(Into::into).collect(),
@@ -77,8 +76,8 @@ impl TryFrom<crate::v6::probes::ProbeCreate> for ProbeCreate {
     }
 }
 
-impl From<crate::v6::probes::ExternalIp> for ExternalIp {
-    fn from(v6: crate::v6::probes::ExternalIp) -> Self {
+impl From<v6::probes::ExternalIp> for ExternalIp {
+    fn from(v6: v6::probes::ExternalIp) -> Self {
         Self {
             ip: v6.ip,
             kind: v6.kind.into(),
@@ -88,20 +87,20 @@ impl From<crate::v6::probes::ExternalIp> for ExternalIp {
     }
 }
 
-impl From<crate::v6::probes::IpKind> for IpKind {
-    fn from(v6: crate::v6::probes::IpKind) -> Self {
+impl From<v6::probes::IpKind> for IpKind {
+    fn from(v6: v6::probes::IpKind) -> Self {
         match v6 {
-            crate::v6::probes::IpKind::Snat => Self::Snat,
-            crate::v6::probes::IpKind::Ephemeral => Self::Ephemeral,
-            crate::v6::probes::IpKind::Floating => Self::Floating,
+            v6::probes::IpKind::Snat => Self::Snat,
+            v6::probes::IpKind::Ephemeral => Self::Ephemeral,
+            v6::probes::IpKind::Floating => Self::Floating,
         }
     }
 }
 
-impl TryFrom<crate::v6::probes::ProbeSet> for ProbeSet {
+impl TryFrom<v6::probes::ProbeSet> for ProbeSet {
     type Error = ExternalError;
 
-    fn try_from(v6: crate::v6::probes::ProbeSet) -> Result<Self, Self::Error> {
+    fn try_from(v6: v6::probes::ProbeSet) -> Result<Self, Self::Error> {
         v6.probes
             .into_iter()
             .map(TryInto::try_into)

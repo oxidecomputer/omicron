@@ -108,8 +108,8 @@ mod tests {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_types_versions::latest::inventory::OmicronZonesConfig;
-    use sled_agent_types_versions::latest::inventory::SledRole;
+    use sled_agent_types::inventory::OmicronZonesConfig;
+    use sled_agent_types::inventory::SledRole;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
 

@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
+
 use camino::Utf8PathBuf;
 use dropshot::{
     Body, FreeformBody, Header, HttpError, HttpResponseAccepted,
@@ -127,10 +129,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
         HttpResponseOk<
-            std::collections::BTreeMap<
-                Utf8PathBuf,
-                latest::zone_bundle::BundleUtilization,
-            >,
+            BTreeMap<Utf8PathBuf, latest::zone_bundle::BundleUtilization>,
         >,
         HttpError,
     >;
@@ -384,11 +383,12 @@ pub trait SledAgentApi {
     }
 
     #[endpoint {
+        operation_id = "sled_role_get",
         method = GET,
         path = "/sled-role",
         versions = ..VERSION_REMOVE_SLED_ROLE,
     }]
-    async fn sled_role_get(
+    async fn sled_role_get_v1(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError>;
 
@@ -413,7 +413,7 @@ pub trait SledAgentApi {
     }]
     async fn vmm_register_v10(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
+        path_params: Path<v1::instance::VmmPathParam>,
         body: TypedBody<v10::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let body =
@@ -430,7 +430,7 @@ pub trait SledAgentApi {
     }]
     async fn vmm_register_v9(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
+        path_params: Path<v1::instance::VmmPathParam>,
         body: TypedBody<v9::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let body = body.try_map(v10::instance::InstanceEnsureBody::try_from)?;
@@ -445,7 +445,7 @@ pub trait SledAgentApi {
     }]
     async fn vmm_register_v7(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
+        path_params: Path<v1::instance::VmmPathParam>,
         body: TypedBody<v7::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         Self::vmm_register_v9(rqctx, path_params, body.map(Into::into)).await
@@ -459,7 +459,7 @@ pub trait SledAgentApi {
     }]
     async fn vmm_register_v1(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
+        path_params: Path<v1::instance::VmmPathParam>,
         body: TypedBody<v1::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         Self::vmm_register_v7(rqctx, path_params, body.map(Into::into)).await
@@ -623,7 +623,7 @@ pub trait SledAgentApi {
     async fn vpc_firewall_rules_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VpcPathParam>,
-        body: TypedBody<latest::instance::VpcFirewallRulesEnsureBody>,
+        body: TypedBody<latest::firewall_rules::VpcFirewallRulesEnsureBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -634,11 +634,12 @@ pub trait SledAgentApi {
     }]
     async fn vpc_firewall_rules_put_v1(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VpcPathParam>,
-        body: TypedBody<v9::instance::VpcFirewallRulesEnsureBody>,
+        path_params: Path<v1::instance::VpcPathParam>,
+        body: TypedBody<v9::firewall_rules::VpcFirewallRulesEnsureBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body = body
-            .try_map(latest::instance::VpcFirewallRulesEnsureBody::try_from)?;
+        let body = body.try_map(
+            latest::firewall_rules::VpcFirewallRulesEnsureBody::try_from,
+        )?;
         Self::vpc_firewall_rules_put(rqctx, path_params, body).await
     }
 
@@ -928,14 +929,15 @@ pub trait SledAgentApi {
     /// This endpoint reports the status of the `destroy_orphaned_datasets`
     /// chicken switch. It will be removed with omicron#6177.
     #[endpoint {
+        operation_id = "chicken_switch_destroy_orphaned_datasets_get",
         method = GET,
         path = "/chicken-switch/destroy-orphaned-datasets",
         versions = ..VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH,
     }]
-    async fn chicken_switch_destroy_orphaned_datasets_get(
+    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
         request_context: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<latest::debug::ChickenSwitchDestroyOrphanedDatasets>,
+        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
         HttpError,
     >;
 
@@ -943,6 +945,7 @@ pub trait SledAgentApi {
     /// (allowing sled-agent to delete datasets it believes are orphaned). It
     /// will be removed with omicron#6177.
     #[endpoint {
+        operation_id = "chicken_switch_destroy_orphaned_datasets_put",
         method = PUT,
         path = "/chicken-switch/destroy-orphaned-datasets",
         // This should have been removed in
@@ -950,9 +953,9 @@ pub trait SledAgentApi {
         // overlooked. This removes it as of the next version instead.
         versions = ..VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY,
     }]
-    async fn chicken_switch_destroy_orphaned_datasets_put(
+    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::debug::ChickenSwitchDestroyOrphanedDatasets>,
+        body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// A debugging endpoint only used by `omdb` that allows us to test

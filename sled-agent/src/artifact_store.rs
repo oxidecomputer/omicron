@@ -40,9 +40,7 @@ use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::artifact::ArtifactConfig;
-use sled_agent_types_versions::latest::artifact::{
-    ArtifactListResponse, ArtifactPutResponse,
-};
+use sled_agent_types::artifact::{ArtifactListResponse, ArtifactPutResponse};
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::File;

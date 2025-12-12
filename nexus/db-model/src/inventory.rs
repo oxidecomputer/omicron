@@ -72,23 +72,23 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
-use sled_agent_types_versions::latest::inventory::BootImageHeader;
-use sled_agent_types_versions::latest::inventory::BootPartitionDetails;
-use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types_versions::latest::inventory::HostPhase2DesiredContents;
-use sled_agent_types_versions::latest::inventory::HostPhase2DesiredSlots;
-use sled_agent_types_versions::latest::inventory::MupdateOverrideBootInventory;
-use sled_agent_types_versions::latest::inventory::MupdateOverrideInventory;
-use sled_agent_types_versions::latest::inventory::MupdateOverrideNonBootInventory;
-use sled_agent_types_versions::latest::inventory::OrphanedDataset;
-use sled_agent_types_versions::latest::inventory::RemoveMupdateOverrideBootSuccessInventory;
-use sled_agent_types_versions::latest::inventory::RemoveMupdateOverrideInventory;
-use sled_agent_types_versions::latest::inventory::ZoneArtifactInventory;
-use sled_agent_types_versions::latest::inventory::ZoneImageResolverInventory;
-use sled_agent_types_versions::latest::inventory::ZoneManifestBootInventory;
-use sled_agent_types_versions::latest::inventory::ZoneManifestInventory;
-use sled_agent_types_versions::latest::inventory::ZoneManifestNonBootInventory;
-use sled_agent_types_versions::latest::inventory::{
+use sled_agent_types::inventory::BootImageHeader;
+use sled_agent_types::inventory::BootPartitionDetails;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HostPhase2DesiredContents;
+use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::MupdateOverrideBootInventory;
+use sled_agent_types::inventory::MupdateOverrideInventory;
+use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
+use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
+use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
+use sled_agent_types::inventory::ZoneArtifactInventory;
+use sled_agent_types::inventory::ZoneImageResolverInventory;
+use sled_agent_types::inventory::ZoneManifestBootInventory;
+use sled_agent_types::inventory::ZoneManifestInventory;
+use sled_agent_types::inventory::ZoneManifestNonBootInventory;
+use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
@@ -869,29 +869,23 @@ impl_enum_type!(
     Scrimlet =>  b"scrimlet"
 );
 
-impl From<sled_agent_types_versions::latest::inventory::SledRole> for SledRole {
-    fn from(
-        value: sled_agent_types_versions::latest::inventory::SledRole,
-    ) -> Self {
+impl From<sled_agent_types::inventory::SledRole> for SledRole {
+    fn from(value: sled_agent_types::inventory::SledRole) -> Self {
         match value {
-            sled_agent_types_versions::latest::inventory::SledRole::Gimlet => {
-                SledRole::Gimlet
-            }
-            sled_agent_types_versions::latest::inventory::SledRole::Scrimlet => {
+            sled_agent_types::inventory::SledRole::Gimlet => SledRole::Gimlet,
+            sled_agent_types::inventory::SledRole::Scrimlet => {
                 SledRole::Scrimlet
             }
         }
     }
 }
 
-impl From<SledRole> for sled_agent_types_versions::latest::inventory::SledRole {
+impl From<SledRole> for sled_agent_types::inventory::SledRole {
     fn from(value: SledRole) -> Self {
         match value {
-            SledRole::Gimlet => {
-                sled_agent_types_versions::latest::inventory::SledRole::Gimlet
-            }
+            SledRole::Gimlet => sled_agent_types::inventory::SledRole::Gimlet,
             SledRole::Scrimlet => {
-                sled_agent_types_versions::latest::inventory::SledRole::Scrimlet
+                sled_agent_types::inventory::SledRole::Scrimlet
             }
         }
     }
@@ -923,7 +917,7 @@ pub struct InvSledAgent {
     pub zone_image_resolver: InvZoneImageResolver,
 }
 
-/// See [`sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus`].
+/// See [`sled_agent_types::inventory::ConfigReconcilerInventoryStatus`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_agent)]
 pub struct InvConfigReconcilerStatus {
@@ -1003,7 +997,7 @@ impl InvConfigReconcilerStatus {
     }
 }
 
-// See [`sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus`].
+// See [`sled_agent_types::inventory::ConfigReconcilerInventoryStatus`].
 impl_enum_type!(
     InvConfigReconcilerStatusKindEnum:
 
@@ -1016,7 +1010,7 @@ impl_enum_type!(
     Idle => b"idle"
 );
 
-/// See [`sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory`].
+/// See [`sled_agent_types::inventory::ConfigReconcilerInventory`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_config_reconciler)]
 pub struct InvSledConfigReconciler {
@@ -1097,7 +1091,7 @@ impl InvSledConfigReconciler {
     }
 }
 
-// See [`sled_agent_types_versions::latest::inventory::DbRemoveMupdateOverrideBootSuccess`].
+// See [`sled_agent_types::inventory::DbRemoveMupdateOverrideBootSuccess`].
 impl_enum_type!(
     RemoveMupdateOverrideBootSuccessEnum:
 
@@ -1133,7 +1127,7 @@ impl From<DbRemoveMupdateOverrideBootSuccess>
     }
 }
 
-/// See [`sled_agent_types_versions::latest::inventory::RemoveMupdateOverrideInventory`].
+/// See [`sled_agent_types::inventory::RemoveMupdateOverrideInventory`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_config_reconciler)]
 pub struct InvRemoveMupdateOverride {
@@ -1197,7 +1191,7 @@ impl InvRemoveMupdateOverride {
     }
 }
 
-/// See [`sled_agent_types_versions::latest::inventory::BootPartitionDetails`].
+/// See [`sled_agent_types::inventory::BootPartitionDetails`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_boot_partition)]
 pub struct InvSledBootPartition {
@@ -2224,9 +2218,9 @@ impl From<ZoneType> for ServiceKind {
     }
 }
 
-impl From<ZoneType> for sled_agent_types_versions::latest::inventory::ZoneKind {
+impl From<ZoneType> for sled_agent_types::inventory::ZoneKind {
     fn from(zone_type: ZoneType) -> Self {
-        use sled_agent_types_versions::latest::inventory::ZoneKind::*;
+        use sled_agent_types::inventory::ZoneKind::*;
 
         match zone_type {
             ZoneType::BoundaryNtp => BoundaryNtp,
@@ -2245,11 +2239,9 @@ impl From<ZoneType> for sled_agent_types_versions::latest::inventory::ZoneKind {
     }
 }
 
-impl From<sled_agent_types_versions::latest::inventory::ZoneKind> for ZoneType {
-    fn from(
-        zone_kind: sled_agent_types_versions::latest::inventory::ZoneKind,
-    ) -> Self {
-        use sled_agent_types_versions::latest::inventory::ZoneKind::*;
+impl From<sled_agent_types::inventory::ZoneKind> for ZoneType {
+    fn from(zone_kind: sled_agent_types::inventory::ZoneKind) -> Self {
+        use sled_agent_types::inventory::ZoneKind::*;
 
         match zone_kind {
             BoundaryNtp => ZoneType::BoundaryNtp,
@@ -2387,7 +2379,7 @@ impl_enum_type!(
     Artifact => b"artifact"
 );
 
-/// See [`sled_agent_types_versions::latest::inventory::OmicronZoneConfig`].
+/// See [`sled_agent_types::inventory::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_zone)]
 pub struct InvOmicronSledConfigZone {

@@ -21,8 +21,7 @@ use omicron_uuid_kinds::{PhysicalDiskUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// Import shared types from v1 for use within this module.
-// Per RFD 619, these types are defined in v1 (the earliest version they appear in).
+use crate::v1;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
@@ -261,8 +260,8 @@ pub struct OmicronZonesConfig {
     pub zones: Vec<OmicronZoneConfig>,
 }
 
-impl From<crate::v1::inventory::OmicronSledConfig> for OmicronSledConfig {
-    fn from(value: crate::v1::inventory::OmicronSledConfig) -> Self {
+impl From<v1::inventory::OmicronSledConfig> for OmicronSledConfig {
+    fn from(value: v1::inventory::OmicronSledConfig) -> Self {
         Self {
             generation: value.generation,
             disks: value.disks,
@@ -274,8 +273,8 @@ impl From<crate::v1::inventory::OmicronSledConfig> for OmicronSledConfig {
     }
 }
 
-impl From<crate::v1::inventory::OmicronZoneConfig> for OmicronZoneConfig {
-    fn from(value: crate::v1::inventory::OmicronZoneConfig) -> Self {
+impl From<v1::inventory::OmicronZoneConfig> for OmicronZoneConfig {
+    fn from(value: v1::inventory::OmicronZoneConfig) -> Self {
         Self {
             id: value.id,
             filesystem_pool: value.filesystem_pool,
@@ -285,10 +284,10 @@ impl From<crate::v1::inventory::OmicronZoneConfig> for OmicronZoneConfig {
     }
 }
 
-impl From<crate::v1::inventory::OmicronZoneType> for OmicronZoneType {
-    fn from(value: crate::v1::inventory::OmicronZoneType) -> Self {
+impl From<v1::inventory::OmicronZoneType> for OmicronZoneType {
+    fn from(value: v1::inventory::OmicronZoneType) -> Self {
         match value {
-            crate::v1::inventory::OmicronZoneType::BoundaryNtp {
+            v1::inventory::OmicronZoneType::BoundaryNtp {
                 address,
                 ntp_servers,
                 dns_servers,
@@ -303,36 +302,34 @@ impl From<crate::v1::inventory::OmicronZoneType> for OmicronZoneType {
                 nic,
                 snat_cfg,
             },
-            crate::v1::inventory::OmicronZoneType::Clickhouse {
-                address,
-                dataset,
-            } => Self::Clickhouse { address, dataset },
-            crate::v1::inventory::OmicronZoneType::ClickhouseKeeper {
+            v1::inventory::OmicronZoneType::Clickhouse { address, dataset } => {
+                Self::Clickhouse { address, dataset }
+            }
+            v1::inventory::OmicronZoneType::ClickhouseKeeper {
                 address,
                 dataset,
             } => Self::ClickhouseKeeper { address, dataset },
-            crate::v1::inventory::OmicronZoneType::ClickhouseServer {
+            v1::inventory::OmicronZoneType::ClickhouseServer {
                 address,
                 dataset,
             } => Self::ClickhouseServer { address, dataset },
-            crate::v1::inventory::OmicronZoneType::CockroachDb {
+            v1::inventory::OmicronZoneType::CockroachDb {
                 address,
                 dataset,
             } => Self::CockroachDb { address, dataset },
-            crate::v1::inventory::OmicronZoneType::Crucible {
-                address,
-                dataset,
-            } => Self::Crucible { address, dataset },
-            crate::v1::inventory::OmicronZoneType::CruciblePantry {
-                address,
-            } => Self::CruciblePantry { address },
-            crate::v1::inventory::OmicronZoneType::ExternalDns {
+            v1::inventory::OmicronZoneType::Crucible { address, dataset } => {
+                Self::Crucible { address, dataset }
+            }
+            v1::inventory::OmicronZoneType::CruciblePantry { address } => {
+                Self::CruciblePantry { address }
+            }
+            v1::inventory::OmicronZoneType::ExternalDns {
                 dataset,
                 http_address,
                 dns_address,
                 nic,
             } => Self::ExternalDns { dataset, http_address, dns_address, nic },
-            crate::v1::inventory::OmicronZoneType::InternalDns {
+            v1::inventory::OmicronZoneType::InternalDns {
                 dataset,
                 http_address,
                 dns_address,
@@ -345,10 +342,10 @@ impl From<crate::v1::inventory::OmicronZoneType> for OmicronZoneType {
                 gz_address,
                 gz_address_index,
             },
-            crate::v1::inventory::OmicronZoneType::InternalNtp { address } => {
+            v1::inventory::OmicronZoneType::InternalNtp { address } => {
                 Self::InternalNtp { address }
             }
-            crate::v1::inventory::OmicronZoneType::Nexus {
+            v1::inventory::OmicronZoneType::Nexus {
                 internal_address,
                 external_ip,
                 nic,
@@ -362,14 +359,14 @@ impl From<crate::v1::inventory::OmicronZoneType> for OmicronZoneType {
                 external_tls,
                 external_dns_servers,
             },
-            crate::v1::inventory::OmicronZoneType::Oximeter { address } => {
+            v1::inventory::OmicronZoneType::Oximeter { address } => {
                 Self::Oximeter { address }
             }
         }
     }
 }
 
-impl From<Inventory> for crate::v1::inventory::Inventory {
+impl From<Inventory> for v1::inventory::Inventory {
     fn from(value: Inventory) -> Self {
         Self {
             sled_id: value.sled_id,
@@ -391,7 +388,7 @@ impl From<Inventory> for crate::v1::inventory::Inventory {
     }
 }
 
-impl From<OmicronSledConfig> for crate::v1::inventory::OmicronSledConfig {
+impl From<OmicronSledConfig> for v1::inventory::OmicronSledConfig {
     fn from(value: OmicronSledConfig) -> Self {
         Self {
             generation: value.generation,
@@ -404,7 +401,7 @@ impl From<OmicronSledConfig> for crate::v1::inventory::OmicronSledConfig {
     }
 }
 
-impl From<OmicronZoneConfig> for crate::v1::inventory::OmicronZoneConfig {
+impl From<OmicronZoneConfig> for v1::inventory::OmicronZoneConfig {
     fn from(value: OmicronZoneConfig) -> Self {
         Self {
             id: value.id,
@@ -415,7 +412,7 @@ impl From<OmicronZoneConfig> for crate::v1::inventory::OmicronZoneConfig {
     }
 }
 
-impl From<OmicronZoneType> for crate::v1::inventory::OmicronZoneType {
+impl From<OmicronZoneType> for v1::inventory::OmicronZoneType {
     fn from(value: OmicronZoneType) -> Self {
         match value {
             OmicronZoneType::BoundaryNtp {
@@ -493,7 +490,7 @@ impl From<OmicronZoneType> for crate::v1::inventory::OmicronZoneType {
 }
 
 impl From<ConfigReconcilerInventory>
-    for crate::v1::inventory::ConfigReconcilerInventory
+    for v1::inventory::ConfigReconcilerInventory
 {
     fn from(value: ConfigReconcilerInventory) -> Self {
         Self {
@@ -509,7 +506,7 @@ impl From<ConfigReconcilerInventory>
 }
 
 impl From<ConfigReconcilerInventoryStatus>
-    for crate::v1::inventory::ConfigReconcilerInventoryStatus
+    for v1::inventory::ConfigReconcilerInventoryStatus
 {
     fn from(value: ConfigReconcilerInventoryStatus) -> Self {
         match value {

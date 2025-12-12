@@ -46,13 +46,9 @@ impl SledCpuFamily {
     }
 }
 
-impl From<sled_agent_types_versions::latest::inventory::SledCpuFamily>
-    for SledCpuFamily
-{
-    fn from(
-        value: sled_agent_types_versions::latest::inventory::SledCpuFamily,
-    ) -> Self {
-        use sled_agent_types_versions::latest::inventory::SledCpuFamily as InputFamily;
+impl From<sled_agent_types::inventory::SledCpuFamily> for SledCpuFamily {
+    fn from(value: sled_agent_types::inventory::SledCpuFamily) -> Self {
+        use sled_agent_types::inventory::SledCpuFamily as InputFamily;
         match value {
             InputFamily::Unknown => Self::Unknown,
             InputFamily::AmdMilan => Self::AmdMilan,
@@ -62,9 +58,7 @@ impl From<sled_agent_types_versions::latest::inventory::SledCpuFamily>
     }
 }
 
-impl From<SledCpuFamily>
-    for sled_agent_types_versions::latest::inventory::SledCpuFamily
-{
+impl From<SledCpuFamily> for sled_agent_types::inventory::SledCpuFamily {
     fn from(value: SledCpuFamily) -> Self {
         match value {
             SledCpuFamily::Unknown => Self::Unknown,

@@ -22,7 +22,7 @@ use omicron_common::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-pub use sled_agent_types_versions::latest::rack_init::RecoverySiloConfig;
+pub use sled_agent_types_versions::latest::rack_init::*;
 use sled_hardware_types::Baseboard;
 
 /// Structures and routines used to maintain backwards compatibility.  The

@@ -4,6 +4,7 @@
 
 //! Software Updates
 
+use crate::app::background::LoadedTargetBlueprint;
 use bytes::Bytes;
 use dropshot::HttpError;
 use futures::Stream;
@@ -15,9 +16,7 @@ use nexus_db_model::TufTrustRoot;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::{
-    Blueprint, BlueprintTarget, TargetReleaseDescription,
-};
+use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::shared::TufSignedRootRole;
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
@@ -30,7 +29,6 @@ use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
 use std::collections::BTreeMap;
 use std::iter;
-use std::sync::Arc;
 use tokio::sync::watch;
 use update_common::artifacts::{
     ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
@@ -40,15 +38,12 @@ use uuid::Uuid;
 /// Used to pull data out of the channels
 #[derive(Clone)]
 pub struct UpdateStatusHandle {
-    latest_blueprint:
-        watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
+    latest_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
 }
 
 impl UpdateStatusHandle {
     pub fn new(
-        latest_blueprint: watch::Receiver<
-            Option<(BlueprintTarget, Arc<Blueprint>)>,
-        >,
+        latest_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
     ) -> Self {
         Self { latest_blueprint }
     }
@@ -220,7 +215,7 @@ impl super::Nexus {
             )
             .await?;
 
-        let (blueprint_target, blueprint) = self
+        let blueprint_target = self
             .update_status
             .latest_blueprint
             .borrow()
@@ -232,12 +227,12 @@ impl super::Nexus {
                 )
             })?;
 
-        let time_last_step_planned = blueprint_target.time_made_target;
+        let time_last_step_planned = blueprint_target.target.time_made_target;
 
         // Update activity is suspended if the current target release generation
         // is less than the blueprint's minimum generation
         let suspended = *db_target_release.generation
-            < blueprint.target_release_minimum_generation;
+            < blueprint_target.blueprint.target_release_minimum_generation;
 
         Ok(views::UpdateStatus {
             target_release: Nullable(target_release),

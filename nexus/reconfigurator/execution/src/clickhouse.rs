@@ -389,7 +389,7 @@ mod test {
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::inventory::ZpoolName;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
+    use sled_agent_types::inventory::OmicronZoneDataset;
     use std::collections::BTreeSet;
 
     fn test_data() -> (Vec<BlueprintZoneConfig>, ClickhouseClusterConfig) {

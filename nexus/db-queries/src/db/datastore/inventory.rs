@@ -105,16 +105,16 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types_versions::latest::inventory::BootPartitionContents;
-use sled_agent_types_versions::latest::inventory::BootPartitionDetails;
-use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
-use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
-use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types_versions::latest::inventory::MupdateOverrideNonBootInventory;
-use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
-use sled_agent_types_versions::latest::inventory::OrphanedDataset;
-use sled_agent_types_versions::latest::inventory::ZoneArtifactInventory;
-use sled_agent_types_versions::latest::inventory::ZoneManifestNonBootInventory;
+use sled_agent_types::inventory::BootPartitionContents;
+use sled_agent_types::inventory::BootPartitionDetails;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::ZoneArtifactInventory;
+use sled_agent_types::inventory::ZoneManifestNonBootInventory;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -4476,14 +4476,14 @@ mod test {
         ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
-    use sled_agent_types_versions::latest::inventory::BootPartitionContents;
-    use sled_agent_types_versions::latest::inventory::BootPartitionDetails;
-    use sled_agent_types_versions::latest::inventory::OrphanedDataset;
-    use sled_agent_types_versions::latest::inventory::{
+    use sled_agent_types::inventory::BootPartitionContents;
+    use sled_agent_types::inventory::BootPartitionDetails;
+    use sled_agent_types::inventory::OrphanedDataset;
+    use sled_agent_types::inventory::{
         BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
         RemoveMupdateOverrideInventory,
     };
-    use sled_agent_types_versions::latest::inventory::{
+    use sled_agent_types::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
         ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
     };

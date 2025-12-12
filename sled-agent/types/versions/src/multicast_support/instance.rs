@@ -14,7 +14,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// Unchanged types from v1
+use crate::v1;
 use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::ResolvedVpcFirewallRule;
 use crate::v1::instance::VmmSpec;
@@ -79,8 +79,8 @@ pub struct InstanceMulticastMembership {
     pub sources: Vec<IpAddr>,
 }
 
-impl From<crate::v1::instance::InstanceEnsureBody> for InstanceEnsureBody {
-    fn from(v1: crate::v1::instance::InstanceEnsureBody) -> Self {
+impl From<v1::instance::InstanceEnsureBody> for InstanceEnsureBody {
+    fn from(v1: v1::instance::InstanceEnsureBody) -> Self {
         Self {
             vmm_spec: v1.vmm_spec,
             local_config: v1.local_config.into(),
@@ -93,10 +93,8 @@ impl From<crate::v1::instance::InstanceEnsureBody> for InstanceEnsureBody {
     }
 }
 
-impl From<crate::v1::instance::InstanceSledLocalConfig>
-    for InstanceSledLocalConfig
-{
-    fn from(v1: crate::v1::instance::InstanceSledLocalConfig) -> Self {
+impl From<v1::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {
+    fn from(v1: v1::instance::InstanceSledLocalConfig) -> Self {
         Self {
             hostname: v1.hostname,
             nics: v1.nics,

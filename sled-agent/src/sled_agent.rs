@@ -65,12 +65,14 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
+use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
+use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::zone_bundle::{
@@ -79,10 +81,6 @@ use sled_agent_types::zone_bundle::{
 };
 use sled_agent_types::zone_images::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
-};
-use sled_agent_types_versions::latest::dataset::LocalStorageDatasetEnsureRequest;
-use sled_agent_types_versions::latest::inventory::{
-    Inventory, OmicronSledConfig, SledRole,
 };
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;

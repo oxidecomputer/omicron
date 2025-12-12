@@ -50,6 +50,7 @@ use propolis_client::{
     Client as PropolisClient, types::InstanceInitializationMethod,
 };
 use range_requests::PotentialRange;
+use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -58,14 +59,13 @@ use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
     VmmPutStateResponse, VmmSpecExt, VmmStateRequested, VmmUnregisterResponse,
 };
-use sled_agent_types::support_bundle::SupportBundleMetadata;
-use sled_agent_types_versions::latest::dataset::LocalStorageDatasetEnsureRequest;
-use sled_agent_types_versions::latest::inventory::{
+use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
     HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
     InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
     ZoneImageResolverInventory,
 };
+use sled_agent_types::support_bundle::SupportBundleMetadata;
 
 use slog::Logger;
 use std::collections::{HashMap, HashSet};

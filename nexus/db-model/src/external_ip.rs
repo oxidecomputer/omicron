@@ -36,7 +36,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceExternalIpBody;
-use sled_agent_types_versions::latest::inventory::ZoneKind;
+use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::convert::TryFrom;
 use std::net::IpAddr;

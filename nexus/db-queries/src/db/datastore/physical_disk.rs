@@ -89,7 +89,7 @@ impl DataStore {
             .map_err(|e| {
                 match err.take() {
                     // A called function performed its own error propagation.
-                    Some(txn_error) => txn_error.into(),
+                    Some(txn_error) => txn_error.into_public_ignore_retries(),
                     // The transaction setup/teardown itself encountered a diesel error.
                     None => public_error_from_diesel(e, ErrorHandler::Server),
                 }
@@ -110,7 +110,8 @@ impl DataStore {
     ) -> CreateResult<PhysicalDisk> {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
         let disk = Self::physical_disk_insert_on_connection(&conn, opctx, disk)
-            .await?;
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
         Ok(disk)
     }
 
@@ -344,7 +345,7 @@ mod test {
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_types_versions::latest::inventory::{
+    use sled_agent_types::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
         SledCpuFamily, SledRole, ZoneImageResolverInventory,
     };

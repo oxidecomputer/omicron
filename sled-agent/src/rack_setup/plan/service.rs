@@ -60,11 +60,9 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
+use sled_agent_types::inventory::{Inventory, OmicronZoneDataset, SledRole};
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
-use sled_agent_types_versions::latest::inventory::{
-    Inventory, OmicronZoneDataset, SledRole,
-};
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -1306,11 +1304,11 @@ mod tests {
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use oxnet::Ipv6Net;
+    use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::SledCpuFamily;
+    use sled_agent_types::inventory::ZoneImageResolverInventory;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
     use sled_agent_types::rack_init::RecoverySiloConfig;
-    use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
-    use sled_agent_types_versions::latest::inventory::SledCpuFamily;
-    use sled_agent_types_versions::latest::inventory::ZoneImageResolverInventory;
     use sled_hardware_types::Baseboard;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
@@ -1493,21 +1491,19 @@ mod tests {
 
         const DISK_COUNT: usize = 10;
         let disks: Vec<_> = (0..DISK_COUNT)
-            .map(|i| {
-                sled_agent_types_versions::latest::inventory::InventoryDisk {
-                    identity: omicron_common::disk::DiskIdentity {
-                        vendor: "vendor".to_string(),
-                        model: "model".to_string(),
-                        serial: format!("test-{i}"),
-                    },
-                    variant: DiskVariant::U2,
-                    slot: i as i64,
-                    active_firmware_slot: 0,
-                    next_active_firmware_slot: None,
-                    number_of_firmware_slots: 8,
-                    slot1_is_read_only: false,
-                    slot_firmware_versions: vec![],
-                }
+            .map(|i| sled_agent_types::inventory::InventoryDisk {
+                identity: omicron_common::disk::DiskIdentity {
+                    vendor: "vendor".to_string(),
+                    model: "model".to_string(),
+                    serial: format!("test-{i}"),
+                },
+                variant: DiskVariant::U2,
+                slot: i as i64,
+                active_firmware_slot: 0,
+                next_active_firmware_slot: None,
+                number_of_firmware_slots: 8,
+                slot1_is_read_only: false,
+                slot_firmware_versions: vec![],
             })
             .collect();
 

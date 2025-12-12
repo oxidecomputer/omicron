@@ -837,7 +837,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
-    use sled_agent_types_versions::latest::inventory::ZoneKind;
+    use sled_agent_types::inventory::ZoneKind;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;

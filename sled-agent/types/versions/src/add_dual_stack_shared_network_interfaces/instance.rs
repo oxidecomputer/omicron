@@ -16,10 +16,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// Unchanged types from earlier versions
 use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::VmmSpec;
 use crate::v7::instance::InstanceMulticastMembership;
+use crate::v9;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
@@ -68,18 +68,11 @@ pub struct InstanceSledLocalConfig {
     pub delegated_zvols: Vec<DelegatedZvol>,
 }
 
-/// Update firewall rules for a VPC
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct VpcFirewallRulesEnsureBody {
-    pub vni: external::Vni,
-    pub rules: Vec<ResolvedVpcFirewallRule>,
-}
-
-impl TryFrom<crate::v9::instance::InstanceEnsureBody> for InstanceEnsureBody {
+impl TryFrom<v9::instance::InstanceEnsureBody> for InstanceEnsureBody {
     type Error = external::Error;
 
     fn try_from(
-        v9: crate::v9::instance::InstanceEnsureBody,
+        v9: v9::instance::InstanceEnsureBody,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
             vmm_spec: v9.vmm_spec,
@@ -93,13 +86,13 @@ impl TryFrom<crate::v9::instance::InstanceEnsureBody> for InstanceEnsureBody {
     }
 }
 
-impl TryFrom<crate::v9::instance::InstanceSledLocalConfig>
+impl TryFrom<v9::instance::InstanceSledLocalConfig>
     for InstanceSledLocalConfig
 {
     type Error = external::Error;
 
     fn try_from(
-        v9: crate::v9::instance::InstanceSledLocalConfig,
+        v9: v9::instance::InstanceSledLocalConfig,
     ) -> Result<Self, Self::Error> {
         let firewall_rules = v9
             .firewall_rules
@@ -146,25 +139,6 @@ impl TryFrom<crate::v1::instance::ResolvedVpcFirewallRule>
             filter_protocols: v1.filter_protocols,
             action: v1.action,
             priority: v1.priority,
-        })
-    }
-}
-
-impl TryFrom<crate::v9::instance::VpcFirewallRulesEnsureBody>
-    for VpcFirewallRulesEnsureBody
-{
-    type Error = external::Error;
-
-    fn try_from(
-        v9: crate::v9::instance::VpcFirewallRulesEnsureBody,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            vni: v9.vni,
-            rules: v9
-                .rules
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
         })
     }
 }

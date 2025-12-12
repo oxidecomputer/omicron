@@ -33,20 +33,18 @@ use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::dataset::{
     LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
 };
-use sled_agent_types::debug::{
-    ChickenSwitchDestroyOrphanedDatasets, OperatorSwitchZonePolicy,
-};
+use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
     VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
-    VmmPutStateResponse, VmmUnregisterResponse, VpcFirewallRulesEnsureBody,
-    VpcPathParam,
+    VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
@@ -505,7 +503,7 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn sled_role_get(
+    async fn sled_role_get_v1(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
         let sa = rqctx.context();
@@ -777,8 +775,7 @@ impl SledAgentApi for SledAgentImpl {
         })?;
 
         let config = match config {
-            // Use the deserialize helper from sled-agent-types
-            Some(config) => sled_agent_types::early_networking::EarlyNetworkConfig::deserialize_bootstore_config(
+            Some(config) => EarlyNetworkConfig::deserialize_bootstore_config(
                 &rqctx.log, &config,
             )
             .map_err(|e| {
@@ -1051,10 +1048,12 @@ impl SledAgentApi for SledAgentImpl {
             .map_err(HttpError::from)
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_get(
+    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
+        HttpError,
+    > {
         // This API has been removed, but we still provide an endpoint for
         // backwards compatibility. Only `omdb` ever called this endpoint, so we
         // could probably just always return an error, but we can at least
@@ -1062,16 +1061,16 @@ impl SledAgentApi for SledAgentImpl {
         // and always attempt to destroy orphans, so we can just claim the
         // chicken switch is always in that state.
         let destroy_orphans = true;
-        Ok(HttpResponseOk(ChickenSwitchDestroyOrphanedDatasets {
+        Ok(HttpResponseOk(v1::debug::ChickenSwitchDestroyOrphanedDatasets {
             destroy_orphans,
         }))
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_put(
+    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
         _request_context: RequestContext<Self::Context>,
-        body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+        body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
+        let v1::debug::ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
             body.into_inner();
 
         // This API has been removed, but we still provide an endpoint for

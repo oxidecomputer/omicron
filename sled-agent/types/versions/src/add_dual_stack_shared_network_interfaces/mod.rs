@@ -10,6 +10,7 @@
 //!
 //! All types in this version use `NetworkInterface` v2 (dual-stack).
 
+pub mod firewall_rules;
 pub mod instance;
 pub mod inventory;
 pub mod probes;

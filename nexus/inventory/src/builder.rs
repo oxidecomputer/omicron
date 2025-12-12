@@ -39,8 +39,8 @@ use omicron_cockroach_metrics::CockroachMetric;
 use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
-use sled_agent_types_versions::latest::inventory::Baseboard;
-use sled_agent_types_versions::latest::inventory::Inventory;
+use sled_agent_types::inventory::Baseboard;
+use sled_agent_types::inventory::Inventory;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -735,10 +735,9 @@ impl CollectionBuilder {
     /// Returns all zones of a kind from the ledgers of observed sleds
     pub fn ledgered_zones_of_kind(
         &self,
-        kind: sled_agent_types_versions::latest::inventory::ZoneKind,
-    ) -> impl Iterator<
-        Item = &sled_agent_types_versions::latest::inventory::OmicronZoneConfig,
-    > + '_ {
+        kind: sled_agent_types::inventory::ZoneKind,
+    ) -> impl Iterator<Item = &sled_agent_types::inventory::OmicronZoneConfig> + '_
+    {
         self.sleds.iter().flat_map(move |sled| {
             sled.ledgered_sled_config.as_ref().into_iter().flat_map(
                 move |sled_config| {
@@ -756,10 +755,9 @@ impl CollectionBuilder {
     /// created by the sled reconciliation process
     pub fn last_reconciled_zones_of_kind(
         &self,
-        kind: sled_agent_types_versions::latest::inventory::ZoneKind,
-    ) -> impl Iterator<
-        Item = &sled_agent_types_versions::latest::inventory::OmicronZoneConfig,
-    > + '_ {
+        kind: sled_agent_types::inventory::ZoneKind,
+    ) -> impl Iterator<Item = &sled_agent_types::inventory::OmicronZoneConfig> + '_
+    {
         self.sleds.iter().flat_map(move |sled| {
             sled.last_reconciliation.as_ref().into_iter().flat_map(
                 move |sled_config| {
@@ -805,7 +803,7 @@ mod test {
     use nexus_types::inventory::RotPageWhich;
     use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
-    use sled_agent_types_versions::latest::inventory::SledRole;
+    use sled_agent_types::inventory::SledRole;
 
     // Verify the contents of an empty collection.
     #[test]

@@ -56,7 +56,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use ref_cast::RefCast;
-use sled_agent_types_versions::latest::inventory::ZoneKind;
+use sled_agent_types::inventory::ZoneKind;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -178,7 +178,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
-    ) -> LookupResult<Vec<ExternalIp>> {
+    ) -> Result<Vec<ExternalIp>, TransactionError<Error>> {
         use nexus_db_schema::schema::external_ip::dsl;
         dsl::external_ip
             .filter(dsl::is_service.eq(true))
@@ -187,7 +187,7 @@ impl DataStore {
             .select(ExternalIp::as_select())
             .get_results_async(conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|err| err.into())
     }
 
     /// Allocates a floating IP address for instance usage.
@@ -233,7 +233,9 @@ impl DataStore {
         data: IncompleteExternalIp,
     ) -> CreateResult<ExternalIp> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        let ip = Self::allocate_external_ip_on_connection(&conn, data).await?;
+        let ip = Self::allocate_external_ip_on_connection(&conn, data)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
         Ok(ip)
     }
 
@@ -675,7 +677,9 @@ impl DataStore {
         ip_id: Uuid,
     ) -> Result<bool, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.deallocate_external_ip_on_connection(&conn, ip_id).await
+        self.deallocate_external_ip_on_connection(&conn, ip_id)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())
     }
 
     /// Variant of [Self::deallocate_external_ip] which may be called from a
@@ -684,7 +688,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         ip_id: Uuid,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, TransactionError<Error>> {
         use nexus_db_schema::schema::external_ip::dsl;
         let now = Utc::now();
         diesel::update(dsl::external_ip)
@@ -698,7 +702,7 @@ impl DataStore {
                 UpdateStatus::Updated => true,
                 UpdateStatus::NotUpdatedButExists => false,
             })
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| e.into())
     }
 
     /// Moves an instance's ephemeral IP from 'Attached' to 'Detaching'.

@@ -45,20 +45,18 @@ use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::dataset::{
     LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
 };
-use sled_agent_types::debug::{
-    ChickenSwitchDestroyOrphanedDatasets, OperatorSwitchZonePolicy,
-};
+use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
     VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
-    VmmPutStateResponse, VmmUnregisterResponse, VpcFirewallRulesEnsureBody,
-    VpcPathParam,
+    VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
@@ -790,7 +788,7 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn sled_role_get(
+    async fn sled_role_get_v1(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
         method_unimplemented()
@@ -889,16 +887,18 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_get(
+    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
+        HttpError,
+    > {
         method_unimplemented()
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_put(
+    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
         _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+        _body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }

@@ -51,10 +51,10 @@ omicron-common.workspace = true
 nexus-config.workspace = true
 nexus-db-schema.workspace = true
 nexus-defaults.workspace = true
-sled-agent-types-versions.workspace = true
 nexus-types.workspace = true
 omicron-passwords.workspace = true
 sled-agent-client.workspace = true
+sled-agent-types.workspace = true
 omicron-workspace-hack.workspace = true
 tufaceous-artifact.workspace = true
 

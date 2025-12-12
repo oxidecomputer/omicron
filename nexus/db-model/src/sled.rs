@@ -20,7 +20,7 @@ use nexus_types::{
 };
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types_versions::latest::inventory::SledRole;
+use sled_agent_types::inventory::SledRole;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;

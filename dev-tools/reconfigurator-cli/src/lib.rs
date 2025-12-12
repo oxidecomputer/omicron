@@ -67,7 +67,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
-use sled_agent_types_versions::latest::inventory::ZoneKind;
+use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeSet;

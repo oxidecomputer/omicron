@@ -4,7 +4,6 @@
 
 use std::net::{IpAddr, SocketAddr};
 
-use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
@@ -18,6 +17,7 @@ use uuid::Uuid;
 use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::ResolvedVpcFirewallRule;
 use crate::v1::instance::VmmSpec;
+use crate::v7;
 use crate::v7::instance::InstanceMulticastMembership;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
@@ -69,15 +69,8 @@ pub struct InstanceSledLocalConfig {
     pub delegated_zvols: Vec<DelegatedZvol>,
 }
 
-/// Update firewall rules for a VPC
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct VpcFirewallRulesEnsureBody {
-    pub vni: external::Vni,
-    pub rules: Vec<ResolvedVpcFirewallRule>,
-}
-
-impl From<crate::v7::instance::InstanceEnsureBody> for InstanceEnsureBody {
-    fn from(v7: crate::v7::instance::InstanceEnsureBody) -> Self {
+impl From<v7::instance::InstanceEnsureBody> for InstanceEnsureBody {
+    fn from(v7: v7::instance::InstanceEnsureBody) -> Self {
         Self {
             vmm_spec: v7.vmm_spec,
             local_config: v7.local_config.into(),
@@ -90,10 +83,8 @@ impl From<crate::v7::instance::InstanceEnsureBody> for InstanceEnsureBody {
     }
 }
 
-impl From<crate::v7::instance::InstanceSledLocalConfig>
-    for InstanceSledLocalConfig
-{
-    fn from(v7: crate::v7::instance::InstanceSledLocalConfig) -> Self {
+impl From<v7::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {
+    fn from(v7: v7::instance::InstanceSledLocalConfig) -> Self {
         Self {
             hostname: v7.hostname,
             nics: v7.nics,

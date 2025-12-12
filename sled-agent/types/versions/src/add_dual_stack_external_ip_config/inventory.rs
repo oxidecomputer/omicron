@@ -26,8 +26,6 @@ use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// Import shared types from v1 for use within this module.
-// Per RFD 619, these types are defined in v1 (the earliest version they appear in).
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
@@ -35,6 +33,7 @@ use crate::v1::inventory::{
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
     SledRole, ZoneImageResolverInventory, ZoneKind,
 };
+use crate::v10;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 
 /// Identity and basic status information about this sled agent
@@ -635,12 +634,10 @@ fn default_nexus_lockstep_port() -> u16 {
 
 use omicron_common::api::external;
 
-impl TryFrom<crate::v10::inventory::Inventory> for Inventory {
+impl TryFrom<v10::inventory::Inventory> for Inventory {
     type Error = external::Error;
 
-    fn try_from(
-        v10: crate::v10::inventory::Inventory,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(v10: v10::inventory::Inventory) -> Result<Self, Self::Error> {
         Ok(Self {
             sled_id: v10.sled_id,
             sled_agent_address: v10.sled_agent_address,
@@ -667,11 +664,11 @@ impl TryFrom<crate::v10::inventory::Inventory> for Inventory {
     }
 }
 
-impl TryFrom<crate::v10::inventory::OmicronSledConfig> for OmicronSledConfig {
+impl TryFrom<v10::inventory::OmicronSledConfig> for OmicronSledConfig {
     type Error = external::Error;
 
     fn try_from(
-        v10: crate::v10::inventory::OmicronSledConfig,
+        v10: v10::inventory::OmicronSledConfig,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
             generation: v10.generation,
@@ -688,11 +685,11 @@ impl TryFrom<crate::v10::inventory::OmicronSledConfig> for OmicronSledConfig {
     }
 }
 
-impl TryFrom<crate::v10::inventory::OmicronZoneConfig> for OmicronZoneConfig {
+impl TryFrom<v10::inventory::OmicronZoneConfig> for OmicronZoneConfig {
     type Error = external::Error;
 
     fn try_from(
-        v10: crate::v10::inventory::OmicronZoneConfig,
+        v10: v10::inventory::OmicronZoneConfig,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
             id: v10.id,
@@ -703,14 +700,14 @@ impl TryFrom<crate::v10::inventory::OmicronZoneConfig> for OmicronZoneConfig {
     }
 }
 
-impl TryFrom<crate::v10::inventory::OmicronZoneType> for OmicronZoneType {
+impl TryFrom<v10::inventory::OmicronZoneType> for OmicronZoneType {
     type Error = external::Error;
 
     fn try_from(
-        v10: crate::v10::inventory::OmicronZoneType,
+        v10: v10::inventory::OmicronZoneType,
     ) -> Result<Self, Self::Error> {
         match v10 {
-            crate::v10::inventory::OmicronZoneType::BoundaryNtp {
+            v10::inventory::OmicronZoneType::BoundaryNtp {
                 address,
                 ntp_servers,
                 dns_servers,
@@ -734,30 +731,29 @@ impl TryFrom<crate::v10::inventory::OmicronZoneType> for OmicronZoneType {
                     snat_cfg,
                 })
             }
-            crate::v10::inventory::OmicronZoneType::Clickhouse {
+            v10::inventory::OmicronZoneType::Clickhouse {
                 address,
                 dataset,
             } => Ok(OmicronZoneType::Clickhouse { address, dataset }),
-            crate::v10::inventory::OmicronZoneType::ClickhouseKeeper {
+            v10::inventory::OmicronZoneType::ClickhouseKeeper {
                 address,
                 dataset,
             } => Ok(OmicronZoneType::ClickhouseKeeper { address, dataset }),
-            crate::v10::inventory::OmicronZoneType::ClickhouseServer {
+            v10::inventory::OmicronZoneType::ClickhouseServer {
                 address,
                 dataset,
             } => Ok(OmicronZoneType::ClickhouseServer { address, dataset }),
-            crate::v10::inventory::OmicronZoneType::CockroachDb {
+            v10::inventory::OmicronZoneType::CockroachDb {
                 address,
                 dataset,
             } => Ok(OmicronZoneType::CockroachDb { address, dataset }),
-            crate::v10::inventory::OmicronZoneType::Crucible {
-                address,
-                dataset,
-            } => Ok(OmicronZoneType::Crucible { address, dataset }),
-            crate::v10::inventory::OmicronZoneType::CruciblePantry {
-                address,
-            } => Ok(OmicronZoneType::CruciblePantry { address }),
-            crate::v10::inventory::OmicronZoneType::ExternalDns {
+            v10::inventory::OmicronZoneType::Crucible { address, dataset } => {
+                Ok(OmicronZoneType::Crucible { address, dataset })
+            }
+            v10::inventory::OmicronZoneType::CruciblePantry { address } => {
+                Ok(OmicronZoneType::CruciblePantry { address })
+            }
+            v10::inventory::OmicronZoneType::ExternalDns {
                 dataset,
                 http_address,
                 dns_address,
@@ -768,7 +764,7 @@ impl TryFrom<crate::v10::inventory::OmicronZoneType> for OmicronZoneType {
                 dns_address,
                 nic,
             }),
-            crate::v10::inventory::OmicronZoneType::InternalDns {
+            v10::inventory::OmicronZoneType::InternalDns {
                 dataset,
                 http_address,
                 dns_address,
@@ -781,10 +777,10 @@ impl TryFrom<crate::v10::inventory::OmicronZoneType> for OmicronZoneType {
                 gz_address,
                 gz_address_index,
             }),
-            crate::v10::inventory::OmicronZoneType::InternalNtp { address } => {
+            v10::inventory::OmicronZoneType::InternalNtp { address } => {
                 Ok(OmicronZoneType::InternalNtp { address })
             }
-            crate::v10::inventory::OmicronZoneType::Nexus {
+            v10::inventory::OmicronZoneType::Nexus {
                 internal_address,
                 lockstep_port,
                 external_ip,
@@ -799,20 +795,20 @@ impl TryFrom<crate::v10::inventory::OmicronZoneType> for OmicronZoneType {
                 external_tls,
                 external_dns_servers,
             }),
-            crate::v10::inventory::OmicronZoneType::Oximeter { address } => {
+            v10::inventory::OmicronZoneType::Oximeter { address } => {
                 Ok(OmicronZoneType::Oximeter { address })
             }
         }
     }
 }
 
-impl TryFrom<crate::v10::inventory::ConfigReconcilerInventory>
+impl TryFrom<v10::inventory::ConfigReconcilerInventory>
     for ConfigReconcilerInventory
 {
     type Error = external::Error;
 
     fn try_from(
-        v10: crate::v10::inventory::ConfigReconcilerInventory,
+        v10: v10::inventory::ConfigReconcilerInventory,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
             last_reconciled_config: v10.last_reconciled_config.try_into()?,
@@ -826,19 +822,19 @@ impl TryFrom<crate::v10::inventory::ConfigReconcilerInventory>
     }
 }
 
-impl TryFrom<crate::v10::inventory::ConfigReconcilerInventoryStatus>
+impl TryFrom<v10::inventory::ConfigReconcilerInventoryStatus>
     for ConfigReconcilerInventoryStatus
 {
     type Error = external::Error;
 
     fn try_from(
-        v10: crate::v10::inventory::ConfigReconcilerInventoryStatus,
+        v10: v10::inventory::ConfigReconcilerInventoryStatus,
     ) -> Result<Self, Self::Error> {
         match v10 {
-            crate::v10::inventory::ConfigReconcilerInventoryStatus::NotYetRun => {
+            v10::inventory::ConfigReconcilerInventoryStatus::NotYetRun => {
                 Ok(ConfigReconcilerInventoryStatus::NotYetRun)
             }
-            crate::v10::inventory::ConfigReconcilerInventoryStatus::Running {
+            v10::inventory::ConfigReconcilerInventoryStatus::Running {
                 config,
                 started_at,
                 running_for,
@@ -847,7 +843,7 @@ impl TryFrom<crate::v10::inventory::ConfigReconcilerInventoryStatus>
                 started_at,
                 running_for,
             }),
-            crate::v10::inventory::ConfigReconcilerInventoryStatus::Idle {
+            v10::inventory::ConfigReconcilerInventoryStatus::Idle {
                 completed_at,
                 ran_for,
             } => Ok(ConfigReconcilerInventoryStatus::Idle {
@@ -858,11 +854,11 @@ impl TryFrom<crate::v10::inventory::ConfigReconcilerInventoryStatus>
     }
 }
 
-impl TryFrom<crate::v10::inventory::OmicronZonesConfig> for OmicronZonesConfig {
+impl TryFrom<v10::inventory::OmicronZonesConfig> for OmicronZonesConfig {
     type Error = external::Error;
 
     fn try_from(
-        v10: crate::v10::inventory::OmicronZonesConfig,
+        v10: v10::inventory::OmicronZonesConfig,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
             generation: v10.generation,
@@ -876,7 +872,7 @@ impl TryFrom<crate::v10::inventory::OmicronZonesConfig> for OmicronZonesConfig {
 }
 
 // Conversions from v11 to v10 for response types
-impl TryFrom<Inventory> for crate::v10::inventory::Inventory {
+impl TryFrom<Inventory> for v10::inventory::Inventory {
     type Error = external::Error;
 
     fn try_from(v11: Inventory) -> Result<Self, Self::Error> {
@@ -906,7 +902,7 @@ impl TryFrom<Inventory> for crate::v10::inventory::Inventory {
     }
 }
 
-impl TryFrom<OmicronSledConfig> for crate::v10::inventory::OmicronSledConfig {
+impl TryFrom<OmicronSledConfig> for v10::inventory::OmicronSledConfig {
     type Error = external::Error;
 
     fn try_from(v11: OmicronSledConfig) -> Result<Self, Self::Error> {
@@ -925,7 +921,7 @@ impl TryFrom<OmicronSledConfig> for crate::v10::inventory::OmicronSledConfig {
     }
 }
 
-impl TryFrom<OmicronZoneConfig> for crate::v10::inventory::OmicronZoneConfig {
+impl TryFrom<OmicronZoneConfig> for v10::inventory::OmicronZoneConfig {
     type Error = external::Error;
 
     fn try_from(v11: OmicronZoneConfig) -> Result<Self, Self::Error> {
@@ -938,7 +934,7 @@ impl TryFrom<OmicronZoneConfig> for crate::v10::inventory::OmicronZoneConfig {
     }
 }
 
-impl TryFrom<OmicronZoneType> for crate::v10::inventory::OmicronZoneType {
+impl TryFrom<OmicronZoneType> for v10::inventory::OmicronZoneType {
     type Error = external::Error;
 
     fn try_from(v11: OmicronZoneType) -> Result<Self, Self::Error> {
@@ -954,7 +950,7 @@ impl TryFrom<OmicronZoneType> for crate::v10::inventory::OmicronZoneType {
                 snat_cfg,
             } => {
                 let (first_port, last_port) = snat_cfg.port_range_raw();
-                Ok(crate::v10::inventory::OmicronZoneType::BoundaryNtp {
+                Ok(v10::inventory::OmicronZoneType::BoundaryNtp {
                     address,
                     ntp_servers,
                     dns_servers,
@@ -973,46 +969,44 @@ impl TryFrom<OmicronZoneType> for crate::v10::inventory::OmicronZoneType {
                 })
             }
             OmicronZoneType::Clickhouse { address, dataset } => {
-                Ok(crate::v10::inventory::OmicronZoneType::Clickhouse {
+                Ok(v10::inventory::OmicronZoneType::Clickhouse {
                     address,
                     dataset,
                 })
             }
             OmicronZoneType::ClickhouseKeeper { address, dataset } => {
-                Ok(crate::v10::inventory::OmicronZoneType::ClickhouseKeeper {
+                Ok(v10::inventory::OmicronZoneType::ClickhouseKeeper {
                     address,
                     dataset,
                 })
             }
             OmicronZoneType::ClickhouseServer { address, dataset } => {
-                Ok(crate::v10::inventory::OmicronZoneType::ClickhouseServer {
+                Ok(v10::inventory::OmicronZoneType::ClickhouseServer {
                     address,
                     dataset,
                 })
             }
             OmicronZoneType::CockroachDb { address, dataset } => {
-                Ok(crate::v10::inventory::OmicronZoneType::CockroachDb {
+                Ok(v10::inventory::OmicronZoneType::CockroachDb {
                     address,
                     dataset,
                 })
             }
             OmicronZoneType::Crucible { address, dataset } => {
-                Ok(crate::v10::inventory::OmicronZoneType::Crucible {
+                Ok(v10::inventory::OmicronZoneType::Crucible {
                     address,
                     dataset,
                 })
             }
             OmicronZoneType::CruciblePantry { address } => {
-                Ok(crate::v10::inventory::OmicronZoneType::CruciblePantry {
-                    address,
-                })
+                Ok(v10::inventory::OmicronZoneType::CruciblePantry { address })
             }
             OmicronZoneType::ExternalDns {
                 dataset,
                 http_address,
                 dns_address,
                 nic,
-            } => Ok(crate::v10::inventory::OmicronZoneType::ExternalDns {
+            } => Ok(v10::inventory::OmicronZoneType::ExternalDns {
                 dataset,
                 http_address,
                 dns_address,
@@ -1024,7 +1018,7 @@ impl TryFrom<OmicronZoneType> for crate::v10::inventory::OmicronZoneType {
                 dns_address,
                 gz_address,
                 gz_address_index,
-            } => Ok(crate::v10::inventory::OmicronZoneType::InternalDns {
+            } => Ok(v10::inventory::OmicronZoneType::InternalDns {
                 dataset,
                 http_address,
                 dns_address,
@@ -1032,9 +1026,7 @@ impl TryFrom<OmicronZoneType> for crate::v10::inventory::OmicronZoneType {
                 gz_address_index,
             }),
             OmicronZoneType::InternalNtp { address } => {
-                Ok(crate::v10::inventory::OmicronZoneType::InternalNtp {
-                    address,
-                })
+                Ok(v10::inventory::OmicronZoneType::InternalNtp { address })
             }
             OmicronZoneType::Nexus {
                 internal_address,
@@ -1043,7 +1035,7 @@ impl TryFrom<OmicronZoneType> for crate::v10::inventory::OmicronZoneType {
                 nic,
                 external_tls,
                 external_dns_servers,
-            } => Ok(crate::v10::inventory::OmicronZoneType::Nexus {
+            } => Ok(v10::inventory::OmicronZoneType::Nexus {
                 internal_address,
                 lockstep_port,
                 external_ip,
@@ -1052,14 +1044,14 @@ impl TryFrom<OmicronZoneType> for crate::v10::inventory::OmicronZoneType {
                 external_dns_servers,
             }),
             OmicronZoneType::Oximeter { address } => {
-                Ok(crate::v10::inventory::OmicronZoneType::Oximeter { address })
+                Ok(v10::inventory::OmicronZoneType::Oximeter { address })
             }
         }
     }
 }
 
 impl TryFrom<ConfigReconcilerInventory>
-    for crate::v10::inventory::ConfigReconcilerInventory
+    for v10::inventory::ConfigReconcilerInventory
 {
     type Error = external::Error;
 
@@ -1077,7 +1069,7 @@ impl TryFrom<ConfigReconcilerInventory>
 }
 
 impl TryFrom<ConfigReconcilerInventoryStatus>
-    for crate::v10::inventory::ConfigReconcilerInventoryStatus
+    for v10::inventory::ConfigReconcilerInventoryStatus
 {
     type Error = external::Error;
 
@@ -1085,33 +1077,29 @@ impl TryFrom<ConfigReconcilerInventoryStatus>
         v11: ConfigReconcilerInventoryStatus,
     ) -> Result<Self, Self::Error> {
         match v11 {
-            ConfigReconcilerInventoryStatus::NotYetRun => Ok(
-                crate::v10::inventory::ConfigReconcilerInventoryStatus::NotYetRun,
-            ),
+            ConfigReconcilerInventoryStatus::NotYetRun => {
+                Ok(v10::inventory::ConfigReconcilerInventoryStatus::NotYetRun)
+            }
             ConfigReconcilerInventoryStatus::Running {
                 config,
                 started_at,
                 running_for,
-            } => Ok(
-                crate::v10::inventory::ConfigReconcilerInventoryStatus::Running {
-                    config: Box::new((*config).try_into()?),
-                    started_at,
-                    running_for,
-                },
-            ),
+            } => Ok(v10::inventory::ConfigReconcilerInventoryStatus::Running {
+                config: Box::new((*config).try_into()?),
+                started_at,
+                running_for,
+            }),
             ConfigReconcilerInventoryStatus::Idle { completed_at, ran_for } => {
-                Ok(
-                    crate::v10::inventory::ConfigReconcilerInventoryStatus::Idle {
-                        completed_at,
-                        ran_for,
-                    },
-                )
+                Ok(v10::inventory::ConfigReconcilerInventoryStatus::Idle {
+                    completed_at,
+                    ran_for,
+                })
             }
         }
     }
 }
 
-impl TryFrom<OmicronZonesConfig> for crate::v10::inventory::OmicronZonesConfig {
+impl TryFrom<OmicronZonesConfig> for v10::inventory::OmicronZonesConfig {
     type Error = external::Error;
 
     fn try_from(v11: OmicronZonesConfig) -> Result<Self, Self::Error> {

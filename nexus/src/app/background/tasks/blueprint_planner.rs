@@ -6,6 +6,7 @@
 
 use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
 use crate::app::background::BackgroundTask;
+use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
 use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_auth::authz;
@@ -16,8 +17,8 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::BlueprintSource;
+use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::PlanningReport;
-use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
@@ -58,8 +59,8 @@ pub struct BlueprintPlanner {
     datastore: Arc<DataStore>,
     rx_config: Receiver<ReconfiguratorConfigLoaderState>,
     rx_inventory: Receiver<Option<Arc<Collection>>>,
-    rx_blueprint: Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
-    tx_blueprint: Sender<Option<(BlueprintTarget, Arc<Blueprint>)>>,
+    rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
+    tx_planned: Sender<Option<BlueprintUuid>>,
     blueprint_limit: u64,
 }
 
@@ -84,23 +85,37 @@ impl BlueprintPlanner {
         datastore: Arc<DataStore>,
         rx_config: Receiver<ReconfiguratorConfigLoaderState>,
         rx_inventory: Receiver<Option<Arc<Collection>>>,
-        rx_blueprint: Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
+        rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
     ) -> Self {
-        let (tx_blueprint, _) = watch::channel(None);
+        let (tx_planned, _) = watch::channel(None);
         Self {
             datastore,
             rx_config,
             rx_inventory,
             rx_blueprint,
-            tx_blueprint,
+            tx_planned,
             blueprint_limit: DEFAULT_BLUEPRINT_LIMIT,
         }
     }
 
-    pub fn watcher(
-        &self,
-    ) -> watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>> {
-        self.tx_blueprint.subscribe()
+    /// Receiving end of a watch channel that holds the most recent blueprint
+    /// created and set as the current target by this `BlueprintPlanner`.
+    ///
+    /// This exact contents of this channel are unlikely to be useful. If you
+    /// want the current target blueprint, you should use the channel exposed by
+    /// the `blueprint_loader` task instead. This channel will often be `None`
+    /// for an extended period of time after Nexus startup (e.g., any time Nexus
+    /// starts up and there are no planning changes to be made), and even if
+    /// it's `Some(blueprint_id)`, the stored ID is the last blueprint planned
+    /// _by this `BlueprintPlanner`_; the current target blueprint may have
+    /// already been set to something else by other sources (e.g., the
+    /// `BlueprintPlanner` tasks on other Nexus instances).
+    ///
+    /// The primary use of this channel is to be notified when the planner has
+    /// created a new target blueprint, at which point a concerned party should
+    /// load the current target.
+    pub fn watcher(&self) -> watch::Receiver<Option<BlueprintUuid>> {
+        self.tx_planned.subscribe()
     }
 
     /// Run a planning iteration to generate a new blueprint.
@@ -160,7 +175,7 @@ impl BlueprintPlanner {
 
         // Get the current target blueprint to use as a parent.
         // Cloned so that we don't block the channel.
-        let Some((target, parent)) =
+        let Some(LoadedTargetBlueprint { target, blueprint: parent }) =
             self.rx_blueprint.borrow_and_update().clone()
         else {
             return Err(PlanError::NoTargetBlueprint);
@@ -313,7 +328,7 @@ impl BlueprintPlanner {
 
         // We have a new target!
 
-        self.tx_blueprint.send_replace(Some((target, Arc::new(blueprint))));
+        self.tx_planned.send_replace(Some(blueprint.id));
         Ok(BlueprintPlannerStatus::Targeted {
             parent_blueprint_id,
             blueprint_id,
@@ -456,10 +471,11 @@ mod test {
             TargetBlueprintLoader::new(datastore.clone(), tx_loader);
         let mut rx_loader = bp_loader.watcher();
         bp_loader.activate(&opctx).await;
-        let (_initial_target, initial_blueprint) = rx_loader
+        let initial_blueprint = rx_loader
             .borrow_and_update()
             .clone()
-            .expect("no initial blueprint");
+            .expect("no initial blueprint")
+            .blueprint;
 
         // Spin up the inventory collector background task.
         let resolver = internal_dns_resolver::Resolver::new_from_addrs(
@@ -526,7 +542,7 @@ mod test {
 
         // Load and check the new target blueprint.
         bp_loader.activate(&opctx).await;
-        let (mut target, blueprint) = rx_loader
+        let LoadedTargetBlueprint { mut target, blueprint } = rx_loader
             .borrow_and_update()
             .clone()
             .expect("failed to load blueprint");
@@ -560,7 +576,7 @@ mod test {
 
         // Ping the loader again so it gets the updated target.
         bp_loader.activate(&opctx).await;
-        let (target, blueprint) = rx_loader
+        let LoadedTargetBlueprint { target, blueprint } = rx_loader
             .borrow_and_update()
             .clone()
             .expect("failed to re-load blueprint");
