@@ -7,6 +7,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::typed_uuid::DbTypedUuid;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
@@ -281,7 +282,7 @@ impl DataStore {
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
-                    let Some(mut db_config) = latest else {
+                    let Some(db_config) = latest else {
                         bail_txn!(
                             err,
                             "No trust quorum config for rack_id {} at epoch {}",
@@ -331,20 +332,9 @@ impl DataStore {
                     // We only update the configuration in the database if:
                     //  1. This is the first time we have seen encrypted rack secrets
                     //  2. We are transitioning from preparing to committed state.
-                    let mut secrets_changed = false;
-                    if db_config.encrypted_rack_secrets_salt.is_none() {
-                        let (salt, secrets) = config
-                            .encrypted_rack_secrets
-                            .map_or((None, None), |s| {
-                                (
-                                    Some(hex::encode(s.salt.0)),
-                                    Some(s.data.into()),
-                                )
-                            });
-                        db_config.encrypted_rack_secrets_salt = salt;
-                        db_config.encrypted_rack_secrets = secrets;
-                        secrets_changed = true;
-                    }
+                    let should_write_secrets =
+                        db_config.encrypted_rack_secrets_salt.is_none()
+                            && config.encrypted_rack_secrets.is_some();
 
                     let mut total_acks = 0;
                     for (mut member, hw_id) in db_members {
@@ -379,23 +369,33 @@ impl DataStore {
                     }
 
                     // Do we have enough acks to commit?
-                    let mut should_commit = false;
-                    if total_acks
+                    let should_commit = total_acks
                         >= (db_config.threshold.0
                             + db_config.commit_crash_tolerance.0)
-                            as usize
-                    {
-                        db_config.state =
-                            DbTrustQuorumConfigurationState::Committed;
-                        should_commit = true;
-                    }
+                            as usize;
 
-                    if secrets_changed && should_commit {
-                        // TODO: write secrets and commit
-                    } else if secrets_changed {
-                        // TODO: write secrets
-                    } else if should_commit {
-                        // TODO: commit
+                    match (should_write_secrets, should_commit) {
+                        (true, true) => {
+
+                            // TODO: write secrets and commit
+                        }
+                        (true, false) => {
+                            self.update_tq_encrypted_rack_secrets_in_txn(
+                                opctx,
+                                conn,
+                                db_config.rack_id,
+                                db_config.epoch,
+                                config.encr,
+                            )
+                            .await
+                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                        }
+                        (false, true) => {
+                            // TODO: commit
+                        }
+                        (false, false) => {
+                            // Nothing to do
+                        }
                     }
 
                     Ok(())
@@ -489,6 +489,34 @@ impl DataStore {
         use nexus_db_schema::schema::trust_quorum_member::dsl as members_dsl;
         diesel::insert_into(members_dsl::trust_quorum_member)
             .values(members)
+            .execute_async(conn)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn update_tq_encrypted_rack_secrets_in_txn(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: DbTypedUuid<RackUuid>,
+        epoch: i64,
+        encrypted_rack_secrets: EncryptedRackSecrets,
+    ) -> Result<(), TransactionError<Error>> {
+        let salt = Some(hex::encode(encrypted_rack_secrets.salt.0));
+        let secrets = Some(encrypted_rack_secrets.data.into());
+
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+
+        diesel::update(dsl::trust_quorum_configuration)
+            .filter(dsl::rack_id.eq(rack_id))
+            .filter(dsl::epoch.eq(epoch))
+            .filter(dsl::encrypted_rack_secrets_salt.is_null())
+            .filter(dsl::encrypted_rack_secrets.is_null())
+            .set((
+                dsl::encrypted_rack_secrets_salt.eq(salt),
+                dsl::encrypted_rack_secrets.eq(secrets),
+            ))
             .execute_async(conn)
             .await?;
 
