@@ -799,7 +799,7 @@ impl DataStore {
             // allocations for an instance are only _validated_ during the sled
             // reservation.
             //
-            // The instance start saga perform sled reservation, creates the
+            // The instance start saga performs sled reservation, creates the
             // corresponding VMM record, and changes the instance's runtime
             // state all in _separate saga nodes_.  This means that there could
             // be an indeterminate amount of time between running the sled
