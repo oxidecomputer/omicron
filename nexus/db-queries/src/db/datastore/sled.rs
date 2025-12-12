@@ -343,7 +343,7 @@ impl DataStore {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
         Self::check_sled_in_service_on_connection(conn, sled_id)
             .await
-            .map_err(From::from)
+            .map_err(|e| e.into_public_ignore_retries())
     }
 
     /// Confirms that a sled exists and is in-service.
