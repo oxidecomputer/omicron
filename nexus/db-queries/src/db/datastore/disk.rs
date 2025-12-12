@@ -812,7 +812,7 @@ impl DataStore {
             //
             // - if an allocation does not already exist for the local storage
             //   disk, the instance_start saga will fail (and unwind) when
-            //   trying to ensure that the allocation's dataset and zvol exist
+            //   trying to ensure that the allocation's dataset and zvol exist,
             //   because the allocation_id column is None.
             //
             // - if an allocation does already exist for the local storage disk,
