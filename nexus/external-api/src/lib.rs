@@ -3914,7 +3914,8 @@ pub trait NexusExternalApi {
     async fn v2025120300_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025120300::Group>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<v2025120300::Group>>, HttpError>
+    {
         match Self::group_list(rqctx, query_params).await {
             Ok(page) => {
                 let new_page = ResultsPage {
@@ -4032,7 +4033,8 @@ pub trait NexusExternalApi {
     async fn v2025120300_current_user_groups(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025120300::Group>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<v2025120300::Group>>, HttpError>
+    {
         match Self::current_user_groups(rqctx, query_params).await {
             Ok(page) => {
                 let new_page = ResultsPage {
