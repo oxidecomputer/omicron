@@ -92,10 +92,7 @@
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
 use dropshot_api_manager_types::api_versions;
 use internal_dns_types::config::ERROR_CODE_INCOMPATIBLE_RECORD;
-use internal_dns_types_versions::{
-    latest, v1,
-    v2::config::{V1ToV2TranslationError, V2ToV1TranslationError},
-};
+use internal_dns_types_versions::{latest, v1, v2};
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -149,7 +146,7 @@ pub trait DnsServerApi {
     ) -> Result<HttpResponseOk<v1::config::DnsConfig>, HttpError> {
         Self::dns_config_get(rqctx).await?.try_map(|config| {
             config.try_into().map_err(
-                |V2ToV1TranslationError::IncompatibleRecord| {
+                |v2::config::V2ToV1TranslationError::IncompatibleRecord| {
                     HttpError::for_bad_request(
                         None,
                         ERROR_CODE_INCOMPATIBLE_RECORD.to_string(),
@@ -182,7 +179,7 @@ pub trait DnsServerApi {
     {
         let rq = rq.try_map(|params| {
             params.try_into().map_err(
-                |V1ToV2TranslationError::GenerationTooLarge| {
+                |v2::config::V1ToV2TranslationError::GenerationTooLarge| {
                     HttpError::for_bad_request(
                         None,
                         ERROR_CODE_INCOMPATIBLE_RECORD.to_string(),

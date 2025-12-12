@@ -297,9 +297,9 @@ impl SimSystem {
     pub fn get_blueprint(
         &self,
         id: &ResolvedBlueprintId,
-    ) -> Result<&Blueprint, KeyError> {
+    ) -> Result<&Arc<Blueprint>, KeyError> {
         match self.blueprints.get(&id.resolved()) {
-            Some(b) => Ok(&**b),
+            Some(b) => Ok(b),
             None => Err(KeyError::resolved_blueprint(id.clone())),
         }
     }
@@ -311,7 +311,7 @@ impl SimSystem {
     pub fn resolve_and_get_blueprint(
         &self,
         original: BlueprintId,
-    ) -> Result<&Blueprint, KeyError> {
+    ) -> Result<&Arc<Blueprint>, KeyError> {
         let id = self.resolve_blueprint_id(original);
         self.get_blueprint(&id)
     }
@@ -429,7 +429,7 @@ impl SimSystemBuilder {
     pub fn get_blueprint(
         &self,
         id: &ResolvedBlueprintId,
-    ) -> Result<&Blueprint, KeyError> {
+    ) -> Result<&Arc<Blueprint>, KeyError> {
         self.inner.system.get_blueprint(id)
     }
 
