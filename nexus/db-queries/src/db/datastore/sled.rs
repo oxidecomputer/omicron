@@ -555,6 +555,11 @@ impl DataStore {
                 );
 
                 if local_storage_allocation_sleds.len() != 1 {
+                    warn!(
+                        &log,
+                        "more than one sled with local storage allocations!"
+                    );
+
                     // It's an error for multiple sleds to host local storage
                     // disks for a single VMM, so return a conflict error here.
                     //
