@@ -30,6 +30,7 @@ use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use slog::{debug, info};
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use std::time::Duration;
 
 // TODO-coverage This test could check other stuff:
@@ -49,15 +50,23 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let opctx = lc.opctx();
     let datastore = lc.datastore();
 
+    let (_, parent_blueprint) = datastore
+        .blueprint_target_get_current_full(opctx)
+        .await
+        .expect("obtained current target blueprint");
     let planner_config = datastore
         .reconfigurator_config_get_latest(opctx)
         .await
         .expect("obtained latest reconfigurator config")
         .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
-    let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
-            .await
-            .expect("planning input");
+    let planning_input = PlanningInputFromDb::assemble(
+        &opctx,
+        &datastore,
+        planner_config,
+        Arc::new(parent_blueprint),
+    )
+    .await
+    .expect("planning input");
     let initial_nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
     let nexus = initial_nexus_clients.first().expect("internal Nexus client");
 
@@ -271,17 +280,20 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
 
     // Now run through the planner.
     info!(log, "running through planner");
-    let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
-            .await
-            .expect("planning input");
     let (_, parent_blueprint) = datastore
         .blueprint_target_get_current_full(opctx)
         .await
         .expect("getting latest target blueprint");
+    let planning_input = PlanningInputFromDb::assemble(
+        &opctx,
+        &datastore,
+        planner_config,
+        Arc::new(parent_blueprint),
+    )
+    .await
+    .expect("planning input");
     let planner = Planner::new_based_on(
         log.clone(),
-        &parent_blueprint,
         &planning_input,
         "live test suite",
         &latest_collection,

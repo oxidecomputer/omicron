@@ -58,8 +58,8 @@ pub struct BlueprintPlanner {
     datastore: Arc<DataStore>,
     rx_config: Receiver<ReconfiguratorConfigLoaderState>,
     rx_inventory: Receiver<Option<Arc<Collection>>>,
-    rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
-    tx_blueprint: Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    rx_blueprint: Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
+    tx_blueprint: Sender<Option<(BlueprintTarget, Arc<Blueprint>)>>,
     blueprint_limit: u64,
 }
 
@@ -84,7 +84,7 @@ impl BlueprintPlanner {
         datastore: Arc<DataStore>,
         rx_config: Receiver<ReconfiguratorConfigLoaderState>,
         rx_inventory: Receiver<Option<Arc<Collection>>>,
-        rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+        rx_blueprint: Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
     ) -> Self {
         let (tx_blueprint, _) = watch::channel(None);
         Self {
@@ -99,7 +99,7 @@ impl BlueprintPlanner {
 
     pub fn watcher(
         &self,
-    ) -> watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>> {
+    ) -> watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>> {
         self.tx_blueprint.subscribe()
     }
 
@@ -160,10 +160,11 @@ impl BlueprintPlanner {
 
         // Get the current target blueprint to use as a parent.
         // Cloned so that we don't block the channel.
-        let Some(loaded) = self.rx_blueprint.borrow_and_update().clone() else {
+        let Some((target, parent)) =
+            self.rx_blueprint.borrow_and_update().clone()
+        else {
             return Err(PlanError::NoTargetBlueprint);
         };
-        let (target, parent) = &*loaded;
         let parent_blueprint_id = parent.id;
 
         // Get the inventory most recently seen by the inventory loader
@@ -180,6 +181,7 @@ impl BlueprintPlanner {
             opctx,
             &self.datastore,
             config.config.planner_config,
+            Arc::clone(&parent),
         )
         .await
         .map_err(PlanError::AssemblePlanningInput)?;
@@ -187,7 +189,6 @@ impl BlueprintPlanner {
         // Generate a new blueprint.
         let planner = Planner::new_based_on(
             opctx.log.clone(),
-            &parent,
             &input,
             "blueprint_planner",
             &collection,
@@ -312,7 +313,7 @@ impl BlueprintPlanner {
 
         // We have a new target!
 
-        self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
+        self.tx_blueprint.send_replace(Some((target, Arc::new(blueprint))));
         Ok(BlueprintPlannerStatus::Targeted {
             parent_blueprint_id,
             blueprint_id,
@@ -455,7 +456,7 @@ mod test {
             TargetBlueprintLoader::new(datastore.clone(), tx_loader);
         let mut rx_loader = bp_loader.watcher();
         bp_loader.activate(&opctx).await;
-        let (_initial_target, initial_blueprint) = &*rx_loader
+        let (_initial_target, initial_blueprint) = rx_loader
             .borrow_and_update()
             .clone()
             .expect("no initial blueprint");
@@ -525,14 +526,14 @@ mod test {
 
         // Load and check the new target blueprint.
         bp_loader.activate(&opctx).await;
-        let (target, blueprint) = &*rx_loader
+        let (mut target, blueprint) = rx_loader
             .borrow_and_update()
             .clone()
             .expect("failed to load blueprint");
         assert_eq!(target.target_id, blueprint.id);
         assert_eq!(target.target_id, blueprint_id);
         assert!(
-            blueprint.diff_since_blueprint(initial_blueprint).has_changes()
+            blueprint.diff_since_blueprint(&initial_blueprint).has_changes()
         );
 
         // Planning again should not change the plan, because nothing has changed.
@@ -551,7 +552,6 @@ mod test {
         );
 
         // Enable execution.
-        let mut target = *target;
         target.enabled = true;
         datastore
             .blueprint_target_set_current_enabled(&opctx, target)
@@ -560,14 +560,14 @@ mod test {
 
         // Ping the loader again so it gets the updated target.
         bp_loader.activate(&opctx).await;
-        let (target, blueprint) = &*rx_loader
+        let (target, blueprint) = rx_loader
             .borrow_and_update()
             .clone()
             .expect("failed to re-load blueprint");
         assert_eq!(target.target_id, blueprint.id);
         assert_eq!(target.target_id, blueprint_id);
         assert!(
-            blueprint.diff_since_blueprint(initial_blueprint).has_changes()
+            blueprint.diff_since_blueprint(&initial_blueprint).has_changes()
         );
 
         // Trigger an inventory collection.

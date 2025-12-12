@@ -30,6 +30,7 @@ use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
@@ -1140,6 +1141,7 @@ impl SystemDescription {
     /// NICs.
     pub fn to_planning_input_builder(
         &self,
+        parent_blueprint: Arc<Blueprint>,
     ) -> anyhow::Result<PlanningInputBuilder> {
         let policy = Policy {
             external_ips: self.external_ip_policy.clone(),
@@ -1159,6 +1161,7 @@ impl SystemDescription {
             planner_config: self.planner_config,
         };
         let mut builder = PlanningInputBuilder::new(
+            parent_blueprint,
             policy,
             self.internal_dns_version,
             self.external_dns_version,

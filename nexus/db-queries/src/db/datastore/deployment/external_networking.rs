@@ -531,7 +531,7 @@ mod tests {
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::identity::Resource;
-    use nexus_types::inventory::SourceNatConfig;
+    use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
     use omicron_common::address::IpRange;
     use omicron_common::address::IpRangeIter;
@@ -657,7 +657,7 @@ mod tests {
             let ntp_id = OmicronZoneUuid::new_v4();
             let ntp_external_ip = OmicronZoneExternalSnatIp {
                 id: ExternalIpUuid::new_v4(),
-                snat_cfg: SourceNatConfig::new(
+                snat_cfg: SourceNatConfigGeneric::new(
                     external_ips.next().expect("exhausted external_ips"),
                     NUM_SOURCE_NAT_PORTS,
                     2 * NUM_SOURCE_NAT_PORTS - 1,
@@ -1137,7 +1137,7 @@ mod tests {
                             external_ip.snat_cfg.port_range_raw();
                         first += NUM_SOURCE_NAT_PORTS;
                         last += NUM_SOURCE_NAT_PORTS;
-                        external_ip.snat_cfg = SourceNatConfig::new(
+                        external_ip.snat_cfg = SourceNatConfigGeneric::new(
                             external_ip.snat_cfg.ip,
                             first,
                             last,

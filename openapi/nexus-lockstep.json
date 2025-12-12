@@ -5849,7 +5849,7 @@
             "$ref": "#/components/schemas/ExternalIpUuid"
           },
           "snat_cfg": {
-            "$ref": "#/components/schemas/SourceNatConfig"
+            "$ref": "#/components/schemas/SourceNatConfigGeneric"
           }
         },
         "required": [
@@ -5895,7 +5895,7 @@
                 "description": "The SNAT configuration for outbound connections.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/SourceNatConfig"
+                    "$ref": "#/components/schemas/SourceNatConfigGeneric"
                   }
                 ]
               },
@@ -8595,7 +8595,7 @@
         "type": "string",
         "format": "uuid"
       },
-      "SourceNatConfig": {
+      "SourceNatConfigGeneric": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
         "properties": {

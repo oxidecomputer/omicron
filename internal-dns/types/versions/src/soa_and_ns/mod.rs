@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! DNS configuration types for API version 2.0.0 (SOA_AND_NS).
+//! Version `SOA_AND_NS` of the DNS server API.
 //!
 //! This version adds:
 //!

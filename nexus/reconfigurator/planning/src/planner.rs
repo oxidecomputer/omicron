@@ -175,7 +175,6 @@ pub struct Planner<'a> {
 impl<'a> Planner<'a> {
     pub fn new_based_on(
         log: Logger,
-        parent_blueprint: &'a Blueprint,
         input: &'a PlanningInput,
         creator: &str,
         // NOTE: Right now, we just assume that this is the latest inventory
@@ -185,7 +184,7 @@ impl<'a> Planner<'a> {
     ) -> anyhow::Result<Planner<'a>> {
         let mut blueprint = BlueprintBuilder::new_based_on(
             &log,
-            parent_blueprint,
+            input.parent_blueprint(),
             creator,
             rng,
         )?;
