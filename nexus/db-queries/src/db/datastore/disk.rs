@@ -820,7 +820,10 @@ impl DataStore {
             //   reservation query would prevent this, but this attach (if not
             //   blocked) happened afterwards. This would mean Nexus would
             //   construct a InstanceSledLocalConfig that contains DelegatedZvol
-            //   entries that refer to different sleds.
+            //   entries that refer to different sleds, and send that request to
+            //   a single sled. Sled-agent would either fail to construct a
+            //   propolis zone due to the missing zvol device, or construct the
+            //   zone anyway and the device would be missing.
             //
             // - if an allocation does exist already, and it's for the same sled
             //   the VMM is on, it may be colocated on a zpool with another
