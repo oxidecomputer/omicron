@@ -42,8 +42,8 @@ use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils::start_sled_agent_with_config;
 use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::params::IpAssignment;
-use nexus_types::external_api::params::IpConfig;
-use nexus_types::external_api::params::Ipv4Config;
+use nexus_types::external_api::params::PrivateIpStackCreate;
+use nexus_types::external_api::params::PrivateIpv4StackCreate;
 use nexus_types::external_api::params::SshKeyCreate;
 use nexus_types::external_api::shared::IpKind;
 use nexus_types::external_api::shared::IpRange;
@@ -2671,7 +2671,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip_config: IpConfig::from_ipv4(requested_address),
+        ip_config: PrivateIpStackCreate::from_ipv4(requested_address),
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
@@ -2757,7 +2757,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip_config: IpConfig::from_ipv4(requested_address),
+        ip_config: PrivateIpStackCreate::from_ipv4(requested_address),
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
@@ -2800,7 +2800,7 @@ async fn test_instance_with_single_explicit_ip_address(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip_config: IpConfig::from_ipv4(requested_address),
+        ip_config: PrivateIpStackCreate::from_ipv4(requested_address),
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
@@ -2909,7 +2909,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip_config: IpConfig::auto_ipv4(),
+        ip_config: PrivateIpStackCreate::auto_ipv4(),
     };
     let if1_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
@@ -2918,7 +2918,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         },
         vpc_name: default_name.clone(),
         subnet_name: non_default_subnet_name.clone(),
-        ip_config: IpConfig::auto_ipv4(),
+        ip_config: PrivateIpStackCreate::auto_ipv4(),
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
@@ -3105,7 +3105,7 @@ async fn test_instance_create_delete_network_interface(
             },
             vpc_name: "default".parse().unwrap(),
             subnet_name: "default".parse().unwrap(),
-            ip_config: IpConfig::V4(Ipv4Config {
+            ip_config: PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
                 ip: IpAssignment::Explicit("172.30.0.10".parse().unwrap()),
                 transit_ips: vec![
                     "10.0.0.0/24".parse().unwrap(),
@@ -3120,7 +3120,7 @@ async fn test_instance_create_delete_network_interface(
             },
             vpc_name: "default".parse().unwrap(),
             subnet_name: secondary_subnet.identity.name.clone(),
-            ip_config: IpConfig::V4(Ipv4Config {
+            ip_config: PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
                 ip: IpAssignment::Explicit("172.31.0.11".parse().unwrap()),
                 transit_ips: vec!["192.168.1.0/24".parse().unwrap()],
             }),
@@ -3372,7 +3372,9 @@ async fn test_instance_update_network_interfaces(
             },
             vpc_name: "default".parse().unwrap(),
             subnet_name: "default".parse().unwrap(),
-            ip_config: IpConfig::from_ipv4("172.30.0.10".parse().unwrap()),
+            ip_config: PrivateIpStackCreate::from_ipv4(
+                "172.30.0.10".parse().unwrap(),
+            ),
         },
         params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
@@ -3381,7 +3383,9 @@ async fn test_instance_update_network_interfaces(
             },
             vpc_name: "default".parse().unwrap(),
             subnet_name: secondary_subnet.identity.name.clone(),
-            ip_config: IpConfig::from_ipv4("172.31.0.11".parse().unwrap()),
+            ip_config: PrivateIpStackCreate::from_ipv4(
+                "172.31.0.11".parse().unwrap(),
+            ),
         },
     ];
 
@@ -3974,7 +3978,9 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip_config: IpConfig::from_ipv4("172.30.0.6".parse().unwrap()),
+        ip_config: PrivateIpStackCreate::from_ipv4(
+            "172.30.0.6".parse().unwrap(),
+        ),
     };
     let if1_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
@@ -3983,7 +3989,9 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip_config: IpConfig::from_ipv4("172.30.0.7".parse().unwrap()),
+        ip_config: PrivateIpStackCreate::from_ipv4(
+            "172.30.0.7".parse().unwrap(),
+        ),
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
@@ -7759,7 +7767,7 @@ async fn test_instance_create_with_cross_project_subnet(
         },
         vpc_name: vpc_b_name.parse().unwrap(),
         subnet_name: subnet_b_name.parse().unwrap(),
-        ip_config: IpConfig::auto_ipv4(),
+        ip_config: PrivateIpStackCreate::auto_ipv4(),
     };
 
     let instance_params = params::InstanceCreate {
@@ -7889,7 +7897,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         },
         vpc_name: vpc_a_name.parse().unwrap(),
         subnet_name: subnet_a_name.parse().unwrap(),
-        ip_config: IpConfig::auto_ipv4(),
+        ip_config: PrivateIpStackCreate::auto_ipv4(),
     };
 
     let instance_same_project = params::InstanceCreate {
@@ -7953,7 +7961,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         },
         vpc_name: vpc_b_name.parse().unwrap(),
         subnet_name: subnet_b_name.parse().unwrap(),
-        ip_config: IpConfig::auto_ipv4(),
+        ip_config: PrivateIpStackCreate::auto_ipv4(),
     };
 
     let instance_cross_project = params::InstanceCreate {

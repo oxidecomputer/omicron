@@ -2990,7 +2990,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::external_api::params;
-    use nexus_types::external_api::params::IpConfig;
+    use nexus_types::external_api::params::PrivateIpStackCreate;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
@@ -3303,7 +3303,7 @@ mod tests {
                     name: nic.name.clone(),
                     description: nic.name.to_string(),
                 },
-                IpConfig::from_ipv4(*ip),
+                PrivateIpStackCreate::from_ipv4(*ip),
                 nic.mac,
                 nic.slot,
             )
@@ -4059,7 +4059,7 @@ mod tests {
                         name: "nic".parse().unwrap(),
                         description: "A NIC...".into(),
                     },
-                    IpConfig::auto_ipv4(),
+                    PrivateIpStackCreate::auto_ipv4(),
                 )
                 .unwrap(),
             )

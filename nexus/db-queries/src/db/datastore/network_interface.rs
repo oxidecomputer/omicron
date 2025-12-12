@@ -1009,7 +1009,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
-    use nexus_types::external_api::params::IpConfig;
+    use nexus_types::external_api::params::PrivateIpStackCreate;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;
     use std::collections::BTreeSet;
@@ -1061,7 +1061,7 @@ mod tests {
                     name: name.parse().unwrap(),
                     description: name,
                 },
-                IpConfig::from_ipv4(ip),
+                PrivateIpStackCreate::from_ipv4(ip),
                 macs.next().unwrap(),
                 0,
             )

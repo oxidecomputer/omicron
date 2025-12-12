@@ -1976,9 +1976,9 @@ mod tests {
     use nexus_types::external_api::params;
     use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
-    use nexus_types::external_api::params::IpConfig;
     use nexus_types::external_api::params::Ipv4Assignment;
-    use nexus_types::external_api::params::Ipv4Config;
+    use nexus_types::external_api::params::PrivateIpStackCreate;
+    use nexus_types::external_api::params::PrivateIpv4StackCreate;
     use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::Error;
@@ -2249,7 +2249,7 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            IpConfig::from_ipv4(ip),
+            PrivateIpStackCreate::from_ipv4(ip),
             MacAddr::random_system(),
             0,
         )
@@ -2321,7 +2321,7 @@ mod tests {
                 name: "interface-a".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::from_ipv4(requested_ip),
+            PrivateIpStackCreate::from_ipv4(requested_ip),
         )
         .unwrap();
         let err = context.datastore()
@@ -2357,11 +2357,11 @@ mod tests {
         let (requested_ip, ip_config) = match ip_version {
             IpVersion::V4 => {
                 let addr = context.net1.subnets[0].ipv4_block.nth(5).unwrap();
-                (IpAddr::V4(addr), IpConfig::from_ipv4(addr))
+                (IpAddr::V4(addr), PrivateIpStackCreate::from_ipv4(addr))
             }
             IpVersion::V6 => {
                 let addr = context.net1.subnets[0].ipv6_block.nth(5).unwrap();
-                (IpAddr::V6(addr), IpConfig::from_ipv6(addr))
+                (IpAddr::V6(addr), PrivateIpStackCreate::from_ipv6(addr))
             }
         };
         let interface = IncompleteNetworkInterface::new_instance(
@@ -2421,7 +2421,7 @@ mod tests {
                 name: "interface-b".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_ipv4(),
         )
         .unwrap();
         let err = context.datastore()
@@ -2459,7 +2459,7 @@ mod tests {
                     name: format!("interface-{}", i).parse().unwrap(),
                     description: String::from("description"),
                 },
-                IpConfig::auto_ipv4(),
+                PrivateIpStackCreate::auto_ipv4(),
             )
             .unwrap();
             let inserted_interface = context
@@ -2509,7 +2509,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_ipv4(),
         )
         .unwrap();
         let inserted_interface = context
@@ -2529,7 +2529,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::from_ipv4(ip.into()),
+            PrivateIpStackCreate::from_ipv4(ip.into()),
         )
         .unwrap();
         let result = context
@@ -2566,7 +2566,7 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            IpConfig::from_ipv4(ip),
+            PrivateIpStackCreate::from_ipv4(ip),
             mac,
             0,
         )
@@ -2606,7 +2606,7 @@ mod tests {
                     name: "service-nic".parse().unwrap(),
                     description: String::from("service nic"),
                 },
-                IpConfig::from_ipv4(ip),
+                PrivateIpStackCreate::from_ipv4(ip),
                 mac,
                 slot,
             )
@@ -2646,7 +2646,9 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            IpConfig::from_ipv4(ips.next().expect("exhausted test subnet")),
+            PrivateIpStackCreate::from_ipv4(
+                ips.next().expect("exhausted test subnet"),
+            ),
             mac,
             0,
         )
@@ -2669,7 +2671,9 @@ mod tests {
                 name: "new-service-nic".parse().unwrap(),
                 description: String::from("new-service nic"),
             },
-            IpConfig::from_ipv4(ips.next().expect("exhausted test subnet")),
+            PrivateIpStackCreate::from_ipv4(
+                ips.next().expect("exhausted test subnet"),
+            ),
             mac,
             0,
         )
@@ -2725,7 +2729,7 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            IpConfig::from_ipv4(ip0),
+            PrivateIpStackCreate::from_ipv4(ip0),
             next_mac(),
             0,
         )
@@ -2746,7 +2750,7 @@ mod tests {
                 name: "new-service-nic".parse().unwrap(),
                 description: String::from("new-service nic"),
             },
-            IpConfig::from_ipv4(ip1),
+            PrivateIpStackCreate::from_ipv4(ip1),
             next_mac(),
             0,
         )
@@ -2779,7 +2783,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_ipv4(),
         )
         .unwrap();
         let _ = context
@@ -2798,7 +2802,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_ipv4(),
         )
         .unwrap();
         let result = context
@@ -2829,7 +2833,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_ipv4(),
         )
         .unwrap();
         let _ = context
@@ -2845,7 +2849,7 @@ mod tests {
                 name: "interface-d".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_ipv4(),
         )
         .unwrap();
         let result = context
@@ -2873,7 +2877,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_ipv4(),
         )
         .unwrap();
         let _ = context
@@ -2915,7 +2919,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_ipv4(),
         )
         .unwrap();
         let _ = context
@@ -2924,9 +2928,10 @@ mod tests {
             .await
             .expect("Failed to insert interface");
         let expected_address = "172.30.0.5".parse().unwrap();
-        for ip_config in
-            [IpConfig::from_ipv4(expected_address), IpConfig::auto_ipv4()]
-        {
+        for ip_config in [
+            PrivateIpStackCreate::from_ipv4(expected_address),
+            PrivateIpStackCreate::auto_ipv4(),
+        ] {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance_id,
@@ -2974,7 +2979,7 @@ mod tests {
                     name: "interface-c".parse().unwrap(),
                     description: String::from("description"),
                 },
-                IpConfig::auto_ipv4(),
+                PrivateIpStackCreate::auto_ipv4(),
             )
             .unwrap();
             let _ = context
@@ -3003,7 +3008,7 @@ mod tests {
                 name: "interface-d".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_ipv4(),
         )
         .unwrap();
         let result = context
@@ -3036,7 +3041,7 @@ mod tests {
                     name: format!("if{}", i).parse().unwrap(),
                     description: String::from("description"),
                 },
-                IpConfig::auto_ipv4(),
+                PrivateIpStackCreate::auto_ipv4(),
             )
             .unwrap();
             let result = context
@@ -3113,7 +3118,7 @@ mod tests {
                     name: format!("interface-{}", slot).parse().unwrap(),
                     description: String::from("description"),
                 },
-                IpConfig::auto_ipv4(),
+                PrivateIpStackCreate::auto_ipv4(),
             )
             .unwrap();
             let inserted_interface = context
@@ -3148,7 +3153,7 @@ mod tests {
                 name: "interface-8".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_ipv4(),
         )
         .unwrap();
         let result = context
@@ -3201,8 +3206,8 @@ mod tests {
         const N_INSTANCES: usize = 3;
         let mut instances = Vec::with_capacity(N_INSTANCES);
         let ip_config = match ip_version {
-            IpVersion::V4 => IpConfig::auto_ipv4(),
-            IpVersion::V6 => IpConfig::auto_ipv6(),
+            IpVersion::V4 => PrivateIpStackCreate::auto_ipv4(),
+            IpVersion::V6 => PrivateIpStackCreate::auto_ipv6(),
         };
         for _ in 0..N_INSTANCES {
             let instance = context.create_stopped_instance().await;
@@ -3343,7 +3348,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::from_ipv4(addr),
+            PrivateIpStackCreate::from_ipv4(addr),
         )
         .unwrap();
         let _ = context
@@ -3363,7 +3368,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_ipv4(),
         )
         .unwrap();
 
@@ -3433,7 +3438,7 @@ mod tests {
             "172.16.0.0/16".parse().unwrap(),
         ];
 
-        let ip_config = IpConfig::V4(Ipv4Config {
+        let ip_config = PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
             ip: Ipv4Assignment::Auto,
             transit_ips: transit_ips.clone(),
         });
@@ -3488,7 +3493,7 @@ mod tests {
                     name: "net0".parse().unwrap(),
                     description: String::from("description"),
                 },
-                IpConfig::auto_ipv6(),
+                PrivateIpStackCreate::auto_ipv6(),
             )
             .unwrap();
             let intf = context

@@ -16,7 +16,9 @@ use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
-use nexus_types::external_api::params::{InstanceDiskAttachment, IpConfig};
+use nexus_types::external_api::params::{
+    InstanceDiskAttachment, PrivateIpStackCreate,
+};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
@@ -506,12 +508,12 @@ async fn sic_add_to_anti_affinity_group(
 /// This panics if the attachment isn't one of the "default" variants.
 fn nic_attachment_to_ip_config(
     attachment: &params::InstanceNetworkInterfaceAttachment,
-) -> IpConfig {
+) -> PrivateIpStackCreate {
     use params::InstanceNetworkInterfaceAttachment::*;
     match attachment {
-        DefaultIpv4 => IpConfig::auto_ipv4(),
-        DefaultIpv6 => IpConfig::auto_ipv6(),
-        DefaultDualStack => IpConfig::auto_dual_stack(),
+        DefaultIpv4 => PrivateIpStackCreate::auto_ipv4(),
+        DefaultIpv6 => PrivateIpStackCreate::auto_ipv6(),
+        DefaultDualStack => PrivateIpStackCreate::auto_dual_stack(),
         Create(_) | None => panic!("Only works for default variants"),
     }
 }
@@ -703,7 +705,7 @@ async fn create_default_primary_network_interface(
     nic_index: usize,
     instance_id: InstanceUuid,
     interface_id: Uuid,
-    ip_config: IpConfig,
+    ip_config: PrivateIpStackCreate,
 ) -> Result<(), ActionError> {
     // We're statically creating up to MAX_NICS_PER_INSTANCE saga nodes, but
     // this method only applies to the case where there's exactly one parameter

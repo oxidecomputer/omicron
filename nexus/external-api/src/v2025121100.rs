@@ -9,9 +9,9 @@ use itertools::Either;
 use itertools::Itertools as _;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::IpAssignment;
-use nexus_types::external_api::params::IpConfig;
-use nexus_types::external_api::params::Ipv4Config;
-use nexus_types::external_api::params::Ipv6Config;
+use nexus_types::external_api::params::PrivateIpStackCreate;
+use nexus_types::external_api::params::PrivateIpv4StackCreate;
+use nexus_types::external_api::params::PrivateIpv6StackCreate;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -248,17 +248,17 @@ impl TryFrom<InstanceNetworkInterfaceCreate>
         let ip_config = match value.ip {
             None => {
                 if !ipv4_transit_ips.is_empty() {
-                    IpConfig::V4(Ipv4Config {
+                    PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
                         ip: IpAssignment::Auto,
                         transit_ips: ipv4_transit_ips,
                     })
                 } else if !ipv6_transit_ips.is_empty() {
-                    IpConfig::V6(Ipv6Config {
+                    PrivateIpStackCreate::V6(PrivateIpv6StackCreate {
                         ip: IpAssignment::Auto,
                         transit_ips: ipv6_transit_ips,
                     })
                 } else {
-                    IpConfig::auto_dual_stack()
+                    PrivateIpStackCreate::auto_dual_stack()
                 }
             }
             Some(IpAddr::V4(ipv4)) => {
@@ -267,7 +267,7 @@ impl TryFrom<InstanceNetworkInterfaceCreate>
                         "Cannot specify IPv6 transit IPs with an IPv4 address",
                     ));
                 }
-                IpConfig::V4(Ipv4Config {
+                PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
                     ip: IpAssignment::Explicit(ipv4),
                     transit_ips: ipv4_transit_ips,
                 })
@@ -278,7 +278,7 @@ impl TryFrom<InstanceNetworkInterfaceCreate>
                         "Cannot specify IPv4 transit IPs with an IPv6 address",
                     ));
                 }
-                IpConfig::V6(Ipv6Config {
+                PrivateIpStackCreate::V6(PrivateIpv6StackCreate {
                     ip: IpAssignment::Explicit(ipv6),
                     transit_ips: ipv6_transit_ips,
                 })

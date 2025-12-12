@@ -20,7 +20,7 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_types::external_api::params;
-use nexus_types::external_api::params::IpConfig;
+use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::IpVersion;
@@ -722,7 +722,7 @@ pub static DEMO_INSTANCE_NIC_CREATE: LazyLock<
     },
     vpc_name: DEMO_VPC_NAME.clone(),
     subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
-    ip_config: IpConfig::auto_ipv4(),
+    ip_config: PrivateIpStackCreate::auto_ipv4(),
 });
 pub static DEMO_INSTANCE_NIC_PUT: LazyLock<
     params::InstanceNetworkInterfaceUpdate,

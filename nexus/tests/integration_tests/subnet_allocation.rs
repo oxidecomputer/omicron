@@ -19,7 +19,7 @@ use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
-use nexus_types::external_api::params::IpConfig;
+use nexus_types::external_api::params::PrivateIpStackCreate;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     InstanceNetworkInterface,
@@ -48,7 +48,7 @@ async fn create_instance_expect_failure(
                 },
                 vpc_name: "default".parse().unwrap(),
                 subnet_name: subnet_name.parse().unwrap(),
-                ip_config: IpConfig::auto_ipv4(),
+                ip_config: PrivateIpStackCreate::auto_ipv4(),
             },
         ]);
     let new_instance = params::InstanceCreate {
@@ -137,7 +137,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             },
             vpc_name: "default".parse().unwrap(),
             subnet_name: SUBNET_NAME.parse().unwrap(),
-            ip_config: IpConfig::auto_ipv4(),
+            ip_config: PrivateIpStackCreate::auto_ipv4(),
         },
     ]);
 

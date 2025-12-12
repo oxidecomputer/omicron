@@ -18,7 +18,7 @@ use nexus_db_schema::schema::network_interface;
 use nexus_db_schema::schema::service_network_interface;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::external_api::params;
-use nexus_types::external_api::params::IpConfig;
+use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::PrivateIpStack;
@@ -445,7 +445,7 @@ pub struct IncompleteNetworkInterface {
     pub kind: NetworkInterfaceKind,
     pub parent_id: Uuid,
     pub subnet: VpcSubnet,
-    pub ip_config: IpConfig,
+    pub ip_config: PrivateIpStackCreate,
     pub mac: Option<external::MacAddr>,
     pub slot: Option<u8>,
 }
@@ -458,7 +458,7 @@ impl IncompleteNetworkInterface {
         parent_id: Uuid,
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
-        ip_config: IpConfig,
+        ip_config: PrivateIpStackCreate,
         mac: Option<external::MacAddr>,
         slot: Option<u8>,
     ) -> Result<Self, external::Error> {
@@ -518,7 +518,7 @@ impl IncompleteNetworkInterface {
         instance_id: InstanceUuid,
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
-        ip_config: IpConfig,
+        ip_config: PrivateIpStackCreate,
     ) -> Result<Self, external::Error> {
         Self::new(
             interface_id,
@@ -537,7 +537,7 @@ impl IncompleteNetworkInterface {
         service_id: Uuid,
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
-        ip_config: IpConfig,
+        ip_config: PrivateIpStackCreate,
         mac: external::MacAddr,
         slot: u8,
     ) -> Result<Self, external::Error> {
@@ -563,7 +563,7 @@ impl IncompleteNetworkInterface {
         probe_id: Uuid,
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
-        ip_config: IpConfig,
+        ip_config: PrivateIpStackCreate,
         mac: Option<external::MacAddr>,
     ) -> Result<Self, external::Error> {
         Self::new(

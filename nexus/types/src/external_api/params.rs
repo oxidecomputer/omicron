@@ -953,8 +953,8 @@ pub struct InstanceNetworkInterfaceCreate {
     ///
     /// If not provided, a default configuration will be used, which creates a
     /// dual-stack IPv4 / IPv6 interface.
-    #[serde(default = "IpConfig::auto_dual_stack")]
-    pub ip_config: IpConfig,
+    #[serde(default = "PrivateIpStackCreate::auto_dual_stack")]
+    pub ip_config: PrivateIpStackCreate,
 }
 
 /// Parameters for updating an `InstanceNetworkInterface`
@@ -1060,7 +1060,7 @@ pub type Ipv6Assignment = IpAssignment<std::net::Ipv6Addr>;
 
 /// Configuration for a network interface's IPv4 addressing.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
-pub struct Ipv4Config {
+pub struct PrivateIpv4StackCreate {
     /// The VPC-private address to assign to the interface.
     pub ip: Ipv4Assignment,
     /// Additional IP networks the interface can send / receive on.
@@ -1070,7 +1070,7 @@ pub struct Ipv4Config {
 
 /// Configuration for a network interface's IPv6 addressing.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
-pub struct Ipv6Config {
+pub struct PrivateIpv6StackCreate {
     /// The VPC-private address to assign to the interface.
     pub ip: Ipv6Assignment,
     /// Additional IP networks the interface can send / receive on.
@@ -1078,22 +1078,22 @@ pub struct Ipv6Config {
     pub transit_ips: Vec<Ipv6Net>,
 }
 
-/// Configuration for a network interface's IP addressing.
+/// Create parameters for a network interface's IP stack.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum IpConfig {
+pub enum PrivateIpStackCreate {
     /// The interface has only an IPv4 stack.
-    V4(Ipv4Config),
+    V4(PrivateIpv4StackCreate),
     /// The interface has only an IPv6 stack.
-    V6(Ipv6Config),
+    V6(PrivateIpv6StackCreate),
     /// The interface has both an IPv4 and IPv6 stack.
-    DualStack { v4: Ipv4Config, v6: Ipv6Config },
+    DualStack { v4: PrivateIpv4StackCreate, v6: PrivateIpv6StackCreate },
 }
 
-impl IpConfig {
+impl PrivateIpStackCreate {
     /// Construct an IPv4 configuration with no transit IPs.
     pub fn from_ipv4(addr: std::net::Ipv4Addr) -> Self {
-        IpConfig::V4(Ipv4Config {
+        PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
             ip: Ipv4Assignment::Explicit(addr),
             transit_ips: vec![],
         })
@@ -1101,15 +1101,20 @@ impl IpConfig {
 
     /// Construct an IP configuration with only an automatic IPv4 address.
     pub fn auto_ipv4() -> Self {
-        IpConfig::V4(Ipv4Config::default())
+        PrivateIpStackCreate::V4(PrivateIpv4StackCreate::default())
     }
 
     /// Return the IPv4 address assignment.
     pub fn ipv4_assignment(&self) -> Option<&Ipv4Assignment> {
         match self {
-            IpConfig::V4(Ipv4Config { ip, .. }) => Some(ip),
-            IpConfig::V6(_) => None,
-            IpConfig::DualStack { v4: Ipv4Config { ip, .. }, .. } => Some(ip),
+            PrivateIpStackCreate::V4(PrivateIpv4StackCreate { ip, .. }) => {
+                Some(ip)
+            }
+            PrivateIpStackCreate::V6(_) => None,
+            PrivateIpStackCreate::DualStack {
+                v4: PrivateIpv4StackCreate { ip, .. },
+                ..
+            } => Some(ip),
         }
     }
 
@@ -1123,7 +1128,7 @@ impl IpConfig {
 
     /// Construct an IPv6 configuration with no transit IPs.
     pub fn from_ipv6(addr: std::net::Ipv6Addr) -> Self {
-        IpConfig::V6(Ipv6Config {
+        PrivateIpStackCreate::V6(PrivateIpv6StackCreate {
             ip: Ipv6Assignment::Explicit(addr),
             transit_ips: vec![],
         })
@@ -1131,15 +1136,20 @@ impl IpConfig {
 
     /// Construct an IP configuration with only an automatic IPv6 address.
     pub fn auto_ipv6() -> Self {
-        IpConfig::V6(Ipv6Config::default())
+        PrivateIpStackCreate::V6(PrivateIpv6StackCreate::default())
     }
 
     /// Return the IPv6 address assignment.
     pub fn ipv6_assignment(&self) -> Option<&Ipv6Assignment> {
         match self {
-            IpConfig::V6(Ipv6Config { ip, .. }) => Some(ip),
-            IpConfig::V4(_) => None,
-            IpConfig::DualStack { v6: Ipv6Config { ip, .. }, .. } => Some(ip),
+            PrivateIpStackCreate::V6(PrivateIpv6StackCreate { ip, .. }) => {
+                Some(ip)
+            }
+            PrivateIpStackCreate::V4(_) => None,
+            PrivateIpStackCreate::DualStack {
+                v6: PrivateIpv6StackCreate { ip, .. },
+                ..
+            } => Some(ip),
         }
     }
 
@@ -1154,15 +1164,17 @@ impl IpConfig {
     /// Return the transit IPs requested in this configuration.
     pub fn transit_ips(&self) -> Vec<IpNet> {
         match self {
-            IpConfig::V4(Ipv4Config { transit_ips, .. }) => {
-                transit_ips.iter().copied().map(Into::into).collect()
-            }
-            IpConfig::V6(Ipv6Config { transit_ips, .. }) => {
-                transit_ips.iter().copied().map(Into::into).collect()
-            }
-            IpConfig::DualStack {
-                v4: Ipv4Config { transit_ips: ipv4_addrs, .. },
-                v6: Ipv6Config { transit_ips: ipv6_addrs, .. },
+            PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
+                transit_ips,
+                ..
+            }) => transit_ips.iter().copied().map(Into::into).collect(),
+            PrivateIpStackCreate::V6(PrivateIpv6StackCreate {
+                transit_ips,
+                ..
+            }) => transit_ips.iter().copied().map(Into::into).collect(),
+            PrivateIpStackCreate::DualStack {
+                v4: PrivateIpv4StackCreate { transit_ips: ipv4_addrs, .. },
+                v6: PrivateIpv6StackCreate { transit_ips: ipv6_addrs, .. },
             } => ipv4_addrs
                 .iter()
                 .copied()
@@ -1177,12 +1189,12 @@ impl IpConfig {
         ipv4: std::net::Ipv4Addr,
         ipv6: std::net::Ipv6Addr,
     ) -> Self {
-        IpConfig::DualStack {
-            v4: Ipv4Config {
+        PrivateIpStackCreate::DualStack {
+            v4: PrivateIpv4StackCreate {
                 ip: Ipv4Assignment::Explicit(ipv4),
                 transit_ips: Vec::new(),
             },
-            v6: Ipv6Config {
+            v6: PrivateIpv6StackCreate {
                 ip: Ipv6Assignment::Explicit(ipv6),
                 transit_ips: Vec::new(),
             },
@@ -1192,24 +1204,26 @@ impl IpConfig {
     /// Construct an IP configuration with both IPv4 / IPv6 addresses and no
     /// transit IPs.
     pub fn auto_dual_stack() -> Self {
-        IpConfig::DualStack {
-            v4: Ipv4Config::default(),
-            v6: Ipv6Config::default(),
+        PrivateIpStackCreate::DualStack {
+            v4: PrivateIpv4StackCreate::default(),
+            v6: PrivateIpv6StackCreate::default(),
         }
     }
 
     /// Return true if this config has any transit IPs
     pub fn has_transit_ips(&self) -> bool {
         match self {
-            IpConfig::V4(Ipv4Config { transit_ips, .. }) => {
-                !transit_ips.is_empty()
-            }
-            IpConfig::V6(Ipv6Config { transit_ips, .. }) => {
-                !transit_ips.is_empty()
-            }
-            IpConfig::DualStack {
-                v4: Ipv4Config { transit_ips: ipv4_addrs, .. },
-                v6: Ipv6Config { transit_ips: ipv6_addrs, .. },
+            PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
+                transit_ips,
+                ..
+            }) => !transit_ips.is_empty(),
+            PrivateIpStackCreate::V6(PrivateIpv6StackCreate {
+                transit_ips,
+                ..
+            }) => !transit_ips.is_empty(),
+            PrivateIpStackCreate::DualStack {
+                v4: PrivateIpv4StackCreate { transit_ips: ipv4_addrs, .. },
+                v6: PrivateIpv6StackCreate { transit_ips: ipv6_addrs, .. },
             } => !ipv4_addrs.is_empty() || !ipv6_addrs.is_empty(),
         }
     }
