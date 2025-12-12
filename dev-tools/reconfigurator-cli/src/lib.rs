@@ -214,7 +214,7 @@ impl ReconfiguratorSim {
                 state.config().active_nexus_zone_generation();
             let mut active_nexus_zones = BTreeSet::new();
             for (_, zone, nexus) in parent_blueprint
-                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_nexus_zones()
             {
                 if nexus.nexus_generation == active_nexus_gen {
                     active_nexus_zones.insert(zone.id);
@@ -2494,7 +2494,7 @@ fn cmd_blueprint_edit(
         BlueprintEditCommands::BumpNexusGeneration => {
             let current_generation = builder.nexus_generation();
             let current_max = blueprint
-                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_nexus_zones()
                 .fold(
                     current_generation,
                     |current_max, (_sled_id, _zone_config, nexus_config)| {

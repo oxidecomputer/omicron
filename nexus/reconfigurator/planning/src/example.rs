@@ -730,7 +730,7 @@ impl ExampleSystemBuilder {
 
         // Find and set the set of active Nexuses
         let active_nexus_zone_ids: BTreeSet<_> = blueprint
-            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_nexus_zones()
             .filter_map(|(_, zone, nexus_zone)| {
                 if nexus_zone.nexus_generation == blueprint.nexus_generation {
                     Some(zone.id)

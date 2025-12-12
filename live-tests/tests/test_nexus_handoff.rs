@@ -215,7 +215,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
 
     // Find the new Nexus zones and make clients for them.
     let new_nexus_clients = blueprint_new_nexus
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_nexus_zones()
         .filter_map(|(_sled_id, zone_cfg, nexus_config)| {
             (nexus_config.nexus_generation == next_generation).then(|| {
                 (
@@ -495,7 +495,7 @@ async fn check_internal_dns(
     // Compute what we expect to find, based on which Nexus instances in the
     // blueprint have the specified generation.
     let expected_nexus_addrs = blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_nexus_zones()
         .filter_map(|(_sled_id, _zone_cfg, nexus_config)| {
             (nexus_config.nexus_generation == active_generation)
                 .then_some(nexus_config.internal_address)
@@ -559,7 +559,7 @@ async fn check_external_dns(
     // Compute which Nexus instances we expect to find in external DNS based on
     // what's in-service in the blueprint.
     let expected_nexus_addrs = blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_nexus_zones()
         .filter_map(|(_sled_id, _zone_cfg, nexus_config)| {
             (nexus_config.nexus_generation == active_generation)
                 .then_some(nexus_config.external_ip.ip)

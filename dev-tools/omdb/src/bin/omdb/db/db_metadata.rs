@@ -133,7 +133,7 @@ async fn get_db_metadata_nexus_rows(
     ];
 
     let nexus_generation_by_zone = blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_nexus_zones()
         .map(|(_, zone, nexus_zone)| (zone.id, nexus_zone.nexus_generation))
         .collect::<BTreeMap<_, _>>();
 
@@ -213,7 +213,7 @@ pub async fn cmd_db_metadata_force_mark_nexus_quiesced(
             .await
             .context("loading current target blueprint")?;
         let nexus_generation = current_target_blueprint
-            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_nexus_zones()
             .find_map(|(_, zone, nexus_zone)| {
                 if zone.id == args.id {
                     Some(nexus_zone.nexus_generation)

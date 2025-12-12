@@ -365,23 +365,39 @@ impl Blueprint {
             .filter(move |(_, z)| filter(z.disposition))
     }
 
-    /// Iterate over all Nexus zones that match the provided filter.
-    pub fn all_nexus_zones<F>(
+    /// Iterate over all in-service Nexus zones.
+    pub fn in_service_nexus_zones(
         &self,
-        filter: F,
     ) -> impl Iterator<
         Item = (SledUuid, &BlueprintZoneConfig, &blueprint_zone_type::Nexus),
-    >
-    where
-        F: FnMut(BlueprintZoneDisposition) -> bool,
-    {
-        self.danger_all_omicron_zones(filter).filter_map(|(sled_id, zone)| {
+    > {
+        self.in_service_zones().filter_map(|(sled_id, zone)| {
             if let BlueprintZoneType::Nexus(nexus_config) = &zone.zone_type {
                 Some((sled_id, zone, nexus_config))
             } else {
                 None
             }
         })
+    }
+
+    /// Iterate over all expunged Nexus zones that are ready for cleanup (i.e.,
+    /// have been confirmed to be shut down and will not restart).
+    pub fn expunged_nexus_zones_ready_for_cleanup(
+        &self,
+        reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<
+        Item = (SledUuid, &BlueprintZoneConfig, &blueprint_zone_type::Nexus),
+    > {
+        self.expunged_zones_ready_for_cleanup(reason).filter_map(
+            |(sled_id, zone)| {
+                if let BlueprintZoneType::Nexus(nexus_config) = &zone.zone_type
+                {
+                    Some((sled_id, zone, nexus_config))
+                } else {
+                    None
+                }
+            },
+        )
     }
 
     /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the
@@ -484,9 +500,7 @@ impl Blueprint {
         nexus_zones: &BTreeSet<OmicronZoneUuid>,
     ) -> Result<Option<Generation>, anyhow::Error> {
         let mut r#gen = None;
-        for (_, zone, nexus_zone) in
-            self.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (_, zone, nexus_zone) in self.in_service_nexus_zones() {
             if nexus_zones.contains(&zone.id) {
                 let found_gen = nexus_zone.nexus_generation;
                 if let Some(r#gen) = r#gen {
@@ -508,11 +522,16 @@ impl Blueprint {
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<Generation, Error> {
-        for (_sled_id, zone_config, nexus_config) in
-            self.all_nexus_zones(BlueprintZoneDisposition::could_be_running)
-        {
-            if zone_config.id == nexus_id {
-                return Ok(nexus_config.nexus_generation);
+        // TODO-john
+        for (_sled_id, zone_config) in self.danger_all_omicron_zones(
+            BlueprintZoneDisposition::could_be_running,
+        ) {
+            if let BlueprintZoneType::Nexus(nexus_config) =
+                &zone_config.zone_type
+            {
+                if zone_config.id == nexus_id {
+                    return Ok(nexus_config.nexus_generation);
+                }
             }
         }
 
@@ -650,6 +669,8 @@ pub struct OperatorNexusConfig<'a> {
 pub enum BlueprintExpungedZoneAccessReason {
     /// TODO-john
     DeallocateExternalNetworkingResources,
+    /// TODO-john
+    NexusSagaReassignment,
     /// TODO-john
     Test,
 }

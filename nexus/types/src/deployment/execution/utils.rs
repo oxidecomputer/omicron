@@ -90,7 +90,7 @@ pub fn blueprint_nexus_external_ips(
     active_generation: Generation,
 ) -> Vec<IpAddr> {
     blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_nexus_zones()
         .filter_map(|(_sled_id, _zone_config, nexus_config)| {
             (nexus_config.nexus_generation == active_generation)
                 .then_some(nexus_config.external_ip.ip)

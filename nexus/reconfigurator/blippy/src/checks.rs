@@ -65,10 +65,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
     > = BTreeMap::new();
     let mut rack_dns_subnets: BTreeSet<DnsSubnet> = BTreeSet::new();
 
-    for (sled_id, zone) in blippy
-        .blueprint()
-        .in_service_zones()
-    {
+    for (sled_id, zone) in blippy.blueprint().in_service_zones() {
         let ip = zone.underlay_ip();
 
         // There should be no duplicate underlay IPs.
@@ -158,10 +155,8 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
     let mut used_nic_ips = BTreeMap::new();
     let mut used_nic_macs = BTreeMap::new();
 
-    for (sled_id, zone, external_ip, nic) in blippy
-        .blueprint()
-        .in_service_zones()
-        .filter_map(|(sled_id, zone)| {
+    for (sled_id, zone, external_ip, nic) in
+        blippy.blueprint().in_service_zones().filter_map(|(sled_id, zone)| {
             zone.zone_type
                 .external_networking()
                 .map(|(external_ip, nic)| (sled_id, zone, external_ip, nic))
@@ -263,10 +258,7 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
 
     // On any given zpool, we should have at most one zone of any given
     // kind.
-    for (sled_id, zone) in blippy
-        .blueprint()
-        .in_service_zones()
-    {
+    for (sled_id, zone) in blippy.blueprint().in_service_zones() {
         // Check "one kind per zpool" for transient datasets...
         let filesystem_dataset = zone.filesystem_dataset();
         let kind = zone.zone_type.kind();
@@ -689,10 +681,7 @@ fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
     > = HashMap::new();
 
     // Collect all Nexus zones and their generations
-    for (sled_id, zone) in blippy
-        .blueprint()
-        .in_service_zones()
-    {
+    for (sled_id, zone) in blippy.blueprint().in_service_zones() {
         if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
             generation_info.entry(nexus.nexus_generation).or_default().push((
                 sled_id,
@@ -1751,7 +1740,7 @@ mod tests {
         let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
 
         let crucible_addr_by_zpool = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter_map(|(_, z)| match z.zone_type {
                 BlueprintZoneType::Crucible(
                     blueprint_zone_type::Crucible { address, .. },
@@ -1996,7 +1985,7 @@ mod tests {
         // Find the Nexus zones
         let ((sled1, zone1_id), (sled2, zone2_id)) = {
             let nexus_zones: Vec<_> = blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter_map(|(sled_id, zone)| {
                     if matches!(zone.zone_type, BlueprintZoneType::Nexus(_)) {
                         Some((sled_id, zone))
@@ -2142,8 +2131,9 @@ fn check_planning_input_network_records_appear_in_blueprint(
     // constructed above in `BuilderExternalNetworking::new()`, we do not
     // check for duplicates here: we could very well see reuse of IPs
     // between expunged zones or between expunged -> running zones.
-    for (_, z) in
-        blippy.blueprint().danger_all_omicron_zones(BlueprintZoneDisposition::any)
+    for (_, z) in blippy
+        .blueprint()
+        .danger_all_omicron_zones(BlueprintZoneDisposition::any)
     {
         let zone_type = &z.zone_type;
         match zone_type {
