@@ -1275,7 +1275,14 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::ExternalDns => {
                 // TODO-cleanup: When external DNS addresses are
                 // in the policy, this can use the input, too.
-                self.blueprint.count_parent_external_dns_zones()
+                //
+                // The target number of external DNS zones is exactly equal to
+                // the number of distinct external DNS IPs we're supposed to
+                // service.
+                self.input
+                    .parent_blueprint()
+                    .all_external_dns_external_ips()
+                    .len()
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()

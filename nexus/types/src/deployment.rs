@@ -513,6 +513,29 @@ impl Blueprint {
             },
         )
     }
+
+    /// Returns the complete set of external IP addresses assigned to external
+    /// DNS servers described by this blueprint, including both in-service and
+    /// expunged external DNS zones.
+    ///
+    /// This information should be operator-configurable, but currently is not:
+    /// we carry it forward from rack setup time onward from blueprint to
+    /// blueprint. Fixing this is
+    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
+    ///
+    /// Returns an empty set if this blueprint contains no external DNS zones.
+    /// (This should only be the case for test blueprints - real systems always
+    /// deploy at least one external DNS zone).
+    pub fn all_external_dns_external_ips(&self) -> BTreeSet<IpAddr> {
+        self.all_omicron_zones(BlueprintZoneDisposition::any)
+            .filter_map(|(_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::ExternalDns(dns) => {
+                    Some(dns.dns_address.addr.ip())
+                }
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

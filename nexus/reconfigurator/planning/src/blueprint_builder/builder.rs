@@ -81,7 +81,6 @@ use slog::info;
 use slog::o;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::collections::HashSet;
 use std::collections::btree_map::Entry;
 use std::fmt;
 use std::iter;
@@ -2130,23 +2129,6 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         Err(Error::NoAvailableZpool { sled_id, kind: zone_kind })
-    }
-
-    /// Determine the number of desired external DNS zones by counting
-    /// unique addresses in the parent blueprint.
-    ///
-    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    pub fn count_parent_external_dns_zones(&self) -> usize {
-        self.parent_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .filter_map(|(_id, zone)| match &zone.zone_type {
-                BlueprintZoneType::ExternalDns(dns) => {
-                    Some(dns.dns_address.addr.ip())
-                }
-                _ => None,
-            })
-            .collect::<HashSet<IpAddr>>()
-            .len()
     }
 
     /// Get the value of `target_release_minimum_generation`.
