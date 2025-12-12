@@ -5848,7 +5848,7 @@ pub(in crate::db::datastore) mod test {
 
         // Try to attach the second disk to the instance - it should fail.
 
-        datastore
+        let e = datastore
             .instance_attach_disk(
                 &opctx,
                 &authz_instance,
@@ -5856,7 +5856,20 @@ pub(in crate::db::datastore) mod test {
                 MAX_DISKS_PER_INSTANCE,
             )
             .await
-            .unwrap_err();
+            .expect_err("instance_attach_disk succeeded");
+
+        let expected_message
+            = "sled reservation has already occurred for instance";
+
+        match e {
+            Error::InvalidRequest { message } => {
+                assert!(message.external_message().contains(&expected_message));
+            }
+
+            _ => {
+                assert!(false);
+            }
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();
