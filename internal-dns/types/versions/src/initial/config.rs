@@ -42,10 +42,6 @@ pub struct DnsConfig {
     pub zones: Vec<DnsConfigZone>,
 }
 
-// See docs on [`crate::v2::config::DnsConfigZone`] for more about this struct.
-// They are functionally equivalent. We would include that doc comment here,
-// but altering docs to existing types makes them appear different in OpenAPI
-// terms and would be "breaking" for the time being.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct DnsConfigZone {
     pub zone_name: String,
