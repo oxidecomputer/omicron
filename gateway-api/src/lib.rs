@@ -421,8 +421,9 @@ pub trait GatewayApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<v1::ignition::SpIgnitionInfo>>, HttpError>
     {
-        let HttpResponseOk(v2_info) = Self::ignition_list(rqctx).await?;
-        Ok(HttpResponseOk(v2_info.into_iter().map(Into::into).collect()))
+        Ok(Self::ignition_list(rqctx)
+            .await?
+            .map(|v| v.into_iter().map(Into::into).collect()))
     }
 
     /// Get SP info via Ignition
@@ -455,8 +456,7 @@ pub trait GatewayApi {
         rqctx: RequestContext<Self::Context>,
         path: Path<v1::component::PathSp>,
     ) -> Result<HttpResponseOk<v1::ignition::SpIgnitionInfo>, HttpError> {
-        let HttpResponseOk(v2_info) = Self::ignition_get(rqctx, path).await?;
-        Ok(HttpResponseOk(v2_info.into()))
+        Ok(Self::ignition_get(rqctx, path).await?.map(Into::into))
     }
 
     /// Send an ignition command targeting a specific SP.

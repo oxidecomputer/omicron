@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types for Gateway API version 1 (INITIAL).
+//! Version `INITIAL` of the Gateway API.
 
 pub mod caboose;
 pub mod component;

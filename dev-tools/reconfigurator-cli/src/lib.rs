@@ -34,7 +34,6 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -68,6 +67,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
+use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -77,6 +77,7 @@ use std::io::IsTerminal;
 use std::net::IpAddr;
 use std::num::ParseIntError;
 use std::str::FromStr;
+use std::sync::Arc;
 use swrite::{SWrite, swrite, swriteln};
 use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
@@ -88,7 +89,7 @@ mod log_capture;
 pub mod test_utils;
 
 /// REPL state
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ReconfiguratorSim {
     // The simulator currently being used.
     sim: Simulator,
@@ -120,13 +121,13 @@ impl ReconfiguratorSim {
 
     fn planning_input(
         &self,
-        parent_blueprint: &Blueprint,
+        parent_blueprint: &Arc<Blueprint>,
     ) -> anyhow::Result<PlanningInput> {
         let state = self.current_state();
         let mut builder = state
             .system()
             .description()
-            .to_planning_input_builder()
+            .to_planning_input_builder(Arc::clone(parent_blueprint))
             .context("generating planning input builder")?;
 
         // The internal and external DNS numbers that go here are supposed to be
@@ -371,7 +372,6 @@ impl ReconfiguratorSim {
             .context("failed to construct planning input")?;
         let planner = Planner::new_based_on(
             self.log.clone(),
-            parent_blueprint,
             &planning_input,
             creator,
             collection,
@@ -1735,10 +1735,14 @@ fn cmd_sled_list(
     }
 
     let state = sim.current_state();
+    let parent_blueprint = state
+        .system()
+        .resolve_and_get_blueprint(BlueprintId::Target)
+        .expect("target blueprint is always present");
     let planning_input = state
         .system()
         .description()
-        .to_planning_input_builder()
+        .to_planning_input_builder(Arc::clone(parent_blueprint))
         .context("failed to generate planning input")?
         .build();
     let rows = planning_input.all_sleds(SledFilter::Commissioned).map(
@@ -1823,8 +1827,12 @@ fn cmd_sled_show(
         description.sled_rot_pending_persistent_boot_preference(sled_id)?;
     let rot_transient_boot_preference =
         description.sled_rot_transient_boot_preference(sled_id)?;
+    let parent_blueprint = state
+        .system()
+        .resolve_and_get_blueprint(BlueprintId::Target)
+        .expect("target blueprint is always present");
     let planning_input = description
-        .to_planning_input_builder()
+        .to_planning_input_builder(Arc::clone(parent_blueprint))
         .context("failed to generate planning_input builder")?
         .build();
     let sled = planning_input.sled_lookup(args.filter, sled_id)?;

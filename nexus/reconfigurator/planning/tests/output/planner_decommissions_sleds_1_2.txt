@@ -1,5 +1,5 @@
 from: blueprint 516e80a3-b362-4fac-bd3c-4559717120dd
-to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
+to:   blueprint 96415178-4e18-4a19-b7db-7e80a9193497
 
  MODIFIED SLEDS:
 
@@ -280,8 +280,8 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
     oxp_a1c30d60-8b8f-4b92-88c4-46bf7f04441d/crypt/local_storage                                                   a08654ce-0b7a-4372-8d50-48d054ff312c   in service    none      none          off        
     oxp_a75011e7-f7e8-4bd7-9052-1360f3f736b6/crypt/local_storage                                                   1f62464c-ee01-4f97-a55f-7ff4e0e71030   in service    none      none          off        
     oxp_d64e97eb-3c1a-42bb-b7e5-f149fdf14e66/crypt/local_storage                                                   994ccfef-9eea-419d-8568-a6d5771ddd5e   in service    none      none          off        
-+   oxp_08207c73-70d5-4bad-a2e6-4853eb963787/crypt/zone/oxz_crucible_pantry_92f6d6cd-dd76-4e38-9f0e-6949644ee552   511d0b30-bfdf-4e6e-8163-713d0ec58f2e   in service    none      none          off        
-+   oxp_08207c73-70d5-4bad-a2e6-4853eb963787/crypt/zone/oxz_nexus_cacd67ea-d1fd-4c2b-8ee5-3968e119f081             1582852d-f64f-46b0-bef2-e5d576df96b7   in service    none      none          off        
++   oxp_08207c73-70d5-4bad-a2e6-4853eb963787/crypt/zone/oxz_crucible_pantry_45758cf5-1322-421e-b2f5-a2bdccebc725   5937e521-6190-4b6f-9e66-70aeb24ed263   in service    none      none          off        
++   oxp_08207c73-70d5-4bad-a2e6-4853eb963787/crypt/zone/oxz_nexus_04b1ff7b-e9c3-4d01-8a16-bc2bf40ab41c             fb16d3e8-0f49-404c-b0c2-a35305eaac36   in service    none      none          off        
 
 
     omicron zones:
@@ -302,8 +302,8 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
     internal_dns      897e9251-1380-440a-a6d9-e05c3c224c15   install dataset   in service    fd00:1122:3344:2::1   
     internal_ntp      8b02285a-e451-4da2-ab8a-8ded29b08615   install dataset   in service    fd00:1122:3344:101::21
     nexus             7f139337-4211-42f9-af78-db9bb8e3bb95   install dataset   in service    fd00:1122:3344:101::22
-+   crucible_pantry   92f6d6cd-dd76-4e38-9f0e-6949644ee552   install dataset   in service    fd00:1122:3344:101::2e
-+   nexus             cacd67ea-d1fd-4c2b-8ee5-3968e119f081   install dataset   in service    fd00:1122:3344:101::2f
++   crucible_pantry   45758cf5-1322-421e-b2f5-a2bdccebc725   install dataset   in service    fd00:1122:3344:101::2e
++   nexus             04b1ff7b-e9c3-4d01-8a16-bc2bf40ab41c   install dataset   in service    fd00:1122:3344:101::2f
 
 
   sled fefcf4cf-f7e7-46b3-b629-058526ce440e (active, config generation 2 -> 3):
@@ -391,10 +391,10 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
     oxp_d61e36a6-4d02-4278-9aad-50cfffcbd58e/crypt/local_storage                                                   8021b53e-a5c0-406d-9114-08c0bf0370cb   in service    none      none          off        
     oxp_d9dbc68a-8e5d-43da-b240-b2922450e91a/crypt/local_storage                                                   8cf78c80-7359-4d43-b32f-1f080b348361   in service    none      none          off        
     oxp_ed0ce16e-4c58-45e5-a875-31cd6457dd40/crypt/local_storage                                                   7392591f-5cab-415a-92f6-4f6a0aa821ae   in service    none      none          off        
-+   oxp_1860b471-544c-4921-903b-056b0140943c/crypt/clickhouse                                                      e2ea26fb-1dbd-49e0-a1bd-d65d77596b18   in service    none      none          off        
-+   oxp_2e146c34-42ff-40f2-b866-d9a4ad1623fa/crypt/internal_dns                                                    00c2b0a0-d2e7-422b-812c-6c17033e988f   in service    none      none          off        
-+   oxp_1860b471-544c-4921-903b-056b0140943c/crypt/zone/oxz_clickhouse_f76fe4c8-421a-41fb-abf5-fdfb83379694        6ce33af9-4b47-4fff-aa24-ff956d0becf1   in service    none      none          off        
-+   oxp_2e146c34-42ff-40f2-b866-d9a4ad1623fa/crypt/zone/oxz_internal_dns_73897804-e45c-408a-94ba-93ac4ec37091      864da4dc-91cd-4624-ba68-d7a4a358cf85   in service    none      none          off        
++   oxp_1860b471-544c-4921-903b-056b0140943c/crypt/clickhouse                                                      6cf5d049-128b-471b-801a-b89082555694   in service    none      none          off        
++   oxp_2e146c34-42ff-40f2-b866-d9a4ad1623fa/crypt/internal_dns                                                    b4e131b7-e7ef-429d-8249-bba331667850   in service    none      none          off        
++   oxp_1860b471-544c-4921-903b-056b0140943c/crypt/zone/oxz_clickhouse_68436b3c-8840-43d5-a76e-8221e3b2a74e        eb411740-4389-4baf-8429-5e58ecf5e4e9   in service    none      none          off        
++   oxp_2e146c34-42ff-40f2-b866-d9a4ad1623fa/crypt/zone/oxz_internal_dns_54361e1a-5d9a-4489-851e-9bbb087adf63      94b9ab4c-d465-41d0-9542-d71e07b1d16c   in service    none      none          off        
 
 
     omicron zones:
@@ -415,8 +415,8 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
     internal_dns      0d3fab7e-bebc-4346-a2ae-2087b8e6189e   install dataset   in service    fd00:1122:3344:3::1   
     internal_ntp      b6d53539-b518-43b6-9033-6324c93c9293   install dataset   in service    fd00:1122:3344:102::21
     nexus             f3b11ae3-b203-4956-906d-6809be2dcbba   install dataset   in service    fd00:1122:3344:102::22
-+   clickhouse        f76fe4c8-421a-41fb-abf5-fdfb83379694   install dataset   in service    fd00:1122:3344:102::2e
-+   internal_dns      73897804-e45c-408a-94ba-93ac4ec37091   install dataset   in service    fd00:1122:3344:1::1   
++   clickhouse        68436b3c-8840-43d5-a76e-8221e3b2a74e   install dataset   in service    fd00:1122:3344:102::2e
++   internal_dns      54361e1a-5d9a-4489-851e-9bbb087adf63   install dataset   in service    fd00:1122:3344:1::1   
 
 
  COCKROACHDB SETTINGS:

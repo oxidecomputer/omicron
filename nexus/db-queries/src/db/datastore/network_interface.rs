@@ -30,7 +30,9 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_errors::retryable;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::IpVersion;
 use nexus_db_model::Ipv4Addr;
@@ -266,7 +268,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
-    ) -> ListResultVec<ServiceNetworkInterface> {
+    ) -> Result<Vec<ServiceNetworkInterface>, TransactionError<Error>> {
         use nexus_db_schema::schema::service_network_interface::dsl;
         dsl::service_network_interface
             .filter(dsl::time_deleted.is_null())
@@ -274,7 +276,7 @@ impl DataStore {
             .select(ServiceNetworkInterface::as_select())
             .get_results_async::<ServiceNetworkInterface>(conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| e.into())
     }
 
     /// List one page of all network interfaces associated with internal services
@@ -396,14 +398,24 @@ impl DataStore {
             .pool_connection_authorized(opctx)
             .await
             .map_err(network_interface::InsertError::External)?;
-        self.create_network_interface_raw_conn(&conn, interface).await
+        self.create_network_interface_raw_conn(&conn, interface.clone())
+            .await
+            .map_err(|err| match err {
+                TransactionError::CustomError(err) => err,
+                TransactionError::Database(err) => {
+                    network_interface::InsertError::from_diesel(err, &interface)
+                }
+            })
     }
 
     pub(crate) async fn create_network_interface_raw_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, network_interface::InsertError> {
+    ) -> Result<
+        NetworkInterface,
+        TransactionError<network_interface::InsertError>,
+    > {
         use nexus_db_schema::schema::network_interface::dsl;
         let subnet_id = interface.subnet.identity.id;
         let query = network_interface::InsertQuery::new(interface.clone());
@@ -415,15 +427,25 @@ impl DataStore {
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => {
-                network_interface::InsertError::External(
-                    Error::ObjectNotFound {
-                        type_name: ResourceType::VpcSubnet,
-                        lookup_type: LookupType::ById(subnet_id),
-                    },
+                TransactionError::CustomError(
+                    network_interface::InsertError::External(
+                        Error::ObjectNotFound {
+                            type_name: ResourceType::VpcSubnet,
+                            lookup_type: LookupType::ById(subnet_id),
+                        },
+                    ),
                 )
             }
             AsyncInsertError::DatabaseError(e) => {
-                network_interface::InsertError::from_diesel(e, &interface)
+                if retryable(&e) {
+                    TransactionError::Database(e)
+                } else {
+                    TransactionError::CustomError(
+                        network_interface::InsertError::from_diesel(
+                            e, &interface,
+                        ),
+                    )
+                }
             }
         })
     }
@@ -560,6 +582,17 @@ impl DataStore {
             network_interface_id,
         )
         .await
+        .map_err(|txn_error| match txn_error {
+            TransactionError::CustomError(err) => err,
+            TransactionError::Database(err) => {
+                let query = network_interface::DeleteQuery::new(
+                    NetworkInterfaceKind::Service,
+                    service_id,
+                    network_interface_id,
+                );
+                network_interface::DeleteError::from_diesel(err, &query)
+            }
+        })
     }
 
     /// Variant of [Self::service_delete_network_interface] which may be called
@@ -569,17 +602,21 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
         network_interface_id: Uuid,
-    ) -> Result<bool, network_interface::DeleteError> {
+    ) -> Result<bool, TransactionError<network_interface::DeleteError>> {
         let query = network_interface::DeleteQuery::new(
             NetworkInterfaceKind::Service,
             service_id,
             network_interface_id,
         );
-        query
-            .clone()
-            .execute_and_check(conn)
-            .await
-            .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
+        query.clone().execute_and_check(conn).await.map_err(|e| {
+            if retryable(&e) {
+                TransactionError::Database(e)
+            } else {
+                TransactionError::CustomError(
+                    network_interface::DeleteError::from_diesel(e, &query),
+                )
+            }
+        })
     }
 
     /// Return information about network interfaces required for the sled

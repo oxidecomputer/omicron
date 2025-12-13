@@ -5,6 +5,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::v1;
 use crate::v1::component::SpIdentifier;
 
 #[derive(
@@ -23,7 +24,7 @@ pub struct SpIgnitionInfo {
     pub details: SpIgnition,
 }
 
-impl From<SpIgnitionInfo> for crate::v1::ignition::SpIgnitionInfo {
+impl From<SpIgnitionInfo> for v1::ignition::SpIgnitionInfo {
     fn from(s: SpIgnitionInfo) -> Self {
         Self { id: s.id, details: s.details.into() }
     }
@@ -89,7 +90,7 @@ impl From<gateway_messages::IgnitionState> for SpIgnition {
     }
 }
 
-impl From<SpIgnition> for crate::v1::ignition::SpIgnition {
+impl From<SpIgnition> for v1::ignition::SpIgnition {
     fn from(state: SpIgnition) -> Self {
         match state {
             SpIgnition::Absent => Self::Absent,
@@ -150,7 +151,7 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
     }
 }
 
-impl From<SpIgnitionSystemType> for crate::v1::ignition::SpIgnitionSystemType {
+impl From<SpIgnitionSystemType> for v1::ignition::SpIgnitionSystemType {
     fn from(st: SpIgnitionSystemType) -> Self {
         match st {
             SpIgnitionSystemType::Gimlet => Self::Gimlet,
