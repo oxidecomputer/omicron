@@ -426,6 +426,12 @@ pub struct SiloIpPool {
     /// ephemeral IPs will come from that pool when no other pool is specified.
     /// There can be at most one default for a given silo.
     pub is_default: bool,
+
+    /// The IP version for the pool.
+    pub ip_version: IpVersion,
+
+    /// Type of IP pool (unicast or multicast)
+    pub pool_type: shared::IpPoolType,
 }
 
 /// A link between an IP pool and a silo that allows one to allocate IPs from

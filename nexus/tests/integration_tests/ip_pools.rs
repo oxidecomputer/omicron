@@ -1381,8 +1381,12 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(list.len(), 2);
     assert_eq!(list[0].identity.name.to_string(), default_name);
     assert!(list[0].is_default);
+    assert_eq!(list[0].ip_version, IpVersion::V4);
+    assert_eq!(list[0].pool_type, IpPoolType::Unicast);
     assert_eq!(list[1].identity.name.to_string(), other_name);
     assert!(!list[1].is_default);
+    assert_eq!(list[1].ip_version, IpVersion::V4);
+    assert_eq!(list[1].pool_type, IpPoolType::Unicast);
 
     // fetch the pools directly too
     let url = format!("/v1/ip-pools/{}", default_name);
@@ -1392,6 +1396,8 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
         .await;
     assert_eq!(pool.identity.name.as_str(), default_name);
     assert!(pool.is_default);
+    assert_eq!(pool.ip_version, IpVersion::V4);
+    assert_eq!(pool.pool_type, IpPoolType::Unicast);
 
     let url = format!("/v1/ip-pools/{}", other_name);
     let pool = NexusRequest::object_get(client, &url)
@@ -1400,6 +1406,8 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
         .await;
     assert_eq!(pool.identity.name.as_str(), other_name);
     assert!(!pool.is_default);
+    assert_eq!(pool.ip_version, IpVersion::V4);
+    assert_eq!(pool.pool_type, IpPoolType::Unicast);
 
     // fetching the other pool directly 404s
     let url = format!("/v1/ip-pools/{}", unlinked_name);
