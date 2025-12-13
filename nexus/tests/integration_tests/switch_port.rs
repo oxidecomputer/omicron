@@ -504,7 +504,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
 
     let mgd = &ctx.mgd[&SwitchLocation::Switch0];
     let mgd_client = mg_admin_client::Client::new(
-        &format!("http://localhost:{}", mgd.port),
+        &format!("http://[::1]:{}", mgd.port),
         ctx.logctx.log.clone(),
     );
 
