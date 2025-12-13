@@ -46,10 +46,11 @@
 //! - Subject to VPC routing and firewall policies
 //!
 //! **Underlay Groups** (admin-scoped IPv6):
-//! - IPv6 multicast scope per RFC 7346; admin-local is ff04::/16
-//!   <https://www.rfc-editor.org/rfc/rfc7346>
+//! - Uses ff04::/64 prefix (subset of admin-local scope per [RFC 7346])
 //! - Internal rack forwarding to guest instances
 //! - Mapped 1:1 with external groups via deterministic mapping
+//!
+//! [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
 //!
 //! ### Forwarding Architecture (Incoming multicast traffic to guests)
 //!
@@ -94,7 +95,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures::FutureExt;
@@ -109,7 +110,6 @@ use nexus_config::DEFAULT_UNDERLAY_MULTICAST_NET;
 use nexus_db_model::MulticastGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::MulticastGroupReconcilerStatus;
 use omicron_uuid_kinds::SledUuid;
 
@@ -122,13 +122,13 @@ pub(crate) mod members;
 
 /// Type alias for the sled mapping cache.
 type SledMappingCache =
-    Arc<RwLock<(SystemTime, HashMap<SledUuid, Vec<SwitchBackplanePort>>)>>;
+    Arc<RwLock<(Instant, HashMap<SledUuid, Vec<SwitchBackplanePort>>)>>;
 
 /// Type alias for the backplane map cache.
 type BackplaneMapCache = Arc<
     RwLock<
         Option<(
-            SystemTime,
+            Instant,
             BTreeMap<
                 dpd_client::types::PortId,
                 dpd_client::types::BackplaneLink,
@@ -209,7 +209,7 @@ impl MulticastGroupReconciler {
             sagas,
             underlay_admin_prefix,
             sled_mapping_cache: Arc::new(RwLock::new((
-                SystemTime::now(),
+                Instant::now(),
                 HashMap::new(),
             ))),
             sled_cache_ttl,
@@ -224,22 +224,24 @@ impl MulticastGroupReconciler {
 
     /// Generate tag for multicast groups.
     ///
-    /// Both external and underlay groups use the same tag (the group name).
-    /// This pairs them logically for management and cleanup operations.
+    /// Delegates to [`MulticastGroup::dpd_tag()`] which uses the group's UUID
+    /// to ensure uniqueness across the group's entire lifecycle.
     pub(crate) fn generate_multicast_tag(group: &MulticastGroup) -> String {
-        group.name().to_string()
+        group.dpd_tag()
     }
 
     /// Generate admin-scoped IPv6 multicast address from an external multicast
     /// address.
     ///
-    /// Maps external addresses into the configured underlay admin-local prefix
-    /// (DEFAULT_UNDERLAY_MULTICAST_NET) using bitmask mapping. Preserves the
-    /// lower `128 - prefix_len` bits from the external address (the group ID)
-    /// and sets the high bits from the prefix.
+    /// Maps external addresses into our ff04::/64 underlay prefix
+    /// (DEFAULT_UNDERLAY_MULTICAST_NET, part of RFC 7346 admin-local scope)
+    /// using XOR-fold mapping. Preserves the lower `128 - prefix_len` bits
+    /// from the external address (the group ID) and sets the high bits from
+    /// the prefix.
     ///
-    /// Admin-local scope (ff04::/16) is defined in RFC 7346.
-    /// See: <https://www.rfc-editor.org/rfc/rfc7346>
+    /// See [RFC 7346] for IPv6 multicast admin-local scope (ff04::/16).
+    ///
+    /// [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
     pub(crate) fn map_external_to_underlay_ip(
         &self,
         external_ip: IpAddr,
@@ -267,8 +269,8 @@ impl MulticastGroupReconciler {
     /// - Need to re-validate sled mappings against new topology
     pub(crate) async fn invalidate_sled_mapping_cache(&self) {
         let mut cache = self.sled_mapping_cache.write().await;
-        // Set timestamp to epoch to force refresh
-        *cache = (SystemTime::UNIX_EPOCH, cache.1.clone());
+        // Set timestamp to past to force refresh on next check
+        *cache = (Instant::now() - self.sled_cache_ttl, cache.1.clone());
     }
 }
 
@@ -455,7 +457,38 @@ impl MulticastGroupReconciler {
             }
         }
 
-        // Process deleting groups
+        // Process member state changes
+        match self.reconcile_member_states(opctx, &dataplane_client).await {
+            Ok(count) => status.members_processed += count,
+            Err(e) => {
+                let msg = format!("failed to reconcile member states: {e:#}");
+                status.errors.push(msg);
+            }
+        }
+
+        // Clean up deleted members ("Left" + `time_deleted`)
+        // This must happen before `cleanup_empty_groups` so empty checks are accurate.
+        match self.cleanup_deleted_members(opctx).await {
+            Ok(count) => status.members_deleted += count,
+            Err(e) => {
+                let msg = format!("failed to cleanup deleted members: {e:#}");
+                status.errors.push(msg);
+            }
+        }
+
+        // Implicitly delete empty groups (groups are automatically deleted when
+        // last member leaves)
+        // This handles the case where instance deletion causes members to be
+        // soft-deleted, and after cleanup, the group becomes empty.
+        match self.cleanup_empty_groups(opctx).await {
+            Ok(count) => status.empty_groups_marked += count,
+            Err(e) => {
+                let msg = format!("failed to cleanup empty groups: {e:#}");
+                status.errors.push(msg);
+            }
+        }
+
+        // Process deleting groups (DPD cleanup + hard-delete from DB)
         match self.reconcile_deleting_groups(opctx, &dataplane_client).await {
             Ok(count) => status.groups_deleted += count,
             Err(e) => {
@@ -469,24 +502,6 @@ impl MulticastGroupReconciler {
             Ok(count) => status.groups_verified += count,
             Err(e) => {
                 let msg = format!("failed to reconcile active groups: {e:#}");
-                status.errors.push(msg);
-            }
-        }
-
-        // Process member state changes
-        match self.reconcile_member_states(opctx, &dataplane_client).await {
-            Ok(count) => status.members_processed += count,
-            Err(e) => {
-                let msg = format!("failed to reconcile member states: {e:#}");
-                status.errors.push(msg);
-            }
-        }
-
-        // Clean up deleted members ("Left" + `time_deleted`)
-        match self.cleanup_deleted_members(opctx).await {
-            Ok(count) => status.members_deleted += count,
-            Err(e) => {
-                let msg = format!("failed to cleanup deleted members: {e:#}");
                 status.errors.push(msg);
             }
         }

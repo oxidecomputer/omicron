@@ -161,8 +161,10 @@ pub struct MulticastGroupReconcilerStatus {
     /// Number of members processed ("Joining"→"Joined", "Left" with
     /// time_deleted→hard-deleted cleanup).
     pub members_processed: usize,
-    /// Number of members deleted (Left + time_deleted).
+    /// Number of members deleted ("Left" + time_deleted).
     pub members_deleted: usize,
+    /// Number of empty groups marked for deletion (implicit deletion).
+    pub empty_groups_marked: usize,
     /// Errors that occurred during reconciliation operations.
     pub errors: Vec<String>,
 }

@@ -1081,6 +1081,7 @@ async fn sic_join_instance_multicast_group(
     let multicast_group_lookup = osagactx
         .nexus()
         .multicast_group_lookup(&opctx, &multicast_group_selector)
+        .await
         .map_err(ActionError::action_failed)?;
 
     // Multicast groups are fleet-scoped - users only need Read permission on the group
@@ -1157,7 +1158,8 @@ async fn sic_join_instance_multicast_group_undo(
     };
     let multicast_group_lookup = osagactx
         .nexus()
-        .multicast_group_lookup(&opctx, &multicast_group_selector)?;
+        .multicast_group_lookup(&opctx, &multicast_group_selector)
+        .await?;
     // Undo uses same permission as forward action (Read on multicast group)
     let (.., db_group) =
         multicast_group_lookup.fetch_for(authz::Action::Read).await?;

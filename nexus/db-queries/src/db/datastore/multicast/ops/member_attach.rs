@@ -209,12 +209,16 @@ impl RunQueryDsl<DbConnection> for AttachMemberToGroupStatement {}
 /// database operation.
 impl AttachMemberToGroupStatement {
     /// Generates the `active_group` CTE (checks if group exists and is active).
+    ///
+    /// Returns id and multicast_ip for use in the member insert.
     fn push_active_group_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
         use nexus_db_model::MulticastGroupState;
-        out.push_sql("SELECT id FROM multicast_group WHERE id = ");
+        out.push_sql(
+            "SELECT id, multicast_ip FROM multicast_group WHERE id = ",
+        );
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.group_id)?;
         out.push_sql(" AND state = ");
         out.push_sql(super::group_state_as_sql_literal(
@@ -247,7 +251,8 @@ impl AttachMemberToGroupStatement {
     ///
     /// SELECT joins with both `active_group` and `instance_sled` CTEs to:
     /// 1. Ensure group is active (FROM active_group)
-    /// 2. Retrieve instance's current sled_id (CROSS JOIN instance_sled)
+    /// 2. Retrieve group's multicast_ip (FROM active_group)
+    /// 3. Retrieve instance's current sled_id (CROSS JOIN instance_sled)
     ///
     /// ON CONFLICT clause uses partial unique index (only rows with time_deleted IS NULL):
     /// - Conflict only for members with time_deleted=NULL (active or stopped)
@@ -257,10 +262,12 @@ impl AttachMemberToGroupStatement {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
+        // Column order matches schema: id, time_created, time_modified,
+        // external_group_id, multicast_ip, parent_id, sled_id, state
         out.push_sql(
             "INSERT INTO multicast_group_member (\
                  id, time_created, time_modified, external_group_id, \
-                 parent_id, sled_id, state) SELECT ",
+                 multicast_ip, parent_id, sled_id, state) SELECT ",
         );
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.new_member_id)?;
         out.push_sql(", ");
@@ -269,7 +276,7 @@ impl AttachMemberToGroupStatement {
         out.push_bind_param::<Timestamptz, _>(&self.time_modified)?;
         out.push_sql(", ");
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.group_id)?;
-        out.push_sql(", ");
+        out.push_sql(", active_group.multicast_ip, ");
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.instance_id)?;
         out.push_sql(", instance_sled.sled_id, ");
         out.push_sql(super::member_state_as_sql_literal(
