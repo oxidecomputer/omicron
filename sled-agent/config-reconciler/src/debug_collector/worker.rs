@@ -898,7 +898,7 @@ impl DebugCollectorWorker {
         info!(&log, "Archiving files");
         // XXX-dap log clone
         let mut archiver = ArchivePlanner::new(
-            log.clone(),
+            log,
             ArchiveWhat::ImmutableOnly,
             &debug_dir.as_ref(),
         );
@@ -943,7 +943,7 @@ impl DebugCollectorWorker {
             .ok_or(ArchiveLogsError::NoDebugDirYet)?;
         // XXX-dap log clone
         let mut archiver = ArchivePlanner::new(
-            self.log.clone(),
+            &self.log,
             ArchiveWhat::Everything,
             &debug_dir.as_ref(),
         );
