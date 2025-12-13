@@ -69,9 +69,19 @@ use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
 
-// "v2" types are the most recent, so we re-export them here for dependents that
+// Re-export the latest versions from the versions crate for dependents that
 // just want "latest".
-pub use crate::v2::config::*;
+pub use internal_dns_types_versions::latest::config::*;
+
+/// Error code used when a record type cannot be represented in an older API
+/// version (e.g., NS records in v1).
+pub const ERROR_CODE_INCOMPATIBLE_RECORD: &str = "IncompatibleRecord";
+
+/// Error code used when an update is already in progress.
+pub const ERROR_CODE_UPDATE_IN_PROGRESS: &str = "UpdateInProgress";
+
+/// Error code used when the provided generation number is stale.
+pub const ERROR_CODE_BAD_UPDATE_GENERATION: &str = "BadUpdateGeneration";
 
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
