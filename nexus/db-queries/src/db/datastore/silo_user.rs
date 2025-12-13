@@ -21,6 +21,7 @@ use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
+use chrono::Timelike;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
@@ -42,6 +43,16 @@ use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use uuid::Uuid;
+
+/// Round a DateTime to microsecond precision to match database TIMESTAMPTZ
+/// precision. This ensures that timestamps created in-memory (with nanosecond
+/// precision) match timestamps retrieved from the database (which only stores
+/// microsecond precision).
+fn round_to_micros(dt: DateTime<Utc>) -> DateTime<Utc> {
+    let nanos = dt.timestamp_subsec_nanos();
+    let micros = (nanos / 1000) * 1000;
+    dt.with_nanosecond(micros).unwrap()
+}
 
 /// The datastore crate's SiloUser is intended to provide type safety above the
 /// database model, as the same database model is used to store semantically
@@ -234,8 +245,8 @@ impl From<SiloUserApiOnly> for views::User {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
-            time_created: u.time_created,
-            time_modified: u.time_modified,
+            time_created: round_to_micros(u.time_created),
+            time_modified: round_to_micros(u.time_modified),
         }
     }
 }
@@ -296,8 +307,8 @@ impl From<SiloUserJit> for views::User {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
-            time_created: u.time_created,
-            time_modified: u.time_modified,
+            time_created: round_to_micros(u.time_created),
+            time_modified: round_to_micros(u.time_modified),
         }
     }
 }
@@ -369,8 +380,8 @@ impl From<SiloUserScim> for views::User {
             // TODO the use of user_name as display_name is temporary
             display_name: u.user_name,
             silo_id: u.silo_id,
-            time_created: u.time_created,
-            time_modified: u.time_modified,
+            time_created: round_to_micros(u.time_created),
+            time_modified: round_to_micros(u.time_modified),
         }
     }
 }
