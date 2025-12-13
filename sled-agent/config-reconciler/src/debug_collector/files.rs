@@ -6,7 +6,6 @@
 //! (e.g., log files)
 
 // XXX-dap current status:
-// - working on the test at the end of the file
 // - write battery of other automated tests
 // - lots of cleanup to do
 
@@ -278,7 +277,7 @@ static ZONE_RULES_LIVE: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         Rule {
             label: "live syslog files",
             directory: VAR_ADM.parse().unwrap(),
-            glob_pattern: "*.log".parse().unwrap(),
+            glob_pattern: "messages".parse().unwrap(),
             delete_original: false,
             naming: Box::new(NameRotatedLogFile), // XXX-dap
         },
@@ -286,9 +285,9 @@ static ZONE_RULES_LIVE: LazyLock<Vec<Rule>> = LazyLock::new(|| {
 });
 
 static CORES_RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
-    label: "process core files",
+    label: "process core files and kernel crash dumps",
     directory: ".".parse().unwrap(),
-    glob_pattern: "core.*".parse().unwrap(),
+    glob_pattern: "*".parse().unwrap(),
     delete_original: true,
     naming: Box::new(NameIdentity),
 });
@@ -623,6 +622,9 @@ mod test {
     use camino::Utf8PathBuf;
     use chrono::DateTime;
     use chrono::Utc;
+    use iddqd::IdOrdItem;
+    use iddqd::IdOrdMap;
+    use iddqd::id_upcast;
     use omicron_test_utils::dev::test_setup_log;
     use regex::Regex;
     use std::collections::BTreeSet;
@@ -633,12 +635,23 @@ mod test {
     use strum::IntoDiscriminant;
     use strum::IntoEnumIterator;
 
+    #[derive(Clone)]
     struct TestFile {
         path: Utf8PathBuf,
         kind: TestFileKind,
     }
 
-    #[derive(Debug, Display, EnumIter, EnumDiscriminants)]
+    impl IdOrdItem for TestFile {
+        type Key<'a> = &'a Utf8Path;
+
+        fn key(&self) -> Self::Key<'_> {
+            &self.path
+        }
+
+        id_upcast!();
+    }
+
+    #[derive(Clone, Debug, Display, EnumIter, EnumDiscriminants)]
     #[strum_discriminants(derive(EnumIter, Ord, PartialOrd))]
     enum TestFileKind {
         KernelCrashDump {
@@ -726,18 +739,15 @@ mod test {
         fn try_from(value: &Utf8Path) -> Result<Self, Self::Error> {
             let s = value.as_str();
 
-            if let Some(m) = RE_CORES_DATASET.find(s) {
-                let cores_dataset = m.as_str().to_owned();
+            if let Some(c) = RE_CORES_DATASET.captures(s) {
+                let (_, [cores_directory]) = c.extract();
+                let cores_directory = cores_directory.to_owned();
                 if s.ends_with("bounds") {
                     Ok(TestFileKind::Ignored)
                 } else if s.contains("/vmdump.") {
-                    Ok(TestFileKind::KernelCrashDump {
-                        cores_directory: cores_dataset,
-                    })
+                    Ok(TestFileKind::KernelCrashDump { cores_directory })
                 } else if s.contains("/core.") {
-                    Ok(TestFileKind::ProcessCoreDump {
-                        cores_directory: cores_dataset,
-                    })
+                    Ok(TestFileKind::ProcessCoreDump { cores_directory })
                 } else {
                     Err(anyhow!("unknown cores dataset test file kind"))
                 }
@@ -793,7 +803,7 @@ mod test {
             .collect()
     }
 
-    fn load_test_files() -> anyhow::Result<Vec<TestFile>> {
+    fn load_test_files() -> anyhow::Result<IdOrdMap<TestFile>> {
         load_real_paths()?
             .into_iter()
             .map(|path| {
@@ -805,11 +815,11 @@ mod test {
     }
 
     struct TestLister<'a> {
-        files: &'a [TestFile],
+        files: &'a IdOrdMap<TestFile>,
     }
 
     impl<'a> TestLister<'a> {
-        fn new(files: &'a [TestFile]) -> Self {
+        fn new(files: &'a IdOrdMap<TestFile>) -> Self {
             Self { files }
         }
     }
@@ -846,7 +856,7 @@ mod test {
         }
 
         fn file_exists(&self, path: &Utf8Path) -> Result<bool, anyhow::Error> {
-            Ok(self.files.iter().any(|f| f.path == path))
+            Ok(self.files.contains_key(path))
         }
     }
 
@@ -875,10 +885,9 @@ mod test {
         }
     }
 
-    /// Test that every file found on a production system matches at most one
-    /// of our configured rules.
+    /// Fully tests archive planning with a bunch of real-world file paths
     #[test]
-    fn test_real_files_match_one_rule() {
+    fn test_archiving_basic() {
         let files = load_test_files().unwrap();
 
         // Construct sources that correspond with the test data.
@@ -905,38 +914,77 @@ mod test {
             &lister,
         );
         for cores_dir in cores_datasets {
+            println!("including cores directory: {cores_dir:?}");
             planner.include_cores_directory(cores_dir);
         }
         for (zone_name, zone_root) in zone_infos {
+            println!("including zone {zone_name:?} at {zone_root:?}");
             planner.include_zone(zone_name, zone_root);
         }
         let plan = planner.into_plan();
 
-        let mut all_files: BTreeSet<_> =
-            files.iter().map(|f| &f.path).collect();
+        // Create index of the test files, storing the kind associated with each
+        // one.
+        let mut unarchived_files = files.clone();
         for step in plan.to_steps() {
             let step = step.expect("no errors with test lister");
             // XXX-dap make sure the Mkdirs are tested elsewhere
-            // XXX-dap make sure the delete_original flag is right for this file
-            // kind
-            let ArchiveStep::ArchiveFile { input_path, .. } = step else {
+            let ArchiveStep::ArchiveFile {
+                input_path, delete_original, ..
+            } = step
+            else {
                 continue;
             };
 
             println!("archiving: {input_path}");
-            if !all_files.remove(&input_path) {
-                panic!(
-                    "attempted to archive the same file multiple times \
-                     (or it was not in the test dataset): {input_path:?}",
-                );
+            let test_file = unarchived_files
+                .remove(input_path.as_path())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "attempted to archive the same file multiple times \
+                         (or it was not in the test dataset): {input_path:?}",
+                    );
+                });
+
+            match &test_file.kind {
+                TestFileKind::KernelCrashDump { .. }
+                | TestFileKind::ProcessCoreDump { .. }
+                | TestFileKind::LogSmfRotated { .. }
+                | TestFileKind::LogSyslogRotated { .. }
+                | TestFileKind::GlobalLogSmfRotated
+                | TestFileKind::GlobalLogSyslogRotated
+                | TestFileKind::Ignored => {
+                    assert!(
+                        delete_original,
+                        "expected to delete original file when archiving file \
+                         of kind {:?}",
+                        test_file.kind,
+                    );
+                }
+
+                TestFileKind::LogSmfLive { .. }
+                | TestFileKind::LogSyslogLive { .. }
+                | TestFileKind::GlobalLogSmfLive
+                | TestFileKind::GlobalLogSyslogLive => {
+                    assert!(
+                        !delete_original,
+                        "expected not to delete original file when archiving \
+                         file of kind {:?}",
+                        test_file.kind,
+                    );
+                }
             }
         }
 
-        // XXX-dap there are files here that aren't being archived that should
-        // be
-        println!("files that were not archived: {}", all_files.len());
-        for file in all_files {
-            println!("    {file}");
+        println!("files that were not archived: {}", unarchived_files.len());
+        for test_file in unarchived_files {
+            println!("    {}", test_file.path);
+            if !matches!(test_file.kind, TestFileKind::Ignored) {
+                panic!(
+                    "non-ignored test file was not archived: {:?}",
+                    test_file.path
+                );
+            }
         }
 
         logctx.cleanup_successful();
