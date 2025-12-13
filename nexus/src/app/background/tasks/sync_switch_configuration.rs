@@ -335,8 +335,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
         async move {
             let log = opctx.log.clone();
 
-            info!(log, "running switch port settings manager RPW");
-
             let racks = match self.datastore.rack_list_initialized(opctx, &DataPageParams::max_page()).await {
                 Ok(racks) => racks,
                 Err(e) => {
@@ -451,7 +449,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // delete the unneeded routes first, just in case there is a conflicting route for
                 // one we need to add
                 if !routes_to_del.is_empty() {
-                    info!(&log, "deleting static v4 routes"; "routes" => ?routes_to_del);
+                    info!(&log, "deleting static routes"; "routes" => ?routes_to_del);
                     delete_static_routes(&mgd_clients, routes_to_del, &log).await;
                 }
 
@@ -1687,7 +1685,6 @@ enum SwitchStaticRoute {
     V6(SwitchStaticRouteV6),
 }
 
-//type SwitchStaticRoutes = HashSet<(Ipv4Addr, Prefix4, Option<u16>, Option<u8>)>;
 type SwitchStaticRoutes = HashSet<SwitchStaticRoute>;
 
 fn static_routes_to_del(
