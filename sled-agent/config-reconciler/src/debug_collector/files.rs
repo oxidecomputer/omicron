@@ -6,8 +6,7 @@
 //! (e.g., log files)
 
 // XXX-dap current status:
-// - working on test bug where the simulated thing is not archiving the per-zone
-//   files
+// - working on the test at the end of the file
 // - write battery of other automated tests
 // - lots of cleanup to do
 
@@ -718,7 +717,7 @@ mod test {
     });
 
     static RE_NONGLOBAL_ZONE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new("^/pool/ext/[^/]+/crypt/zone/([^/]+)").unwrap()
+        Regex::new("^/pool/ext/[^/]+/crypt/zone/([^/]+)/root").unwrap()
     });
 
     impl TryFrom<&Utf8Path> for TestFileKind {
@@ -933,6 +932,8 @@ mod test {
             }
         }
 
+        // XXX-dap there are files here that aren't being archived that should
+        // be
         println!("files that were not archived: {}", all_files.len());
         for file in all_files {
             println!("    {file}");
