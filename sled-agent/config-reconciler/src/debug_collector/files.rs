@@ -7,6 +7,11 @@
 
 // XXX-dap current status:
 // - write battery of other automated tests
+//   - ArchiveStep::ArchiveFile should have a method to compute the filename and
+//     we should verify it
+//     - this will also cover the case of a conflict with an existing file
+// - figure out what will happen for file conflicts outside of log files and
+//   what to do about it
 // - lots of cleanup to do
 
 use anyhow::Context;
@@ -16,7 +21,9 @@ use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::Utc;
 use derive_more::AsRef;
-use either::Either;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use slog::Logger;
 use slog::debug;
 use slog::o;
@@ -81,14 +88,13 @@ impl<'a> ArchivePlanner<'a> {
         );
 
         let source = Source::for_zone(zone_name, zone_root, &self.debug_dir);
-        let rules = match self.what {
-            ArchiveWhat::ImmutableOnly => {
-                Either::Left(ZONE_RULES_IMMUTABLE.iter())
-            }
-            ArchiveWhat::Everything => Either::Right(
-                ZONE_RULES_IMMUTABLE.iter().chain(ZONE_RULES_LIVE.iter()),
-            ),
-        };
+        let rules =
+            ALL_RULES.iter().filter(|r| match (&r.rule_scope, &self.what) {
+                (RuleScope::ZoneAlways, _) => true,
+                (RuleScope::ZoneMutable, ArchiveWhat::Everything) => true,
+                (RuleScope::ZoneMutable, ArchiveWhat::ImmutableOnly) => false,
+                (RuleScope::CoresDirectory, _) => false,
+            });
 
         for rule in rules {
             self.groups.push(ArchiveGroup { source: source.clone(), rule });
@@ -103,7 +109,14 @@ impl<'a> ArchivePlanner<'a> {
         );
 
         let source = Source::for_cores_directory(cores_dir, &self.debug_dir);
-        self.groups.push(ArchiveGroup { source, rule: &CORES_RULE })
+        let rules = ALL_RULES.iter().filter(|r| match r.rule_scope {
+            RuleScope::CoresDirectory => true,
+            RuleScope::ZoneMutable | RuleScope::ZoneAlways => false,
+        });
+
+        for rule in rules {
+            self.groups.push(ArchiveGroup { source: source.clone(), rule });
+        }
     }
 
     fn into_plan(self) -> ArchivePlan<'a> {
@@ -192,6 +205,7 @@ impl Source {
 
 struct Rule {
     label: &'static str,
+    rule_scope: RuleScope,
     directory: Utf8PathBuf,
     glob_pattern: glob::Pattern, // XXX-dap consider regex?
     delete_original: bool,
@@ -202,6 +216,25 @@ impl Rule {
     fn include_file(&self, filename: &Filename) -> bool {
         self.glob_pattern.matches(filename.as_ref())
     }
+}
+
+impl IdOrdItem for Rule {
+    type Key<'a> = &'static str;
+    fn key(&self) -> Self::Key<'_> {
+        self.label
+    }
+    id_upcast!();
+}
+
+enum RuleScope {
+    // this rule applies to all cores directories
+    CoresDirectory,
+    // this rule applies to zone roots for "everything" collections, but not
+    // "immutable" ones
+    ZoneMutable,
+    // this rule applies to zone roots always, regardless of whether or not
+    // we're collecting immutable data only
+    ZoneAlways,
 }
 
 trait NamingRule {
@@ -247,28 +280,20 @@ impl<'a> ArchiveGroup<'a> {
 
 static VAR_SVC_LOG: &str = "var/svc/log";
 static VAR_ADM: &str = "var/adm";
-static ZONE_RULES_IMMUTABLE: LazyLock<Vec<Rule>> = LazyLock::new(|| {
-    vec![
+
+static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
+    let rules = [
         Rule {
-            label: "rotated SMF log files",
-            directory: VAR_SVC_LOG.parse().unwrap(),
-            glob_pattern: "*.log.*".parse().unwrap(), // XXX-dap digits
+            label: "process core files and kernel crash dumps",
+            rule_scope: RuleScope::CoresDirectory,
+            directory: ".".parse().unwrap(),
+            glob_pattern: "*".parse().unwrap(),
             delete_original: true,
-            naming: Box::new(NameRotatedLogFile),
+            naming: Box::new(NameIdentity),
         },
-        Rule {
-            label: "rotated syslog files",
-            directory: VAR_ADM.parse().unwrap(),
-            glob_pattern: "messages.*".parse().unwrap(), // XXX-dap digits
-            delete_original: true,
-            naming: Box::new(NameRotatedLogFile),
-        },
-    ]
-});
-static ZONE_RULES_LIVE: LazyLock<Vec<Rule>> = LazyLock::new(|| {
-    vec![
         Rule {
             label: "live SMF log files",
+            rule_scope: RuleScope::ZoneMutable,
             directory: VAR_SVC_LOG.parse().unwrap(),
             glob_pattern: "*.log".parse().unwrap(),
             delete_original: false,
@@ -276,20 +301,42 @@ static ZONE_RULES_LIVE: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         },
         Rule {
             label: "live syslog files",
+            rule_scope: RuleScope::ZoneMutable,
             directory: VAR_ADM.parse().unwrap(),
             glob_pattern: "messages".parse().unwrap(),
             delete_original: false,
             naming: Box::new(NameRotatedLogFile), // XXX-dap
         },
-    ]
-});
+        Rule {
+            label: "rotated SMF log files",
+            rule_scope: RuleScope::ZoneAlways,
+            directory: VAR_SVC_LOG.parse().unwrap(),
+            glob_pattern: "*.log.*".parse().unwrap(), // XXX-dap digits
+            delete_original: true,
+            naming: Box::new(NameRotatedLogFile),
+        },
+        Rule {
+            label: "rotated syslog files",
+            rule_scope: RuleScope::ZoneAlways,
+            directory: VAR_ADM.parse().unwrap(),
+            glob_pattern: "messages.*".parse().unwrap(), // XXX-dap digits
+            delete_original: true,
+            naming: Box::new(NameRotatedLogFile),
+        },
+    ];
 
-static CORES_RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
-    label: "process core files and kernel crash dumps",
-    directory: ".".parse().unwrap(),
-    glob_pattern: "*".parse().unwrap(),
-    delete_original: true,
-    naming: Box::new(NameIdentity),
+    // We could do this more concisely with a `collect()` or `IdOrdMap::from`,
+    // but those would silently discard duplicates.  We want to detect these and
+    // provide a clear error message.
+    let mut rv = IdOrdMap::new();
+    for rule in rules {
+        let label = rule.label;
+        if let Err(_) = rv.insert_unique(rule) {
+            panic!("found multiple rules with the same label: {:?}", label);
+        }
+    }
+
+    rv
 });
 
 struct NameRotatedLogFile;
@@ -446,9 +493,13 @@ impl ArchivePlan<'_> {
     ) -> impl Iterator<Item = Result<ArchiveStep<'a>, anyhow::Error>> {
         groups
             .iter()
-            .map(|group| {
+            .filter_map(move |group| {
                 let output_directory = group.output_directory(debug_dir);
-                Ok(ArchiveStep::Mkdir { output_directory })
+                if output_directory != debug_dir {
+                    Some(Ok(ArchiveStep::Mkdir { output_directory }))
+                } else {
+                    None
+                }
             })
             .chain(
                 groups
@@ -499,6 +550,7 @@ impl ArchivePlan<'_> {
                                 lister,
                                 namer: &*group.rule.naming,
                                 delete_original: group.rule.delete_original,
+                                rule: group.rule.label,
                             })
                         })
                     }),
@@ -516,7 +568,14 @@ impl ArchivePlan<'_> {
                 Err(error) => Err(error),
                 Ok(ArchiveStep::Mkdir { output_directory }) => {
                     // We assume that the parent of all output directories
-                    // already exists. XXX-dap document better
+                    // already exists.  That's because in practice it should be
+                    // true: all of the output directories are one level below
+                    // the debug dataset itself.  (The test suite verifies
+                    // this.)  So if we find at runtime that this isn't true,
+                    // that's a bad sign.  Maybe somebody has unmounted the
+                    // debug dataset and deleted its mountpoint?  We don't want
+                    // to start spewing stuff to the wrong place.  That's why we
+                    // don't use create_dir_all() here.
                     debug!(
                         log,
                         "create directory";
@@ -541,6 +600,7 @@ impl ArchivePlan<'_> {
                     output_directory,
                     namer,
                     lister,
+                    rule: _,
                 }) => {
                     match namer.archived_file_name(
                         // XXX-dap
@@ -606,12 +666,14 @@ enum ArchiveStep<'a> {
         lister: &'a (dyn FileLister + Send + Sync),
         namer: &'a (dyn NamingRule + Send + Sync),
         delete_original: bool,
+        rule: &'static str,
     },
 }
 
 #[cfg(test)]
 mod test {
     use super::Filename;
+    use crate::debug_collector::files::ALL_RULES;
     use crate::debug_collector::files::ArchivePlanner;
     use crate::debug_collector::files::ArchiveStep;
     use crate::debug_collector::files::ArchiveWhat;
@@ -923,57 +985,115 @@ mod test {
         }
         let plan = planner.into_plan();
 
-        // Create index of the test files, storing the kind associated with each
-        // one.
+        // Now, walk through the archive plan and verify it.
+        let mut directories_created = BTreeSet::new();
         let mut unarchived_files = files.clone();
+        let mut rules_unused: BTreeSet<_> =
+            ALL_RULES.iter().map(|r| r.label).collect();
         for step in plan.to_steps() {
             let step = step.expect("no errors with test lister");
-            // XXX-dap make sure the Mkdirs are tested elsewhere
-            let ArchiveStep::ArchiveFile {
-                input_path, delete_original, ..
-            } = step
-            else {
-                continue;
+
+            match step {
+                // For a `mkdir`, verify that the parent directory matches our
+                // output directory.  (For more on why, see the code where we
+                // process this Mkdir.)  Then record it.  We'll use that to
+                // verify that files are always archived into directories that
+                // already exist.
+                ArchiveStep::Mkdir { output_directory } => {
+                    let parent = output_directory
+                        .parent()
+                        .expect("output directory has a parent");
+                    if parent != fake_output_dir {
+                        panic!(
+                            "archiver created an output directory \
+                             ({output_directory:?}) whose parent is not the \
+                             fake debug directory ({fake_output_dir:?}).  \
+                             This is not currently supported."
+                        );
+                    }
+                    directories_created.insert(output_directory);
+                }
+
+                ArchiveStep::ArchiveFile {
+                    input_path,
+                    delete_original,
+                    output_directory,
+                    rule,
+                    ..
+                } => {
+                    println!("archiving: {input_path}");
+
+                    // Check that we have not already archived this file.
+                    // That would imply that two rules matched the same file,
+                    // which would be a bug in the rule definitions.
+                    let test_file = unarchived_files
+                        .remove(input_path.as_path())
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "attempted to archive the same file multiple \
+                                 times (or it was not in the test dataset): \
+                                 {input_path:?}",
+                            );
+                        });
+
+                    // Check that we've correctly determined whether to delete
+                    // the original file when archiving it.  This is determined
+                    // by the rule that it matched.  We check it here against
+                    // what we expect for each kind of file.
+                    match &test_file.kind {
+                        TestFileKind::KernelCrashDump { .. }
+                        | TestFileKind::ProcessCoreDump { .. }
+                        | TestFileKind::LogSmfRotated { .. }
+                        | TestFileKind::LogSyslogRotated { .. }
+                        | TestFileKind::GlobalLogSmfRotated
+                        | TestFileKind::GlobalLogSyslogRotated
+                        | TestFileKind::Ignored => {
+                            assert!(
+                                delete_original,
+                                "expected to delete original file when \
+                                 archiving file of kind {:?}",
+                                test_file.kind,
+                            );
+                        }
+
+                        TestFileKind::LogSmfLive { .. }
+                        | TestFileKind::LogSyslogLive { .. }
+                        | TestFileKind::GlobalLogSmfLive
+                        | TestFileKind::GlobalLogSyslogLive => {
+                            assert!(
+                                !delete_original,
+                                "expected not to delete original file when \
+                                 archiving file of kind {:?}",
+                                test_file.kind,
+                            );
+                        }
+                    }
+
+                    // The output directory must either match the overall output
+                    // directory or else be one of the directories created by a
+                    // Mkdir that we've already processed.
+                    if output_directory != fake_output_dir
+                        && !directories_created.contains(&output_directory)
+                    {
+                        panic!(
+                            "file was archived into a non-existent \
+                             directory: {}",
+                            test_file.path
+                        );
+                    }
+
+                    // Mark that we've used this rule.  It's not a problem if
+                    // we've already done so.
+                    let _ = rules_unused.remove(rule);
+                }
             };
+        }
 
-            println!("archiving: {input_path}");
-            let test_file = unarchived_files
-                .remove(input_path.as_path())
-                .unwrap_or_else(|| {
-                    panic!(
-                        "attempted to archive the same file multiple times \
-                         (or it was not in the test dataset): {input_path:?}",
-                    );
-                });
-
-            match &test_file.kind {
-                TestFileKind::KernelCrashDump { .. }
-                | TestFileKind::ProcessCoreDump { .. }
-                | TestFileKind::LogSmfRotated { .. }
-                | TestFileKind::LogSyslogRotated { .. }
-                | TestFileKind::GlobalLogSmfRotated
-                | TestFileKind::GlobalLogSyslogRotated
-                | TestFileKind::Ignored => {
-                    assert!(
-                        delete_original,
-                        "expected to delete original file when archiving file \
-                         of kind {:?}",
-                        test_file.kind,
-                    );
-                }
-
-                TestFileKind::LogSmfLive { .. }
-                | TestFileKind::LogSyslogLive { .. }
-                | TestFileKind::GlobalLogSmfLive
-                | TestFileKind::GlobalLogSyslogLive => {
-                    assert!(
-                        !delete_original,
-                        "expected not to delete original file when archiving \
-                         file of kind {:?}",
-                        test_file.kind,
-                    );
-                }
-            }
+        if !rules_unused.is_empty() {
+            panic!(
+                "one or more rules was not covered by the tests: \
+                 {rules_unused:?}"
+            );
         }
 
         println!("files that were not archived: {}", unarchived_files.len());
