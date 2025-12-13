@@ -7,7 +7,6 @@ use crate::blippy::BlueprintKind;
 use crate::blippy::PlanningInputKind;
 use crate::blippy::Severity;
 use crate::blippy::SledKind;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -30,6 +29,7 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::inventory::ZoneKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;
@@ -2253,10 +2253,13 @@ fn check_planning_input_network_records_appear_in_blueprint(
                 }
             }
             _ => {
-                blippy.push_planning_input_note(
-                    Severity::Fatal,
-                    PlanningInputKind::NicWithUnknownOpteSubnet(nic_entry),
-                );
+                // Ignore localhost (used by the test suite).
+                if !nic_entry.nic.ip.is_loopback() {
+                    blippy.push_planning_input_note(
+                        Severity::Fatal,
+                        PlanningInputKind::NicWithUnknownOpteSubnet(nic_entry),
+                    );
+                }
             }
         }
     }

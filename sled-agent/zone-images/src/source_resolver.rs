@@ -7,10 +7,10 @@
 use crate::mupdate_override::AllMupdateOverrides;
 use crate::zone_manifest::AllZoneManifests;
 use camino::Utf8PathBuf;
-use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
+use sled_agent_types::inventory::OmicronZoneImageSource;
 use sled_agent_types::zone_images::RemoveMupdateOverrideResult;
 use sled_agent_types::zone_images::ResolverStatus;
 use slog::o;
@@ -120,13 +120,11 @@ mod tests {
 
     use camino_tempfile_ext::prelude::*;
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
-    use nexus_sled_agent_shared::inventory::{
-        HostPhase2DesiredContents, ZoneKind,
-    };
     use omicron_common::zone_images::ZoneImageFileSource;
     use sled_agent_config_reconciler::{
         HostPhase2PreparedContents, ResolverStatusExt,
     };
+    use sled_agent_types::inventory::{HostPhase2DesiredContents, ZoneKind};
     use sled_agent_types::zone_images::{
         MupdateOverrideReadError, OmicronZoneFileSource,
         OmicronZoneImageLocation, RAMDISK_IMAGE_PATH, ZoneImageLocationError,
