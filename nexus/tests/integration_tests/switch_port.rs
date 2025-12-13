@@ -536,14 +536,23 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    // wait for reconciliation
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-
-    // ensure that our route has landed in mgd
-    let routes = mgd_client
-        .static_list_v6_routes()
-        .await
-        .expect("list maghemite v6 routes");
-
-    assert_eq!(routes.len(), 1);
+    for _ in 0..20 {
+        // wait for mgd to start
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        // ensure that our route has landed in mgd
+        match mgd_client.static_list_v6_routes().await {
+            Ok(routes) => {
+                let n = routes.len();
+                if n == 1 {
+                    return;
+                } else {
+                    println!("expected 1 route got {n}")
+                }
+            }
+            Err(e) => {
+                println!("failed to contact mgd: {e}");
+            }
+        }
+    }
+    panic!("expected number of routes not found");
 }
