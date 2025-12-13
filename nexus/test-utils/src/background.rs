@@ -471,3 +471,76 @@ pub async fn run_tuf_artifact_replication_step(
     assert_eq!(status.last_run_counters.err(), 0);
     status
 }
+
+/// Run the blueprint_loader background task
+pub async fn run_blueprint_loader(lockstep_client: &ClientTestContext) {
+    let last_background_task =
+        activate_background_task(&lockstep_client, "blueprint_loader").await;
+
+    let LastResult::Completed(_last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from blueprint_loader task",
+            last_background_task.last,
+        );
+    };
+}
+
+/// Run the blueprint_planner background task
+pub async fn run_blueprint_planner(
+    lockstep_client: &ClientTestContext,
+) -> BlueprintPlannerStatus {
+    let last_background_task =
+        activate_background_task(&lockstep_client, "blueprint_planner").await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from blueprint_planner task",
+            last_background_task.last,
+        );
+    };
+
+    serde_json::from_value::<BlueprintPlannerStatus>(
+        last_result_completed.details,
+    )
+    .unwrap()
+}
+
+/// Run the blueprint_executor background task
+pub async fn run_blueprint_executor(lockstep_client: &ClientTestContext) {
+    let last_background_task =
+        activate_background_task(&lockstep_client, "blueprint_executor").await;
+
+    let LastResult::Completed(_last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from blueprint_executor task",
+            last_background_task.last,
+        );
+    };
+}
+
+/// Run the blueprint_rendezvous background task
+pub async fn run_blueprint_rendezvous(lockstep_client: &ClientTestContext) {
+    let last_background_task =
+        activate_background_task(&lockstep_client, "blueprint_rendezvous")
+            .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from blueprint_rendezvous task",
+            last_background_task.last,
+        );
+    };
+
+    let _status = serde_json::from_value::<BlueprintRendezvousStatus>(
+        last_result_completed.details,
+    )
+    .unwrap();
+}

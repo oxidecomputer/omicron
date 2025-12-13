@@ -5,6 +5,7 @@
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
+use crate::app::InlineErrorChain;
 use crate::app::sagas::SagaInitError;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::volume_delete;
@@ -12,6 +13,7 @@ use nexus_db_queries::authn;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore;
 use omicron_common::api::external::DiskState;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -38,6 +40,12 @@ declare_saga_actions! {
     SPACE_ACCOUNT -> "no_result1" {
         + sdd_account_space
         - sdd_account_space_undo
+    }
+    DEALLOCATE_LOCAL_STORAGE -> "deallocate_local_storage" {
+        + sdd_deallocate_local_storage
+    }
+    DELETE_LOCAL_STORAGE -> "delete_local_storage" {
+        + sdd_delete_local_storage
     }
 }
 
@@ -96,8 +104,8 @@ impl NexusSaga for SagaDiskDelete {
             }
 
             datastore::Disk::LocalStorage(_) => {
-                // XXX nothing to do here yet, need the delegate_zvol branch to
-                // merge first.
+                builder.append(deallocate_local_storage_action());
+                builder.append(delete_local_storage_action());
             }
         }
 
@@ -185,6 +193,96 @@ async fn sdd_account_space_undo(
         )
         .await
         .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sdd_deallocate_local_storage(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let datastore::Disk::LocalStorage(disk) = params.disk else {
+        // Check during make_saga_dag prevents this case.
+        unreachable!();
+    };
+
+    let Some(allocation) = disk.local_storage_dataset_allocation else {
+        // Nothing to do!
+        return Ok(());
+    };
+
+    osagactx
+        .datastore()
+        .delete_local_storage_dataset_allocation(&opctx, allocation.id())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn sdd_delete_local_storage(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let datastore::Disk::LocalStorage(disk) = params.disk else {
+        // Check during make_saga_dag prevents this case.
+        unreachable!();
+    };
+
+    let Some(allocation) = disk.local_storage_dataset_allocation else {
+        // Nothing to do!
+        return Ok(());
+    };
+
+    let dataset_id = allocation.id();
+    let pool_id = allocation.pool_id();
+    let sled_id = allocation.sled_id();
+
+    // Get a sled agent client
+
+    let sled_agent_client = osagactx
+        .nexus()
+        .sled_client(&sled_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    // Ensure that the local storage is deleted
+
+    let delete_operation = || async {
+        sled_agent_client
+            .local_storage_dataset_delete(&pool_id, &dataset_id)
+            .await
+    };
+
+    let gone_check = || async {
+        osagactx.datastore().check_sled_in_service(&opctx, sled_id).await?;
+
+        // `check_sled_in_service` returns an error if the sled is no longer in
+        // service; if it succeeds, the sled is not gone.
+        Ok(false)
+    };
+
+    ProgenitorOperationRetry::new(delete_operation, gone_check)
+        .run(osagactx.log())
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to delete local storage: {}",
+                InlineErrorChain::new(&e)
+            ))
+        })?;
+
     Ok(())
 }
 

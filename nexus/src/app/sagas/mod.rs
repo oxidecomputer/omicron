@@ -10,11 +10,13 @@
 // easier it will be to test, version, and update in deployed systems.
 
 use crate::saga_interface::SagaContext;
+use serde::Serialize;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use steno::ActionContext;
 use steno::ActionError;
 use steno::DagBuilder;
+use steno::Node;
 use steno::SagaDag;
 use steno::SagaName;
 use steno::SagaType;
@@ -316,6 +318,161 @@ macro_rules! declare_saga_actions {
         crate::app::sagas::__emit_action!($node, $out);
         declare_saga_actions!(S = $saga $($nodes,)* $node <> $($tail)*);
     };
+    // Allow for a repetition syntax that looks like
+    //
+    //  ACTION_NAME (i, j, k) -> "output" {
+    //      + action
+    //      - undo
+    //  }
+    //
+    // This is equivalent to
+    //
+    //  ACTION_NAME_i -> "output_i" {
+    //      + action_i
+    //      - undo_i
+    //  }
+    //
+    //  ACTION_NAME_j -> "output_j" {
+    //      + action_j
+    //      - undo_j
+    //  }
+    //
+    //  ACTION_NAME_k -> "output_k" {
+    //      + action_k
+    //      - undo_k
+    //  }
+    //
+    (S = $saga:ident $($nodes:ident),* <> $node:ident ($repeat:literal, $($repeat_tail:literal),*) -> $out:literal { + $a:ident - $u:ident } $($tail:tt)*) => {
+        paste::paste! {
+            static [<$node _ $repeat>]: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
+                ::std::sync::LazyLock::new(|| {
+                    ::steno::new_action_noop_undo(
+                        crate::app::sagas::__action_name!(
+                            $saga,
+                            [<$node _ $repeat>]
+                        ),
+                        [<$a _ $repeat>],
+                        [<$u _ $repeat>]
+                    )
+                });
+
+            // Note: this is the inlined contents of `__emit_action`, that macro
+            // cannot take the `paste!` output as it isn't a literal:
+            //
+            //  crate::app::sagas::__emit_action!(
+            //      [<$node _ $repeat>],
+            //      [<$out _ $repeat>]    <- this triggers a compile error
+            //  );
+            #[allow(dead_code)]
+            fn [<$node:lower _ $repeat _action>]() -> ::steno::Node {
+                ::steno::Node::action(
+                    crate::app::sagas::__stringify_ident!([<$out _ $repeat>]),
+                    crate::app::sagas::__stringify_ident!([<$node:camel _ $repeat>]),
+                    [<$node _ $repeat>].as_ref(),
+                )
+            }
+
+            declare_saga_actions!(S = $saga $($nodes,)* [<$node _ $repeat>] <> $node ($($repeat_tail),+) -> $out { + $a } $($tail)*);
+        }
+    };
+    (S = $saga:ident $($nodes:ident),* <> $node:ident ($repeat:literal) -> $out:literal { + $a:ident - $u:ident } $($tail:tt)*) => {
+        paste::paste! {
+            static [<$node _ $repeat>]: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
+                ::std::sync::LazyLock::new(|| {
+                    ::steno::new_action_noop_undo(
+                        crate::app::sagas::__action_name!(
+                            $saga,
+                            [<$node _ $repeat>]
+                        ),
+                        [<$a _ $repeat>],
+                        [<$u _ $repeat>]
+                    )
+                });
+
+            // Note: this is the inlined contents of `__emit_action`, that macro
+            // cannot take the `paste!` output as it isn't a literal:
+            //
+            //  crate::app::sagas::__emit_action!(
+            //      [<$node _ $repeat>],
+            //      [<$out _ $repeat>]    <- this triggers a compile error
+            //  );
+            #[allow(dead_code)]
+            fn [<$node:lower _ $repeat _action>]() -> ::steno::Node {
+                ::steno::Node::action(
+                    crate::app::sagas::__stringify_ident!([<$out _ $repeat>]),
+                    crate::app::sagas::__stringify_ident!([<$node:camel _ $repeat>]),
+                    [<$node _ $repeat>].as_ref(),
+                )
+            }
+
+            declare_saga_actions!(S = $saga $($nodes,)* [<$node _ $repeat>] <> $($tail)*);
+        }
+    };
+    // Same as the prior match, but without the undo action.
+    (S = $saga:ident $($nodes:ident),* <> $node:ident ($repeat:literal, $($repeat_tail:literal),*) -> $out:literal { + $a:ident } $($tail:tt)*) => {
+        paste::paste! {
+            static [<$node _ $repeat>]: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
+                ::std::sync::LazyLock::new(|| {
+                    ::steno::new_action_noop_undo(
+                        crate::app::sagas::__action_name!(
+                            $saga,
+                            [<$node _ $repeat>]
+                        ),
+                        [<$a _ $repeat>]
+                    )
+                });
+
+            // Note: this is the inlined contents of `__emit_action`, that macro
+            // cannot take the `paste!` output as it isn't a literal:
+            //
+            //  crate::app::sagas::__emit_action!(
+            //      [<$node _ $repeat>],
+            //      [<$out _ $repeat>]    <- this triggers a compile error
+            //  );
+            #[allow(dead_code)]
+            fn [<$node:lower _ $repeat _action>]() -> ::steno::Node {
+                ::steno::Node::action(
+                    crate::app::sagas::__stringify_ident!([<$out _ $repeat>]),
+                    crate::app::sagas::__stringify_ident!([<$node:camel _ $repeat>]),
+                    [<$node _ $repeat>].as_ref(),
+                )
+            }
+
+            declare_saga_actions!(S = $saga $($nodes,)* [<$node _ $repeat>] <> $node ($($repeat_tail),+) -> $out { + $a } $($tail)*);
+        }
+    };
+    (S = $saga:ident $($nodes:ident),* <> $node:ident ($repeat:literal) -> $out:literal { + $a:ident } $($tail:tt)*) => {
+        paste::paste! {
+            static [<$node _ $repeat>]: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
+                ::std::sync::LazyLock::new(|| {
+                    ::steno::new_action_noop_undo(
+                        crate::app::sagas::__action_name!(
+                            $saga,
+                            [<$node _ $repeat>]
+                        ),
+                        [<$a _ $repeat>]
+                    )
+                });
+
+            // Note: this is the inlined contents of `__emit_action`, that macro
+            // cannot take the `paste!` output as it isn't a literal:
+            //
+            //  crate::app::sagas::__emit_action!(
+            //      [<$node _ $repeat>],
+            //      [<$out _ $repeat>]    <- this triggers a compile error
+            //  );
+            #[allow(dead_code)]
+            fn [<$node:lower _ $repeat _action>]() -> ::steno::Node {
+                ::steno::Node::action(
+                    crate::app::sagas::__stringify_ident!([<$out _ $repeat>]),
+                    crate::app::sagas::__stringify_ident!([<$node:camel _ $repeat>]),
+                    [<$node _ $repeat>].as_ref(),
+                )
+            }
+
+            declare_saga_actions!(S = $saga $($nodes,)* [<$node _ $repeat>] <> $($tail)*);
+        }
+    };
     // The end of the macro, which registers all previous generated saga nodes.
     //
     // We generate a new function, rather than implementing
@@ -337,3 +494,34 @@ pub(crate) use __action_name;
 pub(crate) use __emit_action;
 pub(crate) use __stringify_ident;
 pub(crate) use declare_saga_actions;
+
+// Helper function for appending subsagas to parent sagas.
+fn subsaga_append<S: Serialize>(
+    node_basename: String,
+    subsaga_dag: steno::Dag,
+    parent_builder: &mut steno::DagBuilder,
+    params: S,
+    which: usize,
+) -> Result<(), SagaInitError> {
+    // The "parameter" node is a constant node that goes into the outer saga.
+    // Its value becomes the parameters for the one-node subsaga (defined below)
+    // that actually creates each resource.
+    let params_node_name = format!("{}_params{}", node_basename, which);
+
+    parent_builder.append(Node::constant(
+        &params_node_name,
+        serde_json::to_value(&params).map_err(|e| {
+            SagaInitError::SerializeError(params_node_name.clone(), e)
+        })?,
+    ));
+
+    let output_name = format!("{}{}", node_basename, which);
+
+    parent_builder.append(Node::subsaga(
+        output_name.as_str(),
+        subsaga_dag,
+        params_node_name,
+    ));
+
+    Ok(())
+}

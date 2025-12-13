@@ -30,6 +30,7 @@ internal-dns-types.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 macaddr.workspace = true
+nonempty.workspace = true
 oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.

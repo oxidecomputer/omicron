@@ -1850,6 +1850,9 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(zpool, inv_zpool);
+allow_tables_to_appear_in_same_query!(inv_zpool, physical_disk);
+
 table! {
     inv_dataset (inv_collection_id, sled_id, name) {
         inv_collection_id -> Uuid,

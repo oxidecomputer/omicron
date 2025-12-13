@@ -40,6 +40,30 @@ pub struct LocalStorageDatasetAllocation {
 }
 
 impl LocalStorageDatasetAllocation {
+    /// These records are normally created during sled reservation, but for unit
+    /// tests add this `new` function.
+    pub fn new_for_tests_only(
+        id: DatasetUuid,
+        time_created: DateTime<Utc>,
+        local_storage_dataset_id: DatasetUuid,
+        pool_id: ExternalZpoolUuid,
+        sled_id: SledUuid,
+        dataset_size: ByteCount,
+    ) -> Self {
+        Self {
+            id: id.into(),
+
+            time_created,
+            time_deleted: None,
+
+            local_storage_dataset_id: local_storage_dataset_id.into(),
+            pool_id: pool_id.into(),
+            sled_id: sled_id.into(),
+
+            dataset_size,
+        }
+    }
+
     pub fn id(&self) -> DatasetUuid {
         self.id.into()
     }
