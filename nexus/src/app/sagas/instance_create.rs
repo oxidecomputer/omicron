@@ -11,8 +11,8 @@ use crate::app::{
 };
 use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::ExternalIp;
 use nexus_db_model::NetworkInterfaceKind;
+use nexus_db_model::{ExternalIp, IpVersion};
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
@@ -112,9 +112,13 @@ declare_saga_actions! {
         + sic_create_network_interface
         - sic_create_network_interface_undo
     }
-    CREATE_SNAT_IP -> "snat_ip" {
-        + sic_allocate_instance_snat_ip
-        - sic_allocate_instance_snat_ip_undo
+    CREATE_SNAT_IPV4 -> "snat_ipv4" {
+        + sic_allocate_instance_snat_ipv4
+        - sic_allocate_instance_snat_ipv4_undo
+    }
+    CREATE_SNAT_IPV6 -> "snat_ipv6" {
+        + sic_allocate_instance_snat_ipv6
+        - sic_allocate_instance_snat_ipv6_undo
     }
     CREATE_EXTERNAL_IP -> "output" {
         + sic_allocate_instance_external_ip
@@ -278,13 +282,80 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
-        // Allocate an external IP address for the default outbound connectivity
-        builder.append(Node::action(
-            "snat_ip_id",
-            "CreateSnatIpId",
-            ACTION_GENERATE_ID.as_ref(),
-        ));
-        builder.append(create_snat_ip_action());
+        // Allocate an SNAT IP address for each IP stack in the instance's
+        // primary NIC.
+        //
+        // NOTE: This is really going in the wrong direction. As described in
+        // https://github.com/oxidecomputer/omicron/issues/4317, we want to only
+        // allocate these addresses if there aren't any others. In fixing that,
+        // we should also allow VPC-only networking (which isn't possible
+        // today), attaching / detaching an SNAT IP (you can only do Ephemeral
+        // or Floating today), and moving IP address allocation to the instance
+        // start saga from here.
+        //
+        // All of these together are a pretty big chunk of work, and should be
+        // tackled on their own. So we're deferring that for now.
+        match params.create_params.network_interfaces {
+            params::InstanceNetworkInterfaceAttachment::Create(nics) => {
+                if let Some(primary) = nics.first() {
+                    if primary.ip_config.has_ipv4_stack() {
+                        builder.append(Node::action(
+                            "snat_ipv4_id",
+                            "CreateSnatIpv4Id",
+                            ACTION_GENERATE_ID.as_ref(),
+                        ));
+                        builder.append(create_snat_ipv4_action());
+                    }
+                    if primary.ip_config.has_ipv6_stack() {
+                        builder.append(Node::action(
+                            "snat_ipv6_id",
+                            "CreateSnatIpv6Id",
+                            ACTION_GENERATE_ID.as_ref(),
+                        ));
+                        builder.append(create_snat_ipv6_action());
+                    }
+                }
+            }
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv4 => {
+                builder.append(Node::action(
+                    "snat_ipv4_id",
+                    "CreateSnatIpv4Id",
+                    ACTION_GENERATE_ID.as_ref(),
+                ));
+                builder.append(create_snat_ipv4_action());
+            }
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv6 => {
+                builder.append(Node::action(
+                    "snat_ipv6_id",
+                    "CreateSnatIpv6Id",
+                    ACTION_GENERATE_ID.as_ref(),
+                ));
+                builder.append(create_snat_ipv4_action());
+            }
+            params::InstanceNetworkInterfaceAttachment::DefaultDualStack => {
+                builder.append(Node::action(
+                    "snat_ipv4_id",
+                    "CreateSnatIpv4Id",
+                    ACTION_GENERATE_ID.as_ref(),
+                ));
+                builder.append(create_snat_ipv4_action());
+                builder.append(Node::action(
+                    "snat_ipv6_id",
+                    "CreateSnatIpv6Id",
+                    ACTION_GENERATE_ID.as_ref(),
+                ));
+                builder.append(create_snat_ipv4_action());
+            }
+            params::InstanceNetworkInterfaceAttachment::None => {}
+        }
+        if let Some(primary_nic) = params.create_params.network_interfaces {
+            builder.append(Node::action(
+                "snat_ip_id",
+                "CreateSnatIpId",
+                ACTION_GENERATE_ID.as_ref(),
+            ));
+            builder.append(create_snat_ip_action());
+        }
 
         // See the comment above where we add nodes for creating NICs.  We use
         // the same pattern here.
@@ -791,9 +862,23 @@ async fn create_default_primary_network_interface(
     Ok(())
 }
 
-/// Create an external IP address for instance source NAT.
-async fn sic_allocate_instance_snat_ip(
+/// Create an external IPv4 address for instance source NAT.
+async fn sic_allocate_instance_snat_ipv4(
     sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    sic_allocate_instance_snat_ip_impl(sagactx, IpVersion::V4).await
+}
+
+/// Create an external IPv4 address for instance source NAT.
+async fn sic_allocate_instance_snat_ipv6(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    sic_allocate_instance_snat_ip_impl(sagactx, IpVersion::V6).await
+}
+
+async fn sic_allocate_instance_snat_ip_impl(
+    sagactx: NexusActionContext,
+    _ip_version: IpVersion,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -803,10 +888,12 @@ async fn sic_allocate_instance_snat_ip(
         &saga_params.serialized_authn,
     );
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
-    let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
+    let ip_id = sagactx.lookup::<Uuid>("snat_ipv4_id")?;
 
+    // TODO(ben): Merge Zeeshan's work, and then fetch the default for the
+    // provided version.
     let (.., pool) = datastore
-        .ip_pools_fetch_default(&opctx)
+        .ip_pools_fetch_default(&opctx /*, ip_version */)
         .await
         .map_err(ActionError::action_failed)?;
     let pool_id = pool.identity.id;
@@ -819,8 +906,22 @@ async fn sic_allocate_instance_snat_ip(
 }
 
 /// Destroy an allocated SNAT IP address for the instance.
-async fn sic_allocate_instance_snat_ip_undo(
+async fn sic_allocate_instance_snat_ipv4_undo(
     sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    sic_allocate_instance_snat_ip_undo_impl(sagactx, "snat_ipv4_id").await
+}
+
+/// Destroy an allocated SNAT IPv6 address for the instance.
+async fn sic_allocate_instance_snat_ipv6_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    sic_allocate_instance_snat_ip_undo_impl(sagactx, "snat_ipv6_id").await
+}
+
+async fn sic_allocate_instance_snat_ip_undo_impl(
+    sagactx: NexusActionContext,
+    ip_name: &str,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -829,12 +930,12 @@ async fn sic_allocate_instance_snat_ip_undo(
         &sagactx,
         &saga_params.serialized_authn,
     );
-    let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
+    let ip_id = sagactx.lookup::<Uuid>(ip_name)?;
     datastore.deallocate_external_ip(&opctx, ip_id).await?;
     Ok(())
 }
 
-/// Create an external IPs for the instance, using the request parameters at
+/// Create external IPs for the instance, using the request parameters at
 /// index `ip_index`, and return its ID if one is created (or None).
 async fn sic_allocate_instance_external_ip(
     sagactx: NexusActionContext,
@@ -1434,7 +1535,7 @@ pub mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DataStore;
     use nexus_test_utils::resource_helpers::DiskTest;
-    use nexus_test_utils::resource_helpers::create_default_ip_pool;
+    use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
@@ -1454,7 +1555,7 @@ pub mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id

@@ -224,7 +224,7 @@ mod tests {
             datastore: &Arc<DataStore>,
             opctx: &OpContext,
         ) -> Self {
-            resource_helpers::create_default_ip_pool(&client).await;
+            resource_helpers::create_default_ip_pools(&client).await;
 
             let _project =
                 resource_helpers::create_project(client, PROJECT_NAME).await;

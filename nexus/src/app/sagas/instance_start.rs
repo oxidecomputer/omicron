@@ -916,7 +916,7 @@ mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project, object_create,
+        create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
@@ -937,7 +937,7 @@ mod test {
     const INSTANCE_NAME: &str = "test-instance";
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(&client, PROJECT_NAME).await;
         project.identity.id
     }

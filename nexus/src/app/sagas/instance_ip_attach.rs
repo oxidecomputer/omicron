@@ -334,7 +334,7 @@ pub(crate) mod test {
     use nexus_db_model::{ExternalIp, IpKind};
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_floating_ip, create_instance,
+        create_default_ip_pools, create_floating_ip, create_instance,
         create_project,
     };
     use nexus_test_utils_macros::nexus_test;
@@ -349,7 +349,7 @@ pub(crate) mod test {
     const FIP_NAME: &str = "affogato";
 
     pub async fn ip_manip_test_setup(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_floating_ip(
             client,

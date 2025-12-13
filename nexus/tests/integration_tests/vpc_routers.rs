@@ -13,7 +13,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_route;
 use nexus_test_utils::resource_helpers::create_router;
@@ -476,7 +476,7 @@ async fn test_vpc_routers_custom_delivered_to_instance(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     // Create some instances, one per subnet, and a default pool etc.
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     create_project(client, PROJECT_NAME).await;
 
     let vpc = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;

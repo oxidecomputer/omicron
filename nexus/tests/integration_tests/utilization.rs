@@ -5,7 +5,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
@@ -38,7 +38,7 @@ type ControlPlaneTestContext =
 async fn test_utilization_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // default-silo has quotas, but is explicitly filtered out by ID in the
     // DB query to avoid user confusion. test-suite-silo also exists, but is
@@ -99,7 +99,7 @@ async fn test_utilization_list(cptestctx: &ControlPlaneTestContext) {
 async fn test_utilization_view(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     let _ = create_project(&client, &PROJECT_NAME).await;
     let _ = create_instance(client, &PROJECT_NAME, &INSTANCE_NAME).await;

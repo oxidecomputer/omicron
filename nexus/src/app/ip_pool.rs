@@ -404,21 +404,6 @@ impl super::Nexus {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
-        // Disallow V6 ranges until IPv6 is fully supported by the networking
-        // subsystem. Instead of changing the API to reflect that (making this
-        // endpoint inconsistent with the rest) and changing it back when we
-        // add support, we accept them at the API layer and error here. It
-        // would be nice if we could do it in the datastore layer, but we'd
-        // have no way of creating IPv6 ranges for the purpose of testing IP
-        // pool utilization.
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/8761.
-        if matches!(range, shared::IpRange::V6(_)) {
-            return Err(Error::invalid_request(
-                "IPv6 ranges are not allowed yet",
-            ));
-        }
-
         // Validate uniformity and pool type constraints.
         // Extract first/last addresses once and reuse for all validation checks.
         match range {

@@ -22,7 +22,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_ip_pool;
@@ -44,6 +44,7 @@ use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::params::IpAssignment;
 use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::external_api::params::PrivateIpv4StackCreate;
+use nexus_types::external_api::params::PrivateIpv6StackCreate;
 use nexus_types::external_api::params::SshKeyCreate;
 use nexus_types::external_api::shared::IpKind;
 use nexus_types::external_api::shared::IpRange;
@@ -51,6 +52,7 @@ use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views::Sled;
 use nexus_types::external_api::views::SshKey;
+use nexus_types::external_api::views::VpcSubnet;
 use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
@@ -72,6 +74,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Nullable;
+use omicron_common::api::external::PrivateIpStack;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterId;
@@ -89,6 +92,7 @@ use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use sled_agent_client::TestInterfaces as _;
 use std::collections::HashSet;
 use std::convert::TryFrom;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -149,7 +153,7 @@ const SLEDS_URL: &'static str = "/v1/system/hardware/sleds";
 pub async fn create_project_and_pool(
     client: &ClientTestContext,
 ) -> views::Project {
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     create_project(client, PROJECT_NAME).await
 }
 
@@ -2780,19 +2784,78 @@ async fn test_instance_create_saga_removes_instance_database_record(
     assert_eq!(instance.identity.name, instance_params.identity.name);
 }
 
-// Basic test requesting an interface with a specific IP address.
 #[nexus_test]
-async fn test_instance_with_single_explicit_ip_address(
+async fn test_instance_with_single_explicit_ipv4_address(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _ = create_project_and_pool(&client).await;
+    let cfg = PrivateIpStackCreate::from_ipv4("172.30.0.10".parse().unwrap());
+    test_instance_with_single_explicit_ip_address_impl(client, cfg).await;
+}
+
+#[nexus_test]
+async fn test_instance_with_single_explicit_ipv6_address(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
 
-    create_project_and_pool(&client).await;
+    // Need to fetch the VPC Subnet's IPv6 prefix, to create an address in it.
+    let project = create_project_and_pool(&client).await;
+    let url = format!(
+        "/v1/vpc-subnets/default?project={}&vpc=default",
+        project.identity.name
+    );
+    let subnet = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to get VPC Subnet")
+        .parsed_body::<VpcSubnet>()
+        .expect("Failed to parse a VPC Subnet");
+    let cfg = PrivateIpStackCreate::from_ipv6(
+        subnet.ipv6_block.iter().nth(100).unwrap(),
+    );
+    test_instance_with_single_explicit_ip_address_impl(client, cfg).await;
+}
 
+#[nexus_test]
+async fn test_instance_with_explicit_dual_stack_address(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Need to fetch the VPC Subnet's IPv6 prefix, to create an address in it.
+    let project = create_project_and_pool(&client).await;
+    let url = format!(
+        "/v1/vpc-subnets/default?project={}&vpc=default",
+        project.identity.name
+    );
+    let subnet = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to get VPC Subnet")
+        .parsed_body::<VpcSubnet>()
+        .expect("Failed to parse a VPC Subnet");
+    let v4 = PrivateIpv4StackCreate {
+        ip: IpAssignment::Explicit("172.30.0.10".parse().unwrap()),
+        transit_ips: vec![],
+    };
+    let v6 = PrivateIpv6StackCreate {
+        ip: IpAssignment::Explicit(subnet.ipv6_block.iter().nth(100).unwrap()),
+        transit_ips: vec![],
+    };
+    let cfg = PrivateIpStackCreate::DualStack { v4, v6 };
+    test_instance_with_single_explicit_ip_address_impl(client, cfg).await;
+}
+
+async fn test_instance_with_single_explicit_ip_address_impl(
+    client: &ClientTestContext,
+    ip_config: PrivateIpStackCreate,
+) {
     // Create the parameters for the interface.
     let default_name = "default".parse::<Name>().unwrap();
-    let requested_address =
-        "172.30.0.10".parse::<std::net::Ipv4Addr>().unwrap();
     let if0_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
@@ -2800,7 +2863,7 @@ async fn test_instance_with_single_explicit_ip_address(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip_config: PrivateIpStackCreate::from_ipv4(requested_address),
+        ip_config: ip_config.clone(),
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
@@ -2856,12 +2919,74 @@ async fn test_instance_with_single_explicit_ip_address(
         .expect("Failed to parse a network interface");
     assert_eq!(interface.instance_id, instance.identity.id);
     assert_eq!(interface.identity.name, if0_params.identity.name);
-    let ipv4_stack =
-        interface.ip_stack.ipv4_stack().expect("Expected an IPv4-only stack");
-    assert_eq!(
-        ipv4_stack.ip, requested_address,
-        "Interface was not assigned the requested IP address"
-    );
+
+    let ip_stack = &interface.ip_stack;
+    match (ip_stack, &ip_config) {
+        (PrivateIpStack::V4(stack), PrivateIpStackCreate::V4(config)) => {
+            let IpAssignment::Explicit(requested_ip) = config.ip else {
+                panic!("Expected an explicit requested address");
+            };
+            assert_eq!(
+                stack.ip, requested_ip,
+                "Interface was not assigned the requested IP address",
+            );
+            assert_eq!(
+                stack.transit_ips, config.transit_ips,
+                "Interface was not assigned the requested transit IPs",
+            );
+        }
+        (PrivateIpStack::V6(stack), PrivateIpStackCreate::V6(config)) => {
+            let IpAssignment::Explicit(requested_ip) = config.ip else {
+                panic!("Expected an explicit requested address");
+            };
+            assert_eq!(
+                stack.ip, requested_ip,
+                "Interface was not assigned the requested IP address",
+            );
+            assert_eq!(
+                stack.transit_ips, config.transit_ips,
+                "Interface was not assigned the requested transit IPs",
+            );
+        }
+        (
+            PrivateIpStack::DualStack { v4: v4_stack, v6: v6_stack },
+            PrivateIpStackCreate::DualStack { v4: v4_config, v6: v6_config },
+        ) => {
+            let IpAssignment::Explicit(requested_ip) = v4_config.ip else {
+                panic!("Expected an explicit requested address");
+            };
+            assert_eq!(
+                v4_stack.ip, requested_ip,
+                "Interface was not assigned the requested IP address",
+            );
+            assert_eq!(
+                v4_stack.transit_ips, v4_config.transit_ips,
+                "Interface was not assigned the requested transit IPs",
+            );
+            let IpAssignment::Explicit(requested_ip) = v6_config.ip else {
+                panic!("Expected an explicit requested address");
+            };
+            assert_eq!(
+                v6_stack.ip, requested_ip,
+                "Interface was not assigned the requested IP address",
+            );
+            assert_eq!(
+                v6_stack.transit_ips, v6_config.transit_ips,
+                "Interface was not assigned the requested transit IPs",
+            );
+        }
+        (PrivateIpStack::V4(_), PrivateIpStackCreate::DualStack { .. })
+        | (PrivateIpStack::V4(_), PrivateIpStackCreate::V6(_))
+        | (PrivateIpStack::V6(_), PrivateIpStackCreate::V4(_))
+        | (PrivateIpStack::V6(_), PrivateIpStackCreate::DualStack { .. })
+        | (PrivateIpStack::DualStack { .. }, PrivateIpStackCreate::V4(_))
+        | (PrivateIpStack::DualStack { .. }, PrivateIpStackCreate::V6(_)) => {
+            panic!(
+                "Created IP stack does not match requested config: \
+            config = {ip_config:#?}, stack = {ip_stack:#?}"
+            )
+        }
+    }
 }
 
 // Test creating two new interfaces for an instance, at creation time.
@@ -2918,7 +3043,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         },
         vpc_name: default_name.clone(),
         subnet_name: non_default_subnet_name.clone(),
-        ip_config: PrivateIpStackCreate::auto_ipv4(),
+        ip_config: PrivateIpStackCreate::auto_dual_stack(),
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
@@ -2983,8 +3108,6 @@ async fn test_instance_with_new_custom_network_interfaces(
     assert_eq!(if0.identity.name, if0_params.identity.name);
     assert_eq!(if0.identity.description, if0_params.identity.description);
     assert_eq!(if0.instance_id, instance.identity.id);
-    assert_eq!(if0.subnet_id, non_default_vpc_subnet.identity.id);
-
     let ipv4_stack = if0.ip_stack.ipv4_stack().expect("Expected an IPv4 stack");
     assert_eq!(ipv4_stack.ip, "172.30.0.5".parse::<Ipv4Addr>().unwrap());
     assert!(ipv4_stack.transit_ips.is_empty());
@@ -3008,15 +3131,26 @@ async fn test_instance_with_new_custom_network_interfaces(
 
     assert_eq!(if1.identity.name, if1_params.identity.name);
     assert_eq!(if1.identity.description, if1_params.identity.description);
+    assert!(if1.ip_stack.is_dual_stack());
     let ipv4_stack = if1.ip_stack.ipv4_stack().expect("Expected an IPv4 stack");
     assert_eq!(ipv4_stack.ip, "172.31.0.5".parse::<Ipv4Addr>().unwrap());
     assert!(ipv4_stack.transit_ips.is_empty());
+    let ipv6_stack = if1.ip_stack.ipv6_stack().expect("An IPv6 stack");
+    assert!(
+        non_default_vpc_subnet.ipv6_block.contains(ipv6_stack.ip),
+        "Auto-assigned IPv6 address {} isn't within the VPC Subnet's \
+        IPv6 block {}",
+        ipv6_stack.ip,
+        non_default_vpc_subnet.ipv6_block,
+    );
+    assert!(ipv6_stack.transit_ips.is_empty());
     assert_eq!(if1.instance_id, instance.identity.id);
     assert_eq!(if0.vpc_id, if1.vpc_id);
     assert_ne!(
         if0.subnet_id, if1.subnet_id,
         "Two interfaces should be created in different subnets"
     );
+    assert_eq!(if1.subnet_id, non_default_vpc_subnet.identity.id);
 }
 
 #[nexus_test]
@@ -3713,6 +3847,27 @@ async fn test_instance_update_network_interfaces(
     .unwrap();
     assert!(!iface.primary);
     assert_eq!(iface.identity.name, if_params[0].identity.name);
+}
+
+#[nexus_test]
+async fn can_add_instance_network_interface_ip_stack(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    todo!()
+}
+
+#[nexus_test]
+async fn can_remove_instance_network_interface_ip_stack(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    todo!()
+}
+
+#[nexus_test]
+async fn cannot_remove_all_network_interface_private_ip_stacks(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    todo!()
 }
 
 #[nexus_test]
@@ -7691,7 +7846,7 @@ async fn test_instance_create_with_cross_project_subnet(
     let client = &cptestctx.external_client;
 
     // Setup: Create IP pool and two projects
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project_a_name = "project-a";
     let project_b_name = "project-b";
     create_project(&client, project_a_name).await;
@@ -7823,7 +7978,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
     let client = &cptestctx.external_client;
 
     // Setup: Create IP pool and two projects
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project_a_name = "project-a";
     let project_b_name = "project-b";
     create_project(&client, project_a_name).await;
@@ -8331,10 +8486,8 @@ async fn assert_sled_v2p_mappings(
     nic: &InstanceNetworkInterface,
     vni: Vni,
 ) {
-    let nic_ipv4 =
-        nic.ip_stack.ipv4_addr().copied().map(std::net::IpAddr::from);
-    let nic_ipv6 =
-        nic.ip_stack.ipv6_addr().copied().map(std::net::IpAddr::from);
+    let nic_ipv4 = nic.ip_stack.ipv4_addr().copied().map(IpAddr::from);
+    let nic_ipv6 = nic.ip_stack.ipv6_addr().copied().map(IpAddr::from);
 
     let condition = || async {
         let v2p_mappings = sled_agent.v2p_mappings.lock().unwrap();

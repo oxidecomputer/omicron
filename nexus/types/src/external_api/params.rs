@@ -1227,6 +1227,16 @@ impl PrivateIpStackCreate {
             } => !ipv4_addrs.is_empty() || !ipv6_addrs.is_empty(),
         }
     }
+
+    /// Return true if this IP configuration has an IPv4 stack.
+    pub fn has_ipv4_stack(&self) -> bool {
+        self.ipv4_assignment().is_some()
+    }
+
+    /// Return true if this IP configuration has an IPv6 stack.
+    pub fn has_ipv6_stack(&self) -> bool {
+        self.ipv6_assignment().is_some()
+    }
 }
 
 // CERTIFICATES

@@ -15,7 +15,7 @@
 use http::{Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_project, object_create,
+    create_default_ip_pools, create_project, object_create,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -40,7 +40,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     // Setup in parallel
     let (_, _, mcast_pool) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool(client, "api-edge-pool"),
     )
     .await;
