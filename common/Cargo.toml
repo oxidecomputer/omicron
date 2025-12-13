@@ -27,6 +27,7 @@ hex.workspace = true
 http.workspace = true
 iddqd.workspace = true
 ipnetwork.workspace = true
+itertools.workspace = true
 lldp_protocol.workspace = true
 macaddr.workspace = true
 mg-admin-client.workspace = true

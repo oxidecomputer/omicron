@@ -5,14 +5,14 @@
 use camino::Utf8PathBuf;
 use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::InventoryDataset;
-use nexus_sled_agent_shared::inventory::InventoryDisk;
-use nexus_sled_agent_shared::inventory::InventoryZpool;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::disk::DatasetName;
-use sled_agent_api::ArtifactConfig;
+use sled_agent_types::artifact::ArtifactConfig;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::InventoryDataset;
+use sled_agent_types::inventory::InventoryDisk;
+use sled_agent_types::inventory::InventoryZpool;
+use sled_agent_types::inventory::OmicronSledConfig;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
 use sled_storage::nested_dataset::NestedDatasetConfig;
@@ -50,8 +50,8 @@ use crate::SledAgentFacilities;
 use crate::TimeSyncStatus;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::NestedDatasetMountError;
-use crate::debug_collector_task;
-use crate::debug_collector_task::FormerZoneRootArchiver;
+use crate::debug_collector;
+use crate::debug_collector::FormerZoneRootArchiver;
 use crate::internal_disks::InternalDisksReceiver;
 use crate::ledger::CurrentSledConfig;
 use crate::ledger::LedgerTaskHandle;
@@ -136,7 +136,7 @@ impl ConfigReconcilerHandle {
         // Spawn the task that manages dump devices.
         let (external_disks_tx, external_disks_rx) =
             watch::channel(HashSet::new());
-        let former_zone_root_archiver = debug_collector_task::spawn(
+        let former_zone_root_archiver = debug_collector::spawn(
             internal_disks_rx.clone(),
             external_disks_rx,
             Arc::clone(&mount_config),

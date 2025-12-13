@@ -24,7 +24,7 @@ use diesel::sql_types::{self, Nullable};
 use ipnetwork::Ipv4Network;
 use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use nexus_db_errors::{ErrorHandler, public_error_from_diesel, retryable};
+use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{Ip, IpAssignment, Ipv4Addr, SqlU8};
 use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
@@ -117,8 +117,6 @@ pub enum InsertError {
     InstanceMustBeStopped(Uuid),
     /// The instance does not exist at all, or is in the destroyed state.
     InstanceNotFound(Uuid),
-    /// The operation occurred within a transaction, and is retryable
-    Retryable(DieselError),
     /// Any other error
     External(external::Error),
 }
@@ -226,9 +224,6 @@ impl InsertError {
                     &id,
                 )
             }
-            InsertError::Retryable(err) => {
-                public_error_from_diesel(err, ErrorHandler::Server)
-            }
             InsertError::External(e) => e,
         }
     }
@@ -318,10 +313,6 @@ fn decode_database_error(
         r#"could not parse "non-unique-subnets" as type uuid: "#,
         r#"uuid: incorrect UUID length: non-unique-subnets"#,
     );
-
-    if retryable(&err) {
-        return InsertError::Retryable(err);
-    }
 
     match err {
         // If the address allocation subquery fails, we'll attempt to insert

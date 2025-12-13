@@ -15,7 +15,7 @@
 use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
-pub use crate::inventory::SourceNatConfig;
+pub use crate::inventory::SourceNatConfigGeneric;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
@@ -28,12 +28,6 @@ use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use iddqd::id_ord_map::RefMut;
 use iddqd::id_upcast;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
@@ -57,6 +51,12 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types_versions::latest::inventory::HostPhase2DesiredContents;
+use sled_agent_types_versions::latest::inventory::HostPhase2DesiredSlots;
+use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
+use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
+use sled_agent_types_versions::latest::inventory::OmicronZoneImageSource;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -384,11 +384,13 @@ impl Blueprint {
     /// Iterate over the sled configs of all active (not decommissioned) sleds.
     pub fn active_sled_configs(
         &self,
-    ) -> impl Iterator<Item = &BlueprintSledConfig> {
-        self.sleds.values().filter(|sled_config| match sled_config.state {
-            SledState::Active => true,
-            SledState::Decommissioned => false,
-        })
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintSledConfig)> {
+        self.sleds.iter().filter_map(
+            |(&sled_id, sled_config)| match sled_config.state {
+                SledState::Active => Some((sled_id, sled_config)),
+                SledState::Decommissioned => None,
+            },
+        )
     }
 
     /// Summarize the difference between two blueprints.
