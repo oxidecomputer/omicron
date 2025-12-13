@@ -550,7 +550,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
                 }
             }
             Err(e) => {
-                println!("failed to contact mgd: {e}");
+                println!("failed to contact mgd: {e:?}");
                 #[cfg(target_os = "linux")]
                 dump_connection_diagnostics(mgd.port);
             }
