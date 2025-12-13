@@ -551,8 +551,88 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
             }
             Err(e) => {
                 println!("failed to contact mgd: {e}");
+                #[cfg(target_os = "linux")]
+                dump_connection_diagnostics(mgd.port);
             }
         }
     }
     panic!("expected number of routes not found");
+}
+
+#[cfg(target_os = "linux")]
+pub fn dump_connection_diagnostics(port: u16) {
+    let script = format!(
+        r#"
+echo "=== ULIMIT STATUS ==="
+ulimit -a
+
+echo -e "\n=== SYSTEM-WIDE FILE DESCRIPTOR LIMITS ==="
+cat /proc/sys/fs/file-nr
+cat /proc/sys/fs/file-max
+
+echo -e "\n=== PROCESS FD COUNTS (top 20) ==="
+for pid in /proc/[0-9]*; do
+  fd_count=$(ls -1 ${{pid}}/fd 2>/dev/null | wc -l)
+  name=$(cat ${{pid}}/comm 2>/dev/null)
+  echo "$fd_count $name $(basename $pid)"
+done | sort -rn | head -20
+
+echo -e "\n=== CURRENT PROCESS FD COUNT ==="
+ls -1 /proc/$$/fd | wc -l
+
+echo -e "\n=== SOCKET STATISTICS ==="
+ss -s
+
+echo -e "\n=== TCP CONNECTIONS TO LOCALHOST (summary) ==="
+ss -tn state all | grep -E '127\.0\.0\.1|::1|\[::1\]' | awk '{{print $1}}' | sort | uniq -c
+
+echo -e "\n=== CONNECTIONS TO PORT {port} ==="
+ss -tnp | grep {port}
+
+echo -e "\n=== TIME_WAIT SOCKETS ==="
+ss -tn state time-wait | wc -l
+
+echo -e "\n=== EPHEMERAL PORT RANGE ==="
+cat /proc/sys/net/ipv4/ip_local_port_range
+
+echo -e "\n=== NETSTAT COUNTS BY STATE ==="
+ss -tan | awk 'NR>1 {{print $1}}' | sort | uniq -c | sort -rn
+
+echo -e "\n=== DAEMON PROCESS STATUS ==="
+lsof -i :{port} 2>/dev/null || ss -tlnp | grep {port}
+
+echo -e "\n=== ALL LISTENING SOCKETS (TCP + UDP) ==="
+ss -tulnp
+
+echo -e "\n=== LOCALHOST LISTENERS BY PORT ==="
+ss -tlnp | grep -E '127\.0\.0\.1|::1|\*:\*' | awk '{{
+  split($4, addr, ":");
+  port = addr[length(addr)];
+  proc = $6;
+  gsub(/users:\(\("/, "", proc);
+  gsub(/",pid=.*/, "", proc);
+  print port, proc
+}}' | sort -n
+
+echo -e "\n=== MEMORY PRESSURE ==="
+free -m
+"#,
+        port = port
+    );
+
+    match std::process::Command::new("bash").arg("-c").arg(&script).output() {
+        Ok(output) => {
+            eprintln!("=== CONNECTION DIAGNOSTICS (port {port}) ===");
+            eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+            if !output.stderr.is_empty() {
+                eprintln!(
+                    "stderr: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to run diagnostics: {e}");
+        }
+    }
 }
