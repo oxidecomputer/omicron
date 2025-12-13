@@ -19,6 +19,11 @@ use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{fm_sitrep, fm_sitrep_history};
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind, SitrepKind};
 
+mod case;
+pub use case::*;
+mod diagnosis_engine;
+pub use diagnosis_engine::*;
+
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_sitrep)]
 pub struct SitrepMetadata {
