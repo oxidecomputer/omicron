@@ -1170,6 +1170,14 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        Ok(db_silo_group.into())
+        let mut silo_group: SiloGroup = db_silo_group.into();
+
+        // Fetch the member count for this group
+        let member_count =
+            self.db_datastore.silo_group_member_count(opctx, *group_id).await?;
+
+        silo_group.set_member_count(member_count);
+
+        Ok(silo_group)
     }
 }
