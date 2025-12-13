@@ -2,4 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-pub use gateway_types_versions::latest::task_dump::*;
+//! Version `COSMO` of the Gateway API.
+//!
+//! This version added support for the Cosmo system type in ignition types.
+
+pub mod ignition;

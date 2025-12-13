@@ -2,4 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-pub use gateway_types_versions::latest::task_dump::*;
+//! Version `INITIAL` of the Gateway API.
+
+pub mod caboose;
+pub mod component;
+pub mod component_details;
+pub mod host;
+pub mod ignition;
+pub mod rot;
+pub mod sensor;
+pub mod task_dump;
+pub mod update;
