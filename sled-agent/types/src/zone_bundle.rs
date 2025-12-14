@@ -10,11 +10,6 @@ use camino::Utf8PathBuf;
 
 pub use sled_agent_types_versions::latest::zone_bundle::*;
 
-// Note: ZoneBundleMetadata::new(), PriorityOrder::new(), CleanupPeriod::as_duration(),
-// StorageLimit::as_u8(), StorageLimit::bytes_available() remain as inherent methods
-// in the versions crate because they access private fields. To move them here,
-// the versions crate would need to expose those fields or provide getters.
-
 pub trait PriorityOrderExt {
     fn compare_metadata(
         &self,

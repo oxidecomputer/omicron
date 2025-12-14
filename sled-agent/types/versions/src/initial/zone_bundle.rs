@@ -4,7 +4,6 @@
 
 //! Zone bundle types for Sled Agent API version 1.
 
-use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -163,6 +162,9 @@ pub enum PriorityDimension {
 /// are pruned first, to maintain the dataset quota. Note that bundles are
 /// sorted by each dimension in the order in which they appear, with each
 /// dimension having higher priority than the next.
+///
+/// TODO: The serde deserializer does not currently verify uniqueness of
+/// dimensions.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct PriorityOrder([PriorityDimension; PriorityOrder::EXPECTED_SIZE]);
 
@@ -239,31 +241,6 @@ impl PriorityOrder {
     /// Get the priority order as a slice.
     pub fn as_slice(&self) -> &[PriorityDimension] {
         &self.0
-    }
-
-    /// Order zone bundle metadata according to the contained priority.
-    ///
-    /// We sort the metadata by each dimension, in the order in which it
-    /// appears. That means earlier dimensions have higher priority than later
-    /// ones.
-    pub fn compare_metadata(
-        &self,
-        lhs: &ZoneBundleMetadata,
-        rhs: &ZoneBundleMetadata,
-    ) -> Ordering {
-        for dim in self.0.iter() {
-            let ord = match dim {
-                PriorityDimension::Cause => lhs.cause.cmp(&rhs.cause),
-                PriorityDimension::Time => {
-                    lhs.time_created.cmp(&rhs.time_created)
-                }
-            };
-            if matches!(ord, Ordering::Equal) {
-                continue;
-            }
-            return ord;
-        }
-        Ordering::Equal
     }
 }
 
