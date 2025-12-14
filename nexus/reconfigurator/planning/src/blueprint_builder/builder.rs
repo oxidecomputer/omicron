@@ -73,6 +73,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::ZoneKind;
+use sled_agent_types::inventory::ZoneKindExt;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -2577,6 +2578,7 @@ pub mod test {
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::inventory::OmicronZoneTypeExt;
     use std::collections::BTreeSet;
     use std::mem;
     use tufaceous_artifact::ArtifactHash;

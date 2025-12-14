@@ -13,7 +13,8 @@ use omicron_common::{
     api::external::TufRepoDescription, update::OmicronZoneManifestSource,
 };
 use sled_agent_types::inventory::{
-    ZoneArtifactInventory, ZoneKind, ZoneManifestBootInventory,
+    ZoneArtifactInventory, ZoneManifestBootInventory,
+    artifact_id_name_to_install_dataset_file,
 };
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::KnownArtifactKind;
@@ -87,10 +88,8 @@ impl SimTufRepoSource {
                 }
 
                 // Check that the zone name is known to ZoneKind.
-                if ZoneKind::artifact_id_name_to_install_dataset_file(
-                    &artifact.id.name,
-                )
-                .is_some()
+                if artifact_id_name_to_install_dataset_file(&artifact.id.name)
+                    .is_some()
                 {
                     Some(artifact.id.name.clone())
                 } else {
@@ -156,11 +155,9 @@ impl SimTufRepoSource {
                 }
 
                 let file_name =
-                    ZoneKind::artifact_id_name_to_install_dataset_file(
-                        &artifact.id.name,
-                    )
-                    .expect("we checked this was Some at construction time")
-                    .to_owned();
+                    artifact_id_name_to_install_dataset_file(&artifact.id.name)
+                        .expect("we checked this was Some at construction time")
+                        .to_owned();
                 let path = Utf8Path::new("/fake/path/install").join(&file_name);
                 let status =
                     if self.error_artifact_id_names.contains(&artifact.id.name)

@@ -382,6 +382,7 @@ mod test {
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
+    use sled_agent_types::inventory::OmicronZoneTypeExt;
     use sled_agent_types::inventory::SledRole;
     use sled_agent_types::inventory::ZoneKind;
     use std::collections::BTreeMap;

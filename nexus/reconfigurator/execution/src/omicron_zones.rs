@@ -23,6 +23,7 @@ use omicron_common::address::COCKROACH_ADMIN_PORT;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::ZoneKindExt;
 use slog::Logger;
 use slog::info;
 use slog::warn;

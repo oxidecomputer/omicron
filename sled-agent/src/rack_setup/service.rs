@@ -112,6 +112,7 @@ use sled_agent_types::early_networking::{
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
+    ZONES_CONFIG_INITIAL_GENERATION,
 };
 use sled_agent_types::rack_init::{
     BootstrapAddressDiscovery, RackInitializeRequest as Config,
@@ -1616,7 +1617,7 @@ async fn init_trust_quorum(
 struct DeployStepVersion;
 
 impl DeployStepVersion {
-    const V1_NOTHING: Generation = OmicronZonesConfig::INITIAL_GENERATION;
+    const V1_NOTHING: Generation = ZONES_CONFIG_INITIAL_GENERATION;
     const V2_DNS_ONLY: Generation = Self::V1_NOTHING.next();
     const V3_DNS_AND_NTP: Generation = Self::V2_DNS_ONLY.next();
     const V4_COCKROACHDB: Generation = Self::V3_DNS_AND_NTP.next();
@@ -1732,6 +1733,7 @@ mod test {
     use sled_agent_types::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
         OmicronZoneType, SledCpuFamily, SledRole, ZoneImageResolverInventory,
+        ZoneImageResolverInventoryExt,
     };
 
     fn make_sled_info(

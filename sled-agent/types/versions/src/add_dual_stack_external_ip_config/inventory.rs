@@ -10,7 +10,6 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
 use omicron_common::{
     api::{
@@ -30,8 +29,7 @@ use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
-    RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SledRole, ZoneImageResolverInventory, ZoneKind,
+    RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
 };
 use crate::v10;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
@@ -72,107 +70,6 @@ pub struct ConfigReconcilerInventory {
     ///
     /// `None` if `remove_mupdate_override` was not provided in the sled config.
     pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
-}
-
-impl ConfigReconcilerInventory {
-    /// Iterate over all running zones as reported by the last reconciliation
-    /// result.
-    ///
-    /// This includes zones that are both present in `last_reconciled_config`
-    /// and whose status in `zones` indicates "successfully running".
-    pub fn running_omicron_zones(
-        &self,
-    ) -> impl Iterator<Item = &OmicronZoneConfig> {
-        self.zones.iter().filter_map(|(zone_id, result)| match result {
-            ConfigReconcilerInventoryResult::Ok => {
-                self.last_reconciled_config.zones.get(zone_id)
-            }
-            ConfigReconcilerInventoryResult::Err { .. } => None,
-        })
-    }
-
-    /// Iterate over all zones contained in the most-recently-reconciled sled
-    /// config and report their status as of that reconciliation.
-    pub fn reconciled_omicron_zones(
-        &self,
-    ) -> impl Iterator<Item = (&OmicronZoneConfig, &ConfigReconcilerInventoryResult)>
-    {
-        // `self.zones` may contain zone IDs that aren't present in
-        // `last_reconciled_config` at all, if we failed to _shut down_ zones
-        // that are no longer present in the config. We use `filter_map` to
-        // strip those out, and only report on the configured zones.
-        self.zones.iter().filter_map(|(zone_id, result)| {
-            let config = self.last_reconciled_config.zones.get(zone_id)?;
-            Some((config, result))
-        })
-    }
-
-    /// Given a sled config, produce a reconciler result that sled-agent could
-    /// have emitted if reconciliation succeeded.
-    ///
-    /// This method should only be used by tests and dev tools; real code should
-    /// look at the actual `last_reconciliation` value from the parent
-    /// [`Inventory`].
-    pub fn debug_assume_success(config: OmicronSledConfig) -> Self {
-        let mut ret = Self {
-            // These fields will be filled in by `debug_update_assume_success`.
-            last_reconciled_config: OmicronSledConfig::default(),
-            external_disks: BTreeMap::new(),
-            datasets: BTreeMap::new(),
-            orphaned_datasets: IdOrdMap::new(),
-            zones: BTreeMap::new(),
-            remove_mupdate_override: None,
-
-            // These fields will not.
-            boot_partitions: BootPartitionContents::debug_assume_success(),
-        };
-
-        ret.debug_update_assume_success(config);
-
-        ret
-    }
-
-    /// Given a sled config, update an existing reconciler result to simulate an
-    /// output that sled-agent could have emitted if reconciliation succeeded.
-    ///
-    /// This method should only be used by tests and dev tools; real code should
-    /// look at the actual `last_reconciliation` value from the parent
-    /// [`Inventory`].
-    pub fn debug_update_assume_success(&mut self, config: OmicronSledConfig) {
-        let external_disks = config
-            .disks
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let datasets = config
-            .datasets
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let zones = config
-            .zones
-            .iter()
-            .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let remove_mupdate_override =
-            config.remove_mupdate_override.map(|_| {
-                RemoveMupdateOverrideInventory {
-                    boot_disk_result: Ok(
-                        RemoveMupdateOverrideBootSuccessInventory::Removed,
-                    ),
-                    non_boot_message: "mupdate override successfully removed \
-                                       on non-boot disks"
-                        .to_owned(),
-                }
-            });
-
-        self.last_reconciled_config = config;
-        self.external_disks = external_disks;
-        self.datasets = datasets;
-        self.orphaned_datasets = IdOrdMap::new();
-        self.zones = zones;
-        self.remove_mupdate_override = remove_mupdate_override;
-    }
 }
 
 /// Status of the sled-agent-config-reconciler task.
@@ -261,11 +158,6 @@ pub struct OmicronZonesConfig {
     pub zones: Vec<OmicronZoneConfig>,
 }
 
-impl OmicronZonesConfig {
-    /// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
-    pub const INITIAL_GENERATION: Generation = Generation::from_u32(1);
-}
-
 /// Describes one Omicron-managed zone running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
@@ -293,27 +185,6 @@ impl IdOrdItem for OmicronZoneConfig {
     }
 
     id_upcast!();
-}
-
-impl OmicronZoneConfig {
-    /// Returns the underlay IP address associated with this zone.
-    ///
-    /// Assumes all zone have exactly one underlay IP address (which is
-    /// currently true).
-    pub fn underlay_ip(&self) -> Ipv6Addr {
-        self.zone_type.underlay_ip()
-    }
-
-    pub fn zone_name(&self) -> String {
-        illumos_utils::running_zone::InstalledZone::get_zone_name(
-            self.zone_type.kind().zone_prefix(),
-            Some(self.id),
-        )
-    }
-
-    pub fn dataset_name(&self) -> Option<DatasetName> {
-        self.zone_type.dataset_name()
-    }
 }
 
 /// Describes what kind of zone this is (i.e., what component is running in it)
@@ -413,219 +284,6 @@ pub enum OmicronZoneType {
     Oximeter {
         address: SocketAddrV6,
     },
-}
-
-impl OmicronZoneType {
-    /// Returns the [`ZoneKind`] corresponding to this variant.
-    pub fn kind(&self) -> ZoneKind {
-        match self {
-            OmicronZoneType::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
-            OmicronZoneType::Clickhouse { .. } => ZoneKind::Clickhouse,
-            OmicronZoneType::ClickhouseKeeper { .. } => {
-                ZoneKind::ClickhouseKeeper
-            }
-            OmicronZoneType::ClickhouseServer { .. } => {
-                ZoneKind::ClickhouseServer
-            }
-            OmicronZoneType::CockroachDb { .. } => ZoneKind::CockroachDb,
-            OmicronZoneType::Crucible { .. } => ZoneKind::Crucible,
-            OmicronZoneType::CruciblePantry { .. } => ZoneKind::CruciblePantry,
-            OmicronZoneType::ExternalDns { .. } => ZoneKind::ExternalDns,
-            OmicronZoneType::InternalDns { .. } => ZoneKind::InternalDns,
-            OmicronZoneType::InternalNtp { .. } => ZoneKind::InternalNtp,
-            OmicronZoneType::Nexus { .. } => ZoneKind::Nexus,
-            OmicronZoneType::Oximeter { .. } => ZoneKind::Oximeter,
-        }
-    }
-
-    /// Does this zone require time synchronization before it is initialized?"
-    ///
-    /// This function is somewhat conservative - the set of services
-    /// that can be launched before timesync has completed is intentionally kept
-    /// small, since it would be easy to add a service that expects time to be
-    /// reasonably synchronized.
-    pub fn requires_timesync(&self) -> bool {
-        match self {
-            // These zones can be initialized and started before time has been
-            // synchronized. For the NTP zones, this should be self-evident --
-            // we need the NTP zone to actually perform time synchronization!
-            //
-            // The DNS zone is a bit of an exception here, since the NTP zone
-            // itself may rely on DNS lookups as a dependency.
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::InternalDns { .. } => false,
-            _ => true,
-        }
-    }
-
-    /// Returns the underlay IP address associated with this zone.
-    ///
-    /// Assumes all zone have exactly one underlay IP address (which is
-    /// currently true).
-    pub fn underlay_ip(&self) -> Ipv6Addr {
-        match self {
-            OmicronZoneType::BoundaryNtp { address, .. }
-            | OmicronZoneType::Clickhouse { address, .. }
-            | OmicronZoneType::ClickhouseKeeper { address, .. }
-            | OmicronZoneType::ClickhouseServer { address, .. }
-            | OmicronZoneType::CockroachDb { address, .. }
-            | OmicronZoneType::Crucible { address, .. }
-            | OmicronZoneType::CruciblePantry { address }
-            | OmicronZoneType::ExternalDns { http_address: address, .. }
-            | OmicronZoneType::InternalNtp { address }
-            | OmicronZoneType::Nexus { internal_address: address, .. }
-            | OmicronZoneType::Oximeter { address } => *address.ip(),
-            OmicronZoneType::InternalDns {
-                http_address: address,
-                dns_address,
-                ..
-            } => {
-                // InternalDns is the only variant that carries two
-                // `SocketAddrV6`s that are both on the underlay network. We
-                // expect these to have the same IP address.
-                debug_assert_eq!(address.ip(), dns_address.ip());
-                *address.ip()
-            }
-        }
-    }
-
-    /// Identifies whether this is an NTP zone
-    pub fn is_ntp(&self) -> bool {
-        match self {
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. } => true,
-
-            OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::ExternalDns { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Nexus { .. }
-            | OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// Identifies whether this is a boundary NTP zone
-    pub fn is_boundary_ntp(&self) -> bool {
-        matches!(self, OmicronZoneType::BoundaryNtp { .. })
-    }
-
-    /// Identifies whether this is a Nexus zone
-    pub fn is_nexus(&self) -> bool {
-        match self {
-            OmicronZoneType::Nexus { .. } => true,
-
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::ExternalDns { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// Identifies whether this a Crucible (not Crucible pantry) zone
-    pub fn is_crucible(&self) -> bool {
-        match self {
-            OmicronZoneType::Crucible { .. } => true,
-
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::ExternalDns { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Nexus { .. }
-            | OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// This zone's external IP
-    pub fn external_ip(&self) -> Option<IpAddr> {
-        match self {
-            OmicronZoneType::Nexus { external_ip, .. } => Some(*external_ip),
-            OmicronZoneType::ExternalDns { dns_address, .. } => {
-                Some(dns_address.ip())
-            }
-            OmicronZoneType::BoundaryNtp { snat_cfg, .. } => Some(snat_cfg.ip),
-
-            OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Oximeter { .. } => None,
-        }
-    }
-
-    /// The service vNIC providing external connectivity to this zone
-    pub fn service_vnic(&self) -> Option<&NetworkInterface> {
-        match self {
-            OmicronZoneType::Nexus { nic, .. }
-            | OmicronZoneType::ExternalDns { nic, .. }
-            | OmicronZoneType::BoundaryNtp { nic, .. } => Some(nic),
-
-            OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Oximeter { .. } => None,
-        }
-    }
-
-    /// If this kind of zone has an associated dataset, return the dataset's
-    /// name. Otherwise, return `None`.
-    pub fn dataset_name(&self) -> Option<DatasetName> {
-        let (dataset, dataset_kind) = match self {
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Nexus { .. }
-            | OmicronZoneType::Oximeter { .. }
-            | OmicronZoneType::CruciblePantry { .. } => None,
-            OmicronZoneType::Clickhouse { dataset, .. } => {
-                Some((dataset, DatasetKind::Clickhouse))
-            }
-            OmicronZoneType::ClickhouseKeeper { dataset, .. } => {
-                Some((dataset, DatasetKind::ClickhouseKeeper))
-            }
-            OmicronZoneType::ClickhouseServer { dataset, .. } => {
-                Some((dataset, DatasetKind::ClickhouseServer))
-            }
-            OmicronZoneType::CockroachDb { dataset, .. } => {
-                Some((dataset, DatasetKind::Cockroach))
-            }
-            OmicronZoneType::Crucible { dataset, .. } => {
-                Some((dataset, DatasetKind::Crucible))
-            }
-            OmicronZoneType::ExternalDns { dataset, .. } => {
-                Some((dataset, DatasetKind::ExternalDns))
-            }
-            OmicronZoneType::InternalDns { dataset, .. } => {
-                Some((dataset, DatasetKind::InternalDns))
-            }
-        }?;
-
-        Some(DatasetName::new(dataset.pool_name, dataset_kind))
-    }
 }
 
 fn default_nexus_lockstep_port() -> u16 {

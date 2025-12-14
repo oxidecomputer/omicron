@@ -24,6 +24,7 @@ use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::inventory::OmicronZoneType;
+use sled_agent_types::inventory::OmicronZoneTypeExt;
 use sled_agent_types::inventory::ZoneKind;
 use slog::Logger;
 use slog::o;
@@ -735,7 +736,9 @@ mod test {
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
+    use sled_agent_types::inventory::OmicronZoneTypeExt;
     use sled_agent_types::inventory::SledCpuFamily;
+    use sled_agent_types::inventory::ZoneKindExt;
     use slog::o;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;

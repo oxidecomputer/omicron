@@ -60,10 +60,11 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmSpecExt, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{
-    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
-    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
-    ZoneImageResolverInventory,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryExt,
+    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
+    InventoryDataset, InventoryDisk, InventoryZpool, OmicronSledConfig,
+    OmicronZonesConfig, SledRole, ZoneImageResolverInventory,
+    ZoneImageResolverInventoryExt,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 

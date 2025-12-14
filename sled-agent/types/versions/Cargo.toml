@@ -13,7 +13,6 @@ chrono.workspace = true
 daft.workspace = true
 iddqd.workspace = true
 illumos-utils.workspace = true
-indent_write.workspace = true
 async-trait.workspace = true
 bootstore.workspace = true
 omicron-common.workspace = true

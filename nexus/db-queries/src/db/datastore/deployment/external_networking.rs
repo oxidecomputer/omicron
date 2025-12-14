@@ -27,7 +27,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use sled_agent_types::inventory::ZoneKind;
+use sled_agent_types::inventory::{ZoneKind, ZoneKindExt};
 use slog::Logger;
 use slog::debug;
 use slog::error;

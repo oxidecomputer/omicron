@@ -90,7 +90,8 @@ use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::inventory::{
-    OmicronZoneConfig, OmicronZoneType, ZoneKind,
+    OmicronZoneConfig, OmicronZoneConfigExt, OmicronZoneType,
+    OmicronZoneTypeExt, ZoneKind, ZoneKindExt,
 };
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_agent_types::zone_images::{

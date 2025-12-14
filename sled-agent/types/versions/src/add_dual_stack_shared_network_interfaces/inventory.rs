@@ -160,11 +160,6 @@ pub struct OmicronZonesConfig {
     pub zones: Vec<OmicronZoneConfig>,
 }
 
-impl OmicronZonesConfig {
-    /// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
-    pub const INITIAL_GENERATION: Generation = Generation::from_u32(1);
-}
-
 /// Describes one Omicron-managed zone running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,

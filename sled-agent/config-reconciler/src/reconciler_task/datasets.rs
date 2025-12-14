@@ -26,6 +26,7 @@ use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneConfig;
+use sled_agent_types::inventory::OmicronZoneConfigExt;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::ZONE_DATASET;

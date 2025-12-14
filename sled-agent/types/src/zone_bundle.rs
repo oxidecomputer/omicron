@@ -10,6 +10,42 @@ use camino::Utf8PathBuf;
 
 pub use sled_agent_types_versions::latest::zone_bundle::*;
 
+// Note: ZoneBundleMetadata::new(), PriorityOrder::new(), CleanupPeriod::as_duration(),
+// StorageLimit::as_u8(), StorageLimit::bytes_available() remain as inherent methods
+// in the versions crate because they access private fields. To move them here,
+// the versions crate would need to expose those fields or provide getters.
+
+pub trait PriorityOrderExt {
+    fn compare_metadata(
+        &self,
+        lhs: &ZoneBundleMetadata,
+        rhs: &ZoneBundleMetadata,
+    ) -> Ordering;
+}
+
+impl PriorityOrderExt for PriorityOrder {
+    fn compare_metadata(
+        &self,
+        lhs: &ZoneBundleMetadata,
+        rhs: &ZoneBundleMetadata,
+    ) -> Ordering {
+        // PriorityOrder implements Deref to the array, so self.iter() works
+        for dim in self.iter() {
+            let ord = match dim {
+                PriorityDimension::Cause => lhs.cause.cmp(&rhs.cause),
+                PriorityDimension::Time => {
+                    lhs.time_created.cmp(&rhs.time_created)
+                }
+            };
+            if matches!(ord, Ordering::Equal) {
+                continue;
+            }
+            return ord;
+        }
+        Ordering::Equal
+    }
+}
+
 /// Information about a zone bundle.
 ///
 /// This type is not published in the API, so it remains defined here

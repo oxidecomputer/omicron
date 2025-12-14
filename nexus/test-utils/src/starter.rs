@@ -97,6 +97,7 @@ use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledCpuFamily;
+use sled_agent_types::inventory::ZoneKindExt;
 use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Logger, debug, error, o};
 use std::collections::BTreeMap;

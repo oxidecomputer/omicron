@@ -6,7 +6,7 @@
 
 use nexus_types::deployment::BlueprintZoneType;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types::inventory::ZoneKind;
+use sled_agent_types::inventory::{ZoneKind, ZoneKindExt};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::mem;

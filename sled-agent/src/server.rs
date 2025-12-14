@@ -13,7 +13,7 @@ use crate::services::ServiceManager;
 use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
-use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::sled::{StartSledAgentRequest, StartSledAgentRequestExt};
 use slog::Logger;
 use std::net::SocketAddr;
 use std::sync::Arc;

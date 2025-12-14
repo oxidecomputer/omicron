@@ -91,6 +91,7 @@ use sled_agent_types::inventory::ZoneManifestNonBootInventory;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
+    OmicronZoneTypeExt,
 };
 use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddrV6};

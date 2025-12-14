@@ -64,7 +64,6 @@ pub mod instance {
     pub use crate::v1::instance::VmmPutStateBody;
     pub use crate::v1::instance::VmmPutStateResponse;
     pub use crate::v1::instance::VmmSpec;
-    pub use crate::v1::instance::VmmSpecExt;
     pub use crate::v1::instance::VmmStateRequested;
     pub use crate::v1::instance::VmmUnregisterResponse;
     pub use crate::v1::instance::VpcPathParam;

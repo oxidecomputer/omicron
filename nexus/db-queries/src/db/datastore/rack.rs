@@ -73,6 +73,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::inventory::ZoneKindExt;
 use slog_error_chain::InlineErrorChain;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;

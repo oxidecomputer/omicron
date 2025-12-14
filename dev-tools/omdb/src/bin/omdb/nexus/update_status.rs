@@ -20,6 +20,7 @@ use nexus_types::internal_api::views::{
 };
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::{OmicronZoneTypeExt, ZoneKindExt};
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 
