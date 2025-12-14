@@ -945,6 +945,8 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
                 id: USER_TEST_PRIVILEGED.id(),
                 display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
                 silo_id: DEFAULT_SILO_ID,
+                time_created: initial_silo_users[0].time_created,
+                time_modified: initial_silo_users[0].time_modified,
             },
             views::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
@@ -953,6 +955,8 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
                     .clone()
                     .unwrap(),
                 silo_id: DEFAULT_SILO_ID,
+                time_created: initial_silo_users[1].time_created,
+                time_modified: initial_silo_users[1].time_modified,
             },
         ]
     );
@@ -982,11 +986,15 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
                 id: new_silo_user_id,
                 display_name: new_silo_user_external_id.into(),
                 silo_id: DEFAULT_SILO_ID,
+                time_created: silo_users[0].time_created,
+                time_modified: silo_users[0].time_modified,
             },
             views::User {
                 id: USER_TEST_PRIVILEGED.id(),
                 display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
                 silo_id: DEFAULT_SILO_ID,
+                time_created: silo_users[1].time_created,
+                time_modified: silo_users[1].time_modified,
             },
             views::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
@@ -995,6 +1003,8 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
                     .clone()
                     .unwrap(),
                 silo_id: DEFAULT_SILO_ID,
+                time_created: silo_users[2].time_created,
+                time_modified: silo_users[2].time_modified,
             },
         ]
     );
@@ -1038,6 +1048,8 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             id: new_silo_user_id,
             display_name: new_silo_user_name,
             silo_id: silo.identity.id,
+            time_created: silo2_users.items[0].time_created,
+            time_modified: silo2_users.items[0].time_modified,
         }]
     );
 
