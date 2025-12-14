@@ -999,7 +999,7 @@ impl WriteTransport for BlockDeviceTransport {
         // When writing to a block device, we must write a multiple of the block
         // size. We can assume the image we're given should be
         // appropriately-sized: return an error here if it is not.
-        if total_bytes % block_size != 0 {
+        if !total_bytes.is_multiple_of(block_size) {
             return Err(WriteError::WriteError {
                 component,
                 slot,

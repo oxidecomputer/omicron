@@ -90,7 +90,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     wait_for_groups_active(client, &group_names).await;
 
     // Create multiple instances in parallel - test various attachment scenarios
-    let instances = vec![
+    let instances = [
         // Instance with group attached at creation
         instance_for_multicast_groups(
             cptestctx,
