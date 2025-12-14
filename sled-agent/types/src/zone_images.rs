@@ -22,8 +22,6 @@ use sled_agent_types_versions::latest::inventory::ZoneArtifactInventory;
 use sled_agent_types_versions::latest::inventory::ZoneImageResolverInventory;
 use sled_agent_types_versions::latest::inventory::ZoneKind;
 use sled_agent_types_versions::latest::inventory::ZoneManifestBootInventory;
-
-use crate::inventory::ZoneKindExt;
 use sled_agent_types_versions::latest::inventory::ZoneManifestInventory;
 use sled_agent_types_versions::latest::inventory::ZoneManifestNonBootInventory;
 use slog::{error, info, o, warn};
@@ -31,6 +29,8 @@ use slog_error_chain::InlineErrorChain;
 use swrite::{SWrite, swriteln};
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
+
+use crate::inventory::ZoneKindExt;
 
 /// The location to look for images shipped with the RAM disk.
 pub const RAMDISK_IMAGE_PATH: &str = "/opt/oxide";
