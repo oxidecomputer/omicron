@@ -15,7 +15,6 @@ use nexus_db_queries::db::datastore::SiloGroup;
 use nexus_db_queries::db::datastore::SiloUser;
 use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::params;
-use nexus_types::external_api::views;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -134,35 +133,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<views::Group> {
-        let authz_silo = opctx
-            .authn
-            .silo_required()
-            .internal_context("fetching groups for current user")?;
-
-        let groups = self.db_datastore.silo_groups_for_self(opctx, pagparams).await?;
-
-        // Fetch member counts for each group
-        let mut result = Vec::new();
-        for group in groups {
-            let authz_group = authz::SiloGroup::new(
-                authz_silo.clone(),
-                group.id(),
-                omicron_common::api::external::LookupType::ById(group.id().into_untyped_uuid()),
-            );
-
-            let (db_group, member_count) = self
-                .db_datastore
-                .silo_group_fetch_with_member_count(opctx, &authz_group)
-                .await?;
-
-            let silo_group: SiloGroup = db_group.into();
-            let mut view: views::Group = silo_group.into();
-            view.member_count = member_count;
-            result.push(view);
-        }
-
-        Ok(result)
+    ) -> ListResultVec<SiloGroup> {
+        self.db_datastore.silo_groups_for_self(opctx, pagparams).await
     }
 
     // Silo groups
@@ -171,28 +143,13 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<views::Group> {
+    ) -> ListResultVec<SiloGroup> {
         let authz_silo = opctx
             .authn
             .silo_required()
             .internal_context("listing current silo's groups")?;
 
-        // Fetch groups with member counts
-        let groups_with_counts = self
-            .db_datastore
-            .silo_groups_list_with_member_counts(opctx, &authz_silo, pagparams)
-            .await?;
-
-        // Convert to views, including member_count
-        Ok(groups_with_counts
-            .into_iter()
-            .map(|(group, member_count)| {
-                let silo_group: SiloGroup = group.into();
-                let mut view: views::Group = silo_group.into();
-                view.member_count = member_count;
-                view
-            })
-            .collect())
+        self.db_datastore.silo_groups_list_by_id(opctx, &authz_silo, pagparams).await
     }
 
     // Built-in users

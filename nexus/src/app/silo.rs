@@ -27,7 +27,6 @@ use nexus_db_queries::db::datastore::SiloUserLookup;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz};
 use nexus_types::deployment::execution::blueprint_nexus_external_ips;
-use nexus_types::external_api::views;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::api::external::ListResultVec;
@@ -1165,21 +1164,20 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         group_id: &SiloGroupUuid,
-    ) -> LookupResult<views::Group> {
-        let (.., authz_silo_group) = LookupPath::new(opctx, &self.db_datastore)
+    ) -> LookupResult<SiloGroup> {
+        let (.., db_silo_group) = LookupPath::new(opctx, &self.db_datastore)
             .silo_group_id(*group_id)
-            .lookup_for(authz::Action::Read)
+            .fetch()
             .await?;
 
-        let (group, member_count) = self
-            .db_datastore
-            .silo_group_fetch_with_member_count(opctx, &authz_silo_group)
-            .await?;
+        let mut silo_group: SiloGroup = db_silo_group.into();
 
-        let silo_group: SiloGroup = group.into();
-        let mut view: views::Group = silo_group.into();
-        view.member_count = member_count;
+        // Fetch the member count for this group
+        let member_count =
+            self.db_datastore.silo_group_member_count(opctx, *group_id).await?;
 
-        Ok(view)
+        silo_group.set_member_count(member_count);
+
+        Ok(silo_group)
     }
 }

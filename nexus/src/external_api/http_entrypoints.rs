@@ -8069,7 +8069,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .silo_groups_list(&opctx, &pagparams)
                 .await?
                 .into_iter()
-                .map(|g| g.into())
+                .map(|g| {
+                    let views_group: views::Group = g.into();
+                    views_group.into()
+                })
                 .collect();
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
@@ -8097,7 +8100,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let groups = nexus.silo_groups_list(&opctx, &pagparams).await?;
+            let groups = nexus
+                .silo_groups_list(&opctx, &pagparams)
+                .await?
+                .into_iter()
+                .map(|g| g.into())
+                .collect();
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 groups,
@@ -8122,7 +8130,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let group = nexus.silo_group_lookup(&opctx, &path.group_id).await?;
-            Ok(HttpResponseOk(group.into()))
+            let views_group: views::Group = group.into();
+            Ok(HttpResponseOk(views_group.into()))
         };
         apictx
             .context
@@ -8142,7 +8151,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let group = nexus.silo_group_lookup(&opctx, &path.group_id).await?;
-            Ok(HttpResponseOk(group))
+            Ok(HttpResponseOk(group.into()))
         };
         apictx
             .context
@@ -8262,12 +8271,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
-            let groups = nexus
+            let groups: Vec<views::Group> = nexus
                 .silo_user_fetch_groups_for_self(
                     &opctx,
                     &data_page_params_for(&rqctx, &query)?,
                 )
-                .await?;
+                .await?
+                .into_iter()
+                .map(|g| g.into())
+                .collect();
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 groups,
