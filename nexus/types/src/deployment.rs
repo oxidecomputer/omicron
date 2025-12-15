@@ -810,7 +810,7 @@ pub enum BlueprintExpungedZoneAccessReason {
     ///
     /// The planner must not prune a Nexus zone if it still has any support
     /// bundles assigned to it.
-    NexusSupportBundleMarkFailed,
+    NexusSupportBundleReassign,
 
     /// An expunged Oximeter zone must be marked expunged in the `oximeter` CRDB
     /// table (so Nexus knows to stop assigning producers to it), and any

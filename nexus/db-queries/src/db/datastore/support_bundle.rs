@@ -228,7 +228,7 @@ impl DataStore {
         // ready for cleanup
         let invalid_nexus_zones = blueprint
             .expunged_nexus_zones_ready_for_cleanup(
-                BlueprintExpungedZoneAccessReason::NexusSupportBundleMarkFailed,
+                BlueprintExpungedZoneAccessReason::NexusSupportBundleReassign,
             )
             .map(|(_sled, zone, _nexus_config)| zone.id.into_untyped_uuid())
             .collect::<Vec<Uuid>>();
