@@ -8054,44 +8054,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     // Silo groups
 
-    async fn v2025121200_group_list(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<nexus_external_api::v2025121200::Group>>,
-        HttpError,
-    > {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let query = query_params.into_inner();
-        let pagparams = data_page_params_for(&rqctx, &query)?;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let groups: Vec<nexus_external_api::v2025121200::Group> = nexus
-                .silo_groups_list(&opctx, &pagparams)
-                .await?
-                .into_iter()
-                .map(|g| {
-                    let views_group: views::Group = g.into();
-                    views_group.into()
-                })
-                .collect();
-            Ok(HttpResponseOk(ScanById::results_page(
-                &query,
-                groups,
-                &|_, group: &nexus_external_api::v2025121200::Group| {
-                    group.id.into_untyped_uuid()
-                },
-            )?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn group_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
@@ -8114,28 +8076,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 groups,
                 &|_, group: &Group| group.id.into_untyped_uuid(),
             )?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn v2025121200_group_view(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<params::GroupPath>,
-    ) -> Result<HttpResponseOk<nexus_external_api::v2025121200::Group>, HttpError>
-    {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let group = nexus.silo_group_lookup(&opctx, &path.group_id).await?;
-            let views_group: views::Group = group.into();
-            Ok(HttpResponseOk(views_group.into()))
         };
         apictx
             .context

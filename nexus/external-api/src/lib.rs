@@ -36,7 +36,7 @@ use openapiv3::OpenAPI;
 /// Copies of data types that changed between versions
 mod v2025112000;
 mod v2025120300;
-pub mod v2025121200;
+mod v2025121500;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -3831,8 +3831,9 @@ pub trait NexusExternalApi {
 
     // Silo groups
 
-    /// List groups (old version without member_count)
+    /// List groups
     #[endpoint {
+        operation_id = "group_list",
         method = GET,
         path = "/v1/groups",
         tags = ["silos"],
@@ -3841,9 +3842,18 @@ pub trait NexusExternalApi {
     async fn v2025121200_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025121200::Group>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<v2025121500::Group>>, HttpError>
+    {
+        match Self::group_list(rqctx, query_params).await {
+            Ok(HttpResponseOk(page)) => Ok(HttpResponseOk(ResultsPage {
+                items: page.items.into_iter().map(Into::into).collect(),
+                next_page: page.next_page,
+            })),
+            Err(e) => Err(e),
+        }
+    }
 
-    /// List groups (new version with member_count)
+    /// List groups
     #[endpoint {
         method = GET,
         path = "/v1/groups",
@@ -3855,7 +3865,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError>;
 
-    /// Fetch group (old version)
+    /// Fetch group
     #[endpoint {
         operation_id = "group_view",
         method = GET,
@@ -3866,11 +3876,15 @@ pub trait NexusExternalApi {
     async fn v2025121200_group_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::GroupPath>,
-    ) -> Result<HttpResponseOk<v2025121200::Group>, HttpError>;
+    ) -> Result<HttpResponseOk<v2025121500::Group>, HttpError> {
+        match Self::group_view(rqctx, path_params).await {
+            Ok(HttpResponseOk(group)) => Ok(HttpResponseOk(group.into())),
+            Err(e) => Err(e),
+        }
+    }
 
-    /// Fetch group (new version)
+    /// Fetch group
     #[endpoint {
-        operation_id = "group_view",
         method = GET,
         path = "/v1/groups/{group_id}",
         tags = ["silos"],
