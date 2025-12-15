@@ -110,11 +110,11 @@ use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::ManifestNonBootInventory;
 use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::ZoneArtifactInventory;
-use sled_agent_types::inventory::ZoneManifestNonBootInventory;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -3646,7 +3646,7 @@ impl DataStore {
 
             let mut by_sled_id: BTreeMap<
                 SledUuid,
-                IdOrdMap<ZoneManifestNonBootInventory>,
+                IdOrdMap<ManifestNonBootInventory>,
             > = BTreeMap::new();
 
             let mut paginator = Paginator::new(
