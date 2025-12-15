@@ -2,46 +2,60 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2025120300 to 2025120900
+//! Nexus external types that changed from 2025120300 to 2025121200
 
-use nexus_types::external_api::views;
-use omicron_uuid_kinds::SiloGroupUuid;
+use std::net::IpAddr;
+
+use omicron_common::api::external::SwitchLocation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-/// View of a Group (without member_count field)
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct Group {
-    #[schemars(with = "Uuid")]
-    pub id: SiloGroupUuid,
+/// The current status of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpPeerStatus {
+    /// IP address of the peer.
+    pub addr: IpAddr,
 
-    /// Human-readable name that can identify the group
-    pub display_name: String,
+    /// Local autonomous system number.
+    pub local_asn: u32,
 
-    /// Uuid of the silo to which this group belongs
-    pub silo_id: Uuid,
+    /// Remote autonomous system number.
+    pub remote_asn: u32,
+
+    /// State of the peer.
+    pub state: BgpPeerState,
+
+    /// Time of last state change.
+    pub state_duration_millis: u64,
+
+    /// Switch with the peer session.
+    pub switch: SwitchLocation,
 }
 
-impl From<Group> for views::Group {
-    fn from(old: Group) -> views::Group {
-        views::Group {
-            id: old.id,
-            display_name: old.display_name,
-            silo_id: old.silo_id,
-            // Default member_count to 0 for old clients that didn't have this field
-            member_count: 0,
-        }
-    }
-}
+/// The current state of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum BgpPeerState {
+    /// Initial state. Refuse all incoming BGP connections. No resources
+    /// allocated to peer.
+    Idle,
 
-impl From<views::Group> for Group {
-    fn from(new: views::Group) -> Group {
-        Group {
-            id: new.id,
-            display_name: new.display_name,
-            silo_id: new.silo_id,
-            // Drop member_count when converting to old version
-        }
-    }
+    /// Waiting for the TCP connection to be completed.
+    Connect,
+
+    /// Trying to acquire peer by listening for and accepting a TCP connection.
+    Active,
+
+    /// Waiting for open message from peer.
+    OpenSent,
+
+    /// Waiting for keepaliave or notification from peer.
+    OpenConfirm,
+
+    /// Synchronizing with peer.
+    SessionSetup,
+
+    /// Session established. Able to exchange update, notification and keepalive
+    /// messages with peers.
+    Established,
 }

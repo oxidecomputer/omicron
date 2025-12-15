@@ -1726,6 +1726,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "colored"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
+dependencies = [
+ "windows-sys 0.48.0",
+]
+
+[[package]]
 name = "common"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/dendrite?branch=main#606c0be888f47d458c8e0465726358d92bc736e6"
@@ -2458,14 +2467,12 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=08f2a34d487658e87545ffbba3add632a82baf0d#08f2a34d487658e87545ffbba3add632a82baf0d"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0df320d42b356e689a3c7a7600eec9b16770237a#0df320d42b356e689a3c7a7600eec9b16770237a"
 dependencies = [
  "oxnet",
- "percent-encoding",
  "progenitor 0.11.2",
  "reqwest",
  "serde",
- "serde_json",
  "slog",
  "uuid",
 ]
@@ -3291,7 +3298,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "colored",
+ "colored 2.2.0",
  "dhcproto",
  "futures",
  "hickory-resolver 0.25.2",
@@ -5828,7 +5835,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "colored",
+ "colored 2.2.0",
  "futures",
  "indicatif 0.17.11",
  "libc",
@@ -5900,7 +5907,7 @@ source = "git+https://github.com/oxidecomputer/netadm-sys?branch=main#f4eae3d807
 dependencies = [
  "anyhow",
  "cfg-if",
- "colored",
+ "colored 2.2.0",
  "dlpi",
  "libc",
  "num_enum",
@@ -6305,17 +6312,19 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=08f2a34d487658e87545ffbba3add632a82baf0d#08f2a34d487658e87545ffbba3add632a82baf0d"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0df320d42b356e689a3c7a7600eec9b16770237a#0df320d42b356e689a3c7a7600eec9b16770237a"
 dependencies = [
- "anyhow",
  "chrono",
- "percent-encoding",
+ "colored 3.0.0",
  "progenitor 0.11.2",
+ "rdb-types",
  "reqwest",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
+ "tabwriter",
+ "uuid",
 ]
 
 [[package]]
@@ -8346,6 +8355,7 @@ dependencies = [
  "range-requests",
  "raw-cpuid",
  "rcgen",
+ "rdb-types",
  "ref-cast",
  "regex",
  "reqwest",
@@ -8778,6 +8788,7 @@ dependencies = [
  "rand 0.9.2",
  "range-requests",
  "rcgen",
+ "rdb-types",
  "regress",
  "repo-depot-api",
  "repo-depot-client",
@@ -11306,6 +11317,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rdb-types"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0df320d42b356e689a3c7a7600eec9b16770237a#0df320d42b356e689a3c7a7600eec9b16770237a"
+dependencies = [
+ "oxnet",
+ "schemars 0.8.22",
+ "serde",
+]
+
+[[package]]
 name = "reconfigurator-cli"
 version = "0.1.0"
 dependencies = [
@@ -11315,7 +11336,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
- "colored",
+ "colored 2.2.0",
  "daft",
  "datatest-stable",
  "dropshot",
@@ -14697,7 +14718,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "colored",
+ "colored 2.2.0",
  "daft",
  "iddqd",
  "omicron-repl-utils",

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "6.0.0"
+    "version": "8.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -469,29 +469,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SledIdentifiers"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sled-role": {
-      "get": {
-        "operationId": "sled_role_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledRole"
                 }
               }
             }
@@ -1767,6 +1744,76 @@
         }
       }
     },
+    "/vmms/{propolis_id}/multicast-group": {
+      "put": {
+        "operationId": "vmm_join_multicast_group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PropolisUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMulticastBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "vmm_leave_multicast_group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PropolisUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMulticastBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/vmms/{propolis_id}/state": {
       "get": {
         "operationId": "vmm_get_state",
@@ -2245,6 +2292,7 @@
         ]
       },
       "ArtifactConfig": {
+        "description": "Artifact configuration.\n\nThis type is used in both GET (response) and PUT (request) operations.",
         "type": "object",
         "properties": {
           "artifacts": {
@@ -2265,6 +2313,7 @@
         ]
       },
       "ArtifactCopyFromDepotBody": {
+        "description": "Request body for copying artifacts from a depot.",
         "type": "object",
         "properties": {
           "depot_base_url": {
@@ -2276,9 +2325,11 @@
         ]
       },
       "ArtifactCopyFromDepotResponse": {
+        "description": "Response for copying artifacts from a depot.",
         "type": "object"
       },
       "ArtifactListResponse": {
+        "description": "Response for listing artifacts.",
         "type": "object",
         "properties": {
           "generation": {
@@ -2299,6 +2350,7 @@
         ]
       },
       "ArtifactPutResponse": {
+        "description": "Response for putting an artifact.",
         "type": "object",
         "properties": {
           "datasets": {
@@ -2926,6 +2978,7 @@
         "additionalProperties": false
       },
       "BootstoreStatus": {
+        "description": "Status of the local bootstore node.",
         "type": "object",
         "properties": {
           "accepted_connections": {
@@ -4341,7 +4394,7 @@
         ]
       },
       "EarlyNetworkConfig": {
-        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`crate::rack_init::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
+        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from `RackInitializeRequest` necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
         "type": "object",
         "properties": {
           "body": {
@@ -4408,6 +4461,7 @@
         ]
       },
       "EstablishedConnection": {
+        "description": "An established connection to a bootstore peer.",
         "type": "object",
         "properties": {
           "addr": {
@@ -4751,24 +4805,6 @@
         "minLength": 1,
         "maxLength": 7
       },
-      "IdMapDatasetConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/DatasetConfig"
-        }
-      },
-      "IdMapOmicronPhysicalDiskConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-        }
-      },
-      "IdMapOmicronZoneConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronZoneConfig"
-        }
-      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -4948,8 +4984,58 @@
           "src_propolis_addr"
         ]
       },
+      "InstanceMulticastBody": {
+        "description": "Request body for multicast group operations.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "join": {
+                "$ref": "#/components/schemas/InstanceMulticastMembership"
+              }
+            },
+            "required": [
+              "join"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "leave": {
+                "$ref": "#/components/schemas/InstanceMulticastMembership"
+              }
+            },
+            "required": [
+              "leave"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "InstanceMulticastMembership": {
+        "description": "Represents a multicast group membership for an instance.\n\nIntroduced in v7.",
+        "type": "object",
+        "properties": {
+          "group_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        },
+        "required": [
+          "group_ip",
+          "sources"
+        ]
+      },
       "InstanceSledLocalConfig": {
-        "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional.",
+        "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional.\n\nAdded in v7: `multicast_groups` field.",
         "type": "object",
         "properties": {
           "dhcp_config": {
@@ -4977,6 +5063,12 @@
           "hostname": {
             "$ref": "#/components/schemas/Hostname"
           },
+          "multicast_groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceMulticastMembership"
+            }
+          },
           "nics": {
             "type": "array",
             "items": {
@@ -4992,6 +5084,7 @@
           "firewall_rules",
           "floating_ips",
           "hostname",
+          "multicast_groups",
           "nics",
           "source_nat"
         ]
@@ -5870,10 +5963,38 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "$ref": "#/components/schemas/IdMapDatasetConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/DatasetConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DatasetConfig"
+            }
           },
           "disks": {
-            "$ref": "#/components/schemas/IdMapOmicronPhysicalDiskConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+            }
           },
           "generation": {
             "$ref": "#/components/schemas/Generation"
@@ -5902,7 +6023,21 @@
             ]
           },
           "zones": {
-            "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronZoneConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronZoneConfig"
+            }
           }
         },
         "required": [
@@ -7627,7 +7762,7 @@
         "minimum": 0
       },
       "SupportBundleMetadata": {
-        "description": "Metadata about a support bundle",
+        "description": "Metadata about a support bundle.",
         "type": "object",
         "properties": {
           "state": {
@@ -7643,6 +7778,7 @@
         ]
       },
       "SupportBundleState": {
+        "description": "State of a support bundle.",
         "type": "string",
         "enum": [
           "complete",
@@ -7848,6 +7984,7 @@
         ]
       },
       "VmmIssueDiskSnapshotRequestBody": {
+        "description": "Request body for VMM disk snapshot requests.",
         "type": "object",
         "properties": {
           "snapshot_id": {
@@ -7860,6 +7997,7 @@
         ]
       },
       "VmmIssueDiskSnapshotRequestResponse": {
+        "description": "Response for VMM disk snapshot requests.",
         "type": "object",
         "properties": {
           "snapshot_id": {
@@ -7936,7 +8074,7 @@
         ]
       },
       "VmmSpec": {
-        "description": "Specifies the virtual hardware configuration of a new Propolis VMM in the form of a Propolis instance specification.\n\nSled-agent expects that when an instance spec is provided alongside an `InstanceSledLocalConfig` to initialize a new instance, the NIC IDs in that config's network interface list will match the IDs of the virtio network backends in the instance spec.",
+        "description": "Specifies the virtual hardware configuration of a new Propolis VMM in the form of a Propolis instance specification.",
         "allOf": [
           {
             "$ref": "#/components/schemas/InstanceSpecV0"

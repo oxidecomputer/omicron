@@ -1320,7 +1320,7 @@ async fn switch_zone_address_mappings(
             return Err(e.to_string());
         }
     };
-    Ok(map_switch_zone_addrs(&log, switch_zone_addresses).await)
+    Ok(map_switch_zone_addrs(&log, switch_zone_addresses, resolver).await)
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`
@@ -1344,14 +1344,33 @@ async fn switch_zone_address_mappings(
 async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,
+    resolver: &internal_dns_resolver::Resolver,
 ) -> HashMap<SwitchLocation, Ipv6Addr> {
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
 
     for addr in switch_zone_addresses {
+        let port = match resolver
+            .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
+            .await
+        {
+            Ok(addrs) => {
+                let port_map: HashMap<Ipv6Addr, u16> = addrs
+                    .into_iter()
+                    .map(|sockaddr| (*sockaddr.ip(), sockaddr.port()))
+                    .collect();
+
+                *port_map.get(&addr).unwrap_or(&MGS_PORT)
+            }
+            Err(e) => {
+                error!(log, "failed to resolve MGS addresses"; "error" => %e);
+                MGS_PORT
+            }
+        };
+
         let mgs_client = MgsClient::new(
-            &format!("http://[{}]:{}", addr, MGS_PORT),
+            &format!("http://[{}]:{}", addr, port),
             log.new(o!("component" => "MgsClient")),
         );
 

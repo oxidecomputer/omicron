@@ -36,6 +36,7 @@ use openapiv3::OpenAPI;
 /// Copies of data types that changed between versions
 mod v2025112000;
 mod v2025120300;
+mod v2025121500;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -65,7 +66,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2025120900, GROUP_MEMBER_COUNT),
+    (2025121500, GROUP_MEMBER_COUNT),
+    (2025121200, BGP_PEER_COLLISION_STATE),
     (2025120300, LOCAL_STORAGE),
     (2025112000, INITIAL),
 ]);
@@ -3792,7 +3794,7 @@ pub trait NexusExternalApi {
     async fn v2025120300_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025120300::Group>>, HttpError>
+    ) -> Result<HttpResponseOk<ResultsPage<v2025121500::Group>>, HttpError>
     {
         match Self::group_list(rqctx, query_params).await {
             Ok(HttpResponseOk(page)) => Ok(HttpResponseOk(ResultsPage {
@@ -3826,7 +3828,7 @@ pub trait NexusExternalApi {
     async fn v2025120300_group_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::GroupPath>,
-    ) -> Result<HttpResponseOk<v2025120300::Group>, HttpError> {
+    ) -> Result<HttpResponseOk<v2025121500::Group>, HttpError> {
         match Self::group_view(rqctx, path_params).await {
             Ok(HttpResponseOk(group)) => Ok(HttpResponseOk(group.into())),
             Err(e) => Err(e),

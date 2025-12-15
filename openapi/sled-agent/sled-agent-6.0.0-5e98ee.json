@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "4.0.0"
+    "version": "6.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -412,6 +412,34 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/OmicronSledConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/probes": {
+      "put": {
+        "summary": "Update the entire set of probe zones on this sled.",
+        "description": "Probe zones are used to debug networking configuration. They look similar to instances, in that they have an OPTE port on a VPC subnet and external addresses, but no actual VM.",
+        "operationId": "probes_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeSet"
               }
             }
           },
@@ -836,7 +864,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -845,7 +873,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -885,7 +913,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -894,7 +922,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -903,7 +931,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -936,7 +964,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -945,7 +973,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -954,7 +982,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -990,7 +1018,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -999,7 +1027,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1008,7 +1036,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1041,7 +1069,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1050,7 +1078,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1059,7 +1087,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1094,7 +1122,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1112,7 +1140,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1121,7 +1149,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1154,7 +1182,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1172,7 +1200,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1181,7 +1209,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1209,7 +1237,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1218,7 +1246,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1227,7 +1255,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           },
           {
@@ -1279,7 +1307,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1288,7 +1316,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1297,7 +1325,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1330,7 +1358,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1339,7 +1367,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1348,7 +1376,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1375,7 +1403,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1384,7 +1412,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1393,7 +1421,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           },
           {
@@ -1551,7 +1579,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1592,7 +1620,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1635,7 +1663,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1678,7 +1706,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1712,7 +1740,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1748,7 +1776,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1779,7 +1807,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -2217,6 +2245,7 @@
         ]
       },
       "ArtifactConfig": {
+        "description": "Artifact configuration.\n\nThis type is used in both GET (response) and PUT (request) operations.",
         "type": "object",
         "properties": {
           "artifacts": {
@@ -2237,6 +2266,7 @@
         ]
       },
       "ArtifactCopyFromDepotBody": {
+        "description": "Request body for copying artifacts from a depot.",
         "type": "object",
         "properties": {
           "depot_base_url": {
@@ -2248,9 +2278,11 @@
         ]
       },
       "ArtifactCopyFromDepotResponse": {
+        "description": "Response for copying artifacts from a depot.",
         "type": "object"
       },
       "ArtifactListResponse": {
+        "description": "Response for listing artifacts.",
         "type": "object",
         "properties": {
           "generation": {
@@ -2271,6 +2303,7 @@
         ]
       },
       "ArtifactPutResponse": {
+        "description": "Response for putting an artifact.",
         "type": "object",
         "properties": {
           "datasets": {
@@ -2898,6 +2931,7 @@
         "additionalProperties": false
       },
       "BootstoreStatus": {
+        "description": "Status of the local bootstore node.",
         "type": "object",
         "properties": {
           "accepted_connections": {
@@ -3833,7 +3867,7 @@
             "description": "The UUID of the dataset being requested",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+                "$ref": "#/components/schemas/DatasetUuid"
               }
             ]
           },
@@ -3888,6 +3922,15 @@
           "kind",
           "pool_name"
         ]
+      },
+      "DatasetUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::DatasetUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "DhcpConfig": {
         "description": "DHCP configuration for a port\n\nNot present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we use `InstanceRuntimeState::hostname` for this value.",
@@ -4304,7 +4347,7 @@
         ]
       },
       "EarlyNetworkConfig": {
-        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`crate::rack_init::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
+        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from `RackInitializeRequest` necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
         "type": "object",
         "properties": {
           "body": {
@@ -4371,6 +4414,7 @@
         ]
       },
       "EstablishedConnection": {
+        "description": "An established connection to a bootstore peer.",
         "type": "object",
         "properties": {
           "addr": {
@@ -4383,6 +4427,43 @@
         "required": [
           "addr",
           "baseboard"
+        ]
+      },
+      "ExternalIp": {
+        "description": "An external IP address used by a probe.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "description": "The first port used by the address.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "description": "The external IP address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "description": "The kind of address this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpKind"
+              }
+            ]
+          },
+          "last_port": {
+            "description": "The last port used by the address.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "kind",
+          "last_port"
         ]
       },
       "ExternalIpGatewayMap": {
@@ -4677,24 +4758,6 @@
         "minLength": 1,
         "maxLength": 7
       },
-      "IdMapDatasetConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/DatasetConfig"
-        }
-      },
-      "IdMapOmicronPhysicalDiskConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-        }
-      },
-      "IdMapOmicronZoneConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronZoneConfig"
-        }
-      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -4744,7 +4807,7 @@
             "description": "The ID of the instance for which this VMM is being created.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                "$ref": "#/components/schemas/InstanceUuid"
               }
             ]
           },
@@ -4941,6 +5004,24 @@
         ],
         "additionalProperties": false
       },
+      "InstanceUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::InstanceUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "InternalZpoolUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::InternalZpoolUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "InternetGatewayRouterTarget": {
         "description": "An Internet Gateway router target.",
         "oneOf": [
@@ -5029,7 +5110,7 @@
             "type": "string"
           },
           "sled_id": {
-            "$ref": "#/components/schemas/TypedUuidForSledKind"
+            "$ref": "#/components/schemas/SledUuid"
           },
           "sled_role": {
             "$ref": "#/components/schemas/SledRole"
@@ -5089,7 +5170,7 @@
             "description": "Although datasets mandated by the control plane will have UUIDs, datasets can be created (and have been created) without UUIDs.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+                "$ref": "#/components/schemas/DatasetUuid"
               }
             ]
           },
@@ -5187,7 +5268,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            "$ref": "#/components/schemas/ZpoolUuid"
           },
           "total_size": {
             "$ref": "#/components/schemas/ByteCount"
@@ -5196,6 +5277,15 @@
         "required": [
           "id",
           "total_size"
+        ]
+      },
+      "IpKind": {
+        "description": "The kind of external IP address of a probe.",
+        "type": "string",
+        "enum": [
+          "snat",
+          "ephemeral",
+          "floating"
         ]
       },
       "IpNet": {
@@ -5437,7 +5527,7 @@
             "description": "The ID of the MUPdate override.\n\nThis is unique and generated by Installinator each time it is run. During a MUPdate, each sled gets a MUPdate override ID. (The ID is shared across boot disks and non-boot disks, though.)",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+                "$ref": "#/components/schemas/MupdateOverrideUuid"
               }
             ]
           }
@@ -5548,7 +5638,7 @@
             "description": "The non-boot zpool ID.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForInternalZpoolKind"
+                "$ref": "#/components/schemas/InternalZpoolUuid"
               }
             ]
           }
@@ -5559,6 +5649,24 @@
           "path",
           "zpool_id"
         ]
+      },
+      "MupdateOverrideUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MupdateOverrideUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "MupdateUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MupdateUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "Name": {
         "title": "A name unique within the parent collection",
@@ -5731,13 +5839,13 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+            "$ref": "#/components/schemas/PhysicalDiskUuid"
           },
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
           },
           "pool_id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            "$ref": "#/components/schemas/ZpoolUuid"
           }
         },
         "required": [
@@ -5751,10 +5859,38 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "$ref": "#/components/schemas/IdMapDatasetConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/DatasetConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DatasetConfig"
+            }
           },
           "disks": {
-            "$ref": "#/components/schemas/IdMapOmicronPhysicalDiskConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+            }
           },
           "generation": {
             "$ref": "#/components/schemas/Generation"
@@ -5778,12 +5914,26 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+                "$ref": "#/components/schemas/MupdateOverrideUuid"
               }
             ]
           },
           "zones": {
-            "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronZoneConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronZoneConfig"
+            }
           }
         },
         "required": [
@@ -5807,7 +5957,7 @@
             ]
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+            "$ref": "#/components/schemas/OmicronZoneUuid"
           },
           "image_source": {
             "default": {
@@ -5891,7 +6041,7 @@
                 "description": "The UUID of the mupdate.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/TypedUuidForMupdateKind"
+                    "$ref": "#/components/schemas/MupdateUuid"
                   }
                 ]
               },
@@ -6282,6 +6432,15 @@
           }
         ]
       },
+      "OmicronZoneUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::OmicronZoneUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "OperatorSwitchZonePolicy": {
         "description": "Policy allowing an operator (via `omdb`) to control whether the switch zone is started or stopped.\n\nThis is an _extremely_ dicey operation in general; a stopped switch zone leaves the rack inoperable! We are only adding this as a workaround and test tool for handling sidecar resets; see <https://github.com/oxidecomputer/omicron/issues/8480> for background.",
         "oneOf": [
@@ -6327,7 +6486,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+                "$ref": "#/components/schemas/DatasetUuid"
               }
             ]
           },
@@ -6437,6 +6596,15 @@
           "pci_path"
         ],
         "additionalProperties": false
+      },
+      "PhysicalDiskUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PhysicalDiskUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "PortConfigV2": {
         "type": "object",
@@ -6575,6 +6743,77 @@
         },
         "minItems": 2,
         "maxItems": 2
+      },
+      "ProbeCreate": {
+        "description": "Parameters used to create a probe.",
+        "type": "object",
+        "properties": {
+          "external_ips": {
+            "description": "The external IP addresses assigned to the probe.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalIp"
+            }
+          },
+          "id": {
+            "description": "The ID for the probe.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProbeUuid"
+              }
+            ]
+          },
+          "interface": {
+            "description": "The probe's networking interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NetworkInterface"
+              }
+            ]
+          }
+        },
+        "required": [
+          "external_ips",
+          "id",
+          "interface"
+        ]
+      },
+      "ProbeSet": {
+        "description": "A set of probes that the target sled should run.",
+        "type": "object",
+        "properties": {
+          "probes": {
+            "title": "IdHashMap",
+            "description": "The exact set of probes to run.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ProbeCreate"
+                }
+              ],
+              "path": "iddqd::IdHashMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeCreate"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "probes"
+        ]
+      },
+      "ProbeUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ProbeUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "QemuPvpanic": {
         "type": "object",
@@ -7192,6 +7431,15 @@
           }
         ]
       },
+      "SledUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::SledUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "SledVmmState": {
         "description": "A wrapper type containing a sled's total knowledge of the state of a VMM.",
         "type": "object",
@@ -7369,7 +7617,7 @@
             "description": "Uuid of the Sled Agent to be created.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForSledKind"
+                "$ref": "#/components/schemas/SledUuid"
               }
             ]
           },
@@ -7410,14 +7658,14 @@
         "minimum": 0
       },
       "SupportBundleMetadata": {
-        "description": "Metadata about a support bundle",
+        "description": "Metadata about a support bundle.",
         "type": "object",
         "properties": {
           "state": {
             "$ref": "#/components/schemas/SupportBundleState"
           },
           "support_bundle_id": {
-            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            "$ref": "#/components/schemas/SupportBundleUuid"
           }
         },
         "required": [
@@ -7426,11 +7674,21 @@
         ]
       },
       "SupportBundleState": {
+        "description": "State of a support bundle.",
         "type": "string",
         "enum": [
           "complete",
           "incomplete"
         ]
+      },
+      "SupportBundleUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::SupportBundleUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "SwitchLocation": {
         "description": "Identifies switch physical location",
@@ -7501,46 +7759,6 @@
             "format": "int32"
           }
         }
-      },
-      "TypedUuidForDatasetKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForInstanceKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForInternalZpoolKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForMupdateKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForMupdateOverrideKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForOmicronZoneKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForPhysicalDiskKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSledKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSupportBundleKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForZpoolKind": {
-        "type": "string",
-        "format": "uuid"
       },
       "UplinkAddressConfig": {
         "type": "object",
@@ -7662,6 +7880,7 @@
         ]
       },
       "VmmIssueDiskSnapshotRequestBody": {
+        "description": "Request body for VMM disk snapshot requests.",
         "type": "object",
         "properties": {
           "snapshot_id": {
@@ -7674,6 +7893,7 @@
         ]
       },
       "VmmIssueDiskSnapshotRequestResponse": {
+        "description": "Response for VMM disk snapshot requests.",
         "type": "object",
         "properties": {
           "snapshot_id": {
@@ -7750,7 +7970,7 @@
         ]
       },
       "VmmSpec": {
-        "description": "Specifies the virtual hardware configuration of a new Propolis VMM in the form of a Propolis instance specification.\n\nSled-agent expects that when an instance spec is provided alongside an `InstanceSledLocalConfig` to initialize a new instance, the NIC IDs in that config's network interface list will match the IDs of the virtio network backends in the instance spec.",
+        "description": "Specifies the virtual hardware configuration of a new Propolis VMM in the form of a Propolis instance specification.",
         "allOf": [
           {
             "$ref": "#/components/schemas/InstanceSpecV0"
@@ -8344,7 +8564,7 @@
             "description": "The ID of the non-boot zpool.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForInternalZpoolKind"
+                "$ref": "#/components/schemas/InternalZpoolUuid"
               }
             ]
           }
@@ -8362,7 +8582,21 @@
         "type": "string",
         "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       },
-      "TypedUuidForPropolisKind": {
+      "ZpoolUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ZpoolUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "PropolisUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PropolisUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       }
