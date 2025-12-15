@@ -230,13 +230,7 @@ impl DataStore {
             .expunged_nexus_zones_ready_for_cleanup(
                 BlueprintExpungedZoneAccessReason::NexusSupportBundleMarkFailed,
             )
-            .filter_map(|(_sled, zone, _nexus_config)| {
-                if zone.zone_type.is_nexus() {
-                    Some(zone.id.into_untyped_uuid())
-                } else {
-                    None
-                }
-            })
+            .map(|(_sled, zone, _nexus_config)| zone.id.into_untyped_uuid())
             .collect::<Vec<Uuid>>();
 
         // For this blueprint: The set of expunged debug datasets
