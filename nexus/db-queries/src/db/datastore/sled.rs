@@ -517,7 +517,7 @@ impl DataStore {
 
         // Gather constraints for the instance placement, starting with the
         // arguments to this function.
-        let maybe_must_use_sleds: Option<HashSet<SledUuid>> =
+        let mut maybe_must_use_sleds: Option<HashSet<SledUuid>> =
             if let Some(must_select_from) = constraints.must_select_from() {
                 let set = must_select_from.into_iter().cloned().collect();
                 info!(&log, "reservation constrained to sleds {set:?}");
@@ -591,13 +591,12 @@ impl DataStore {
                 // filtered further. Otherwise return the one sled that local
                 // storage disks have already been allocated on.
                 match maybe_must_use_sleds {
-                    Some(must_use_sleds) => Some(
+                    Some(mut must_use_sleds) => Some(
                         must_use_sleds
-                            .into_iter()
-                            .filter(|sled| {
+                            .retain(|sled|
                                 local_storage_allocation_sleds.contains(&sled)
-                            })
-                            .collect(),
+                            );
+                        must_use_sleds
                     ),
 
                     None => Some(local_storage_allocation_sleds),
