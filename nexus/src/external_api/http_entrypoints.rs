@@ -8057,7 +8057,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn v2025121200_group_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<nexus_external_api::v2025121200::Group>>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<nexus_external_api::v2025121200::Group>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let query = query_params.into_inner();
@@ -8122,7 +8125,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn v2025121200_group_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::GroupPath>,
-    ) -> Result<HttpResponseOk<nexus_external_api::v2025121200::Group>, HttpError> {
+    ) -> Result<HttpResponseOk<nexus_external_api::v2025121200::Group>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

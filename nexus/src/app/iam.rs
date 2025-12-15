@@ -149,7 +149,9 @@ impl super::Nexus {
             .silo_required()
             .internal_context("listing current silo's groups")?;
 
-        self.db_datastore.silo_groups_list_by_id(opctx, &authz_silo, pagparams).await
+        self.db_datastore
+            .silo_groups_list_by_id(opctx, &authz_silo, pagparams)
+            .await
     }
 
     // Built-in users
