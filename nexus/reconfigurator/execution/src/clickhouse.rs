@@ -23,6 +23,7 @@ use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::ClickhouseClusterConfig;
@@ -45,9 +46,11 @@ pub(crate) async fn deploy_nodes(
     blueprint: &Blueprint,
     clickhouse_cluster_config: &ClickhouseClusterConfig,
 ) -> Result<(), Vec<anyhow::Error>> {
-    // Important: We must continue to pass in `BlueprintZoneDisposition::any`
-    // here, instead of `BlueprintZoneDisposition::is_in_service`, as would
-    // be expected.
+    use BlueprintExpungedZoneAccessReason::ClickhouseKeeperServerConfigIps;
+
+    // Important: We must look at all zones here, including expunged zones in
+    // both "not ready for cleanup" and "ready for cleanup" states, instead of
+    // just in-service zones, as would be expected.
     //
     // We can only add or remove one clickhouse keeper node at a time,
     // and the planner generates the `ClickhouseClusterConfig` under this
@@ -72,12 +75,17 @@ pub(crate) async fn deploy_nodes(
     //    `ClickhouseClusterConfig`.
     //
     // This is tracked in https://github.com/oxidecomputer/omicron/issues/7724
-    deploy_nodes_impl(
-        opctx,
-        blueprint.danger_all_omicron_zones(BlueprintZoneDisposition::any),
-        clickhouse_cluster_config,
-    )
-    .await
+    let all_zones =
+        blueprint
+            .in_service_zones()
+            .chain(blueprint.expunged_zones_not_ready_for_cleanup(
+                ClickhouseKeeperServerConfigIps,
+            ))
+            .chain(blueprint.expunged_zones_ready_for_cleanup(
+                ClickhouseKeeperServerConfigIps,
+            ));
+
+    deploy_nodes_impl(opctx, all_zones, clickhouse_cluster_config).await
 }
 
 async fn deploy_nodes_impl<'a, I>(

@@ -668,6 +668,8 @@ pub struct OperatorNexusConfig<'a> {
 /// TODO-john
 pub enum BlueprintExpungedZoneAccessReason {
     /// TODO-john
+    ClickhouseKeeperServerConfigIps,
+    /// TODO-john
     CockroachDecommission,
     /// TODO-john
     DeallocateExternalNetworkingResources,
