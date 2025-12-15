@@ -312,17 +312,28 @@ impl Blueprint {
     pub fn in_service_zones(
         &self,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
-        // TODO-john explain
+        // Danger note: this call has no danger of accessing expunged zones,
+        // because we're filtering to in-service.
         self.danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     }
 
-    /// TODO-john
+    /// Iterate over the expunged [`BlueprintZoneConfig`] instances in the
+    /// blueprint, along with the associated sled id.
+    ///
+    /// Each call must specify whether they want zones that are
+    /// `ready_for_cleanup` (i.e., have been confirmed to be shut down and will
+    /// not be restarted), and must also specify a
+    /// [`BlueprintExpungedZoneAccessReason`]. The latter allows us to
+    /// statically track all uses of expunged zones, each of which we must
+    /// account for in the planner's logic to permanently prune expunged zones
+    /// from the blueprint.
     pub fn expunged_zones(
         &self,
         ready_for_cleanup: ReadyForCleanup,
         _reason: BlueprintExpungedZoneAccessReason,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
-        // TODO-john explain
+        // Danger note: this call will definitely access expunged zones, but we
+        // know the caller has provided a known reason to do so.
         self.danger_all_omicron_zones(move |disposition| {
             let this_zone_ready_for_cleanup = match disposition {
                 BlueprintZoneDisposition::InService => return false,
@@ -342,8 +353,13 @@ impl Blueprint {
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
     /// that match the provided filter, along with the associated sled id.
     ///
-    /// TODO-john Explain danger? Add reason arg?
-    pub fn danger_all_omicron_zones<F>(
+    /// This method is prefixed with `danger_` and is private because it allows
+    /// the caller to potentially act on expunged zones without providing a
+    /// reason for doing so. It should only be called by `in_service_zones()`
+    /// and `expunged_zones()` above; all other callers that want access to
+    /// expunged zones must go through `expunged_zones()`, which forces them to
+    /// specify a [`BlueprintExpungedZoneAccessReason`].
+    fn danger_all_omicron_zones<F>(
         &self,
         mut filter: F,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
@@ -461,14 +477,19 @@ impl Blueprint {
         BlueprintDisplay { blueprint: self }
     }
 
-    /// Returns whether the given Nexus instance should be quiescing or quiesced
-    /// in preparation for handoff to the next generation
+    /// Returns whether the Nexus instance `nexus_id`, which is assumed to refer
+    /// to the currently-running Nexus instance (the current process), should be
+    /// quiescing or quiesced in preparation for handoff to the next generation
     pub fn is_nexus_quiescing(
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<bool, anyhow::Error> {
         let zone = self
-            .danger_all_omicron_zones(|_z| true)
+            .in_service_zones()
+            .chain(self.expunged_zones(
+                ReadyForCleanup::Both,
+                BlueprintExpungedZoneAccessReason::NexusSelfIsQuiescing,
+            ))
             .find(|(_sled_id, zone_config)| zone_config.id == nexus_id)
             .ok_or_else(|| {
                 anyhow!("zone {} does not exist in blueprint", nexus_id)
@@ -515,10 +536,12 @@ impl Blueprint {
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<Generation, Error> {
-        // TODO-john
-        for (_sled_id, zone_config) in self.danger_all_omicron_zones(
-            BlueprintZoneDisposition::could_be_running,
-        ) {
+        for (_sled_id, zone_config) in
+            self.in_service_zones().chain(self.expunged_zones(
+                ReadyForCleanup::Both,
+                BlueprintExpungedZoneAccessReason::NexusSelfGeneration,
+            ))
+        {
             if let BlueprintZoneType::Nexus(nexus_config) =
                 &zone_config.zone_type
             {
@@ -553,8 +576,12 @@ impl Blueprint {
         // zones. (Real racks will always have at least one in-service boundary
         // NTP zone, but some test or test systems may have 0 if they have only
         // a single sled and that sled's boundary NTP zone is being upgraded.)
-        self.danger_all_omicron_zones(BlueprintZoneDisposition::any).find_map(
-            |(_sled_id, zone)| match &zone.zone_type {
+        self.in_service_zones()
+            .chain(self.expunged_zones(
+                ReadyForCleanup::Both,
+                BlueprintExpungedZoneAccessReason::NtpUpstreamConfig,
+            ))
+            .find_map(|(_sled_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::BoundaryNtp(ntp_config) => {
                     Some(UpstreamNtpConfig {
                         ntp_servers: &ntp_config.ntp_servers,
@@ -563,8 +590,7 @@ impl Blueprint {
                     })
                 }
                 _ => None,
-            },
-        )
+            })
     }
 
     /// Return the operator-specified configuration of Nexus.
@@ -583,8 +609,12 @@ impl Blueprint {
         // zones. (Real racks will always have at least one in-service Nexus
         // zone - the one calling this code - but some tests create blueprints
         // without any.)
-        self.danger_all_omicron_zones(BlueprintZoneDisposition::any).find_map(
-            |(_sled_id, zone)| match &zone.zone_type {
+        self.in_service_zones()
+            .chain(self.expunged_zones(
+                ReadyForCleanup::Both,
+                BlueprintExpungedZoneAccessReason::NexusExternalConfig,
+            ))
+            .find_map(|(_sled_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::Nexus(nexus_config) => {
                     Some(OperatorNexusConfig {
                         external_tls: nexus_config.external_tls,
@@ -593,8 +623,7 @@ impl Blueprint {
                     })
                 }
                 _ => None,
-            },
-        )
+            })
     }
 
     /// Returns the complete set of external IP addresses assigned to external
@@ -634,7 +663,11 @@ impl Blueprint {
         // don't check for that here. That would be an illegal blueprint; blippy
         // would complain, and attempting to execute it would fail due to
         // database constraints on external IP uniqueness.
-        self.danger_all_omicron_zones(BlueprintZoneDisposition::any)
+        self.in_service_zones()
+            .chain(self.expunged_zones(
+                ReadyForCleanup::Both,
+                BlueprintExpungedZoneAccessReason::ExternalDnsExternalIps,
+            ))
             .filter_map(|(_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::ExternalDns(dns) => {
                     Some(dns.dns_address.addr.ip())
@@ -666,28 +699,23 @@ pub enum ReadyForCleanup {
     Both,
 }
 
-/// TODO-john
+/// TODO-john docs on all variants
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BlueprintExpungedZoneAccessReason {
-    /// TODO-john
     Blippy,
-    /// TODO-john
     ClickhouseKeeperServerConfigIps,
-    /// TODO-john
     CockroachDecommission,
-    /// TODO-john
     DeallocateExternalNetworkingResources,
-    /// TODO-john
+    ExternalDnsExternalIps,
     NexusDeleteMetadataRecord,
-    /// TODO-john
+    NexusExternalConfig,
+    NexusSelfGeneration,
+    NexusSelfIsQuiescing,
     NexusSagaReassignment,
-    /// TODO-john
     NexusSupportBundleMarkFailed,
-    /// TODO-john
+    NtpUpstreamConfig,
     Omdb,
-    /// TODO-john
     OximeterExpungeAndReassignProducers,
-    /// TODO-john
     Test,
 }
 
