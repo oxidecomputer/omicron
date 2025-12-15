@@ -18,6 +18,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CollectorReassignment;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
 use omicron_uuid_kinds::GenericUuid;
@@ -94,10 +95,9 @@ fn clean_up_expunged_nexus_zones<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
 ) -> impl Stream<Item = (Logger, anyhow::Result<()>)> + 'a {
+    use BlueprintExpungedZoneAccessReason::NexusDeleteMetadataRecord;
     let zones_to_clean_up = blueprint
-        .danger_all_omicron_zones(
-            BlueprintZoneDisposition::is_ready_for_cleanup,
-        )
+        .expunged_zones_ready_for_cleanup(NexusDeleteMetadataRecord)
         .filter(|(_sled_id, zone)| zone.zone_type.is_nexus());
 
     stream::iter(zones_to_clean_up).then(move |(sled_id, zone)| async move {
@@ -120,10 +120,9 @@ fn clean_up_expunged_cockroach_zones<'a, R: CleanupResolver>(
     resolver: &'a R,
     blueprint: &'a Blueprint,
 ) -> impl Stream<Item = (Logger, anyhow::Result<()>)> + 'a {
+    use BlueprintExpungedZoneAccessReason::CockroachDecommission;
     let zones_to_clean_up = blueprint
-        .danger_all_omicron_zones(
-            BlueprintZoneDisposition::is_ready_for_cleanup,
-        )
+        .expunged_zones_ready_for_cleanup(CockroachDecommission)
         .filter(|(_sled_id, zone)| zone.zone_type.is_cockroach());
 
     stream::iter(zones_to_clean_up).then(move |(sled_id, zone)| async move {
@@ -145,10 +144,9 @@ fn clean_up_expunged_oximeter_zones<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
 ) -> impl Stream<Item = (Logger, anyhow::Result<()>)> + 'a {
+    use BlueprintExpungedZoneAccessReason::OximeterExpungeAndReassignProducers;
     let zones_to_clean_up = blueprint
-        .danger_all_omicron_zones(
-            BlueprintZoneDisposition::is_ready_for_cleanup,
-        )
+        .expunged_zones_ready_for_cleanup(OximeterExpungeAndReassignProducers)
         .filter(|(_sled_id, zone)| zone.zone_type.is_oximeter());
 
     stream::iter(zones_to_clean_up).then(move |(sled_id, zone)| async move {

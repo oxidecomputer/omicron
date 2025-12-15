@@ -668,11 +668,17 @@ pub struct OperatorNexusConfig<'a> {
 /// TODO-john
 pub enum BlueprintExpungedZoneAccessReason {
     /// TODO-john
+    CockroachDecommission,
+    /// TODO-john
     DeallocateExternalNetworkingResources,
+    /// TODO-john
+    NexusDeleteMetadataRecord,
     /// TODO-john
     NexusSagaReassignment,
     /// TODO-john
     NexusSupportBundleMarkFailed,
+    /// TODO-john
+    OximeterExpungeAndReassignProducers,
     /// TODO-john
     Test,
 }
