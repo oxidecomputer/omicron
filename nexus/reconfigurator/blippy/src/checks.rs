@@ -9,6 +9,7 @@ use crate::blippy::Severity;
 use crate::blippy::SledKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -18,6 +19,7 @@ use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ReadyForCleanup;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::DnsSubnet;
@@ -2131,10 +2133,12 @@ fn check_planning_input_network_records_appear_in_blueprint(
     // constructed above in `BuilderExternalNetworking::new()`, we do not
     // check for duplicates here: we could very well see reuse of IPs
     // between expunged zones or between expunged -> running zones.
-    for (_, z) in blippy
-        .blueprint()
-        .danger_all_omicron_zones(BlueprintZoneDisposition::any)
-    {
+    for (_, z) in blippy.blueprint().in_service_zones().chain(
+        blippy.blueprint().expunged_zones(
+            ReadyForCleanup::Both,
+            BlueprintExpungedZoneAccessReason::Blippy,
+        ),
+    ) {
         let zone_type = &z.zone_type;
         match zone_type {
             BlueprintZoneType::BoundaryNtp(ntp) => {
