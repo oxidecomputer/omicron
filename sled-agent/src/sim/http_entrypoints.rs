@@ -24,9 +24,6 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use dropshot::endpoint;
-use nexus_sled_agent_shared::inventory::Inventory;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
@@ -39,22 +36,43 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use range_requests::PotentialRange;
 use sled_agent_api::*;
+use sled_agent_types::artifact::{
+    ArtifactConfig, ArtifactCopyFromDepotBody, ArtifactCopyFromDepotResponse,
+    ArtifactListResponse, ArtifactPathParam, ArtifactPutResponse,
+    ArtifactQueryParam,
+};
 use sled_agent_types::bootstore::BootstoreStatus;
-use sled_agent_types::disk::DiskEnsureBody;
+use sled_agent_types::dataset::{
+    LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
+};
+use sled_agent_types::debug::OperatorSwitchZonePolicy;
+use sled_agent_types::diagnostics::{
+    SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
+};
+use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
-use sled_agent_types::instance::InstanceExternalIpBody;
-use sled_agent_types::instance::InstanceMulticastBody;
-use sled_agent_types::instance::VmmPutStateBody;
-use sled_agent_types::instance::VmmPutStateResponse;
-use sled_agent_types::instance::VmmUnregisterResponse;
+use sled_agent_types::instance::{
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
+    VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
+    VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
+};
+use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
-use sled_agent_types::zone_bundle::BundleUtilization;
-use sled_agent_types::zone_bundle::CleanupContext;
-use sled_agent_types::zone_bundle::CleanupCount;
-use sled_agent_types::zone_bundle::ZoneBundleId;
-use sled_agent_types::zone_bundle::ZoneBundleMetadata;
+use sled_agent_types::support_bundle::{
+    RangeRequestHeaders, SupportBundleFilePathParam,
+    SupportBundleFinalizeQueryParams, SupportBundleListPathParam,
+    SupportBundleMetadata, SupportBundlePathParam,
+    SupportBundleTransferQueryParams,
+};
+use sled_agent_types::zone_bundle::{
+    BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
+    ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
+};
+// Fixed identifiers for prior versions only
+use sled_agent_types_versions::v1;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -87,7 +105,7 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
+        body: TypedBody<InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
@@ -770,9 +788,9 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn sled_role_get(
+    async fn sled_role_get_v1(
         _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<SledRole>, HttpError> {
+    ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
         method_unimplemented()
     }
 
@@ -863,22 +881,24 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_logs_download(
         _request_context: RequestContext<Self::Context>,
-        _path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        _path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
         _query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         method_unimplemented()
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_get(
+    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
+        HttpError,
+    > {
         method_unimplemented()
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_put(
+    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
         _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+        _body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }

@@ -60,11 +60,10 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
-use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneType, ZoneKind,
-};
+use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
+use omicron_common::address::MAX_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -72,7 +71,6 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::TFPORTD_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
-use omicron_common::address::{AZ_PREFIX, MAX_PORT};
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
 use omicron_common::address::{
     CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT,
@@ -91,6 +89,9 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_types::inventory::{
+    OmicronZoneConfig, OmicronZoneType, ZoneKind,
+};
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_agent_types::zone_images::{
     MupdateOverrideReadError, PreparedOmicronZone,

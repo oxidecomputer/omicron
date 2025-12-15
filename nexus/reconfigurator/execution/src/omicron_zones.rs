@@ -17,13 +17,13 @@ use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CollectorReassignment;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::ZoneKind;
 use slog::Logger;
 use slog::info;
 use slog::warn;
@@ -326,7 +326,6 @@ mod test {
     use httptest::Expectation;
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::{json_encoded, status_code};
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         BlueprintZoneConfig, BlueprintZoneImageSource, BlueprintZoneType,
@@ -336,6 +335,7 @@ mod test {
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::OmicronZoneDataset;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =

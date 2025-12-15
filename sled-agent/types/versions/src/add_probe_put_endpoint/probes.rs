@@ -2,20 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types for manipulating networking probe zones.
-
 use iddqd::IdHashItem;
 use iddqd::IdHashMap;
 use iddqd::id_upcast;
-use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_uuid_kinds::ProbeUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::IpAddr;
-
-/// Version 1 of the probe API types.
-pub mod v1;
 
 /// Parameters used to create a probe.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
