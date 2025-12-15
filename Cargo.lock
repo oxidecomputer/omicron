@@ -1726,6 +1726,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "colored"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
+dependencies = [
+ "windows-sys 0.48.0",
+]
+
+[[package]]
 name = "common"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/dendrite?branch=main#606c0be888f47d458c8e0465726358d92bc736e6"
@@ -2458,14 +2467,12 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=08f2a34d487658e87545ffbba3add632a82baf0d#08f2a34d487658e87545ffbba3add632a82baf0d"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0df320d42b356e689a3c7a7600eec9b16770237a#0df320d42b356e689a3c7a7600eec9b16770237a"
 dependencies = [
  "oxnet",
- "percent-encoding",
  "progenitor 0.11.2",
  "reqwest",
  "serde",
- "serde_json",
  "slog",
  "uuid",
 ]
@@ -3291,7 +3298,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "colored",
+ "colored 2.2.0",
  "dhcproto",
  "futures",
  "hickory-resolver 0.25.2",
@@ -5828,7 +5835,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "colored",
+ "colored 2.2.0",
  "futures",
  "indicatif 0.17.11",
  "libc",
@@ -5900,7 +5907,7 @@ source = "git+https://github.com/oxidecomputer/netadm-sys?branch=main#f4eae3d807
 dependencies = [
  "anyhow",
  "cfg-if",
- "colored",
+ "colored 2.2.0",
  "dlpi",
  "libc",
  "num_enum",
@@ -6305,17 +6312,19 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=08f2a34d487658e87545ffbba3add632a82baf0d#08f2a34d487658e87545ffbba3add632a82baf0d"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0df320d42b356e689a3c7a7600eec9b16770237a#0df320d42b356e689a3c7a7600eec9b16770237a"
 dependencies = [
- "anyhow",
  "chrono",
- "percent-encoding",
+ "colored 3.0.0",
  "progenitor 0.11.2",
+ "rdb-types",
  "reqwest",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
+ "tabwriter",
+ "uuid",
 ]
 
 [[package]]
@@ -6710,7 +6719,6 @@ dependencies = [
  "nexus-config",
  "nexus-db-schema",
  "nexus-defaults",
- "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-certificates",
  "omicron-cockroach-metrics",
@@ -6731,6 +6739,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-client",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "steno",
@@ -6785,7 +6794,6 @@ dependencies = [
  "nexus-db-schema",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
- "nexus-sled-agent-shared",
  "nexus-test-utils",
  "nexus-types",
  "omicron-cockroach-metrics",
@@ -6820,6 +6828,7 @@ dependencies = [
  "serde_with",
  "sha2",
  "sled-agent-client",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "static_assertions",
@@ -6922,7 +6931,6 @@ dependencies = [
  "iddqd",
  "itertools 0.14.0",
  "nexus-client",
- "nexus-sled-agent-shared",
  "nexus-types",
  "ntp-admin-client",
  "omicron-cockroach-metrics",
@@ -6935,6 +6943,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-agent-zone-images-examples",
  "slog",
  "slog-error-chain",
@@ -6969,7 +6978,6 @@ dependencies = [
  "chrono",
  "futures",
  "iddqd",
- "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
  "omicron-passwords",
@@ -6982,6 +6990,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "sled-agent-types-versions",
  "slog",
  "uuid",
 ]
@@ -7043,7 +7052,6 @@ dependencies = [
  "iddqd",
  "internal-dns-resolver",
  "internal-dns-types",
- "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
  "omicron-test-utils",
@@ -7093,12 +7101,12 @@ name = "nexus-reconfigurator-blippy"
 version = "0.1.0"
 dependencies = [
  "nexus-reconfigurator-planning",
- "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "sled-agent-types",
  "tufaceous-artifact",
 ]
 
@@ -7164,7 +7172,6 @@ dependencies = [
  "nexus-networking",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
- "nexus-sled-agent-shared",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
@@ -7178,6 +7185,7 @@ dependencies = [
  "pq-sys",
  "reqwest",
  "sled-agent-client",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "tokio",
@@ -7218,7 +7226,6 @@ dependencies = [
  "nexus-inventory",
  "nexus-reconfigurator-blippy",
  "nexus-reconfigurator-simulation",
- "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
  "omicron-test-utils",
@@ -7231,6 +7238,7 @@ dependencies = [
  "reconfigurator-cli",
  "semver 1.0.27",
  "sled-agent-client",
+ "sled-agent-types",
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
@@ -7302,13 +7310,13 @@ dependencies = [
  "itertools 0.14.0",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
- "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "petname",
  "sapling-renderdag",
+ "sled-agent-types",
  "slog",
  "strum 0.27.2",
  "swrite",
@@ -7347,45 +7355,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-sled-agent-shared"
-version = "0.1.0"
-dependencies = [
- "camino",
- "chrono",
- "daft",
- "iddqd",
- "illumos-utils",
- "indent_write",
- "omicron-common",
- "omicron-passwords",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "proptest",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "sled-hardware-types",
- "strum 0.27.2",
- "test-strategy",
- "thiserror 2.0.17",
- "tufaceous-artifact",
- "uuid",
-]
-
-[[package]]
 name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "nexus-config",
  "nexus-db-queries",
- "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pq-sys",
+ "sled-agent-types",
  "slog",
  "tokio",
  "uuid",
@@ -7421,7 +7403,6 @@ dependencies = [
  "nexus-config",
  "nexus-db-queries",
  "nexus-lockstep-client",
- "nexus-sled-agent-shared",
  "nexus-test-interface",
  "nexus-types",
  "omicron-cockroach-admin",
@@ -7440,6 +7421,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sled-agent-client",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "tokio",
@@ -7489,7 +7471,6 @@ dependencies = [
  "itertools 0.14.0",
  "newtype-uuid",
  "newtype_derive",
- "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-passwords",
  "omicron-test-utils",
@@ -7507,6 +7488,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
@@ -8210,7 +8192,6 @@ dependencies = [
  "nexus-lockstep-client",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
- "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
  "omicron-rpaths",
@@ -8220,6 +8201,7 @@ dependencies = [
  "pq-sys",
  "reqwest",
  "serde",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "textwrap 0.16.2",
@@ -8332,7 +8314,6 @@ dependencies = [
  "nexus-reconfigurator-preparation",
  "nexus-reconfigurator-rendezvous",
  "nexus-saga-recovery",
- "nexus-sled-agent-shared",
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",
@@ -8374,6 +8355,7 @@ dependencies = [
  "range-requests",
  "raw-cpuid",
  "rcgen",
+ "rdb-types",
  "ref-cast",
  "regex",
  "reqwest",
@@ -8507,7 +8489,6 @@ dependencies = [
  "nexus-lockstep-client",
  "nexus-reconfigurator-preparation",
  "nexus-saga-recovery",
- "nexus-sled-agent-shared",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
@@ -8531,6 +8512,7 @@ dependencies = [
  "serde_json",
  "sigpipe",
  "sled-agent-client",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "steno",
@@ -8785,7 +8767,6 @@ dependencies = [
  "nexus-config",
  "nexus-lockstep-client",
  "nexus-reconfigurator-blippy",
- "nexus-sled-agent-shared",
  "nexus-types",
  "ntp-admin-client",
  "omicron-common",
@@ -8807,6 +8788,7 @@ dependencies = [
  "rand 0.9.2",
  "range-requests",
  "rcgen",
+ "rdb-types",
  "regress",
  "repo-depot-api",
  "repo-depot-client",
@@ -8822,6 +8804,7 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-agent-zone-images",
  "sled-diagnostics",
  "sled-hardware",
@@ -11334,6 +11317,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rdb-types"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0df320d42b356e689a3c7a7600eec9b16770237a#0df320d42b356e689a3c7a7600eec9b16770237a"
+dependencies = [
+ "oxnet",
+ "schemars 0.8.22",
+ "serde",
+]
+
+[[package]]
 name = "reconfigurator-cli"
 version = "0.1.0"
 dependencies = [
@@ -11343,7 +11336,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
- "colored",
+ "colored 2.2.0",
  "daft",
  "datatest-stable",
  "dropshot",
@@ -11359,7 +11352,6 @@ dependencies = [
  "nexus-reconfigurator-blippy",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-simulation",
- "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
  "omicron-repl-utils",
@@ -11371,6 +11363,7 @@ dependencies = [
  "semver 1.0.27",
  "serde",
  "serde_json",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "slog-term",
@@ -12854,7 +12847,6 @@ dependencies = [
  "dropshot-api-manager-types",
  "http",
  "iddqd",
- "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -12862,6 +12854,7 @@ dependencies = [
  "semver 1.0.27",
  "serde",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-diagnostics",
  "sled-hardware-types",
  "tufaceous-artifact",
@@ -12875,7 +12868,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -12888,6 +12880,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "slog",
  "uuid",
 ]
@@ -12914,7 +12907,6 @@ dependencies = [
  "illumos-utils",
  "installinator-common",
  "key-manager",
- "nexus-sled-agent-shared",
  "ntp-admin-client",
  "omicron-common",
  "omicron-test-utils",
@@ -12929,6 +12921,7 @@ dependencies = [
  "sha2",
  "sled-agent-api",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-agent-zone-images-examples",
  "sled-hardware",
  "sled-storage",
@@ -12954,7 +12947,6 @@ dependencies = [
  "chrono",
  "daft",
  "iddqd",
- "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -12967,6 +12959,7 @@ dependencies = [
  "serde_human_bytes",
  "serde_json",
  "sha3",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
@@ -12974,6 +12967,39 @@ dependencies = [
  "swrite",
  "thiserror 2.0.17",
  "toml 0.8.23",
+ "tufaceous-artifact",
+ "uuid",
+]
+
+[[package]]
+name = "sled-agent-types-versions"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bootstore",
+ "camino",
+ "chrono",
+ "daft",
+ "iddqd",
+ "illumos-utils",
+ "indent_write",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "propolis_api_types",
+ "proptest",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha3",
+ "sled-hardware-types",
+ "slog",
+ "strum 0.27.2",
+ "test-strategy",
+ "thiserror 2.0.17",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -12988,7 +13014,6 @@ dependencies = [
  "expectorate",
  "iddqd",
  "illumos-utils",
- "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -13014,7 +13039,6 @@ dependencies = [
  "camino",
  "camino-tempfile-ext",
  "iddqd",
- "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -14694,7 +14718,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "colored",
+ "colored 2.2.0",
  "daft",
  "iddqd",
  "omicron-repl-utils",

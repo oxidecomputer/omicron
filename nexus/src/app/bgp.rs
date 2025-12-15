@@ -123,7 +123,7 @@ impl super::Nexus {
             for r in &router_info {
                 let asn = r.asn;
 
-                let peers = match client.get_neighbors(asn).await {
+                let peers = match client.get_neighbors_v2(asn).await {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
                         error!(
@@ -196,12 +196,12 @@ impl super::Nexus {
                     let mut xps = Vec::new();
                     for ex in exports.iter() {
                         let net = match ex {
-                            mg_admin_client::types::Prefix::V4(v4) => {
+                            rdb_types::Prefix::V4(v4) => {
                                 oxnet::Ipv4Net::new_unchecked(
                                     v4.value, v4.length,
                                 )
                             }
-                            mg_admin_client::types::Prefix::V6(v6) => {
+                            rdb_types::Prefix::V6(v6) => {
                                 let v6 = oxnet::IpNet::V6(
                                     oxnet::Ipv6Net::new_unchecked(
                                         v6.value, v6.length,
@@ -237,7 +237,11 @@ impl super::Nexus {
             ))
         })? {
             let history = match client
-                .message_history(&MessageHistoryRequest { asn: sel.asn })
+                .message_history_v2(&MessageHistoryRequest {
+                    asn: sel.asn,
+                    direction: None,
+                    peer: None,
+                })
                 .await
             {
                 Ok(result) => result.into_inner().by_peer.clone(),
@@ -265,7 +269,7 @@ impl super::Nexus {
     pub async fn bgp_imported_routes_ipv4(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpRouteSelector,
+        _sel: &params::BgpRouteSelector,
     ) -> ListResultVec<BgpImportedRouteIpv4> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
@@ -276,9 +280,7 @@ impl super::Nexus {
         })? {
             let mut imported: Vec<BgpImportedRouteIpv4> = Vec::new();
             match client
-                .get_imported(&mg_admin_client::types::AsnSelector {
-                    asn: sel.asn,
-                })
+                .get_rib_imported(Some(&rdb_types::AddressFamily::Ipv4), None)
                 .await
             {
                 Ok(result) => {

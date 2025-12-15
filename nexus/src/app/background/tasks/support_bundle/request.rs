@@ -31,7 +31,7 @@ pub enum BundleDataCategory {
     SledCubbyInfo,
     /// Saves task dumps from SPs.
     SpDumps,
-    /// Collects ereports
+    /// Collects ereports.
     Ereports,
 }
 

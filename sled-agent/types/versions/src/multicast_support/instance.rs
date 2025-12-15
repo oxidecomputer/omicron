@@ -2,27 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Sled agent types that changed from version 8 to version 9
+use std::net::{IpAddr, SocketAddr};
 
-use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
-use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
-use sled_agent_types::instance::InstanceMetadata;
-use sled_agent_types::instance::InstanceMulticastMembership;
-use sled_agent_types::instance::VmmSpec;
-use sled_agent_types::inventory::v9;
-use std::collections::HashSet;
-use std::net::IpAddr;
-use std::net::SocketAddr;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::v1;
+use crate::v1::instance::InstanceMetadata;
+use crate::v1::instance::ResolvedVpcFirewallRule;
+use crate::v1::instance::VmmSpec;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
@@ -56,6 +51,8 @@ pub struct InstanceEnsureBody {
 
 /// Describes sled-local configuration that a sled-agent must establish to make
 /// the instance's virtual hardware fully functional.
+///
+/// Added in v7: `multicast_groups` field.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstanceSledLocalConfig {
     pub hostname: Hostname,
@@ -70,62 +67,51 @@ pub struct InstanceSledLocalConfig {
     pub dhcp_config: DhcpConfig,
 }
 
-impl From<InstanceEnsureBody> for v9::InstanceEnsureBody {
-    fn from(v8: InstanceEnsureBody) -> Self {
+/// Represents a multicast group membership for an instance.
+///
+/// Introduced in v7.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct InstanceMulticastMembership {
+    pub group_ip: IpAddr,
+    // For Source-Specific Multicast (SSM)
+    pub sources: Vec<IpAddr>,
+}
+
+impl From<v1::instance::InstanceEnsureBody> for InstanceEnsureBody {
+    fn from(v1: v1::instance::InstanceEnsureBody) -> Self {
         Self {
-            vmm_spec: v8.vmm_spec,
-            local_config: v8.local_config.into(),
-            vmm_runtime: v8.vmm_runtime,
-            instance_id: v8.instance_id,
-            migration_id: v8.migration_id,
-            propolis_addr: v8.propolis_addr,
-            metadata: v8.metadata,
+            vmm_spec: v1.vmm_spec,
+            local_config: v1.local_config.into(),
+            vmm_runtime: v1.vmm_runtime,
+            instance_id: v1.instance_id,
+            migration_id: v1.migration_id,
+            propolis_addr: v1.propolis_addr,
+            metadata: v1.metadata,
         }
     }
 }
 
-impl From<InstanceSledLocalConfig> for v9::InstanceSledLocalConfig {
-    fn from(v8: InstanceSledLocalConfig) -> Self {
-        let firewall_rules =
-            v8.firewall_rules.into_iter().map(Into::into).collect();
+impl From<v1::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {
+    fn from(v1: v1::instance::InstanceSledLocalConfig) -> Self {
         Self {
-            hostname: v8.hostname,
-            nics: v8.nics,
-            source_nat: v8.source_nat,
-            ephemeral_ip: v8.ephemeral_ip,
-            floating_ips: v8.floating_ips,
-            multicast_groups: v8.multicast_groups,
-            firewall_rules,
-            dhcp_config: v8.dhcp_config,
-            delegated_zvols: vec![],
+            hostname: v1.hostname,
+            nics: v1.nics,
+            source_nat: v1.source_nat,
+            ephemeral_ip: v1.ephemeral_ip,
+            floating_ips: v1.floating_ips,
+            multicast_groups: Vec::new(), // Added in v7
+            firewall_rules: v1.firewall_rules,
+            dhcp_config: v1.dhcp_config,
         }
     }
 }
 
-/// VPC firewall rule after object name resolution has been performed by Nexus
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct ResolvedVpcFirewallRule {
-    pub status: external::VpcFirewallRuleStatus,
-    pub direction: external::VpcFirewallRuleDirection,
-    pub targets: Vec<NetworkInterface>,
-    pub filter_hosts: Option<HashSet<HostIdentifier>>,
-    pub filter_ports: Option<Vec<external::L4PortRange>>,
-    pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
-    pub action: external::VpcFirewallRuleAction,
-    pub priority: external::VpcFirewallRulePriority,
-}
-
-impl From<ResolvedVpcFirewallRule> for v9::ResolvedVpcFirewallRule {
-    fn from(v8: ResolvedVpcFirewallRule) -> Self {
-        Self {
-            status: v8.status,
-            direction: v8.direction,
-            targets: v8.targets,
-            filter_hosts: v8.filter_hosts,
-            filter_ports: v8.filter_ports,
-            filter_protocols: v8.filter_protocols,
-            action: v8.action,
-            priority: v8.priority,
-        }
-    }
+/// Request body for multicast group operations.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceMulticastBody {
+    Join(InstanceMulticastMembership),
+    Leave(InstanceMulticastMembership),
 }

@@ -26,7 +26,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use range_requests::PotentialRange;
 use range_requests::SingleRange;
 use sha2::Digest;
-use sled_agent_api::*;
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
 use sled_agent_config_reconciler::DatasetTaskError;
 use sled_agent_config_reconciler::InventoryError;
@@ -37,6 +36,9 @@ use sled_agent_config_reconciler::NestedDatasetMountError;
 use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
 use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
+use sled_agent_types::support_bundle::{
+    SupportBundleMetadata, SupportBundleState,
+};
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;
