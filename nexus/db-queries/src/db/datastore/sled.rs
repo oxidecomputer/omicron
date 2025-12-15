@@ -817,13 +817,20 @@ impl DataStore {
                     })
                     .collect();
 
-                info!(&log, "filtered zpools for sled: {zpools_for_sled:?}");
-
                 if local_storage_allocation_required.len()
                     > zpools_for_sled.len()
                 {
                     // Not enough zpools to satisfy the number of allocations
                     // required. Find another sled!
+                    info!(
+                        &log,
+                        "sled {sled_target:?} does not have enough zpools to \
+                        satisfy local storage allocations";
+                        "zpools" => zpools_for_sled.len(),
+                        "allocations" =>
+                            local_storage_allocation_required.len(),
+                    );
+
                     sled_targets.remove(&sled_target);
                     banned.remove(&sled_target);
                     unpreferred.remove(&sled_target);
@@ -831,6 +838,8 @@ impl DataStore {
 
                     continue;
                 }
+
+                info!(&log, "filtered zpools for sled: {zpools_for_sled:?}");
 
                 let mut allocations_to_perform =
                     Vec::with_capacity(local_storage_allocation_required.len());
@@ -886,6 +895,14 @@ impl DataStore {
                     if candidate_datasets.is_empty() {
                         // if there's no local storage datasets on this sled for
                         // this request's size, then try another sled.
+                        info!(
+                            &log,
+                            "sled {sled_target:?} does not have any \
+                            candidate datasets with available space to \
+                            satisfy local storage allocation";
+                            "request" => ?request,
+                        );
+
                         sled_targets.remove(&sled_target);
                         banned.remove(&sled_target);
                         unpreferred.remove(&sled_target);
