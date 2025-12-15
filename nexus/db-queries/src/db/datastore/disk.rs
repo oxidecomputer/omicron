@@ -806,9 +806,39 @@ impl DataStore {
             //
             // The instance start saga performs sled reservation, creates the
             // corresponding VMM record, and changes the instance's runtime
-            // state all in _separate saga nodes_.  This means that there could
+            // state all in _separate saga nodes_. This means that there could
             // be an indeterminate amount of time between running the sled
             // reservation query and changing the instance's state.
+            //
+            // This separation is due to how the VMM state machine is defined:
+            //
+            // - we cannot create the `omicron.public.vmm` record until we have
+            //   allocated sled resources to it (and allocated the Propolis IP),
+            //   because that record includes what sled it resides on (as well
+            //   as the IP)
+            //
+            // - we cannot move the `omicron.public.instance` record to the
+            //   "starting" state until the `vmm` record exists, because
+            //   "starting" is not a real instance state; instead, it is
+            //   represented by the instance being in `InstanceState::Vmm` and
+            //   having a non-`NULL` `propolis_id` UUID pointing to the `vmm`
+            //   record. When an instance has an active VMM, its state is
+            //   actually the state of the VMM record, so a "starting" instance
+            //   is an instance with a non-`NULL` VMM ID and the corresponding
+            //   VMM record is in the "starting" state
+            //
+            // - it would be _Considered Bad_ to populate the instance record's
+            //   `propolis_id` before a corresponding vmm record exists, as
+            //   anything looking at the instance's state would try to follow
+            //   that foreign key and be unpleasantly surprised when it doesn't
+            //   exist. so we can't just make up a UUID and put it in there; we
+            //   must actually allocate the VMM before we can transition to
+            //   "starting"
+            //
+            // Execution occurring in different saga nodes means that there
+            // could be an indeterminate amount of time between running the sled
+            // reservation query and changing the instance's state (see RFD 419,
+            // section 3.4). Other client requests can race in those gaps.
             //
             // If a client attaches a local storage disk to an instance after
             // sled reservation occurs but before the instance's start saga
