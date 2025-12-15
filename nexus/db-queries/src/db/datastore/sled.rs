@@ -740,7 +740,8 @@ impl DataStore {
             if local_storage_allocation_required.is_empty() {
                 info!(
                     &log,
-                    "calling insert (no local storage allocation requred)"
+                    "attempting to insert sled resource record";
+                    "local storage required" => "no",
                 );
 
                 // If no local storage allocation is required, then simply try
@@ -1060,7 +1061,8 @@ impl DataStore {
 
                     info!(
                         &log,
-                        "calling insert with local storage allocations";
+                        "attempting to insert sled resource record";
+                        "local storage required" => "yes",
                         "allocations" => ?allocations,
                     );
 
