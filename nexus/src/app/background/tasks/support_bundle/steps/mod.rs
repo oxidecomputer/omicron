@@ -12,6 +12,7 @@ use nexus_types::internal_api::background::SupportBundleCollectionStep;
 mod bundle_id;
 mod ereports;
 mod host_info;
+mod omdb;
 mod reconfigurator;
 mod sled_cubby;
 mod sp_dumps;
@@ -84,6 +85,10 @@ pub fn all(cache: &Cache) -> Vec<CollectionStep> {
                     .boxed()
                 }
             }),
+        ),
+        CollectionStep::new(
+            SupportBundleCollectionStep::STEP_OMDB,
+            Box::new(|collection, dir| omdb::collect(collection, dir).boxed()),
         ),
     ]
 }

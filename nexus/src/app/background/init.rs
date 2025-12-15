@@ -144,6 +144,7 @@ use nexus_background_task_interface::Activator;
 use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
+use nexus_config::OmdbConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -632,6 +633,7 @@ impl BackgroundTasksInitializer {
                     resolver.clone(),
                     config.support_bundle_collector.disable,
                     nexus_id,
+                    args.omdb_config.clone(),
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
@@ -1191,6 +1193,8 @@ pub struct BackgroundTasksData {
     /// Channel for exposing the latest loaded fault-management sitrep.
     pub sitrep_load_tx:
         watch::Sender<Option<Arc<(fm::SitrepVersion, fm::Sitrep)>>>,
+    /// PATH information for `omdb`, for tasks that want to invoke it directly
+    pub omdb_config: OmdbConfig,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either

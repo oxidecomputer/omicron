@@ -528,10 +528,17 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     // Now we should be able to download the bundle
     let contents = bundle_download(&client, bundle.id).await.unwrap();
     let archive = ZipArchive::new(Cursor::new(&contents)).unwrap();
-    let mut names = archive.file_names();
+    let mut names = archive.file_names().peekable();
     assert_eq!(names.next(), Some("bundle_id.txt"));
     assert_eq!(names.next(), Some("meta/"));
     assert_eq!(names.next(), Some("meta/trace.json"));
+    assert_eq!(names.next(), Some("omdb/"));
+    while let Some(name) = names.peek() {
+        if !name.starts_with("omdb/") {
+            break;
+        }
+        let _ = names.next();
+    }
     assert_eq!(names.next(), Some("rack/"));
     assert!(names.any(|n| n == "sp_task_dumps/"));
     // There's much more data in the bundle, but validating it isn't the point

@@ -647,6 +647,7 @@ impl Nexus {
                     mgs_updates_tx,
                     blueprint_load_tx,
                     sitrep_load_tx,
+                    omdb_config: task_config.pkg.omdb.clone(),
                 },
             );
 
