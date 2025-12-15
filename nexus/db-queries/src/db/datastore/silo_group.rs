@@ -193,7 +193,6 @@ impl From<SiloGroupApiOnly> for views::Group {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
-            // Default to 0, callers should use methods that fetch actual count
             member_count: 0,
         }
     }
@@ -254,7 +253,6 @@ impl From<SiloGroupJit> for views::Group {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
-            // Default to 0, callers should use methods that fetch actual count
             member_count: 0,
         }
     }
@@ -323,7 +321,6 @@ impl From<SiloGroupScim> for views::Group {
             // TODO the use of display name as display_name is temporary
             display_name: u.display_name,
             silo_id: u.silo_id,
-            // Default to 0, callers should use methods that fetch actual count
             member_count: 0,
         }
     }

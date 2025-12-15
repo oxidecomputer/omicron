@@ -8267,10 +8267,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &opctx,
                     &data_page_params_for(&rqctx, &query)?,
                 )
-                .await?
-                .into_iter()
-                .map(|d| d.into())
-                .collect();
+                .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 groups,

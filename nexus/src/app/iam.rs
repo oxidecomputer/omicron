@@ -134,8 +134,35 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<SiloGroup> {
-        self.db_datastore.silo_groups_for_self(opctx, pagparams).await
+    ) -> ListResultVec<views::Group> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("fetching groups for current user")?;
+
+        let groups = self.db_datastore.silo_groups_for_self(opctx, pagparams).await?;
+
+        // Fetch member counts for each group
+        let mut result = Vec::new();
+        for group in groups {
+            let authz_group = authz::SiloGroup::new(
+                authz_silo.clone(),
+                group.id(),
+                omicron_common::api::external::LookupType::ById(group.id().into_untyped_uuid()),
+            );
+
+            let (db_group, member_count) = self
+                .db_datastore
+                .silo_group_fetch_with_member_count(opctx, &authz_group)
+                .await?;
+
+            let silo_group: SiloGroup = db_group.into();
+            let mut view: views::Group = silo_group.into();
+            view.member_count = member_count;
+            result.push(view);
+        }
+
+        Ok(result)
     }
 
     // Silo groups
