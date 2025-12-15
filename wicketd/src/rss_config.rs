@@ -55,7 +55,7 @@ use wicketd_api::SetBgpAuthKeyStatus;
 // TODO-correctness For now, we always use the same rack subnet when running
 // RSS. When we get to multirack, this will be wrong, but there are many other
 // RSS-related things that need to change then too.
-static RACK_SUBNET: LazyLock<Ipv6Subnet<RACK_PREFIX>> = LazyLock::new(|| {
+static DEFAULT_RACK_SUBNET: LazyLock<Ipv6Subnet<RACK_PREFIX>> = LazyLock::new(|| {
     let ip = Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0);
     Ipv6Subnet::new(ip)
 });
@@ -659,10 +659,13 @@ fn validate_rack_network_config(
         }
     }
 
+    // TODO more validation?
+    let rack_subnet = config.rack_subnet()?;
+
     // TODO Add more client side checks on `rack_network_config` contents?
 
     Ok(bootstrap_agent_client::types::RackNetworkConfigV2 {
-        rack_subnet: RACK_SUBNET.net(),
+        rack_subnet,
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
         ports: config

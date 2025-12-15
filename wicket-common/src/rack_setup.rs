@@ -20,6 +20,8 @@ use omicron_common::api::internal::shared::UplinkAddressConfig;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use oxnet::IpNet;
+use oxnet::IpNetPrefixError;
+use oxnet::Ipv6Net;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -99,6 +101,7 @@ pub struct BootstrapSledDescription {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedRackNetworkConfig {
+    pub rack_subnet_address: Ipv6Addr,
     pub infra_ip_first: Ipv4Addr,
     pub infra_ip_last: Ipv4Addr,
     // Map of switch -> port -> configuration, under the assumption that
@@ -168,6 +171,12 @@ impl UserSpecifiedRackNetworkConfig {
             .map(|(port, cfg)| (SwitchLocation::Switch1, port.as_str(), cfg));
 
         iter0.chain(iter1)
+    }
+
+    pub fn rack_subnet(&self) -> Result<Ipv6Net, IpNetPrefixError> {
+        // Do not allow rack0
+        // must be fd
+        Ipv6Net::new(self.rack_subnet_address, 56)
     }
 }
 

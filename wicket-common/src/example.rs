@@ -197,6 +197,7 @@ impl ExampleRackSetupData {
         });
 
         let rack_network_config = UserSpecifiedRackNetworkConfig {
+            rack_subnet_address: Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0),
             infra_ip_first: "172.30.0.1".parse().unwrap(),
             infra_ip_last: "172.30.0.10".parse().unwrap(),
             #[rustfmt::skip]
