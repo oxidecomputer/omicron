@@ -34,7 +34,7 @@ use omicron_common::api::external::{
 use openapiv3::OpenAPI;
 
 /// Copies of data that changed prior to adding dual-stack NICs.
-mod v2025121100;
+mod v2025121700;
 
 /// Copies of data types that changed between versions
 mod v2025112000;
@@ -1616,7 +1616,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         new_instance: TypedBody<v2025112000::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::v2025121100_instance_create(
+        Self::v2025121700_instance_create(
             rqctx,
             query_params,
             new_instance.map(Into::into),
@@ -1632,10 +1632,10 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = VERSION_LOCAL_STORAGE..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121100_instance_create(
+    async fn v2025121700_instance_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<v2025121100::InstanceCreate>,
+        new_instance: TypedBody<v2025121700::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
         Self::instance_create(
             rqctx,
@@ -2801,18 +2801,18 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121100_instance_network_interface_list(
+    async fn v2025121700_instance_network_interface_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId<params::InstanceSelector>>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2025121100::InstanceNetworkInterface>>,
+        HttpResponseOk<ResultsPage<v2025121700::InstanceNetworkInterface>>,
         HttpError,
     > {
         let HttpResponseOk(ResultsPage { next_page, items }) =
             Self::instance_network_interface_list(rqctx, query_params).await?;
         items
             .into_iter()
-            .map(v2025121100::InstanceNetworkInterface::try_from)
+            .map(v2025121700::InstanceNetworkInterface::try_from)
             .collect::<Result<_, _>>()
             .map(|items| HttpResponseOk(ResultsPage { next_page, items }))
             .map_err(HttpError::from)
@@ -2839,14 +2839,14 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121100_instance_network_interface_create(
+    async fn v2025121700_instance_network_interface_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::InstanceSelector>,
         interface_params: TypedBody<
-            v2025121100::InstanceNetworkInterfaceCreate,
+            v2025121700::InstanceNetworkInterfaceCreate,
         >,
     ) -> Result<
-        HttpResponseCreated<v2025121100::InstanceNetworkInterface>,
+        HttpResponseCreated<v2025121700::InstanceNetworkInterface>,
         HttpError,
     > {
         let interface_params = interface_params.try_map(TryInto::try_into)?;
@@ -2897,11 +2897,11 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121100_instance_network_interface_view(
+    async fn v2025121700_instance_network_interface_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::NetworkInterfacePath>,
         query_params: Query<params::OptionalInstanceSelector>,
-    ) -> Result<HttpResponseOk<v2025121100::InstanceNetworkInterface>, HttpError>
+    ) -> Result<HttpResponseOk<v2025121700::InstanceNetworkInterface>, HttpError>
     {
         let HttpResponseOk(nic) = Self::instance_network_interface_view(
             rqctx,
@@ -2934,12 +2934,12 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121100_instance_network_interface_update(
+    async fn v2025121700_instance_network_interface_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::NetworkInterfacePath>,
         query_params: Query<params::OptionalInstanceSelector>,
-        updated_iface: TypedBody<v2025121100::InstanceNetworkInterfaceUpdate>,
-    ) -> Result<HttpResponseOk<v2025121100::InstanceNetworkInterface>, HttpError>
+        updated_iface: TypedBody<v2025121700::InstanceNetworkInterfaceUpdate>,
+    ) -> Result<HttpResponseOk<v2025121700::InstanceNetworkInterface>, HttpError>
     {
         let updated_iface = updated_iface.try_map(TryInto::try_into)?;
         let HttpResponseOk(nic) = Self::instance_network_interface_update(

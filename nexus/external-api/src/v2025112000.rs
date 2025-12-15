@@ -6,7 +6,7 @@
 
 use std::net::IpAddr;
 
-use crate::v2025121100;
+use crate::v2025121700;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -230,7 +230,7 @@ impl Default for InstanceNetworkInterfaceAttachment {
 }
 
 impl From<InstanceNetworkInterfaceAttachment>
-    for v2025121100::InstanceNetworkInterfaceAttachment
+    for v2025121700::InstanceNetworkInterfaceAttachment
 {
     fn from(value: InstanceNetworkInterfaceAttachment) -> Self {
         match value {
@@ -261,7 +261,7 @@ pub struct InstanceNetworkInterfaceCreate {
 }
 
 impl From<InstanceNetworkInterfaceCreate>
-    for v2025121100::InstanceNetworkInterfaceCreate
+    for v2025121700::InstanceNetworkInterfaceCreate
 {
     fn from(value: InstanceNetworkInterfaceCreate) -> Self {
         Self {
@@ -390,9 +390,9 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<external::InstanceCpuPlatform>,
 }
 
-impl From<InstanceCreate> for v2025121100::InstanceCreate {
-    fn from(old: InstanceCreate) -> v2025121100::InstanceCreate {
-        v2025121100::InstanceCreate {
+impl From<InstanceCreate> for v2025121700::InstanceCreate {
+    fn from(old: InstanceCreate) -> v2025121700::InstanceCreate {
+        v2025121700::InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,
             memory: old.memory,

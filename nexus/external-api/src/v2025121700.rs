@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2025120300 to 2025121100
+//! Nexus external types that changed from 2025120300 to 2025121700
 
 use api_identity::ObjectIdentity;
 use itertools::Either;
