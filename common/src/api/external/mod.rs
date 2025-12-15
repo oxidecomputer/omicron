@@ -3291,6 +3291,11 @@ pub enum BgpPeerState {
     /// Waiting for keepaliave or notification from peer.
     OpenConfirm,
 
+    /// There is an ongoing Connection Collision that hasn't yet been resolved.
+    /// Two connections are maintained until one connection receives an Open or
+    /// is able to progress into Established.
+    ConnectionCollision,
+
     /// Synchronizing with peer.
     SessionSetup,
 
@@ -3308,6 +3313,9 @@ impl From<mg_admin_client::types::FsmStateKind> for BgpPeerState {
             FsmStateKind::Active => BgpPeerState::Active,
             FsmStateKind::OpenSent => BgpPeerState::OpenSent,
             FsmStateKind::OpenConfirm => BgpPeerState::OpenConfirm,
+            FsmStateKind::ConnectionCollision => {
+                BgpPeerState::ConnectionCollision
+            }
             FsmStateKind::SessionSetup => BgpPeerState::SessionSetup,
             FsmStateKind::Established => BgpPeerState::Established,
         }

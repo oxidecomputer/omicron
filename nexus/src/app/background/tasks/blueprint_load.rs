@@ -25,7 +25,6 @@ pub struct LoadedTargetBlueprint {
 
 pub struct TargetBlueprintLoader {
     datastore: Arc<DataStore>,
-    last: Option<LoadedTargetBlueprint>,
     tx: watch::Sender<Option<LoadedTargetBlueprint>>,
 }
 
@@ -34,7 +33,7 @@ impl TargetBlueprintLoader {
         datastore: Arc<DataStore>,
         tx: watch::Sender<Option<LoadedTargetBlueprint>>,
     ) -> TargetBlueprintLoader {
-        TargetBlueprintLoader { datastore, last: None, tx }
+        TargetBlueprintLoader { datastore, tx }
     }
 
     /// Expose the target blueprint
@@ -48,10 +47,14 @@ impl BackgroundTask for TargetBlueprintLoader {
         &'a mut self,
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
+        // Clone the most-recently-loaded blueprint (if any), so we can check
+        // whether the current target is different.
+        let last = self.tx.borrow().clone();
+
         async {
             // Set up a logger for this activation that includes metadata about
             // the current target.
-            let log = match &self.last {
+            let log = match &last {
                 None => opctx.log.clone(),
                 Some(LoadedTargetBlueprint { blueprint, .. }) => {
                     opctx.log.new(o!(
@@ -91,7 +94,7 @@ impl BackgroundTask for TargetBlueprintLoader {
             let Some(LoadedTargetBlueprint {
                 target: old_bp_target,
                 blueprint: old_blueprint,
-            }) = self.last.as_ref()
+            }) = last
             else {
                 // We've found a target blueprint for the first time.
                 // Save it and notify any watchers.
@@ -103,11 +106,10 @@ impl BackgroundTask for TargetBlueprintLoader {
                     "target_id" => %target_id,
                     "time_created" => %time_created
                 );
-                self.last = Some(LoadedTargetBlueprint {
+                self.tx.send_replace(Some(LoadedTargetBlueprint {
                     target: new_bp_target,
                     blueprint: Arc::new(new_blueprint),
-                });
-                self.tx.send_replace(self.last.clone());
+                }));
                 return json!({
                     "target_id": target_id,
                     "time_created": time_created,
@@ -127,11 +129,10 @@ impl BackgroundTask for TargetBlueprintLoader {
                     "target_id" => %target_id,
                     "time_created" => %time_created
                 );
-                self.last = Some(LoadedTargetBlueprint {
+                self.tx.send_replace(Some(LoadedTargetBlueprint {
                     target: new_bp_target,
                     blueprint: Arc::new(new_blueprint),
-                });
-                self.tx.send_replace(self.last.clone());
+                }));
                 json!({
                     "target_id": target_id,
                     "time_created": time_created,
@@ -146,7 +147,7 @@ impl BackgroundTask for TargetBlueprintLoader {
                 // It should not be possible for the contents of a
                 // blueprint to change, but we check to catch possible
                 // bugs further up the stack.
-                if **old_blueprint != new_blueprint {
+                if *old_blueprint != new_blueprint {
                     let message = format!(
                         "blueprint for id {} changed. Blueprints are supposed \
                          to be immutable.",
@@ -173,11 +174,10 @@ impl BackgroundTask for TargetBlueprintLoader {
                         "time_created" => %time_created,
                         "state" => status,
                     );
-                    self.last = Some(LoadedTargetBlueprint {
+                    self.tx.send_replace(Some(LoadedTargetBlueprint {
                         target: new_bp_target,
                         blueprint: Arc::new(new_blueprint),
-                    });
-                    self.tx.send_replace(self.last.clone());
+                    }));
                     json!({
                         "target_id": target_id,
                         "time_created": time_created,
