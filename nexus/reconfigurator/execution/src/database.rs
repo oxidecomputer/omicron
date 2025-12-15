@@ -8,7 +8,6 @@ use anyhow::anyhow;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use std::collections::BTreeSet;
 

@@ -13,10 +13,7 @@ use omicron_uuid_kinds::SledUuid;
 use sled_agent_types_versions::latest::inventory::SledRole;
 
 use crate::{
-    deployment::{
-        Blueprint, BlueprintZoneDisposition, BlueprintZoneType,
-        blueprint_zone_type,
-    },
+    deployment::{Blueprint, BlueprintZoneType, blueprint_zone_type},
     external_api::views::SledPolicy,
 };
 

@@ -10,7 +10,7 @@ use internal_dns_resolver::Resolver;
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_types::{
     deployment::{
-        Blueprint, BlueprintZoneDisposition, PendingMgsUpdates,
+        Blueprint, PendingMgsUpdates,
         execution::{EventBuffer, Overridables},
     },
     quiesce::SagaQuiesceHandle,

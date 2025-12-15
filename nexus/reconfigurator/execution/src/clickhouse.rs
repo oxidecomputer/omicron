@@ -25,7 +25,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::ReadyForCleanup;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
@@ -388,6 +387,7 @@ mod test {
     use clickhouse_admin_types::KeeperId;
     use clickhouse_admin_types::ServerId;
     use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::blueprint_zone_type;

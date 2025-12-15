@@ -22,7 +22,6 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -547,6 +546,7 @@ mod test {
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::SimRngState;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;

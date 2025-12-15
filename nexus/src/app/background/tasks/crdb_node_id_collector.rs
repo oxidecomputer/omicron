@@ -34,7 +34,6 @@ use futures::stream;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::COCKROACH_ADMIN_PORT;

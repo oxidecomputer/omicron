@@ -29,7 +29,6 @@ use nexus_config::NexusConfig;
 use nexus_db_model::RendezvousDebugDataset;
 use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::internal_api::params::{

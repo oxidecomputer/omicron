@@ -17,7 +17,6 @@ use nexus_db_model::DbMetadataNexusState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;

@@ -7,9 +7,7 @@
 use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::{
-    Blueprint, BlueprintExpungedZoneAccessReason, BlueprintZoneDisposition,
-};
+use nexus_types::deployment::{Blueprint, BlueprintExpungedZoneAccessReason};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use slog::{debug, info, warn};

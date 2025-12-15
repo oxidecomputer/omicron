@@ -12,7 +12,6 @@ use nexus_db_model::DbMetadataNexusState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::internal_api::views::QuiesceState;
 use nexus_types::internal_api::views::QuiesceStatus;
@@ -521,7 +520,6 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintTargetSet;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::quiesce::SagaReassignmentDone;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
