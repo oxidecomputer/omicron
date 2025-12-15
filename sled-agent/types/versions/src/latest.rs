@@ -88,6 +88,9 @@ pub mod inventory {
     pub use crate::v1::inventory::InventoryDataset;
     pub use crate::v1::inventory::InventoryDisk;
     pub use crate::v1::inventory::InventoryZpool;
+    pub use crate::v1::inventory::ManifestBootInventory;
+    pub use crate::v1::inventory::ManifestInventory;
+    pub use crate::v1::inventory::ManifestNonBootInventory;
     pub use crate::v1::inventory::MupdateOverrideBootInventory;
     pub use crate::v1::inventory::MupdateOverrideInventory;
     pub use crate::v1::inventory::MupdateOverrideNonBootInventory;
@@ -101,9 +104,6 @@ pub mod inventory {
     pub use crate::v1::inventory::ZoneArtifactInventory;
     pub use crate::v1::inventory::ZoneImageResolverInventory;
     pub use crate::v1::inventory::ZoneKind;
-    pub use crate::v1::inventory::ZoneManifestBootInventory;
-    pub use crate::v1::inventory::ZoneManifestInventory;
-    pub use crate::v1::inventory::ZoneManifestNonBootInventory;
 
     pub use crate::v11::inventory::ConfigReconcilerInventory;
     pub use crate::v11::inventory::ConfigReconcilerInventoryStatus;
@@ -113,14 +113,14 @@ pub mod inventory {
     pub use crate::v11::inventory::OmicronZoneType;
     pub use crate::v11::inventory::OmicronZonesConfig;
 
+    pub use crate::impls::inventory::ManifestBootInventoryDisplay;
+    pub use crate::impls::inventory::ManifestInventoryDisplay;
+    pub use crate::impls::inventory::ManifestNonBootInventoryDisplay;
     pub use crate::impls::inventory::MupdateOverrideBootInventoryDisplay;
     pub use crate::impls::inventory::MupdateOverrideInventoryDisplay;
     pub use crate::impls::inventory::MupdateOverrideNonBootInventoryDisplay;
     pub use crate::impls::inventory::ZoneArtifactInventoryDisplay;
     pub use crate::impls::inventory::ZoneImageResolverInventoryDisplay;
-    pub use crate::impls::inventory::ZoneManifestBootInventoryDisplay;
-    pub use crate::impls::inventory::ZoneManifestInventoryDisplay;
-    pub use crate::impls::inventory::ZoneManifestNonBootInventoryDisplay;
 }
 
 pub mod probes {

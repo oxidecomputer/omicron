@@ -1285,8 +1285,8 @@ mod tests {
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::disk::SharedDatasetConfig;
-    use omicron_common::update::OmicronZoneManifest;
-    use omicron_common::update::OmicronZoneManifestSource;
+    use omicron_common::update::OmicronInstallManifest;
+    use omicron_common::update::OmicronInstallManifestSource;
     use omicron_common::zone_images::ZoneImageFileSource;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
@@ -1295,6 +1295,7 @@ mod tests {
     use sled_agent_types::inventory::OmicronZoneDataset;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::ZoneKind;
+    use sled_agent_types::zone_images::MeasurementManifestStatus;
     use sled_agent_types::zone_images::MupdateOverrideStatus;
     use sled_agent_types::zone_images::OmicronZoneFileSource;
     use sled_agent_types::zone_images::RemoveMupdateOverrideBootSuccess;
@@ -1501,12 +1502,23 @@ mod tests {
                 removed_ddm_prefixes: Default::default(),
                 // successful status containing no artifacts
                 resolver_status: ResolverStatus {
+                    measurement_manifest: MeasurementManifestStatus {
+                        boot_disk_path: boot_disk_path.clone(),
+                        boot_disk_result: Ok(ZoneManifestArtifactsResult {
+                            manifest: OmicronInstallManifest {
+                                source: OmicronInstallManifestSource::SledAgent,
+                                files: IdOrdMap::new(),
+                            },
+                            data: IdOrdMap::new(),
+                        }),
+                        non_boot_disk_metadata: IdOrdMap::new(),
+                    },
                     zone_manifest: ZoneManifestStatus {
                         boot_disk_path: boot_disk_path.clone(),
                         boot_disk_result: Ok(ZoneManifestArtifactsResult {
-                            manifest: OmicronZoneManifest {
-                                source: OmicronZoneManifestSource::SledAgent,
-                                zones: IdOrdMap::new(),
+                            manifest: OmicronInstallManifest {
+                                source: OmicronInstallManifestSource::SledAgent,
+                                files: IdOrdMap::new(),
                             },
                             data: IdOrdMap::new(),
                         }),
@@ -1518,6 +1530,7 @@ mod tests {
                         non_boot_disk_overrides: IdOrdMap::new(),
                     },
                     image_directory_override: None,
+                    measurement_directory_override: None,
                 },
             }
         }
