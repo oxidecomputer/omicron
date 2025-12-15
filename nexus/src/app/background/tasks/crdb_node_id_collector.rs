@@ -146,18 +146,18 @@ impl CockroachAdminFromBlueprint for CockroachAdminFromBlueprintViaFixedPort {
         // We can only actively collect from zones that should be in-service; if
         // there are CRDB zones in other states that still need their node ID
         // collected, we have to wait until they're running.
-        blueprint.in_service_zones().filter_map(
-            |(_sled_id, zone)| match &zone.zone_type {
-                BlueprintZoneType::CockroachDb(
-                    blueprint_zone_type::CockroachDb { address, .. },
-                ) => {
-                    let mut admin_addr = *address;
-                    admin_addr.set_port(COCKROACH_ADMIN_PORT);
-                    Some((zone.id, admin_addr))
-                }
-                _ => None,
-            },
-        )
+        blueprint.in_service_zones().filter_map(|(_sled_id, zone)| match &zone
+            .zone_type
+        {
+            BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { address, .. },
+            ) => {
+                let mut admin_addr = *address;
+                admin_addr.set_port(COCKROACH_ADMIN_PORT);
+                Some((zone.id, admin_addr))
+            }
+            _ => None,
+        })
     }
 }
 

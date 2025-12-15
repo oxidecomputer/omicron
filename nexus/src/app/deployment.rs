@@ -367,9 +367,7 @@ fn is_target_release_change_allowed(
     }
 
     // Now check zone configs.
-    for (_, zone_config) in current_blueprint
-        .in_service_zones()
-    {
+    for (_, zone_config) in current_blueprint.in_service_zones() {
         match &zone_config.image_source {
             BlueprintZoneImageSource::InstallDataset => {
                 // A mupdate has occurred; we must allow a new target release.

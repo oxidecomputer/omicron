@@ -159,9 +159,7 @@ impl ReconfiguratorSim {
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
         // Handle zone networking setup first
-        for (_, zone) in parent_blueprint
-            .in_service_zones()
-        {
+        for (_, zone) in parent_blueprint.in_service_zones() {
             if let Some((external_ip, nic)) =
                 zone.zone_type.external_networking()
             {
@@ -213,9 +211,7 @@ impl ReconfiguratorSim {
             let active_nexus_gen =
                 state.config().active_nexus_zone_generation();
             let mut active_nexus_zones = BTreeSet::new();
-            for (_, zone, nexus) in parent_blueprint
-                .in_service_nexus_zones()
-            {
+            for (_, zone, nexus) in parent_blueprint.in_service_nexus_zones() {
                 if nexus.nexus_generation == active_nexus_gen {
                     active_nexus_zones.insert(zone.id);
                 }
@@ -232,9 +228,7 @@ impl ReconfiguratorSim {
             let active_nexus_gen =
                 state.config().active_nexus_zone_generation();
             let mut not_yet_nexus_zones = BTreeSet::new();
-            for (_, zone) in parent_blueprint
-                .in_service_zones()
-            {
+            for (_, zone) in parent_blueprint.in_service_zones() {
                 match &zone.zone_type {
                     nexus_types::deployment::BlueprintZoneType::Nexus(
                         nexus,
@@ -2493,17 +2487,12 @@ fn cmd_blueprint_edit(
         }
         BlueprintEditCommands::BumpNexusGeneration => {
             let current_generation = builder.nexus_generation();
-            let current_max = blueprint
-                .in_service_nexus_zones()
-                .fold(
-                    current_generation,
-                    |current_max, (_sled_id, _zone_config, nexus_config)| {
-                        std::cmp::max(
-                            nexus_config.nexus_generation,
-                            current_max,
-                        )
-                    },
-                );
+            let current_max = blueprint.in_service_nexus_zones().fold(
+                current_generation,
+                |current_max, (_sled_id, _zone_config, nexus_config)| {
+                    std::cmp::max(nexus_config.nexus_generation, current_max)
+                },
+            );
             ensure!(
                 current_max > current_generation,
                 "cannot bump blueprint generation (currently \

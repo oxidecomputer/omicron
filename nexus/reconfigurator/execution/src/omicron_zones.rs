@@ -97,10 +97,7 @@ fn clean_up_expunged_nexus_zones<'a>(
 ) -> impl Stream<Item = (Logger, anyhow::Result<()>)> + 'a {
     use BlueprintExpungedZoneAccessReason::NexusDeleteMetadataRecord;
     let zones_to_clean_up = blueprint
-        .expunged_zones(
-            ReadyForCleanup::Yes,
-            NexusDeleteMetadataRecord,
-        )
+        .expunged_zones(ReadyForCleanup::Yes, NexusDeleteMetadataRecord)
         .filter(|(_sled_id, zone)| zone.zone_type.is_nexus());
 
     stream::iter(zones_to_clean_up).then(move |(sled_id, zone)| async move {
@@ -125,10 +122,7 @@ fn clean_up_expunged_cockroach_zones<'a, R: CleanupResolver>(
 ) -> impl Stream<Item = (Logger, anyhow::Result<()>)> + 'a {
     use BlueprintExpungedZoneAccessReason::CockroachDecommission;
     let zones_to_clean_up = blueprint
-        .expunged_zones(
-            ReadyForCleanup::Yes,
-            CockroachDecommission,
-        )
+        .expunged_zones(ReadyForCleanup::Yes, CockroachDecommission)
         .filter(|(_sled_id, zone)| zone.zone_type.is_cockroach());
 
     stream::iter(zones_to_clean_up).then(move |(sled_id, zone)| async move {

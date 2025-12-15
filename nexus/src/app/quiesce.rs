@@ -351,9 +351,8 @@ async fn check_all_sagas_drained(
     //
     // This doesn't ever change once we've determined it once.  But we don't
     // know what the value is until we see our first blueprint.
-    let Some(my_generation) = current_blueprint
-        .in_service_zones()
-        .find_map(|(_sled_id, zone)| {
+    let Some(my_generation) =
+        current_blueprint.in_service_zones().find_map(|(_sled_id, zone)| {
             if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
                 (zone.id == my_nexus_id).then_some(nexus.nexus_generation)
             } else {

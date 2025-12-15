@@ -1626,12 +1626,11 @@ async fn lookup_service_info(
 ) -> anyhow::Result<Option<ServiceInfo>> {
     // We don't know anything about `service_id`; it may be in-service or it may
     // be expunged. Check all the zone states.
-    let mut all_zones = blueprint.in_service_zones().chain(
-        blueprint.expunged_zones(
+    let mut all_zones =
+        blueprint.in_service_zones().chain(blueprint.expunged_zones(
             ReadyForCleanup::Both,
             BlueprintExpungedZoneAccessReason::Omdb,
-        ),
-    );
+        ));
 
     let Some(zone_config) = all_zones.find_map(|(_sled_id, zone_config)| {
         if zone_config.id.into_untyped_uuid() == service_id {

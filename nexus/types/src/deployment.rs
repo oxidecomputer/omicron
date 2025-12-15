@@ -381,15 +381,16 @@ impl Blueprint {
     ) -> impl Iterator<
         Item = (SledUuid, &BlueprintZoneConfig, &blueprint_zone_type::Nexus),
     > {
-        self.expunged_zones(ReadyForCleanup::Yes, reason)
-            .filter_map(|(sled_id, zone)| {
+        self.expunged_zones(ReadyForCleanup::Yes, reason).filter_map(
+            |(sled_id, zone)| {
                 if let BlueprintZoneType::Nexus(nexus_config) = &zone.zone_type
                 {
                     Some((sled_id, zone, nexus_config))
                 } else {
                     None
                 }
-            })
+            },
+        )
     }
 
     /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the
