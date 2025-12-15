@@ -579,7 +579,7 @@ impl Blueprint {
         self.in_service_zones()
             .chain(self.expunged_zones(
                 ReadyForCleanup::Both,
-                BlueprintExpungedZoneAccessReason::NtpUpstreamConfig,
+                BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig,
             ))
             .find_map(|(_sled_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::BoundaryNtp(ntp_config) => {
@@ -691,31 +691,149 @@ pub struct OperatorNexusConfig<'a> {
     pub external_dns_servers: &'a [IpAddr],
 }
 
-/// TODO-john
+/// Argument to [`Blueprint::expunged_zones()`] allowing the caller whether they
+/// zones that are ready for cleanup, not ready for cleanup, or both/either.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ReadyForCleanup {
+    /// Only return zones that are ready for cleanup (i.e., have been confirmed
+    /// shut down by sled-agent and will not be restarted).
     Yes,
+    /// Only return zones that are NOT YET ready for cleanup. These zones are
+    /// expunged but could still be running.
     No,
+    /// Return expunged zones regardless in either "ready for cleanup" state.
     Both,
 }
 
-/// TODO-john docs on all variants
+/// Argument to [`Blueprint::expunged_zones()`] requiring the caller to specify
+/// the reason they want to access a blueprint's expunged zones.
+///
+/// The planner is responsible for permanently pruning expunged zones from the
+/// blueprint. However, doing so correctly requires waiting for any cleanup
+/// actions that need to happen, all of which are specific to the zone kind.
+/// For example, blueprint execution checks for expunged Oximeter zones to
+/// perform metric producer reassignment, which means the planner cannot prune
+/// an expunged Oximeter zone until it knows that all possible such
+/// reassignments are complete.
+///
+/// These reasons are not used at runtime; they exist soley to document and
+/// attempt to statically guard against new code adding a new call to
+/// `expunged_zones()` that the planner doesn't know about (and therefore
+/// doesn't get updated to account for!). If you are attempting to call
+/// `expunged_zones()` for a new reason, you must:
+///
+/// 1. Add a new variant to this enum.
+/// 2. Update the planner to account for it, to prevent the planner from pruning
+///    the zone before whatever your use of it is completes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BlueprintExpungedZoneAccessReason {
-    Blippy,
+    // --------------------------------------------------------------------
+    // Zone-kind-specific variants. Keep this sorted alphabetically, prefix
+    // them by the zone kind if applicable, and add details explaining the
+    // conditions the planner must consider during pruning.
+    // --------------------------------------------------------------------
+
+    /// Carrying forward the upstream NTP configuration provided by the operator
+    /// during rack setup; see [`Blueprint::upstream_ntp_config()`].
+    ///
+    /// The planner must not prune a boundary NTP zone if it's the last zone
+    /// remaining with the set of configuration.
+    BoundaryNtpUpstreamConfig,
+
+    /// Multinode Clickhouse configuration changes must operate one node at a
+    /// time, but the [`ClickhouseClusterConfig`] does not currently include the
+    /// IP addresses of all nodes. Blueprint execution therefore must scan
+    /// expunged nodes to find IP addresses.
+    ///
+    /// The planner must not prune a Clickhouse keeper or server zone if its
+    /// zone ID is contained in the current [`ClickhouseClusterConfig`].
     ClickhouseKeeperServerConfigIps,
+
+    /// The cockroachdb cluster should be instructed to decommission any
+    /// expunged cockroach nodes.
+    ///
+    /// The planner must not prune a CRDB zone if it has not yet been
+    /// decommissioned.
     CockroachDecommission,
+
+    /// This is a catch-all variant for updating the `external_ip` and
+    /// `network_interface` tables for all zone types that have external
+    /// networking (Nexus, boundary NTP, and external DNS).
+    ///
+    /// The planner must not prune any of these zone types if their external
+    /// networking bits are still referenced by the active CRDB tables.
     DeallocateExternalNetworkingResources,
+
+    /// Carrying forward the external DNS external IPs provided by the operator
+    /// during rack setup; see [`Blueprint::all_external_dns_external_ips()`].
+    ///
+    /// The planner must not prune an external DNS zone if it's the last zone
+    /// remaining with the set of IPs.
     ExternalDnsExternalIps,
+
+    /// After handoff, expunged Nexus zones must have their database access row
+    /// deleted.
+    ///
+    /// The planner must not prune a Nexus zone if it's still referenced in the
+    /// `db_metadata_nexus` table.
     NexusDeleteMetadataRecord,
+
+    /// Carrying forward the external Nexus configuration provided by the
+    /// operator during rack setup; see [`Blueprint::operator_nexus_config()`].
+    ///
+    /// The planner must not prune a Nexus zone if it's the last zone
+    /// remaining with the set of configuration.
     NexusExternalConfig,
+
+    /// Nexus needs to determine its own generation. If the actively-running
+    /// Nexus has been expunged (but not yet shut down), it should still be able
+    /// to find its own generation!
+    ///
+    /// The planner does not need to account for this when pruning Nexus zones.
     NexusSelfGeneration,
+
+    /// Nexus needs to whether it itself should be quiescing. If the
+    /// actively-running Nexus has been expunged (but not yet shut down), it
+    /// should still be able to determine this!
+    ///
+    /// The planner does not need to account for this when pruning Nexus zones.
     NexusSelfIsQuiescing,
+
+    /// Sagas assigneed to any expunged Nexus must be reassigned to an
+    /// in-service Nexus.
+    ///
+    /// The planner must not prune a Nexus zone if it still has any sagas
+    /// assigned to it.
     NexusSagaReassignment,
+
+    /// Support bundles assigned to an expunged Nexus must either be reassigned
+    /// or marked as failed.
+    ///
+    /// The planner must not prune a Nexus zone if it still has any support
+    /// bundles assigned to it.
     NexusSupportBundleMarkFailed,
-    NtpUpstreamConfig,
-    Omdb,
+
+    /// An expunged Oximeter zone must be marked expunged in the `oximeter` CRDB
+    /// table (so Nexus knows to stop assigning producers to it), and any
+    /// producers previously assigned to it must be reassigned to new Oximeters.
+    ///
+    /// The planner must not prune an Oximeter zone if it's still eligible for
+    /// new producers or if it has any assigned producers.
     OximeterExpungeAndReassignProducers,
+
+    // --------------------------------------------------------------------
+    // Catch-all variants for non-production callers. The planner does not need
+    // to account for these when pruning.
+    // --------------------------------------------------------------------
+
+    /// Blippy performs checks that include expunged zones.
+    Blippy,
+
+    /// Omdb allows support operators to poke at blueprint contents, including
+    /// expunged zones.
+    Omdb,
+
+    /// Various unit and integration tests access expunged zones.
     Test,
 }
 
