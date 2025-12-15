@@ -21,14 +21,14 @@ pub struct HealthMonitorHandle {
 }
 
 impl HealthMonitorHandle {
-    pub fn new() -> Self {
+    pub fn stub() -> Self {
         let (smf_services_in_maintenance_tx, _rx) =
             watch::channel(Ok(SvcsInMaintenanceResult::new()));
         Self { smf_services_in_maintenance_tx }
     }
 
     pub fn spawn(log: &Logger) -> Self {
-        let health_handle = HealthMonitorHandle::new();
+        let health_handle = HealthMonitorHandle::stub();
 
         // Spawn a task to retrieve information about services in maintenance
         info!(log, "Starting SMF service health poller");

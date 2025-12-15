@@ -8,6 +8,9 @@ use illumos_utils::svcs::Svcs;
 use illumos_utils::svcs::SvcsInMaintenanceResult;
 use slog::Logger;
 use tokio::sync::watch;
+use tokio::time::Duration;
+use tokio::time::MissedTickBehavior;
+use tokio::time::interval;
 
 pub(crate) async fn poll_smf_services_in_maintenance(
     log: Logger,
@@ -17,8 +20,12 @@ pub(crate) async fn poll_smf_services_in_maintenance(
 ) {
     // We poll every minute to verify the health of all services. This interval
     // is arbitrary.
-    let mut interval =
-        tokio::time::interval(tokio::time::Duration::from_secs(60));
+    let mut interval = interval(Duration::from_secs(60));
+
+    // If one of these calls to `svcs` takes longer than a minute,
+    // `MissedTickBehavior::Skip` ensures that the health check happens every
+    // interval, rather than bursting.
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     loop {
         interval.tick().await;
