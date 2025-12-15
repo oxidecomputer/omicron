@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::v1;
-use anyhow::ensure;
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,24 +16,6 @@ pub struct DnsConfigParams {
     pub serial: u32,
     pub time_created: chrono::DateTime<chrono::Utc>,
     pub zones: Vec<DnsConfigZone>,
-}
-
-impl DnsConfigParams {
-    /// Given a high-level DNS configuration, return a reference to its sole
-    /// DNS zone.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if there are 0 or more than one zones in this
-    /// configuration.
-    pub fn sole_zone(&self) -> Result<&DnsConfigZone, anyhow::Error> {
-        ensure!(
-            self.zones.len() == 1,
-            "expected exactly one DNS zone, but found {}",
-            self.zones.len()
-        );
-        Ok(&self.zones[0])
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -102,31 +83,6 @@ pub enum DnsRecord {
     Srv(Srv),
     #[serde(rename = "NS")]
     Ns(String),
-}
-
-// The `From<Ipv4Addr>` and `From<Ipv6Addr>` implementations are very slightly
-// dubious, because a v4 or v6 address could also theoretically map to a DNS
-// PTR record
-// (https://www.cloudflare.com/learning/dns/dns-records/dns-ptr-record/).
-// However, we don't support PTR records at the moment, so this is fine. Would
-// certainly be worth revisiting if we do in the future, though.
-
-impl From<Ipv4Addr> for DnsRecord {
-    fn from(ip: Ipv4Addr) -> Self {
-        DnsRecord::A(ip)
-    }
-}
-
-impl From<Ipv6Addr> for DnsRecord {
-    fn from(ip: Ipv6Addr) -> Self {
-        DnsRecord::Aaaa(ip)
-    }
-}
-
-impl From<Srv> for DnsRecord {
-    fn from(srv: Srv) -> Self {
-        DnsRecord::Srv(srv)
-    }
 }
 
 #[derive(

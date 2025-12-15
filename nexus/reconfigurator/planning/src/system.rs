@@ -16,20 +16,6 @@ use indexmap::IndexMap;
 use ipnet::Ipv6Net;
 use ipnet::Ipv6Subnets;
 use nexus_inventory::CollectionBuilder;
-use nexus_sled_agent_shared::inventory::Baseboard;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::Inventory;
-use nexus_sled_agent_shared::inventory::InventoryDataset;
-use nexus_sled_agent_shared::inventory::InventoryDisk;
-use nexus_sled_agent_shared::inventory::InventoryZpool;
-use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::SledCpuFamily;
-use nexus_sled_agent_shared::inventory::SledRole;
-use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
-use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
@@ -73,6 +59,20 @@ use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::inventory::Baseboard;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::Inventory;
+use sled_agent_types::inventory::InventoryDataset;
+use sled_agent_types::inventory::InventoryDisk;
+use sled_agent_types::inventory::InventoryZpool;
+use sled_agent_types::inventory::ManifestBootInventory;
+use sled_agent_types::inventory::MupdateOverrideBootInventory;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::SledCpuFamily;
+use sled_agent_types::inventory::SledRole;
+use sled_agent_types::inventory::ZoneImageResolverInventory;
+use sled_agent_types::inventory::ZoneKind;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -675,7 +675,7 @@ impl SystemDescription {
     pub fn sled_set_zone_manifest(
         &mut self,
         sled_id: SledUuid,
-        boot_inventory: Result<ZoneManifestBootInventory, String>,
+        boot_inventory: Result<ManifestBootInventory, String>,
     ) -> anyhow::Result<&mut Self> {
         let sled = self.get_sled_mut(sled_id)?;
         sled.set_zone_manifest(boot_inventory);
@@ -1741,7 +1741,7 @@ impl Sled {
 
     fn set_zone_manifest(
         &mut self,
-        boot_inventory: Result<ZoneManifestBootInventory, String>,
+        boot_inventory: Result<ManifestBootInventory, String>,
     ) {
         self.inventory_sled_agent
             .zone_image_resolver
