@@ -27,6 +27,7 @@ use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::ClickhouseClusterConfig;
+use nexus_types::deployment::ReadyForCleanup;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -46,8 +47,6 @@ pub(crate) async fn deploy_nodes(
     blueprint: &Blueprint,
     clickhouse_cluster_config: &ClickhouseClusterConfig,
 ) -> Result<(), Vec<anyhow::Error>> {
-    use BlueprintExpungedZoneAccessReason::ClickhouseKeeperServerConfigIps;
-
     // Important: We must look at all zones here, including expunged zones in
     // both "not ready for cleanup" and "ready for cleanup" states, instead of
     // just in-service zones, as would be expected.
@@ -75,15 +74,13 @@ pub(crate) async fn deploy_nodes(
     //    `ClickhouseClusterConfig`.
     //
     // This is tracked in https://github.com/oxidecomputer/omicron/issues/7724
-    let all_zones =
-        blueprint
-            .in_service_zones()
-            .chain(blueprint.expunged_zones_not_ready_for_cleanup(
-                ClickhouseKeeperServerConfigIps,
-            ))
-            .chain(blueprint.expunged_zones_ready_for_cleanup(
-                ClickhouseKeeperServerConfigIps,
-            ));
+    use BlueprintExpungedZoneAccessReason::ClickhouseKeeperServerConfigIps;
+    let all_zones = blueprint.in_service_zones().chain(
+        blueprint.expunged_zones(
+            ReadyForCleanup::Both,
+            ClickhouseKeeperServerConfigIps,
+        ),
+    );
 
     deploy_nodes_impl(opctx, all_zones, clickhouse_cluster_config).await
 }

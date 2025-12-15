@@ -317,32 +317,25 @@ impl Blueprint {
     }
 
     /// TODO-john
-    pub fn expunged_zones_not_ready_for_cleanup(
+    pub fn expunged_zones(
         &self,
+        ready_for_cleanup: ReadyForCleanup,
         _reason: BlueprintExpungedZoneAccessReason,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
         // TODO-john explain
-        self.danger_all_omicron_zones(|disposition| match disposition {
-            BlueprintZoneDisposition::InService => false,
-            BlueprintZoneDisposition::Expunged {
-                as_of_generation: _,
-                ready_for_cleanup,
-            } => !ready_for_cleanup,
-        })
-    }
-
-    /// TODO-john
-    pub fn expunged_zones_ready_for_cleanup(
-        &self,
-        _reason: BlueprintExpungedZoneAccessReason,
-    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
-        // TODO-john explain
-        self.danger_all_omicron_zones(|disposition| match disposition {
-            BlueprintZoneDisposition::InService => false,
-            BlueprintZoneDisposition::Expunged {
-                as_of_generation: _,
-                ready_for_cleanup,
-            } => ready_for_cleanup,
+        self.danger_all_omicron_zones(move |disposition| {
+            let this_zone_ready_for_cleanup = match disposition {
+                BlueprintZoneDisposition::InService => return false,
+                BlueprintZoneDisposition::Expunged {
+                    as_of_generation: _,
+                    ready_for_cleanup: this_zone_ready_for_cleanup,
+                } => this_zone_ready_for_cleanup,
+            };
+            match ready_for_cleanup {
+                ReadyForCleanup::Yes => this_zone_ready_for_cleanup,
+                ReadyForCleanup::No => !this_zone_ready_for_cleanup,
+                ReadyForCleanup::Both => true,
+            }
         })
     }
 
@@ -388,16 +381,15 @@ impl Blueprint {
     ) -> impl Iterator<
         Item = (SledUuid, &BlueprintZoneConfig, &blueprint_zone_type::Nexus),
     > {
-        self.expunged_zones_ready_for_cleanup(reason).filter_map(
-            |(sled_id, zone)| {
+        self.expunged_zones(ReadyForCleanup::Yes, reason)
+            .filter_map(|(sled_id, zone)| {
                 if let BlueprintZoneType::Nexus(nexus_config) = &zone.zone_type
                 {
                     Some((sled_id, zone, nexus_config))
                 } else {
                     None
                 }
-            },
-        )
+            })
     }
 
     /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the
@@ -666,7 +658,18 @@ pub struct OperatorNexusConfig<'a> {
 }
 
 /// TODO-john
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReadyForCleanup {
+    Yes,
+    No,
+    Both,
+}
+
+/// TODO-john
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BlueprintExpungedZoneAccessReason {
+    /// TODO-john
+    Blippy,
     /// TODO-john
     ClickhouseKeeperServerConfigIps,
     /// TODO-john
@@ -679,6 +682,8 @@ pub enum BlueprintExpungedZoneAccessReason {
     NexusSagaReassignment,
     /// TODO-john
     NexusSupportBundleMarkFailed,
+    /// TODO-john
+    Omdb,
     /// TODO-john
     OximeterExpungeAndReassignProducers,
     /// TODO-john

@@ -19,7 +19,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CollectorReassignment;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
-use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::ReadyForCleanup;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -97,7 +97,10 @@ fn clean_up_expunged_nexus_zones<'a>(
 ) -> impl Stream<Item = (Logger, anyhow::Result<()>)> + 'a {
     use BlueprintExpungedZoneAccessReason::NexusDeleteMetadataRecord;
     let zones_to_clean_up = blueprint
-        .expunged_zones_ready_for_cleanup(NexusDeleteMetadataRecord)
+        .expunged_zones(
+            ReadyForCleanup::Yes,
+            NexusDeleteMetadataRecord,
+        )
         .filter(|(_sled_id, zone)| zone.zone_type.is_nexus());
 
     stream::iter(zones_to_clean_up).then(move |(sled_id, zone)| async move {
@@ -122,7 +125,10 @@ fn clean_up_expunged_cockroach_zones<'a, R: CleanupResolver>(
 ) -> impl Stream<Item = (Logger, anyhow::Result<()>)> + 'a {
     use BlueprintExpungedZoneAccessReason::CockroachDecommission;
     let zones_to_clean_up = blueprint
-        .expunged_zones_ready_for_cleanup(CockroachDecommission)
+        .expunged_zones(
+            ReadyForCleanup::Yes,
+            CockroachDecommission,
+        )
         .filter(|(_sled_id, zone)| zone.zone_type.is_cockroach());
 
     stream::iter(zones_to_clean_up).then(move |(sled_id, zone)| async move {
@@ -146,7 +152,10 @@ fn clean_up_expunged_oximeter_zones<'a>(
 ) -> impl Stream<Item = (Logger, anyhow::Result<()>)> + 'a {
     use BlueprintExpungedZoneAccessReason::OximeterExpungeAndReassignProducers;
     let zones_to_clean_up = blueprint
-        .expunged_zones_ready_for_cleanup(OximeterExpungeAndReassignProducers)
+        .expunged_zones(
+            ReadyForCleanup::Yes,
+            OximeterExpungeAndReassignProducers,
+        )
         .filter(|(_sled_id, zone)| zone.zone_type.is_oximeter());
 
     stream::iter(zones_to_clean_up).then(move |(sled_id, zone)| async move {
@@ -332,8 +341,8 @@ mod test {
     use httptest::responders::{json_encoded, status_code};
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        BlueprintZoneConfig, BlueprintZoneImageSource, BlueprintZoneType,
-        blueprint_zone_type,
+        BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintZoneImageSource, BlueprintZoneType, blueprint_zone_type,
     };
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
