@@ -15,6 +15,7 @@ use nexus_db_queries::db::datastore::SiloGroup;
 use nexus_db_queries::db::datastore::SiloUser;
 use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::params;
+use nexus_types::external_api::views;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -143,14 +144,28 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<SiloGroup> {
+    ) -> ListResultVec<views::Group> {
         let authz_silo = opctx
             .authn
             .silo_required()
             .internal_context("listing current silo's groups")?;
-        self.db_datastore
-            .silo_groups_list_by_id(opctx, &authz_silo, pagparams)
-            .await
+
+        // Fetch groups with member counts
+        let groups_with_counts = self
+            .db_datastore
+            .silo_groups_list_with_member_counts(opctx, &authz_silo, pagparams)
+            .await?;
+
+        // Convert to views, including member_count
+        Ok(groups_with_counts
+            .into_iter()
+            .map(|(group, member_count)| {
+                let silo_group: SiloGroup = group.into();
+                let mut view: views::Group = silo_group.into();
+                view.member_count = member_count;
+                view
+            })
+            .collect())
     }
 
     // Built-in users

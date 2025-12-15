@@ -161,3 +161,120 @@ async fn expect_failure(
         .await
         .expect("Expected failure");
 }
+
+#[nexus_test]
+async fn test_group_member_count(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let opctx = OpContext::for_tests(
+        cptestctx.logctx.log.new(o!()),
+        cptestctx.server.server_context().nexus.datastore().clone(),
+    );
+
+    let authz_silo = authz::Silo::new(
+        authz::FLEET,
+        DEFAULT_SILO_ID,
+        LookupType::ById(DEFAULT_SILO_ID),
+    );
+
+    // Create a group
+    let group_name = "test-group".to_string();
+    let group = nexus
+        .datastore()
+        .silo_group_ensure(
+            &opctx,
+            &authz_silo,
+            SiloGroupApiOnly::new(
+                authz_silo.id(),
+                SiloGroupUuid::new_v4(),
+                group_name.clone(),
+            )
+            .into(),
+        )
+        .await
+        .expect("Group created");
+
+    // Fetch the group via API and verify member_count is 0
+    let group_url = format!("/v1/groups/{}", group.id());
+    let group_view = NexusRequest::object_get(&client, &group_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Group>()
+        .await;
+    assert_eq!(group_view.member_count, 0);
+    assert_eq!(group_view.display_name, group_name);
+
+    // Add unprivileged user to the group
+    let authz_silo_user = authz::SiloUser::new(
+        authz_silo.clone(),
+        USER_TEST_UNPRIVILEGED.id(),
+        LookupType::by_id(USER_TEST_UNPRIVILEGED.id()),
+    );
+
+    nexus
+        .datastore()
+        .silo_group_membership_replace_for_user(
+            &opctx,
+            &authz_silo_user,
+            vec![group.id()],
+        )
+        .await
+        .expect("Failed to set user group memberships");
+
+    // Fetch the group again and verify member_count is now 1
+    let group_view = NexusRequest::object_get(&client, &group_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Group>()
+        .await;
+    assert_eq!(group_view.member_count, 1);
+
+    // Create another user (we'll use the test DB to add a user)
+    use nexus_db_queries::authn::USER_TEST_PRIVILEGED;
+    let authz_silo_user2 = authz::SiloUser::new(
+        authz_silo,
+        USER_TEST_PRIVILEGED.id(),
+        LookupType::by_id(USER_TEST_PRIVILEGED.id()),
+    );
+
+    // Add second user to the group
+    nexus
+        .datastore()
+        .silo_group_membership_replace_for_user(
+            &opctx,
+            &authz_silo_user2,
+            vec![group.id()],
+        )
+        .await
+        .expect("Failed to add second user to group");
+
+    // Verify member_count is now 2
+    let group_view = NexusRequest::object_get(&client, &group_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Group>()
+        .await;
+    assert_eq!(group_view.member_count, 2);
+
+    // Test the list endpoint also shows correct counts
+    let groups =
+        objects_list_page_authz::<views::Group>(client, "/v1/groups").await;
+
+    let our_group = groups.items.iter().find(|g| g.id == group.id()).unwrap();
+    assert_eq!(our_group.member_count, 2);
+
+    // Remove user from group and verify count decreases
+    nexus
+        .datastore()
+        .silo_group_membership_replace_for_user(
+            &opctx,
+            &authz_silo_user,
+            vec![], // Empty list removes from all groups
+        )
+        .await
+        .expect("Failed to remove user from group");
+
+    // Verify member_count is now 1
+    let group_view = NexusRequest::object_get(&client, &group_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Group>()
+        .await;
+    assert_eq!(group_view.member_count, 1);
+}

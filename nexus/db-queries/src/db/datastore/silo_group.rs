@@ -193,6 +193,8 @@ impl From<SiloGroupApiOnly> for views::Group {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
+            // Default to 0, callers should use methods that fetch actual count
+            member_count: 0,
         }
     }
 }
@@ -252,6 +254,8 @@ impl From<SiloGroupJit> for views::Group {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
+            // Default to 0, callers should use methods that fetch actual count
+            member_count: 0,
         }
     }
 }
@@ -319,6 +323,8 @@ impl From<SiloGroupScim> for views::Group {
             // TODO the use of display name as display_name is temporary
             display_name: u.display_name,
             silo_id: u.silo_id,
+            // Default to 0, callers should use methods that fetch actual count
+            member_count: 0,
         }
     }
 }
@@ -769,5 +775,93 @@ impl DataStore {
             .collect::<Vec<SiloGroup>>();
 
         Ok(page)
+    }
+
+    /// Fetch a single group with its member count
+    pub async fn silo_group_fetch_with_member_count(
+        &self,
+        opctx: &OpContext,
+        authz_silo_group: &authz::SiloGroup,
+    ) -> LookupResult<(model::SiloGroup, i64)> {
+        opctx.authorize(authz::Action::Read, authz_silo_group).await?;
+
+        use nexus_db_schema::schema::silo_group::dsl as group_dsl;
+        use nexus_db_schema::schema::silo_group_membership::dsl as membership_dsl;
+
+        // First get the group
+        let group = group_dsl::silo_group
+            .filter(group_dsl::id.eq(to_db_typed_uuid(authz_silo_group.id())))
+            .filter(group_dsl::time_deleted.is_null())
+            .select(model::SiloGroup::as_select())
+            .first_async::<model::SiloGroup>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // Then count the members
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let member_count = membership_dsl::silo_group_membership
+            .filter(membership_dsl::silo_group_id.eq(to_db_typed_uuid(authz_silo_group.id())))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok((group, member_count))
+    }
+
+    /// List groups with their member counts
+    pub async fn silo_groups_list_with_member_counts(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<(model::SiloGroup, i64)> {
+        use nexus_db_schema::schema::silo_group::dsl as group_dsl;
+        use nexus_db_schema::schema::silo_group_membership::dsl as membership_dsl;
+
+        opctx.authorize(authz::Action::Read, authz_silo).await?;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let silo = {
+            use nexus_db_schema::schema::silo::dsl;
+            dsl::silo
+                .filter(dsl::id.eq(authz_silo.id()))
+                .select(model::Silo::as_select())
+                .get_result_async::<model::Silo>(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_silo),
+                    )
+                })?
+        };
+
+        // Get the groups first
+        let groups = paginated(group_dsl::silo_group, group_dsl::id, pagparams)
+            .filter(group_dsl::time_deleted.is_null())
+            .filter(group_dsl::silo_id.eq(authz_silo.id()))
+            .filter(group_dsl::user_provision_type.eq(silo.user_provision_type))
+            .select(model::SiloGroup::as_select())
+            .load_async::<model::SiloGroup>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // Then get member counts for each group
+        let mut result = Vec::new();
+        for group in groups {
+            let member_count = membership_dsl::silo_group_membership
+                .filter(membership_dsl::silo_group_id.eq(to_db_typed_uuid(group.id())))
+                .count()
+                .get_result_async::<i64>(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            result.push((group, member_count));
+        }
+
+        Ok(result)
     }
 }
