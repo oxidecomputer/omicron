@@ -1471,7 +1471,8 @@ impl Sled {
                 ),
                 // XXX: return something more reasonable here?
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
-                // TODO-K: Have the ability to add failed health checks here
+                // TODO-K[omicron#9517]: Have the ability to add failed health
+                // checks here
                 health_monitor: HealthMonitorInventory::new(),
             }
         };

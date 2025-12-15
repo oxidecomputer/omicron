@@ -26,8 +26,3 @@ thiserror.workspace = true
 tokio.workspace = true
 
 omicron-workspace-hack.workspace = true
-
-[dev-dependencies]
-
-[features]
-testing = []

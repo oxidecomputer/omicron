@@ -4000,7 +4000,8 @@ impl DataStore {
                 reconciler_status,
                 last_reconciliation,
                 zone_image_resolver,
-                // TODO-K: Actually query the DB when there is something there
+                // TODO-K[omicron#9516]: Actually query the DB when there is
+                // something there
                 health_monitor: HealthMonitorInventory::new(),
             };
             sled_agents

@@ -634,9 +634,10 @@ pub fn representative() -> Representative {
                 zone_image_resolver(ZoneImageResolverExampleKind::Mismatch {
                     has_mupdate_override: true,
                 }),
-                // TODO-K: Will want to add some services in maintenance here
-                // in a follow up PR when SMF service health information is
-                // being added to the DB.
+                // TODO-K[omicron#9517]: Will want to add health monitor
+                // information here (smf services in maintenance, etc) in a
+                // follow up PR when SMF service health information has been
+                // added to the DB.
             ),
         )
         .unwrap();

@@ -80,7 +80,7 @@ impl SvcsInMaintenanceResult {
 #[serde(rename_all = "snake_case")]
 pub enum SvcState {
     /// Initial state for all service instances.
-    Uninitailized,
+    Uninitialized,
     /// The instance is enabled, but not yet running or available to run.
     Offline,
     /// The instance is enabled and running or is available to run.
@@ -102,7 +102,7 @@ pub enum SvcState {
 impl From<String> for SvcState {
     fn from(value: String) -> Self {
         match value.as_str() {
-            "Uninitailized" | "uninitailized" => SvcState::Uninitailized,
+            "Uninitialized" | "uninitialized" => SvcState::Uninitialized,
             "Offline" | "offline" => SvcState::Offline,
             "Online" | "online" => SvcState::Online,
             "Degraded" | "degraded" => SvcState::Degraded,
@@ -126,7 +126,9 @@ pub struct SvcInMaintenance {
 impl SvcInMaintenance {
     // These methods are only used when the target OS is "illumos". They are not
     // marked as a configuration option based on target OS because they are not
-    // Illumos specific themselves. We mark them as unused instead.
+    // Illumos specific themselves. Additionally, we would not be able to run the
+    // unit tests on any other OS if we mark them to be used on Illumos only.
+    // We mark them as unused instead.
     #[allow(dead_code)]
     fn new() -> SvcInMaintenance {
         SvcInMaintenance { fmri: String::new(), zone: String::new() }

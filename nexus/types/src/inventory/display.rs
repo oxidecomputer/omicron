@@ -896,6 +896,9 @@ fn display_sleds(
             }
         }
 
+        // TODO-K[omicron#9516]: This is temporarily hidden until we add the
+        // health monitor types to the DB. Once those have been integrated,
+        // we'll show health monitor status when everything is healthy as well.
         if !health_monitor.is_empty() {
             writeln!(indented, "HEALTH MONITOR")?;
             let mut indent2 = IndentWriter::new("  ", &mut indented);
