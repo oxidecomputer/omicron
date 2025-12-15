@@ -60,9 +60,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
-use sled_agent_types::inventory::{
-    Inventory, OmicronZoneDataset, SledRole, ZoneKindExt,
-};
+use sled_agent_types::inventory::{Inventory, OmicronZoneDataset, SledRole};
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
@@ -1309,7 +1307,6 @@ mod tests {
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::ZoneImageResolverInventory;
-    use sled_agent_types::inventory::ZoneImageResolverInventoryExt;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
     use sled_agent_types::rack_init::RecoverySiloConfig;
     use sled_hardware_types::Baseboard;

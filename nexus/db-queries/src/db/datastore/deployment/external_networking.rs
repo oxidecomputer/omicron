@@ -16,8 +16,6 @@ use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::IpConfig;
 use nexus_db_model::IpPool;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -27,7 +25,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use sled_agent_types::inventory::{ZoneKind, ZoneKindExt};
+use sled_agent_types::inventory::ZoneKind;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -72,17 +70,7 @@ impl DataStore {
         let (_target, blueprint) =
             self.blueprint_target_get_current_full(opctx).await?;
 
-        let external_dns_ips = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .filter_map(|(_sled_id, z)| match &z.zone_type {
-                BlueprintZoneType::ExternalDns(external_dns) => {
-                    Some(external_dns.dns_address.addr.ip())
-                }
-                _ => None,
-            })
-            .collect();
-
-        Ok(external_dns_ips)
+        Ok(blueprint.all_external_dns_external_ips())
     }
 
     pub(super) async fn ensure_zone_external_networking_allocated_on_connection(
@@ -532,6 +520,7 @@ mod tests {
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;

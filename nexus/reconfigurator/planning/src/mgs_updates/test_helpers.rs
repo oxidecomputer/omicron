@@ -47,7 +47,6 @@ use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZoneImageResolverInventory;
-use sled_agent_types::inventory::ZoneImageResolverInventoryExt;
 use sled_hardware_types::COSMO_SLED_MODEL;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use sled_hardware_types::OxideSled;

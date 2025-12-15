@@ -157,23 +157,6 @@ pub enum VmmStateRequested {
     Reboot,
 }
 
-impl std::fmt::Display for VmmStateRequested {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.label())
-    }
-}
-
-impl VmmStateRequested {
-    fn label(&self) -> &str {
-        match self {
-            VmmStateRequested::MigrationTarget(_) => "migrating in",
-            VmmStateRequested::Running => "running",
-            VmmStateRequested::Stopped => "stopped",
-            VmmStateRequested::Reboot => "reboot",
-        }
-    }
-}
-
 /// The response sent from a request to unregister an instance.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct VmmUnregisterResponse {

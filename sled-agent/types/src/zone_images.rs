@@ -30,8 +30,6 @@ use swrite::{SWrite, swriteln};
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
 
-use crate::inventory::ZoneKindExt;
-
 /// The location to look for images shipped with the RAM disk.
 pub const RAMDISK_IMAGE_PATH: &str = "/opt/oxide";
 

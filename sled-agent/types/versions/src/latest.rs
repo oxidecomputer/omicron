@@ -112,6 +112,15 @@ pub mod inventory {
     pub use crate::v11::inventory::OmicronZoneConfig;
     pub use crate::v11::inventory::OmicronZoneType;
     pub use crate::v11::inventory::OmicronZonesConfig;
+
+    pub use crate::impls::inventory::MupdateOverrideBootInventoryDisplay;
+    pub use crate::impls::inventory::MupdateOverrideInventoryDisplay;
+    pub use crate::impls::inventory::MupdateOverrideNonBootInventoryDisplay;
+    pub use crate::impls::inventory::ZoneArtifactInventoryDisplay;
+    pub use crate::impls::inventory::ZoneImageResolverInventoryDisplay;
+    pub use crate::impls::inventory::ZoneManifestBootInventoryDisplay;
+    pub use crate::impls::inventory::ZoneManifestInventoryDisplay;
+    pub use crate::impls::inventory::ZoneManifestNonBootInventoryDisplay;
 }
 
 pub mod probes {

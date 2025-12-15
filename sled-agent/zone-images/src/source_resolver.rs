@@ -124,9 +124,7 @@ mod tests {
     use sled_agent_config_reconciler::{
         HostPhase2PreparedContents, ResolverStatusExt,
     };
-    use sled_agent_types::inventory::{
-        HostPhase2DesiredContents, ZoneKind, ZoneKindExt,
-    };
+    use sled_agent_types::inventory::{HostPhase2DesiredContents, ZoneKind};
     use sled_agent_types::zone_images::{
         MupdateOverrideReadError, OmicronZoneFileSource,
         OmicronZoneImageLocation, RAMDISK_IMAGE_PATH, ZoneImageLocationError,

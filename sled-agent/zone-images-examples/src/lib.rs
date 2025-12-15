@@ -21,7 +21,7 @@ use omicron_common::update::{
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
-use sled_agent_types::inventory::{ZoneKind, ZoneKindExt};
+use sled_agent_types::inventory::ZoneKind;
 use sled_agent_types::zone_images::{
     ArcIoError, ArcSerdeJsonError, ArtifactReadResult,
     InstallMetadataReadError, ZoneManifestArtifactResult,

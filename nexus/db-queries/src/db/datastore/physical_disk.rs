@@ -348,7 +348,6 @@ mod test {
     use sled_agent_types::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
         SledCpuFamily, SledRole, ZoneImageResolverInventory,
-        ZoneImageResolverInventoryExt,
     };
     use std::num::NonZeroU32;
 

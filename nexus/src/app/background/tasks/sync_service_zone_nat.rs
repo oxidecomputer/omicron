@@ -19,7 +19,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::inventory::Collection;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
 use serde_json::json;
-use sled_agent_types::inventory::ConfigReconcilerInventoryExt;
 use sled_agent_types::inventory::OmicronZoneType;
 use std::sync::Arc;
 use tokio::sync::watch;

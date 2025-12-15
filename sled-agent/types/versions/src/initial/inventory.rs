@@ -148,18 +148,6 @@ pub struct HostPhase2DesiredSlots {
     pub slot_b: HostPhase2DesiredContents,
 }
 
-impl HostPhase2DesiredSlots {
-    /// Return a `HostPhase2DesiredSlots` with both slots set to
-    /// [`HostPhase2DesiredContents::CurrentContents`]; i.e., "make no changes
-    /// to the current contents of either slot".
-    pub const fn current_contents() -> Self {
-        Self {
-            slot_a: HostPhase2DesiredContents::CurrentContents,
-            slot_b: HostPhase2DesiredContents::CurrentContents,
-        }
-    }
-}
-
 /// Describes a persistent ZFS dataset associated with an Omicron zone
 #[derive(
     Clone,
@@ -528,6 +516,33 @@ impl OmicronZoneImageSource {
 /// Like [`OmicronZoneType`], but without any associated data.
 ///
 /// This enum is meant to correspond exactly 1:1 with `OmicronZoneType`.
+///
+/// # String representations of this type
+///
+/// There are no fewer than six string representations for this type, all
+/// slightly different from each other.
+///
+/// 1. [`Self::zone_prefix`]: Used to construct zone names.
+/// 2. [`Self::service_prefix`]: Used to construct SMF service names.
+/// 3. [`Self::name_prefix`]: Used to construct `Name` instances.
+/// 4. [`Self::report_str`]: Used for reporting and testing.
+/// 5. [`Self::artifact_id_name`]: Used to match TUF artifact IDs.
+/// 6. [`Self::artifact_in_install_dataset`]: Used to match zone image tarballs
+///    in the install dataset. (This method is equivalent to appending `.tar.gz`
+///    to the result of [`Self::zone_prefix`].)
+///
+/// There is no `Display` impl to ensure that users explicitly choose the
+/// representation they want. (Please play close attention to this! The
+/// functions are all similar but different, and we don't currently have great
+/// type safety around the choice.)
+///
+/// ## Adding new representations
+///
+/// If you have a new use case for a string representation, please reuse one of
+/// the six representations if at all possible. If you must add a new one,
+/// please add it here rather than doing something ad-hoc in the calling code
+/// so it's more legible.
+
 #[derive(
     Debug,
     Clone,

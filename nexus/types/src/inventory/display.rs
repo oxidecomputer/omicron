@@ -20,10 +20,7 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
-use sled_agent_types::inventory::OmicronZoneTypeExt;
-use sled_agent_types::inventory::ZoneImageResolverInventoryExt;
-use sled_agent_types::inventory::ZoneKindExt;
-use sled_agent_types::inventory::{
+use sled_agent_types_versions::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
     ConfigReconcilerInventoryStatus, HostPhase2DesiredContents,

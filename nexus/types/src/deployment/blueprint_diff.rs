@@ -25,8 +25,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::disk::{CompressionAlgorithm, DatasetName};
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid};
-use sled_agent_types::inventory::ZoneKind;
-use sled_agent_types::inventory::ZoneKindExt;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 

@@ -132,7 +132,7 @@ impl BackgroundTask for BfdManager {
                 },
             };
 
-            let mgd_clients = build_mgd_clients(mappings, log);
+            let mgd_clients = build_mgd_clients(mappings, log, &self.resolver).await;
 
             for (location, c) in &mgd_clients {
                 let client_current = match c.get_bfd_peers().await {

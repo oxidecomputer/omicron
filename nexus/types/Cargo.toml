@@ -66,7 +66,6 @@ omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
-sled-agent-types.workspace = true
 sled-agent-types-versions.workspace = true
 swrite.workspace = true
 tough.workspace = true

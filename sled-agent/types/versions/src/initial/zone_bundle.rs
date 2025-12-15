@@ -4,7 +4,6 @@
 
 //! Zone bundle types for Sled Agent API version 1.
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -116,23 +115,6 @@ pub struct ZoneBundleMetadata {
     pub cause: ZoneBundleCause,
 }
 
-impl ZoneBundleMetadata {
-    pub const VERSION: u8 = 0;
-
-    /// Create a new set of metadata for the provided zone.
-    pub fn new(zone_name: &str, cause: ZoneBundleCause) -> Self {
-        Self {
-            id: ZoneBundleId {
-                zone_name: zone_name.to_string(),
-                bundle_id: Uuid::new_v4(),
-            },
-            time_created: Utc::now(),
-            version: Self::VERSION,
-            cause,
-        }
-    }
-}
-
 /// A dimension along with bundles can be sorted, to determine priority.
 #[derive(
     Clone,
@@ -166,20 +148,7 @@ pub enum PriorityDimension {
 /// TODO: The serde deserializer does not currently verify uniqueness of
 /// dimensions.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-pub struct PriorityOrder([PriorityDimension; PriorityOrder::EXPECTED_SIZE]);
-
-impl std::ops::Deref for PriorityOrder {
-    type Target = [PriorityDimension; PriorityOrder::EXPECTED_SIZE];
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Default for PriorityOrder {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
+pub struct PriorityOrder(pub(crate) [PriorityDimension; 2]);
 
 /// Error type for creating a priority order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -188,129 +157,15 @@ pub enum PriorityOrderCreateError {
     DuplicateFound(PriorityDimension),
 }
 
-impl std::fmt::Display for PriorityOrderCreateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PriorityOrderCreateError::WrongDimensionCount(n) => {
-                write!(
-                    f,
-                    "expected exactly {} dimensions, found {}",
-                    PriorityOrder::EXPECTED_SIZE,
-                    n
-                )
-            }
-            PriorityOrderCreateError::DuplicateFound(dim) => {
-                write!(
-                    f,
-                    "duplicate element found in priority ordering: {:?}",
-                    dim
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for PriorityOrderCreateError {}
-
-impl PriorityOrder {
-    // NOTE: Must match the number of variants in `PriorityDimension`.
-    pub(crate) const EXPECTED_SIZE: usize = 2;
-    const DEFAULT: Self =
-        Self([PriorityDimension::Cause, PriorityDimension::Time]);
-
-    /// Construct a new priority order.
-    ///
-    /// This requires that each dimension appear exactly once.
-    pub fn new(
-        dims: &[PriorityDimension],
-    ) -> Result<Self, PriorityOrderCreateError> {
-        if dims.len() != Self::EXPECTED_SIZE {
-            return Err(PriorityOrderCreateError::WrongDimensionCount(
-                dims.len(),
-            ));
-        }
-        let mut seen = HashSet::new();
-        for dim in dims.iter() {
-            if !seen.insert(dim) {
-                return Err(PriorityOrderCreateError::DuplicateFound(*dim));
-            }
-        }
-        Ok(Self(dims.try_into().unwrap()))
-    }
-
-    /// Get the priority order as a slice.
-    pub fn as_slice(&self) -> &[PriorityDimension] {
-        &self.0
-    }
-}
-
 /// A period on which bundles are automatically cleaned up.
 #[derive(
     Clone, Copy, Deserialize, JsonSchema, PartialEq, PartialOrd, Serialize,
 )]
-pub struct CleanupPeriod(Duration);
-
-impl Default for CleanupPeriod {
-    fn default() -> Self {
-        Self(Duration::from_secs(600))
-    }
-}
+pub struct CleanupPeriod(pub(crate) Duration);
 
 /// Error type for creating a cleanup period.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CleanupPeriodCreateError(pub Duration);
-
-impl std::fmt::Display for CleanupPeriodCreateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "invalid cleanup period ({:?}): must be between {:?} and {:?}, inclusive",
-            self.0,
-            CleanupPeriod::MIN.as_duration(),
-            CleanupPeriod::MAX.as_duration(),
-        )
-    }
-}
-
-impl std::error::Error for CleanupPeriodCreateError {}
-
-impl CleanupPeriod {
-    /// The minimum supported cleanup period.
-    pub const MIN: Self = Self(Duration::from_secs(60));
-
-    /// The maximum supported cleanup period.
-    pub const MAX: Self = Self(Duration::from_secs(60 * 60 * 24));
-
-    /// Construct a new cleanup period, checking that it's valid.
-    pub fn new(duration: Duration) -> Result<Self, CleanupPeriodCreateError> {
-        if duration >= Self::MIN.as_duration()
-            && duration <= Self::MAX.as_duration()
-        {
-            Ok(Self(duration))
-        } else {
-            Err(CleanupPeriodCreateError(duration))
-        }
-    }
-
-    /// Return the period as a duration.
-    pub const fn as_duration(&self) -> Duration {
-        self.0
-    }
-}
-
-impl TryFrom<Duration> for CleanupPeriod {
-    type Error = CleanupPeriodCreateError;
-
-    fn try_from(duration: Duration) -> Result<Self, Self::Error> {
-        Self::new(duration)
-    }
-}
-
-impl std::fmt::Debug for CleanupPeriod {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
 
 /// The limit on space allowed for zone bundles, as a percentage of the overall
 /// dataset's quota.
@@ -324,67 +179,11 @@ impl std::fmt::Debug for CleanupPeriod {
     PartialOrd,
     Serialize,
 )]
-pub struct StorageLimit(u8);
-
-impl std::fmt::Display for StorageLimit {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}%", self.as_u8())
-    }
-}
-
-impl Default for StorageLimit {
-    fn default() -> Self {
-        StorageLimit(25)
-    }
-}
+pub struct StorageLimit(pub(crate) u8);
 
 /// Error type for creating a storage limit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StorageLimitCreateError(pub u8);
-
-impl std::fmt::Display for StorageLimitCreateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "invalid storage limit ({}): must be expressed as a percentage in ({}, {}]",
-            self.0,
-            StorageLimit::MIN.0,
-            StorageLimit::MAX.0,
-        )
-    }
-}
-
-impl std::error::Error for StorageLimitCreateError {}
-
-impl StorageLimit {
-    /// Minimum percentage of dataset quota supported.
-    pub const MIN: Self = Self(0);
-
-    /// Maximum percentage of dataset quota supported.
-    pub const MAX: Self = Self(50);
-
-    /// Construct a new limit allowed for zone bundles.
-    ///
-    /// This should be expressed as a percentage, in the range (Self::MIN,
-    /// Self::MAX].
-    pub const fn new(percentage: u8) -> Result<Self, StorageLimitCreateError> {
-        if percentage > Self::MIN.0 && percentage <= Self::MAX.0 {
-            Ok(Self(percentage))
-        } else {
-            Err(StorageLimitCreateError(percentage))
-        }
-    }
-
-    /// Return the contained quota percentage.
-    pub const fn as_u8(&self) -> u8 {
-        self.0
-    }
-
-    // Compute the number of bytes available from a dataset quota, in bytes.
-    pub const fn bytes_available(&self, dataset_quota: u64) -> u64 {
-        (dataset_quota * self.as_u8() as u64) / 100
-    }
-}
 
 /// The portion of a debug dataset used for zone bundles.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
@@ -419,66 +218,4 @@ pub struct CleanupCount {
     pub bundles: u64,
     /// The number of bytes removed.
     pub bytes: u64,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sort_zone_bundle_cause() {
-        use ZoneBundleCause::*;
-        let mut original = [Other, TerminatedInstance, UnexpectedZone];
-        let expected = [Other, UnexpectedZone, TerminatedInstance];
-        original.sort();
-        assert_eq!(original, expected);
-    }
-
-    #[test]
-    fn test_priority_dimension() {
-        assert!(PriorityOrder::new(&[]).is_err());
-        assert!(PriorityOrder::new(&[PriorityDimension::Cause]).is_err());
-        assert!(
-            PriorityOrder::new(&[
-                PriorityDimension::Cause,
-                PriorityDimension::Cause
-            ])
-            .is_err()
-        );
-        assert!(
-            PriorityOrder::new(&[
-                PriorityDimension::Cause,
-                PriorityDimension::Cause,
-                PriorityDimension::Time
-            ])
-            .is_err()
-        );
-
-        assert!(
-            PriorityOrder::new(&[
-                PriorityDimension::Cause,
-                PriorityDimension::Time
-            ])
-            .is_ok()
-        );
-        assert_eq!(
-            PriorityOrder::new(PriorityOrder::default().as_slice()).unwrap(),
-            PriorityOrder::default()
-        );
-    }
-
-    #[test]
-    fn test_storage_limit_bytes_available() {
-        let pct = StorageLimit(1);
-        assert_eq!(pct.bytes_available(100), 1);
-        assert_eq!(pct.bytes_available(1000), 10);
-
-        let pct = StorageLimit(50);
-        assert_eq!(pct.bytes_available(100), 50);
-        assert_eq!(pct.bytes_available(1000), 500);
-
-        // Test non-power of 10.
-        let pct = StorageLimit(25);
-        assert_eq!(pct.bytes_available(32768), 8192);
-    }
 }

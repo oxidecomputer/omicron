@@ -57,14 +57,13 @@ use sled_agent_types::early_networking::{
 };
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
-    VmmPutStateResponse, VmmSpecExt, VmmStateRequested, VmmUnregisterResponse,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{
-    ConfigReconcilerInventory, ConfigReconcilerInventoryExt,
-    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
-    InventoryDataset, InventoryDisk, InventoryZpool, OmicronSledConfig,
-    OmicronZonesConfig, SledRole, ZoneImageResolverInventory,
-    ZoneImageResolverInventoryExt,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
+    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
+    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
+    ZoneImageResolverInventory,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 

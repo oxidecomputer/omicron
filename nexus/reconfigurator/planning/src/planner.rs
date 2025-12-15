@@ -62,13 +62,10 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types::inventory::ConfigReconcilerInventoryExt;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneImageSource;
 use sled_agent_types::inventory::OmicronZoneType;
-use sled_agent_types::inventory::OmicronZoneTypeExt;
 use sled_agent_types::inventory::ZoneKind;
-use sled_agent_types::inventory::ZoneKindExt;
 use slog::error;
 use slog::{Logger, info, o, warn};
 use slog_error_chain::InlineErrorChain;
@@ -1278,7 +1275,14 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::ExternalDns => {
                 // TODO-cleanup: When external DNS addresses are
                 // in the policy, this can use the input, too.
-                self.blueprint.count_parent_external_dns_zones()
+                //
+                // The target number of external DNS zones is exactly equal to
+                // the number of distinct external DNS IPs we're supposed to
+                // service.
+                self.input
+                    .parent_blueprint()
+                    .all_external_dns_external_ips()
+                    .len()
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()

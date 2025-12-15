@@ -30,9 +30,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneConfig;
-use sled_agent_types::inventory::OmicronZoneConfigExt;
 use sled_agent_types::inventory::OmicronZoneType;
-use sled_agent_types::inventory::OmicronZoneTypeExt;
 use sled_agent_types::zone_images::MupdateOverrideReadError;
 use sled_agent_types::zone_images::OmicronZoneImageLocation;
 use sled_agent_types::zone_images::PreparedOmicronZone;
@@ -1297,7 +1295,6 @@ mod tests {
     use sled_agent_types::inventory::OmicronZoneDataset;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::ZoneKind;
-    use sled_agent_types::inventory::ZoneKindExt;
     use sled_agent_types::zone_images::MupdateOverrideStatus;
     use sled_agent_types::zone_images::OmicronZoneFileSource;
     use sled_agent_types::zone_images::RemoveMupdateOverrideBootSuccess;

@@ -1026,9 +1026,7 @@ mod tests {
     use omicron_common::address::get_sled_address;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_types::inventory::{
-        OmicronZoneConfig, OmicronZoneTypeExt, ZoneKind,
-    };
+    use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
     use slog_error_chain::InlineErrorChain;
 
     use super::*;

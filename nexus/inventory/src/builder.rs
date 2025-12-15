@@ -41,7 +41,6 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::Inventory;
-use sled_agent_types::inventory::OmicronZoneTypeExt;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;

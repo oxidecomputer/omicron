@@ -10,7 +10,6 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::ledger::Ledgerable;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
@@ -111,32 +110,6 @@ pub struct OmicronSledConfig {
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
-}
-
-impl Default for OmicronSledConfig {
-    fn default() -> Self {
-        Self {
-            generation: Generation::new(),
-            disks: IdOrdMap::default(),
-            datasets: IdOrdMap::default(),
-            zones: IdOrdMap::default(),
-            remove_mupdate_override: None,
-            host_phase_2: HostPhase2DesiredSlots::current_contents(),
-        }
-    }
-}
-
-impl Ledgerable for OmicronSledConfig {
-    fn is_newer_than(&self, other: &Self) -> bool {
-        self.generation > other.generation
-    }
-
-    fn generation_bump(&mut self) {
-        // DO NOTHING!
-        //
-        // Generation bumps must only ever come from nexus and will be encoded
-        // in the struct itself
-    }
 }
 
 /// Describes the set of Omicron-managed zones running on a sled

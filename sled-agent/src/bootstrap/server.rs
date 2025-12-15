@@ -42,7 +42,7 @@ use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::rack_init::RackInitializeRequestParams;
-use sled_agent_types::sled::{StartSledAgentRequest, StartSledAgentRequestExt};
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
 use slog::Logger;
