@@ -100,15 +100,15 @@ impl DataStore {
 
         // First, retrieve our configuration if there is one.
         let Some(latest) =
-            self.tq_get_latest_config_conn(opctx, conn, rack_id).await?
+            Self::tq_get_latest_config_conn(opctx, conn, rack_id).await?
         else {
             return Ok(None);
         };
 
         // Then get any members associated with the configuration
-        let members = self
-            .tq_get_members_conn(opctx, conn, rack_id, latest.epoch)
-            .await?;
+        let members =
+            Self::tq_get_members_conn(opctx, conn, rack_id, latest.epoch)
+                .await?;
 
         let mut tq_members: BTreeMap<BaseboardId, TrustQuorumMemberData> =
             BTreeMap::new();
@@ -209,10 +209,13 @@ impl DataStore {
                 let config = config.clone();
 
                 async move {
-                    let current = self
-                        .tq_get_latest_epoch_in_txn(opctx, &c, config.rack_id)
-                        .await
-                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let current = Self::tq_get_latest_epoch_in_txn(
+                        opctx,
+                        &c,
+                        config.rack_id,
+                    )
+                    .await
+                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     let is_insertable = if let Some(epoch) = current.clone() {
                         // Only insert if what is in the DB is immediately prior to
@@ -237,7 +240,7 @@ impl DataStore {
                         )));
                     }
 
-                    self.insert_tq_config_in_txn(opctx, conn, config)
+                    Self::insert_tq_config_in_txn(opctx, conn, config)
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))
                 }
@@ -275,8 +278,7 @@ impl DataStore {
                 let acked_prepares = acked_prepares.clone();
                 async move {
                     // First, retrieve our configuration if there is one.
-                    let latest = self
-                        .tq_get_latest_config_conn(opctx, &c, rack_id)
+                    let latest = Self::tq_get_latest_config_conn(opctx, &c, rack_id)
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
@@ -317,8 +319,7 @@ impl DataStore {
                     }
 
                     // Then get any members associated with the configuration
-                    let db_members = self
-                        .tq_get_members_conn(
+                    let db_members = Self::tq_get_members_conn(
                             opctx,
                             &c,
                             rack_id,
@@ -371,7 +372,7 @@ impl DataStore {
                         // Write each member that has been modified
                         match (update_share_digest, update_prepared) {
                             (true, true) => {
-                                self.update_tq_member_share_digest_and_state_prepared_in_txn(
+                                Self::update_tq_member_share_digest_and_state_prepared_in_txn(
                                     opctx,
                                     conn,
                                     member
@@ -380,7 +381,7 @@ impl DataStore {
                                 .map_err(|txn_error| txn_error.into_diesel(&err))?;
                             }
                             (true, false) => {
-                                self.update_tq_member_share_digest_in_txn(
+                                Self::update_tq_member_share_digest_in_txn(
                                     opctx,
                                     conn,
                                     member
@@ -389,7 +390,7 @@ impl DataStore {
                                 .map_err(|txn_error| txn_error.into_diesel(&err))?;
                             }
                             (false, true) => {
-                                self.update_tq_member_state_prepared_in_txn(
+                                Self::update_tq_member_state_prepared_in_txn(
                                     opctx,
                                     conn,
                                     member
@@ -412,7 +413,7 @@ impl DataStore {
 
                     match (should_write_secrets, should_commit) {
                         (true, true) => {
-                            self.update_tq_encrypted_rack_secrets_and_commit_in_txn(
+                            Self::update_tq_encrypted_rack_secrets_and_commit_in_txn(
                                 opctx,
                                 conn,
                                 db_config.rack_id,
@@ -423,7 +424,7 @@ impl DataStore {
                             .map_err(|txn_error| txn_error.into_diesel(&err))?;
                         }
                         (true, false) => {
-                            self.update_tq_encrypted_rack_secrets_in_txn(
+                            Self::update_tq_encrypted_rack_secrets_in_txn(
                                 opctx,
                                 conn,
                                 db_config.rack_id,
@@ -434,7 +435,7 @@ impl DataStore {
                             .map_err(|txn_error| txn_error.into_diesel(&err))?;
                         }
                         (false, true) => {
-                            self.update_tq_commit_state_in_txn(
+                            Self::update_tq_commit_state_in_txn(
                                 opctx,
                                 conn,
                                 db_config.rack_id,
@@ -477,10 +478,10 @@ impl DataStore {
                 let acked_commits = acked_commits.clone();
                 async move {
                     // First, retrieve our configuration if there is one.
-                    let latest = self
-                        .tq_get_latest_config_conn(opctx, &c, rack_id)
-                        .await
-                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let latest =
+                        Self::tq_get_latest_config_conn(opctx, &c, rack_id)
+                            .await
+                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     let Some(db_config) = latest else {
                         bail_txn!(
@@ -538,7 +539,6 @@ impl DataStore {
 
     // Unconditional insert that should only run inside a transaction
     async fn insert_tq_config_in_txn(
-        &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         config: TrustQuorumConfig,
@@ -613,7 +613,6 @@ impl DataStore {
     }
 
     async fn update_tq_member_share_digest_and_state_prepared_in_txn(
-        &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         member: DbTrustQuorumMember,
@@ -673,7 +672,6 @@ impl DataStore {
     }
 
     async fn update_tq_member_share_digest_in_txn(
-        &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         member: DbTrustQuorumMember,
@@ -695,7 +693,6 @@ impl DataStore {
     }
 
     async fn update_tq_member_state_prepared_in_txn(
-        &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         member: DbTrustQuorumMember,
@@ -717,7 +714,6 @@ impl DataStore {
     }
 
     async fn update_tq_encrypted_rack_secrets_in_txn(
-        &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
@@ -746,7 +742,6 @@ impl DataStore {
     }
 
     async fn update_tq_encrypted_rack_secrets_and_commit_in_txn(
-        &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
@@ -776,7 +771,6 @@ impl DataStore {
     }
 
     async fn update_tq_commit_state_in_txn(
-        &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
@@ -821,7 +815,6 @@ impl DataStore {
     }
 
     async fn tq_get_latest_epoch_in_txn(
-        &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
@@ -843,7 +836,6 @@ impl DataStore {
     }
 
     async fn tq_get_latest_config_conn(
-        &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
@@ -864,7 +856,6 @@ impl DataStore {
     }
 
     async fn tq_get_members_conn(
-        &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
