@@ -15,13 +15,13 @@ use camino_tempfile_ext::{
     prelude::*,
 };
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::update::{
     MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
     OmicronZoneManifestSource,
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
+use sled_agent_types::inventory::ZoneKind;
 use sled_agent_types::zone_images::{
     ArcIoError, ArcSerdeJsonError, ArtifactReadResult,
     InstallMetadataReadError, ZoneManifestArtifactResult,

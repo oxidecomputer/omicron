@@ -10,6 +10,7 @@ use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::sync::Arc;
 
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_editor::ExternalNetworkingAllocator;
@@ -24,7 +25,6 @@ use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use nexus_inventory::CollectionBuilderRng;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -45,6 +45,7 @@ use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
+use sled_agent_types::inventory::ZoneKind;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::KnownArtifactKind;
@@ -182,7 +183,7 @@ pub struct ExampleSystem {
     pub input: PlanningInput,
     pub collection: Collection,
     /// The initial blueprint that was used to describe the system.
-    pub initial_blueprint: Blueprint,
+    pub initial_blueprint: Arc<Blueprint>,
 }
 
 /// Returns a collection, planning input, and blueprint describing a pretty
@@ -531,16 +532,17 @@ impl ExampleSystemBuilder {
         }
 
         let mut input_builder = system
-            .to_planning_input_builder()
+            .to_planning_input_builder(Arc::new(
+                // Start with an empty blueprint.
+                BlueprintBuilder::build_empty_seeded(
+                    "test suite",
+                    rng.blueprint1_rng,
+                ),
+            ))
             .expect("failed to make planning input builder");
 
         let base_input = input_builder.clone().build();
-
-        // Start with an empty blueprint.
-        let initial_blueprint = BlueprintBuilder::build_empty_seeded(
-            "test suite",
-            rng.blueprint1_rng,
-        );
+        let initial_blueprint = Arc::clone(&base_input.parent_blueprint());
 
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(
@@ -1015,7 +1017,6 @@ mod tests {
     use internal_dns_resolver::ResolveError;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::names::ServiceName;
-    use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -1025,6 +1026,7 @@ mod tests {
     use omicron_common::address::get_sled_address;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
     use slog_error_chain::InlineErrorChain;
 
     use super::*;

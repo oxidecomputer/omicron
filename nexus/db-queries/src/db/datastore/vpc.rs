@@ -3003,6 +3003,7 @@ mod tests {
     use slog::info;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
+    use std::sync::Arc;
 
     // Test that we detect the right error condition and return None when we
     // fail to insert a VPC due to VNI exhaustion.
@@ -3283,10 +3284,6 @@ mod tests {
             datastore.sled_upsert(sled_update).await.expect("upserting sled");
         }
         sled_ids.sort_unstable();
-        let planning_input = system
-            .to_planning_input_builder()
-            .expect("creating planning builder")
-            .build();
 
         // Helper to convert a zone's nic into an insertable nic.
         let db_nic_from_zone = |zone_config: &BlueprintZoneConfig| {
@@ -3314,8 +3311,13 @@ mod tests {
         };
 
         // Create an initial, empty blueprint, and make it the target.
-        let bp0 = BlueprintBuilder::build_empty("test");
+        let bp0 = Arc::new(BlueprintBuilder::build_empty("test"));
         bp_insert_and_make_target(&opctx, &datastore, &bp0).await;
+
+        let planning_input = system
+            .to_planning_input_builder(Arc::clone(&bp0))
+            .expect("creating planning builder")
+            .build();
 
         // Our blueprint doesn't describe any services, so we shouldn't find any
         // sled IDs running services.
@@ -3905,10 +3907,10 @@ mod tests {
             assert!(resolved.iter().any(|x| {
                 let k = &x.dest;
                 let v = &x.target;
-                *k == subnet.ipv4_block.0.into()
+                *k == IpNet::from(subnet.ipv4_block.0)
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
-                            *ip == subnet.ipv4_block.0.into()
+                            *ip == IpNet::from(subnet.ipv4_block.0)
                         }
                         _ => false,
                     }
@@ -3916,10 +3918,10 @@ mod tests {
             assert!(resolved.iter().any(|x| {
                 let k = &x.dest;
                 let v = &x.target;
-                *k == subnet.ipv6_block.0.into()
+                *k == IpNet::from(subnet.ipv6_block.0)
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
-                            *ip == subnet.ipv6_block.0.into()
+                            *ip == IpNet::from(subnet.ipv6_block.0)
                         }
                         _ => false,
                     }

@@ -8,8 +8,6 @@ use crate::deployment::Blueprint;
 use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::shared::Baseboard;
 use crate::external_api::shared::IpRange;
-use nexus_sled_agent_shared::inventory::{SledCpuFamily, SledRole};
-use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
@@ -18,13 +16,15 @@ use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types_versions::latest::inventory::{SledCpuFamily, SledRole};
+use sled_agent_types_versions::latest::rack_init::RecoverySiloConfig;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -130,7 +130,7 @@ pub enum ServiceKind {
     Oximeter,
     Dendrite,
     Tfport,
-    BoundaryNtp { snat: SourceNatConfig, nic: ServiceNic },
+    BoundaryNtp { snat: SourceNatConfigGeneric, nic: ServiceNic },
     InternalNtp,
     Mgd,
 }

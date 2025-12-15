@@ -68,6 +68,24 @@ impl<T> TransactionError<T> {
             _ => NotRetryable(self),
         }
     }
+
+    /// Maps a `TransactionError<T>` to a `TransactionError<T2>`
+    ///
+    /// Applyies an operation transforming `T` to `T2`.
+    /// The API here resembles [Result::map_err] intentionally.
+    pub fn map<T2, O>(self, op: O) -> TransactionError<T2>
+    where
+        O: FnOnce(T) -> T2,
+    {
+        match self {
+            TransactionError::CustomError(err) => {
+                TransactionError::CustomError(op(err))
+            }
+            TransactionError::Database(db_err) => {
+                TransactionError::Database(db_err)
+            }
+        }
+    }
 }
 
 impl<T: std::fmt::Debug> TransactionError<T> {
@@ -100,9 +118,22 @@ impl From<PublicError> for TransactionError<PublicError> {
     }
 }
 
-impl From<TransactionError<PublicError>> for PublicError {
-    fn from(err: TransactionError<PublicError>) -> Self {
-        match err {
+impl TransactionError<PublicError> {
+    /// Converts a `TransactionError<PublicError>` into a `PublicError`.
+    ///
+    /// This is basically an `impl From<Self> -> PublicError`, but with
+    /// a different name to force the caller to label the contract
+    /// happening here:
+    ///
+    /// - When Diesel APIs are invoked within a transaction, they
+    /// may return errors indicating "please retry the transaction".
+    /// - If those are silently converted into the `PublicError` type, retry
+    /// information is not propagated up to the transaction retry wrapper, which
+    /// uses those errors to direct automated retry.
+    ///
+    /// However, outside of transactions, this conversion is harmless.
+    pub fn into_public_ignore_retries(self) -> PublicError {
+        match self {
             TransactionError::CustomError(err) => err,
             TransactionError::Database(err) => {
                 public_error_from_diesel(err, ErrorHandler::Server)

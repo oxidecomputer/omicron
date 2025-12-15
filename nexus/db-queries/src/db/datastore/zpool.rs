@@ -69,8 +69,9 @@ impl DataStore {
         zpool: Zpool,
     ) -> CreateResult<Zpool> {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
-        let zpool =
-            Self::zpool_insert_on_connection(&conn, opctx, zpool).await?;
+        let zpool = Self::zpool_insert_on_connection(&conn, opctx, zpool)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
         Ok(zpool)
     }
 
