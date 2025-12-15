@@ -732,7 +732,6 @@ pub enum BlueprintExpungedZoneAccessReason {
     // them by the zone kind if applicable, and add details explaining the
     // conditions the planner must consider during pruning.
     // --------------------------------------------------------------------
-
     /// Carrying forward the upstream NTP configuration provided by the operator
     /// during rack setup; see [`Blueprint::upstream_ntp_config()`].
     ///
@@ -825,7 +824,6 @@ pub enum BlueprintExpungedZoneAccessReason {
     // Catch-all variants for non-production callers. The planner does not need
     // to account for these when pruning.
     // --------------------------------------------------------------------
-
     /// Blippy performs checks that include expunged zones.
     Blippy,
 
