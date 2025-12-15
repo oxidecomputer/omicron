@@ -592,12 +592,11 @@ impl DataStore {
                 // storage disks have already been allocated on.
                 match maybe_must_use_sleds {
                     Some(mut must_use_sleds) => {
-                        must_use_sleds
-                            .retain(|sled|
-                                local_storage_allocation_sleds.contains(&sled)
-                            );
+                        must_use_sleds.retain(|sled| {
+                            local_storage_allocation_sleds.contains(&sled)
+                        });
                         Some(must_use_sleds)
-                    },
+                    }
 
                     None => Some(local_storage_allocation_sleds),
                 }
@@ -5881,8 +5880,8 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect_err("instance_attach_disk succeeded");
 
-        let expected_message
-            = "sled reservation has already occurred for instance";
+        let expected_message =
+            "sled reservation has already occurred for instance";
 
         match e {
             Error::InvalidRequest { message } => {
