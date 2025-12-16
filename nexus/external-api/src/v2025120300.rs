@@ -32,7 +32,7 @@ use nexus_types::external_api::params::UserData;
 use nexus_types::external_api::{params, views};
 use nexus_types::multicast::MulticastGroupCreate as InternalMulticastGroupCreate;
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams,
+    ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, Name,
     NameOrId, Nullable,
 };
@@ -106,11 +106,11 @@ pub struct MulticastGroupCreate {
     /// from the default pool.
     #[serde(default)]
     pub multicast_ip: Option<IpAddr>,
-    /// Source IP addresses for Source-Specific Multicast (SSM).
+    /// Source IP addresses for source-filtered multicast.
     ///
-    /// None uses default behavior (Any-Source Multicast).
-    /// Empty list explicitly allows any source (Any-Source Multicast).
-    /// Non-empty list restricts to specific sources (SSM).
+    /// - **ASM**: Sources are optional. None or empty list allows any source.
+    ///   A non-empty list enables source filtering via IGMPv3/MLDv2.
+    /// - **SSM**: Sources are required for SSM addresses (232/8, ff3x::/32).
     #[serde(default)]
     pub source_ips: Option<Vec<IpAddr>>,
     /// Name or ID of the IP pool to allocate from. If None, uses the default
@@ -134,7 +134,8 @@ pub struct MulticastGroupUpdate {
     /// New description for the multicast group
     #[serde(default)]
     pub description: Option<String>,
-    /// Update source IPs for SSM
+    /// Update source IPs for source filtering (ASM can have sources, but
+    /// SSM requires them)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_ips: Option<Vec<IpAddr>>,
     /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
@@ -166,21 +167,60 @@ pub struct MulticastGroupByIpPath {
 
 impl From<MulticastGroupCreate> for InternalMulticastGroupCreate {
     fn from(old: MulticastGroupCreate) -> Self {
+        // Note: `source_ips` is ignored because it's per-member in new version,
+        // not per-group.
+        //
+        // The old API field is kept for backward compatibility but ignored.
+        // We still use `has_sources` for pool selection preference.
+        let has_sources =
+            old.source_ips.as_ref().is_some_and(|s| !s.is_empty());
         Self {
             identity: IdentityMetadataCreateParams {
                 name: old.name,
                 description: old.description,
             },
             multicast_ip: old.multicast_ip,
-            source_ips: old.source_ips,
             mvlan: old.mvlan,
+            has_sources,
+        }
+    }
+}
+
+/// View of a Multicast Group.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct MulticastGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The multicast IP address held by this resource.
+    pub multicast_ip: IpAddr,
+    /// Source IP addresses for Source-Specific Multicast (SSM).
+    /// Empty array means any source is allowed.
+    pub source_ips: Vec<IpAddr>,
+    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// None means no VLAN tagging on egress.
+    pub mvlan: Option<VlanID>,
+    /// The ID of the IP pool this resource belongs to.
+    pub ip_pool_id: Uuid,
+    /// Current state of the multicast group.
+    pub state: String,
+}
+
+impl From<views::MulticastGroup> for MulticastGroup {
+    fn from(v: views::MulticastGroup) -> Self {
+        Self {
+            identity: v.identity,
+            multicast_ip: v.multicast_ip,
+            source_ips: v.source_ips,
+            mvlan: v.mvlan,
+            ip_pool_id: v.ip_pool_id,
+            state: v.state,
         }
     }
 }
 
 /// View of a Multicast Group Member.
 ///
-/// This version doesn't have the `multicast_ip` field which was added later.
+/// This version omits `multicast_ip` and `source_ips` fields added in later versions.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct MulticastGroupMember {
     /// unique, immutable, system-controlled identifier for each resource
@@ -285,9 +325,15 @@ fn bool_true() -> bool {
 
 impl From<InstanceCreate> for params::InstanceCreate {
     fn from(old: InstanceCreate) -> Self {
-        // Convert NameOrId to MulticastGroupIdentifier
-        let multicast_groups =
-            old.multicast_groups.into_iter().map(|g| g.into()).collect();
+        // Convert NameOrId to MulticastGroupJoinSpec (with no `source_ips`)
+        let multicast_groups = old
+            .multicast_groups
+            .into_iter()
+            .map(|g| params::MulticastGroupJoinSpec {
+                group: g.into(),
+                source_ips: None,
+            })
+            .collect();
 
         Self {
             identity: old.identity,
@@ -344,10 +390,16 @@ pub struct InstanceUpdate {
 
 impl From<InstanceUpdate> for params::InstanceUpdate {
     fn from(old: InstanceUpdate) -> Self {
-        // Convert Option<Vec<NameOrId>> to Option<Vec<MulticastGroupIdentifier>>
-        let multicast_groups = old
-            .multicast_groups
-            .map(|groups| groups.into_iter().map(|g| g.into()).collect());
+        // Convert Option<Vec<NameOrId>> to Option<Vec<MulticastGroupJoinSpec>>
+        let multicast_groups = old.multicast_groups.map(|groups| {
+            groups
+                .into_iter()
+                .map(|g| params::MulticastGroupJoinSpec {
+                    group: g.into(),
+                    source_ips: None,
+                })
+                .collect()
+        });
 
         Self {
             ncpus: old.ncpus,

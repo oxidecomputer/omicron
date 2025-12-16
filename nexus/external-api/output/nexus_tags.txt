@@ -53,9 +53,7 @@ instance_multicast_group_join            PUT      /v1/instances/{instance}/multi
 instance_multicast_group_leave           DELETE   /v1/instances/{instance}/multicast-groups/{multicast_group}
 instance_multicast_group_list            GET      /v1/instances/{instance}/multicast-groups
 multicast_group_list                     GET      /v1/multicast-groups
-multicast_group_member_add               POST     /v1/multicast-groups/{multicast_group}/members
 multicast_group_member_list              GET      /v1/multicast-groups/{multicast_group}/members
-multicast_group_member_remove            DELETE   /v1/multicast-groups/{multicast_group}/members/{instance}
 multicast_group_view                     GET      /v1/multicast-groups/{multicast_group}
 probe_create                             POST     /experimental/v1/probes
 probe_delete                             DELETE   /experimental/v1/probes/{probe}

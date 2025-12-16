@@ -13,16 +13,12 @@
 
 use gateway_client::types::{PowerState, RotState, SpState};
 use nexus_db_queries::context::OpContext;
-use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_project,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::params::MulticastGroupMemberAdd;
-use nexus_types::external_api::views::MulticastGroupMember;
 use nexus_types::inventory::SpType;
-use omicron_common::api::external::NameOrId;
 use omicron_nexus::Server;
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
@@ -71,21 +67,9 @@ async fn test_sled_move_updates_multicast_port_mapping(
     )
     .await;
 
-    // Add instance to multicast group
-    let member_add_url = format!(
-        "{}?project={PROJECT_NAME}",
-        mcast_group_members_url(GROUP_NAME)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance.identity.id),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(&cptestctx, PROJECT_NAME, INSTANCE_NAME, GROUP_NAME)
+        .await;
     wait_for_group_active(client, GROUP_NAME).await;
 
     let instance_uuid = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -344,21 +328,9 @@ async fn test_cache_ttl_driven_refresh() {
     )
     .await;
 
-    // Add instance to multicast group
-    let member_add_url = format!(
-        "{}?project={PROJECT_NAME}",
-        mcast_group_members_url(GROUP_NAME)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance.identity.id),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(&cptestctx, PROJECT_NAME, INSTANCE_NAME, GROUP_NAME)
+        .await;
     wait_for_group_active(client, GROUP_NAME).await;
 
     let instance_uuid = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -557,21 +529,9 @@ async fn test_backplane_cache_ttl_expiry() {
     )
     .await;
 
-    // Add instance to multicast group
-    let member_add_url = format!(
-        "{}?project={PROJECT_NAME}",
-        mcast_group_members_url(GROUP_NAME)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance.identity.id),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(&cptestctx, PROJECT_NAME, INSTANCE_NAME, GROUP_NAME)
+        .await;
     wait_for_group_active(client, GROUP_NAME).await;
 
     let instance_uuid = InstanceUuid::from_untyped_uuid(instance.identity.id);

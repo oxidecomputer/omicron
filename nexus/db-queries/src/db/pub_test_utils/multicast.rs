@@ -190,11 +190,11 @@ pub async fn create_test_group_with_state(
     let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: group_name.parse().unwrap(),
-            description: format!("Test group: {}", group_name),
+            description: format!("Test group: {group_name}"),
         },
         multicast_ip: Some(multicast_ip.parse().unwrap()),
-        source_ips: None,
         mvlan: None,
+        has_sources: false,
     };
 
     let group = datastore

@@ -15,6 +15,7 @@
 //! - Attach/detach: `multicast_group_attach`, `multicast_group_detach`
 
 use std::future::Future;
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -27,12 +28,13 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    link_ip_pool, object_create, object_delete,
+    link_ip_pool, object_create, object_delete, object_get,
 };
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::params::{
     InstanceCreate, InstanceMulticastGroupJoin,
     InstanceNetworkInterfaceAttachment, IpPoolCreate, MulticastGroupIdentifier,
+    MulticastGroupJoinSpec,
 };
 use nexus_types::external_api::shared::{IpRange, Ipv4Range};
 use nexus_types::external_api::views::{
@@ -41,7 +43,7 @@ use nexus_types::external_api::views::{
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
-    InstanceCpuCount, InstanceState, NameOrId,
+    InstanceCpuCount, InstanceState,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
@@ -79,22 +81,6 @@ pub(crate) fn mcast_group_url(group_name: &str) -> String {
 /// Build URL for listing members of a multicast group.
 pub(crate) fn mcast_group_members_url(group_name: &str) -> String {
     format!("/v1/multicast-groups/{group_name}/members")
-}
-
-/// Build URL for adding a member to a multicast group.
-///
-/// The `?project=` parameter is required when using instance names (for scoping)
-/// but must not be provided when using instance UUIDs (causes 400 Bad Request).
-pub(crate) fn mcast_group_member_add_url(
-    group_name: &str,
-    instance: &NameOrId,
-    project_name: &str,
-) -> String {
-    let base_url = mcast_group_members_url(group_name);
-    match instance {
-        NameOrId::Name(_) => format!("{base_url}?project={project_name}"),
-        NameOrId::Id(_) => base_url,
-    }
 }
 
 /// Create a multicast IP pool for ASM (Any-Source Multicast) testing.
@@ -252,7 +238,7 @@ pub(crate) async fn ensure_inventory_ready(
 
     info!(log, "waiting for inventory with SP data for all sleds");
 
-    // Wait for inventory to have SP data for ALL in-service sleds
+    // Wait for inventory to have SP data for all in-service sleds
     match wait_for_condition(
         || async {
             let opctx = OpContext::for_tests(log.clone(), datastore.clone());
@@ -553,7 +539,7 @@ pub(crate) async fn wait_for_member_state(
     };
 
     // Use reconciler-activating wait for "Joined" state
-    let result = if expected_state
+    let res = if expected_state
         == nexus_db_model::MulticastGroupMemberState::Joined
     {
         wait_for_condition_with_reconciler(
@@ -572,7 +558,7 @@ pub(crate) async fn wait_for_member_state(
         .await
     };
 
-    match result {
+    match res {
         Ok(member) => member,
         Err(poll::Error::TimedOut(elapsed)) => {
             panic!(
@@ -976,7 +962,10 @@ pub(crate) async fn instance_for_multicast_groups(
     let client = &cptestctx.external_client;
     let multicast_groups: Vec<_> = multicast_group_names
         .iter()
-        .map(|name| MulticastGroupIdentifier::Name(name.parse().unwrap()))
+        .map(|name| MulticastGroupJoinSpec {
+            group: MulticastGroupIdentifier::Name(name.parse().unwrap()),
+            source_ips: None,
+        })
         .collect();
 
     let url = format!("/v1/instances?project={project_name}");
@@ -1012,15 +1001,14 @@ pub(crate) async fn instance_for_multicast_groups(
 
 /// Attach an instance to a multicast group.
 ///
-/// If the group doesn't exist and is referenced by name, it will be implicitly created
-/// using the specified pool (required for implicit creation).
+/// If the group doesn't exist and is referenced by name, it will be implicitly created.
 pub(crate) async fn multicast_group_attach(
     cptestctx: &ControlPlaneTestContext,
     project_name: &str,
     instance_name: &str,
     group_name: &str,
 ) {
-    multicast_group_attach_with_pool(
+    multicast_group_attach_with_sources(
         cptestctx,
         project_name,
         instance_name,
@@ -1030,23 +1018,23 @@ pub(crate) async fn multicast_group_attach(
     .await
 }
 
-/// Attach an instance to a multicast group, specifying a pool for implicit creation.
+/// Attach an instance to a multicast group with optional source IPs.
 ///
-/// If the group doesn't exist and is referenced by name, it will be implicitly created
-/// using the specified pool.
-pub(crate) async fn multicast_group_attach_with_pool(
+/// If the group doesn't exist and is referenced by name, it will be implicitly created.
+/// For SSM groups (232.0.0.0/8), source_ips must be provided.
+pub(crate) async fn multicast_group_attach_with_sources(
     cptestctx: &ControlPlaneTestContext,
     project_name: &str,
     instance_name: &str,
     group_name: &str,
-    _pool: Option<&str>,
+    source_ips: Option<Vec<IpAddr>>,
 ) {
     let client = &cptestctx.external_client;
     let url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
 
-    let body = InstanceMulticastGroupJoin { source_ips: None };
+    let body = InstanceMulticastGroupJoin { source_ips };
 
     // Use PUT to attach instance to multicast group
     let response = NexusRequest::new(

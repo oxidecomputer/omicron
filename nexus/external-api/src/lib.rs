@@ -1284,16 +1284,8 @@ pub trait NexusExternalApi {
 
     // Multicast Groups
     //
-    // API versioning note: Versioned endpoints can use default trait
-    // implementations when path types are identical between versions.
-    // `TypedBody<T>` has `.map()` for input conversion, but `Path<T>` does not.
-    // Endpoints with different path types (e.g., `v2025120300::MulticastGroupPath`
-    // vs `params::MulticastGroupPath`) must have implementations in
-    // `http_entrypoints.rs`.
-    //
-    // TODO: Consider adding `.map()` to dropshot's `Path<T>` (similar to
-    // `TypedBody<T>`) to enable default implementations for versioned endpoints
-    // with different path types.
+    // TODO: Consider adding `.map()` to dropshot's `Path<T>` (like `TypedBody`)
+    // to enable inline delegation when path types differ between API versions.
 
     /// List multicast groups.
     #[endpoint {
@@ -1306,10 +1298,17 @@ pub trait NexusExternalApi {
     async fn v2025120300_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>
-    {
-        // Types are identical, delegate directly
-        Self::multicast_group_list(rqctx, query_params).await
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025120300::MulticastGroup>>,
+        HttpError,
+    > {
+        match Self::multicast_group_list(rqctx, query_params).await {
+            Ok(HttpResponseOk(page)) => Ok(HttpResponseOk(ResultsPage {
+                items: page.items.into_iter().map(|g| g.into()).collect(),
+                next_page: page.next_page,
+            })),
+            Err(e) => Err(e),
+        }
     }
 
     /// List multicast groups.
@@ -1335,9 +1334,18 @@ pub trait NexusExternalApi {
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
     async fn v2025120300_multicast_group_create(
-        rqctx: RequestContext<Self::Context>,
-        new_group: TypedBody<v2025120300::MulticastGroupCreate>,
-    ) -> Result<HttpResponseCreated<views::MulticastGroup>, HttpError>;
+        _rqctx: RequestContext<Self::Context>,
+        _new_group: TypedBody<v2025120300::MulticastGroupCreate>,
+    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroup>, HttpError>
+    {
+        Err(HttpError::for_bad_request(
+            None,
+            "multicast group creation is deprecated; groups are created \
+             implicitly when instances join via: \
+             PUT /v1/instances/{instance}/multicast-groups/{group}"
+                .to_string(),
+        ))
+    }
 
     /// Fetch a multicast group.
     ///
@@ -1349,10 +1357,12 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_view",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
+    // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
+    // and can't construct Path<T> (Dropshot extractor with private fields).
     async fn v2025120300_multicast_group_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025120300::MulticastGroupPath>,
-    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
+    ) -> Result<HttpResponseOk<v2025120300::MulticastGroup>, HttpError>;
 
     /// Fetch a multicast group.
     ///
@@ -1379,10 +1389,17 @@ pub trait NexusExternalApi {
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
     async fn v2025120300_multicast_group_update(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025120300::MulticastGroupPath>,
-        update_params: TypedBody<v2025120300::MulticastGroupUpdate>,
-    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<v2025120300::MulticastGroupPath>,
+        _update_params: TypedBody<v2025120300::MulticastGroupUpdate>,
+    ) -> Result<HttpResponseOk<v2025120300::MulticastGroup>, HttpError> {
+        Err(HttpError::for_bad_request(
+            None,
+            "multicast group update is deprecated; groups are managed \
+             implicitly through member operations"
+                .to_string(),
+        ))
+    }
 
     /// Delete a multicast group.
     ///
@@ -1394,9 +1411,16 @@ pub trait NexusExternalApi {
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
     async fn v2025120300_multicast_group_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025120300::MulticastGroupPath>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<v2025120300::MulticastGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        Err(HttpError::for_bad_request(
+            None,
+            "multicast group deletion is deprecated; groups are \
+             automatically deleted when all members leave"
+                .to_string(),
+        ))
+    }
 
     /// List members of a multicast group.
     ///
@@ -1408,6 +1432,8 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_member_list",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
+    // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
+    // and can't construct Path<T> (Dropshot extractor with private fields).
     async fn v2025120300_multicast_group_member_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025120300::MulticastGroupPath>,
@@ -1434,7 +1460,8 @@ pub trait NexusExternalApi {
 
     /// Add instance to a multicast group.
     ///
-    /// The group can be specified by name or UUID.
+    /// Deprecated: use the instance join endpoint which supports implicit group
+    /// creation and accepts group by name, UUID, or IP address.
     #[endpoint {
         method = POST,
         path = "/v1/multicast-groups/{multicast_group}/members",
@@ -1443,58 +1470,24 @@ pub trait NexusExternalApi {
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
     async fn v2025120300_multicast_group_member_add(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025120300::MulticastGroupPath>,
-        query_params: Query<params::OptionalProjectSelector>,
-        member_params: TypedBody<v2025120300::MulticastGroupMemberAdd>,
-    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroupMember>, HttpError>;
-
-    /// Add instance to a multicast group.
-    ///
-    /// Functionally equivalent to updating the instance's `multicast_groups` field.
-    /// Both approaches modify the same underlying membership and trigger the same
-    /// reconciliation logic.
-    ///
-    /// Authorization: requires Modify on the instance specified in the request
-    /// body (checked first) and Read on the multicast group (users can only attach
-    /// instances they are authorized to modify).
-    ///
-    /// Group Identification: Groups can be referenced by name, IP address,
-    /// or UUID. All three are fleet-wide unique identifiers:
-    /// - By name: If group doesn't exist, it's implicitly created with an
-    ///   auto-allocated IP from a multicast pool linked to the caller's silo.
-    ///   Pool selection prefers the default pool; if none, selects alphabetically.
-    /// - By IP: If group doesn't exist, it's implicitly created using that
-    ///   IP. The pool is determined by which pool contains the IP.
-    /// - By UUID: Group must already exist.
-    ///
-    /// Source IP filtering (SSM):
-    /// - Duplicate IPs in the request are automatically deduplicated.
-    /// - Maximum of 64 source IPs allowed (per RFC 3376, IGMPv3).
-    /// - Creating a new SSM group: `source_ips` is required. SSM addresses
-    ///   (232.x.x.x for IPv4, FF3x:: for IPv6) require source filtering.
-    /// - Joining an existing group: If `source_ips` is omitted, the instance
-    ///   inherits the group's existing sources. If specified, they must exactly
-    ///   match the group's sources or the request fails.
-    /// - Providing `source_ips` to an ASM group (or vice versa) will fail.
-    ///
-    /// Specify instance by name (requires `?project=<name>`) or UUID.
-    #[endpoint {
-        method = POST,
-        path = "/v1/multicast-groups/{multicast_group}/members",
-        tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
-    }]
-    async fn multicast_group_member_add(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::MulticastGroupPath>,
-        query_params: Query<params::OptionalProjectSelector>,
-        member_params: TypedBody<params::MulticastGroupMemberAdd>,
-    ) -> Result<HttpResponseCreated<MulticastGroupMember>, HttpError>;
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<v2025120300::MulticastGroupPath>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _member_params: TypedBody<v2025120300::MulticastGroupMemberAdd>,
+    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroupMember>, HttpError>
+    {
+        Err(HttpError::for_bad_request(
+            None,
+            "multicast group member add is deprecated; use the instance \
+             join endpoint: PUT /v1/instances/{instance}/multicast-groups/{group}"
+                .to_string(),
+        ))
+    }
 
     /// Remove instance from a multicast group.
     ///
-    /// The group can be specified by name or UUID.
+    /// Deprecated: use the instance leave endpoint which accepts group by name,
+    /// UUID, or IP address.
     #[endpoint {
         method = DELETE,
         path = "/v1/multicast-groups/{multicast_group}/members/{instance}",
@@ -1503,35 +1496,17 @@ pub trait NexusExternalApi {
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
     async fn v2025120300_multicast_group_member_remove(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025120300::MulticastGroupMemberPath>,
-        query_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// Remove instance from a multicast group.
-    ///
-    /// The group can be specified by name, UUID, or multicast IP address.
-    /// All three are fleet-wide unique identifiers.
-    ///
-    /// Functionally equivalent to removing the group from the instance's
-    /// `multicast_groups` field. Both approaches modify the same underlying
-    /// membership and trigger reconciliation.
-    ///
-    /// Authorization: requires Modify on the instance (checked first) and Read
-    /// on the multicast group.
-    ///
-    /// Specify instance by name (requires `?project=<name>`) or UUID.
-    #[endpoint {
-        method = DELETE,
-        path = "/v1/multicast-groups/{multicast_group}/members/{instance}",
-        tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
-    }]
-    async fn multicast_group_member_remove(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::MulticastGroupMemberPath>,
-        query_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<v2025120300::MulticastGroupMemberPath>,
+        _query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        Err(HttpError::for_bad_request(
+            None,
+            "multicast group member remove is deprecated; use the instance \
+             leave endpoint: DELETE /v1/instances/{instance}/multicast-groups/{group}"
+                .to_string(),
+        ))
+    }
 
     /// Look up multicast group by IP address.
     ///
@@ -1545,7 +1520,7 @@ pub trait NexusExternalApi {
     async fn v2025120300_lookup_multicast_group_by_ip(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025120300::MulticastGroupByIpPath>,
-    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
+    ) -> Result<HttpResponseOk<v2025120300::MulticastGroup>, HttpError>;
 
     // Disks
 
@@ -3044,8 +3019,9 @@ pub trait NexusExternalApi {
 
     /// Join a multicast group.
     ///
-    /// The group can be specified by name or UUID. This endpoint does not
-    /// accept a request body.
+    /// Deprecated: newer version supports implicit group creation, accepts group
+    /// by name/UUID/IP and allows specifying source IPs (optional for ASM,
+    /// required for SSM).
     #[endpoint {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
@@ -3078,15 +3054,13 @@ pub trait NexusExternalApi {
     ///   IP. The pool is determined by which pool contains the IP.
     /// - By UUID: Group must already exist.
     ///
-    /// Source IP filtering (SSM):
+    /// Source IP filtering:
     /// - Duplicate IPs in the request are automatically deduplicated.
     /// - Maximum of 64 source IPs allowed (per RFC 3376, IGMPv3).
-    /// - Creating a new SSM group: `source_ips` is required. SSM addresses
-    ///   (232.x.x.x for IPv4, FF3x:: for IPv6) require source filtering.
-    /// - Joining an existing group: If `source_ips` is omitted, the instance
-    ///   inherits the group's existing sources. If specified, they must exactly
-    ///   match the group's sources or the request fails.
-    /// - Providing `source_ips` to an ASM group (or vice versa) will fail.
+    /// - ASM: Sources are optional. Providing sources enables source
+    ///   filtering via IGMPv3/MLDv2 even for ASM addresses.
+    /// - SSM: Sources are required. SSM addresses (232.x.x.x for IPv4,
+    ///   FF3x:: for IPv6) must have at least one source specified.
     #[endpoint {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
@@ -3102,7 +3076,7 @@ pub trait NexusExternalApi {
 
     /// Leave a multicast group.
     ///
-    /// The group can be specified by name or UUID.
+    /// Deprecated: newer version accepts group by name, UUID, or IP address.
     #[endpoint {
         method = DELETE,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
@@ -3110,6 +3084,8 @@ pub trait NexusExternalApi {
         operation_id = "instance_multicast_group_leave",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
+    // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
+    // and can't construct Path<T> (Dropshot extractor with private fields).
     async fn v2025120300_instance_multicast_group_leave(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025120300::InstanceMulticastGroupPath>,

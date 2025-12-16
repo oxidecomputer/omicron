@@ -4330,7 +4330,7 @@
           "experimental"
         ],
         "summary": "Join a multicast group.",
-        "description": "This is functionally equivalent to adding the instance via the group's member management endpoint or updating the instance's `multicast_groups` field. All approaches modify the same membership and trigger reconciliation.\n\nAuthorization: requires Modify on the instance identified in the URL path (checked first) and Read on the multicast group. Checking instance permission first prevents creating orphaned groups when the instance check fails.\n\nGroup Identification: Groups can be referenced by name, IP address, or UUID. All three are fleet-wide unique identifiers: - By name: If group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. Pool selection prefers the default pool; if none, selects alphabetically. - By IP: If group doesn't exist, it's implicitly created using that IP. The pool is determined by which pool contains the IP. - By UUID: Group must already exist.\n\nSource IP filtering (SSM): - Duplicate IPs in the request are automatically deduplicated. - Maximum of 64 source IPs allowed (per RFC 3376, IGMPv3). - Creating a new SSM group: `source_ips` is required. SSM addresses (232.x.x.x for IPv4, FF3x:: for IPv6) require source filtering. - Joining an existing group: If `source_ips` is omitted, the instance inherits the group's existing sources. If specified, they must exactly match the group's sources or the request fails. - Providing `source_ips` to an ASM group (or vice versa) will fail.",
+        "description": "This is functionally equivalent to adding the instance via the group's member management endpoint or updating the instance's `multicast_groups` field. All approaches modify the same membership and trigger reconciliation.\n\nAuthorization: requires Modify on the instance identified in the URL path (checked first) and Read on the multicast group. Checking instance permission first prevents creating orphaned groups when the instance check fails.\n\nGroup Identification: Groups can be referenced by name, IP address, or UUID. All three are fleet-wide unique identifiers: - By name: If group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. Pool selection prefers the default pool; if none, selects alphabetically. - By IP: If group doesn't exist, it's implicitly created using that IP. The pool is determined by which pool contains the IP. - By UUID: Group must already exist.\n\nSource IP filtering: - Duplicate IPs in the request are automatically deduplicated. - Maximum of 64 source IPs allowed (per RFC 3376, IGMPv3). - ASM: Sources are optional. Providing sources enables source filtering via IGMPv3/MLDv2 even for ASM addresses. - SSM: Sources are required. SSM addresses (232.x.x.x for IPv4, FF3x:: for IPv6) must have at least one source specified.",
         "operationId": "instance_multicast_group_join",
         "parameters": [
           {
@@ -6202,110 +6202,6 @@
         },
         "x-dropshot-pagination": {
           "required": []
-        }
-      },
-      "post": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Add instance to a multicast group.",
-        "description": "Functionally equivalent to updating the instance's `multicast_groups` field. Both approaches modify the same underlying membership and trigger the same reconciliation logic.\n\nAuthorization: requires Modify on the instance specified in the request body (checked first) and Read on the multicast group (users can only attach instances they are authorized to modify).\n\nGroup Identification: Groups can be referenced by name, IP address, or UUID. All three are fleet-wide unique identifiers: - By name: If group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. Pool selection prefers the default pool; if none, selects alphabetically. - By IP: If group doesn't exist, it's implicitly created using that IP. The pool is determined by which pool contains the IP. - By UUID: Group must already exist.\n\nSource IP filtering (SSM): - Duplicate IPs in the request are automatically deduplicated. - Maximum of 64 source IPs allowed (per RFC 3376, IGMPv3). - Creating a new SSM group: `source_ips` is required. SSM addresses (232.x.x.x for IPv4, FF3x:: for IPv6) require source filtering. - Joining an existing group: If `source_ips` is omitted, the instance inherits the group's existing sources. If specified, they must exactly match the group's sources or the request fails. - Providing `source_ips` to an ASM group (or vice versa) will fail.\n\nSpecify instance by name (requires `?project=<name>`) or UUID.",
-        "operationId": "multicast_group_member_add",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "multicast_group",
-            "description": "Name, ID, or IP address of the multicast group",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MulticastGroupMemberAdd"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MulticastGroupMember"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/multicast-groups/{multicast_group}/members/{instance}": {
-      "delete": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Remove instance from a multicast group.",
-        "description": "The group can be specified by name, UUID, or multicast IP address. All three are fleet-wide unique identifiers.\n\nFunctionally equivalent to removing the group from the instance's `multicast_groups` field. Both approaches modify the same underlying membership and trigger reconciliation.\n\nAuthorization: requires Modify on the instance (checked first) and Read on the multicast group.\n\nSpecify instance by name (requires `?project=<name>`) or UUID.",
-        "operationId": "multicast_group_member_remove",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance",
-            "description": "Name or ID of the instance",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "multicast_group",
-            "description": "Name, ID, or IP address of the multicast group",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
         }
       }
     },
@@ -21026,11 +20922,11 @@
             ]
           },
           "multicast_groups": {
-            "description": "The multicast groups this instance should join.\n\nThe instance will be automatically added as a member of the specified multicast groups during creation, enabling it to send and receive multicast traffic for those groups. Groups can be specified by name, ID, or multicast IP address.",
+            "description": "The multicast groups this instance should join.\n\nThe instance will be automatically added as a member of the specified multicast groups during creation, enabling it to send and receive multicast traffic for those groups.\n\nEach entry specifies the group (by name, UUID, or IP address) and optional source IPs for source-filtered multicast. SSM addresses (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6) require at least one source IP.",
             "default": [],
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
+              "$ref": "#/components/schemas/MulticastGroupJoinSpec"
             }
           },
           "name": {
@@ -21159,7 +21055,7 @@
         "properties": {
           "source_ips": {
             "nullable": true,
-            "description": "Optional Source IP addresses for Source-Specific Multicast (SSM).\n\nIf the group already exists: - Validates sources match the group's existing configuration\n\nIf the group doesn't exist (implicit creation): - Non-empty list creates an SSM group with these sources - Empty or omitted creates an ASM group",
+            "description": "Optional source IP addresses for source-filtered multicast.\n\n- **ASM**: Sources optional. If omitted, receives from any source. - **SSM (232.0.0.0/8, ff3x::/32)**: At least one source required.\n\nEach member stores its own sources; the group's `source_ips` shows the union.",
             "default": null,
             "type": "array",
             "items": {
@@ -21574,11 +21470,11 @@
           },
           "multicast_groups": {
             "nullable": true,
-            "description": "Multicast groups this instance should join.\n\nWhen specified, this replaces the instance's current multicast group membership with the new set of groups. The instance will leave any groups not listed here and join any new groups that are specified. Groups can be specified by name, ID, or multicast IP address.\n\nIf not provided (None), the instance's multicast group membership will not be changed.",
+            "description": "Multicast groups this instance should join.\n\nWhen specified, this replaces the instance's current multicast group membership with the new set of groups. The instance will leave any groups not listed here and join any new groups that are specified.\n\nEach entry specifies the group (by name, UUID, or IP address) and optional source IPs for source-filtered multicast. SSM addresses (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6) require at least one source IP.\n\nIf not provided (None), the instance's multicast group membership will not be changed.",
             "default": null,
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
+              "$ref": "#/components/schemas/MulticastGroupJoinSpec"
             }
           },
           "ncpus": {
@@ -22920,7 +22816,7 @@
             ]
           },
           "source_ips": {
-            "description": "Source IP addresses for Source-Specific Multicast (SSM). Empty array means any source is allowed.",
+            "description": "Union of all member source IP addresses (computed, read-only).\n\nThis field shows the combined source IPs across all group members. Individual members may subscribe to different sources; this union reflects all sources that any member is subscribed to. Empty array means no members have source filtering enabled.",
             "type": "array",
             "items": {
               "type": "string",
@@ -22959,6 +22855,33 @@
         "description": "Can be a UUID, a name, or an IP address",
         "type": "string"
       },
+      "MulticastGroupJoinSpec": {
+        "description": "Specification for joining a multicast group with optional source filtering.\n\nUsed in `InstanceCreate` and `InstanceUpdate` to specify multicast group membership along with per-member source IP configuration.",
+        "type": "object",
+        "properties": {
+          "group": {
+            "description": "The multicast group to join, specified by name, UUID, or IP address.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MulticastGroupIdentifier"
+              }
+            ]
+          },
+          "source_ips": {
+            "nullable": true,
+            "description": "Optional source IP addresses for source-filtered multicast.\n\n- **ASM**: Sources optional. If omitted, receives from any source. - **SSM (232.0.0.0/8, ff3x::/32)**: At least one source required.\n\nEach member stores its own sources; the group's `source_ips` shows the union.",
+            "default": null,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        },
+        "required": [
+          "group"
+        ]
+      },
       "MulticastGroupMember": {
         "description": "View of a Multicast Group Member (instance belonging to a multicast group)",
         "type": "object",
@@ -22995,6 +22918,14 @@
               }
             ]
           },
+          "source_ips": {
+            "description": "Source IP addresses for this member's multicast subscription.\n\n- **ASM**: Sources are optional. Empty array means any source is allowed. Non-empty array enables source filtering (IGMPv3/MLDv2). - **SSM**: Sources are required for SSM addresses (232/8, ff3x::/32).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
           "state": {
             "description": "Current state of the multicast group membership.",
             "type": "string"
@@ -23017,36 +22948,10 @@
           "multicast_group_id",
           "multicast_ip",
           "name",
+          "source_ips",
           "state",
           "time_created",
           "time_modified"
-        ]
-      },
-      "MulticastGroupMemberAdd": {
-        "description": "Parameters for adding an instance to a multicast group.",
-        "type": "object",
-        "properties": {
-          "instance": {
-            "description": "Name or ID of the instance to add to the multicast group",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
-          },
-          "source_ips": {
-            "nullable": true,
-            "description": "Optional Source IP addresses for Source-Specific Multicast (SSM).\n\nIf the group already exists: - If `source_ips` is specified, validates they match the group's sources (no implicit update is performed).\n\nIf the group doesn't exist (implicit creation): - If `source_ips` is specified and non-empty, attempts to create an SSM group using these sources. - If omitted or empty, creates an ASM group.",
-            "default": null,
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
-            }
-          }
-        },
-        "required": [
-          "instance"
         ]
       },
       "MulticastGroupMemberResultsPage": {

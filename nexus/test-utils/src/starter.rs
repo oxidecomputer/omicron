@@ -1250,6 +1250,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             logctx: self.logctx,
             gateway: self.gateway,
             dendrite: RwLock::new(self.dendrite.into_inner().unwrap()),
+            stopped_dendrite_ports: RwLock::new(HashMap::new()),
             mgd: self.mgd,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
             external_dns: self.external_dns.unwrap(),

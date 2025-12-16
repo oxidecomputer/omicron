@@ -47,8 +47,8 @@
 //! | Condition | DPD State | Action | Next State |
 //! |-----------|-----------|---------|------------|
 //! | 1 | Matches DB | No action | "Active" (NoChange) |
-//! | 2 | Differs from DB | Direct dataplane call to fix drift | "Active" (StateChanged) |
-//! | 3 | Missing/error | Direct dataplane call to fix drift | "Active" (StateChanged) |
+//! | 2 | Differs/missing | Direct dataplane call succeeds | "Active" (StateChanged) |
+//! | 3 | Differs/missing | Direct dataplane call fails | "Active" (NoChange, retry) |
 //!
 //! ### DELETING State Transitions
 //! | Condition | DPD cleanup (external+underlay) | DB cleanup (row) | Action | Next State |
@@ -73,43 +73,59 @@
 //! - **DB failures**: Operations retried in subsequent reconciler passes
 //! - **Partial cleanup**: "Deleting" state preserved until complete cleanup
 
+use std::net::IpAddr;
+
 use anyhow::Context;
+use chrono::Utc;
 use futures::stream::{self, StreamExt};
+use ipnetwork::IpNetwork;
 use slog::{debug, error, info, trace, warn};
 
-use nexus_db_model::{MulticastGroup, MulticastGroupState};
+use nexus_db_model::{MulticastGroup, MulticastGroupState, SqlU8};
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::multicast::EnsureUnderlayResult;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::{self, DataPageParams};
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
-use super::{MulticastGroupReconciler, StateTransition};
+use super::{
+    MulticastGroupReconciler, StateTransition, map_external_to_underlay_ip,
+};
 use crate::app::multicast::dataplane::{
     GroupUpdateParams, MulticastDataplaneClient,
 };
 use crate::app::saga::create_saga_dag;
 use crate::app::sagas;
 
-/// Check if DPD tag matches database UUID.
+/// Minimum age before an orphaned group in "Creating" state can be cleaned up.
 ///
-/// Tags are UUID-based to prevent collision when group names are reused.
+/// This grace period avoids racing with in-progress member attachment operations
+/// that occur immediately after group creation.
+const ORPHAN_GROUP_MIN_AGE: chrono::Duration = chrono::Duration::seconds(10);
+
+/// Check if DPD tag matches the database group's tag.
+///
+/// Tags use format `{uuid}:{ip}` to prevent collision when group names are reused.
 fn dpd_state_matches_tag(
     dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
     db_group: &MulticastGroup,
 ) -> bool {
-    dpd_group
-        .tag
-        .as_ref()
-        .map_or(false, |tag| tag == &db_group.id().to_string())
+    match (&dpd_group.tag, &db_group.tag) {
+        (Some(dpd_tag), Some(db_tag)) => dpd_tag == db_tag,
+        _ => false,
+    }
 }
 
-/// Check if DPD sources match database sources.
+/// Check if DPD sources match computed member sources.
+///
+/// Source IPs are per-member in the database, but per-group in DPD.
+/// DPD filters at the group level before replicating packets to members,
+/// so it receives the union of all member source IPs.
 fn dpd_state_matches_sources(
     dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
-    db_group: &MulticastGroup,
+    member_sources: &[IpAddr],
 ) -> bool {
-    let db_sources: Vec<_> =
-        db_group.source_ips.iter().map(|ip| ip.ip()).collect();
+    let db_sources: Vec<_> = member_sources.to_vec();
     let dpd_sources = dpd_group.sources.clone().unwrap_or_default();
 
     // Extract exact IPs from DPD sources (filter out subnets)
@@ -208,6 +224,98 @@ impl GroupStateProcessor for ExternalGroupProcessor {
 }
 
 impl MulticastGroupReconciler {
+    /// Ensure an underlay group exists for the given external group.
+    ///
+    /// Handles the XOR-fold mapping and collision retry with salt increment.
+    /// Returns `Some(underlay)` on success, `None` if the group was deleted.
+    ///
+    /// Salt is a `u8`, so we can try up to 256 different values (0-255).
+    async fn ensure_underlay_for_external(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+    ) -> anyhow::Result<Option<nexus_db_model::UnderlayMulticastGroup>> {
+        let initial_salt: u8 = group.underlay_salt.map_or(0, |s| *s);
+        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+
+        for salt in initial_salt..=u8::MAX {
+            let underlay_ip =
+                map_external_to_underlay_ip(group.multicast_ip.ip(), salt);
+
+            let result = self
+                .datastore
+                .ensure_underlay_multicast_group(
+                    opctx,
+                    group.clone(),
+                    underlay_ip.into(),
+                )
+                .await;
+
+            match result {
+                Ok(
+                    EnsureUnderlayResult::Created(underlay)
+                    | EnsureUnderlayResult::Existing(underlay),
+                ) => {
+                    if salt != initial_salt {
+                        // Persist the new salt. If the group was deleted during
+                        // processing, return None; caller handles appropriately.
+                        match self
+                            .datastore
+                            .multicast_group_set_underlay_salt(
+                                opctx,
+                                group_id,
+                                SqlU8::new(salt),
+                            )
+                            .await
+                        {
+                            Ok(()) => {}
+                            Err(external::Error::ObjectNotFound { .. }) => {
+                                info!(
+                                    opctx.log,
+                                    "Group deleted during salt update";
+                                    "group_id" => %group.id(),
+                                );
+                                return Ok(None);
+                            }
+                            Err(e) => {
+                                return Err(e)
+                                    .context("failed to update underlay salt");
+                            }
+                        }
+                    }
+                    return Ok(Some(underlay));
+                }
+                Ok(EnsureUnderlayResult::Collision) => {
+                    info!(
+                        opctx.log,
+                        "Underlay IP collision at salt {salt}, will retry";
+                        "group_id" => %group.id(),
+                    );
+                }
+                Err(external::Error::ObjectNotFound { .. }) => {
+                    info!(
+                        opctx.log,
+                        "Group deleted during underlay creation";
+                        "group_id" => %group.id(),
+                    );
+                    return Ok(None);
+                }
+                Err(e) => {
+                    return Err(e).context("failed to ensure underlay group");
+                }
+            }
+        }
+
+        // Exhausted all 256 possible salt values (0-255)
+        anyhow::bail!(
+            "failed to find non-colliding underlay IP after {} attempts \
+             (salt range {}..={})",
+            u16::from(u8::MAX) - u16::from(initial_salt) + 1,
+            initial_salt,
+            u8::MAX
+        )
+    }
+
     /// Generic group reconciliation logic for any state.
     ///
     /// This consolidates the common pattern of:
@@ -378,21 +486,15 @@ impl MulticastGroupReconciler {
                 processor.process_creating(self, opctx, group).await
             }
             MulticastGroupState::Deleting => {
-                let dataplane_client = dataplane_client.ok_or_else(|| {
-                    anyhow::Error::msg(
-                        "dataplane client required for deleting state",
-                    )
-                })?;
+                let dataplane_client = dataplane_client
+                    .context("dataplane client required for deleting state")?;
                 processor
                     .process_deleting(self, opctx, group, dataplane_client)
                     .await
             }
             MulticastGroupState::Active => {
-                let dataplane_client = dataplane_client.ok_or_else(|| {
-                    anyhow::Error::msg(
-                        "dataplane client required for active state",
-                    )
-                })?;
+                let dataplane_client = dataplane_client
+                    .context("dataplane client required for active state")?;
                 processor
                     .process_active(self, opctx, group, dataplane_client)
                     .await
@@ -446,6 +548,45 @@ impl MulticastGroupReconciler {
             "underlay_linked" => group.underlay_group_id.is_some()
         );
 
+        // Clean up orphaned groups stuck in "Creating" state with no members.
+        // This handles cases where implicit group creation succeeded but member
+        // attachment failed (e.g., SSM validation error, transient failures).
+        //
+        // We only clean up groups that have been in "Creating" for at least
+        // ORPHAN_GROUP_MIN_AGE to avoid racing with in-progress member
+        // attachment operations.
+        let age = Utc::now() - group.time_created();
+        if age > ORPHAN_GROUP_MIN_AGE {
+            let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+            match self
+                .datastore
+                .mark_multicast_group_for_removal_if_no_members(opctx, group_id)
+                .await
+            {
+                Ok(true) => {
+                    info!(
+                        opctx.log,
+                        "cleaned up orphaned multicast group in \"Creating\" state with no members";
+                        "group_id" => %group.id(),
+                        "group_name" => group.name().as_str(),
+                        "age_seconds" => age.num_seconds(),
+                    );
+                    return Ok(StateTransition::NeedsCleanup);
+                }
+                Ok(false) => {
+                    // Group has members, continue with normal processing
+                }
+                Err(e) => {
+                    warn!(
+                        opctx.log,
+                        "failed to check/cleanup orphaned group";
+                        "group_id" => %group.id(),
+                        "error" => ?e,
+                    );
+                }
+            }
+        }
+
         // TODO: Add front port selection for egress traffic (instances →
         // external). When transitioning groups to Active, we need to identify
         // and validate front ports against DPD's QSFP topology (similar to
@@ -457,7 +598,9 @@ impl MulticastGroupReconciler {
         // configurable, and later learned (i.e., via `mcastd`/IGMP).
 
         // Handle underlay group creation/linking (same logic as before)
-        self.process_creating_group_inner(opctx, group).await?;
+        if !self.process_creating_group_inner(opctx, group).await? {
+            return Ok(StateTransition::EntityGone);
+        }
 
         // Successfully started saga - the saga will handle state transition to "Active".
         // We return NoChange because the reconciler shouldn't change the state;
@@ -491,18 +634,27 @@ impl MulticastGroupReconciler {
     /// External group handler for groups in "Active" state.
     ///
     /// Checks if the group's DPD state matches the database state. If not,
-    /// we make a dataplane calls to sync. This self-corrects any DPD drift.
+    /// we make dataplane calls to sync. This self-corrects any DPD drift.
     async fn handle_active_external_group(
         &self,
         opctx: &OpContext,
         group: &MulticastGroup,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
-        let underlay_group_id = group.underlay_group_id.ok_or_else(|| {
-            anyhow::Error::msg(
-                "active multicast group missing underlay_group_id",
-            )
-        })?;
+        let underlay_group_id = group
+            .underlay_group_id
+            .context("active multicast group missing underlay_group_id")?;
+
+        // Compute union of member source IPs for DPD comparison/update.
+        // Source IPs are per-member in DB but per-group in DPD.
+        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+        let source_ips_map = self
+            .datastore
+            .multicast_groups_source_ips_union(opctx, &[group_id])
+            .await
+            .context("failed to fetch member source IPs union")?;
+        let member_sources =
+            source_ips_map.get(&group.id()).cloned().unwrap_or_default();
 
         // Check if DPD state matches DB state (read-before-write for drift detection)
         let needs_update = match dataplane_client
@@ -512,7 +664,7 @@ impl MulticastGroupReconciler {
             Ok(Some(dpd_group)) => {
                 let tag_matches = dpd_state_matches_tag(&dpd_group, group);
                 let sources_match =
-                    dpd_state_matches_sources(&dpd_group, group);
+                    dpd_state_matches_sources(&dpd_group, &member_sources);
                 let mvlan_matches = dpd_state_matches_mvlan(&dpd_group, group);
 
                 let needs_update =
@@ -532,7 +684,7 @@ impl MulticastGroupReconciler {
                 needs_update
             }
             Ok(None) => {
-                // Group not found in DPD - need to create
+                // Group not found in DPD
                 debug!(
                     opctx.log,
                     "active group not found in DPD, will update";
@@ -541,7 +693,7 @@ impl MulticastGroupReconciler {
                 true
             }
             Err(e) => {
-                // Error fetching from DPD - log and retry
+                // Error fetching from DPD -> log and retry
                 warn!(
                     opctx.log,
                     "error fetching active group from DPD, will retry update";
@@ -571,12 +723,15 @@ impl MulticastGroupReconciler {
 
             // Direct dataplane call for drift correction
             // If update fails, we leave existing state and retry on next RPW cycle.
+            // Converts `IpAddr` to `IpNetwork` for DPD API (creates /32 for IPv4, /128 for IPv6).
+            let sources_as_networks: Vec<IpNetwork> =
+                member_sources.iter().map(|ip| IpNetwork::from(*ip)).collect();
             match dataplane_client
                 .update_groups(GroupUpdateParams {
                     external_group: group,
                     underlay_group: &underlay_group,
                     new_name: group.name().as_str(),
-                    new_sources: &group.source_ips,
+                    new_sources: &sources_as_networks,
                 })
                 .await
             {
@@ -606,11 +761,12 @@ impl MulticastGroupReconciler {
     }
 
     /// Process a single multicast group in "Creating" state.
+    /// Returns `false` if the group was deleted during processing.
     async fn process_creating_group_inner(
         &self,
         opctx: &OpContext,
         group: &MulticastGroup,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<bool, anyhow::Error> {
         debug!(
             opctx.log,
             "processing creating multicast group";
@@ -642,26 +798,10 @@ impl MulticastGroupReconciler {
                     "creating new underlay group";
                     "group" => ?group
                 );
-
-                // Generate underlay multicast IP using our ff04::/64 prefix
-                // (part of the RFC 7346 admin-local scope ff04::/16)
-                let underlay_ip = self
-                    .map_external_to_underlay_ip(group.multicast_ip.ip())
-                    .context(
-                        "failed to map customer multicast IP to underlay",
-                    )?;
-
-                let new_underlay = self
-                    .datastore
-                    .ensure_underlay_multicast_group(
-                        opctx,
-                        group.clone(),
-                        underlay_ip.into(),
-                    )
-                    .await
-                    .context("failed to create underlay multicast group")?;
-
-                new_underlay
+                match self.ensure_underlay_for_external(opctx, &group).await? {
+                    Some(underlay) => underlay,
+                    None => return Ok(false), // Group deleted during processing
+                }
             }
         };
 
@@ -706,7 +846,7 @@ impl MulticastGroupReconciler {
             "expected_outcome" => "Creating → Active"
         );
 
-        Ok(())
+        Ok(true)
     }
 
     /// Process a single multicast group in "Deleting" state.
@@ -716,7 +856,8 @@ impl MulticastGroupReconciler {
         group: &MulticastGroup,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<(), anyhow::Error> {
-        let tag = Self::generate_multicast_tag(group);
+        let tag = Self::get_multicast_tag(group)
+            .context("multicast group missing tag")?;
 
         debug!(
             opctx.log,

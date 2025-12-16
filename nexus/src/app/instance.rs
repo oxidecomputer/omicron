@@ -68,7 +68,7 @@ use sagas::instance_start;
 use sagas::instance_update;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -363,11 +363,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        multicast_groups: &[params::MulticastGroupIdentifier],
+        multicast_groups: &[params::MulticastGroupJoinSpec],
     ) -> Result<(), Error> {
         let instance_id = authz_instance.id();
 
-        // Check if multicast is enabled - if not, skip all multicast operations
+        // Check if multicast is enabled -> if not, skip all multicast operations
         if !self.multicast_enabled() {
             debug!(opctx.log,
                    "multicast not enabled, skipping multicast group changes";
@@ -403,19 +403,59 @@ impl super::Nexus {
             "current_group_ids" => ?current_group_ids
         );
 
-        // Resolve new multicast group names/IDs to group records
+        // Resolve multicast group identifiers to group IDs.
+        //
+        // For existing memberships (group already in current_group_ids), we just
+        // need the ID - no validation needed since source_ips: None means
+        // "preserve existing sources".
+        //
+        // For new memberships, we resolve (which creates groups if needed) and
+        // validation (address family + SSM) happens inside resolve.
         let mut new_group_ids = HashSet::new();
-        for group_name_or_id in multicast_groups {
-            let multicast_group_selector = params::MulticastGroupSelector {
-                multicast_group: group_name_or_id.clone(),
+        let mut group_source_ips: HashMap<Uuid, Option<Vec<std::net::IpAddr>>> =
+            HashMap::new();
+        for spec in multicast_groups {
+            // Check if this is an existing membership by looking up the group ID first
+            let group_uuid = match self
+                .resolve_multicast_group_identifier(opctx, &spec.group)
+                .await
+            {
+                Ok(id) => {
+                    let uuid = id.into_untyped_uuid();
+                    // If already a member, skip validation (None = preserve)
+                    if !current_group_ids.contains(&uuid) {
+                        // New membership - validate (address family + SSM)
+                        self.resolve_multicast_group_identifier_with_sources(
+                            opctx,
+                            &spec.group,
+                            &spec.source_ips,
+                        )
+                        .await?;
+                    }
+                    uuid
+                }
+                Err(Error::ObjectNotFound { .. }) => {
+                    // Group doesn't exist - resolve will create it (and validate)
+                    let id = self
+                        .resolve_multicast_group_identifier_with_sources(
+                            opctx,
+                            &spec.group,
+                            &spec.source_ips,
+                        )
+                        .await?;
+                    id.into_untyped_uuid()
+                }
+                Err(e) => return Err(e),
             };
-            let multicast_group_lookup = self
-                .multicast_group_lookup(opctx, &multicast_group_selector)
-                .await?;
-            let (.., db_group) =
-                multicast_group_lookup.fetch_for(authz::Action::Read).await?;
-            let id = db_group.id();
-            new_group_ids.insert(id);
+            new_group_ids.insert(group_uuid);
+            group_source_ips.insert(group_uuid, spec.source_ips.clone());
+        }
+
+        // Validate no duplicate groups were specified
+        if new_group_ids.len() != multicast_groups.len() {
+            return Err(Error::invalid_request(
+                "Duplicate multicast group specified in request",
+            ));
         }
 
         // Determine which groups to leave and join
@@ -449,19 +489,32 @@ impl super::Nexus {
                 .await?;
         }
 
-        // Add members to new groups
+        // Add members to new groups with their source_ips.
+        // Validation (address family + SSM) already happened in resolve.
         for group_id in groups_to_join {
+            let source_ips = group_source_ips
+                .get(&group_id)
+                .cloned()
+                .expect("group_id must be in group_source_ips");
+
+            let source_networks: Option<Vec<ipnetwork::IpNetwork>> = source_ips
+                .map(|ips| {
+                    ips.into_iter().map(ipnetwork::IpNetwork::from).collect()
+                });
+
             debug!(
                 opctx.log,
                 "adding member to group (reconciler will handle dataplane updates)";
                 "instance_id" => %instance_id,
-                "group_id" => %group_id
+                "group_id" => %group_id,
+                "source_ips" => ?source_networks
             );
             self.datastore()
                 .multicast_group_member_attach_to_instance(
                     opctx,
                     MulticastGroupUuid::from_untyped_uuid(group_id),
                     InstanceUuid::from_untyped_uuid(instance_id),
+                    source_networks,
                 )
                 .await?;
         }
@@ -1520,10 +1573,11 @@ impl super::Nexus {
                     )
                     .await
                 {
+                    // Source IPs are per-member, not per-group
                     multicast_groups.push(
                         sled_agent_client::types::InstanceMulticastMembership {
                             group_ip: group.multicast_ip.ip(),
-                            sources: group
+                            sources: member
                                 .source_ips
                                 .into_iter()
                                 .map(|src_ip| src_ip.ip())

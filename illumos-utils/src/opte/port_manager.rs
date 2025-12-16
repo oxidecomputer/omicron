@@ -89,7 +89,8 @@ struct RouteSet {
 pub struct MulticastGroupCfg {
     /// The multicast group IP address (IPv4 or IPv6).
     pub group_ip: IpAddr,
-    /// For Source-Specific Multicast (SSM), list of source addresses.
+    /// Source addresses for source-filtered multicast (optional for ASM,
+    /// required for SSM).
     pub sources: Vec<IpAddr>,
 }
 
