@@ -631,8 +631,7 @@ async fn sis_ensure_local_storage(
         local_storage_dataset_allocation
     else {
         return Err(ActionError::action_failed(format!(
-            "local storage record {} has a None allocation!",
-            which
+            "local storage record {which} has a None allocation!",
         )));
     };
 
