@@ -57,6 +57,7 @@ pub struct BundleCollection {
 }
 
 impl BundleCollection {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         datastore: Arc<DataStore>,
         resolver: Resolver,
