@@ -7067,8 +7067,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
     version_removed INT8,
 
+    /* Salt for underlay IP collision avoidance (XORed into mapping) */
+    /* Note: Column added via migration, must be at end for schema compatibility */
+    underlay_salt INT2,
+
     /* Constraints */
-    -- External groups: IPv4 multicast or non-admin-scoped IPv6
+    -- External groups: IPv4 multicast or non-admin-local IPv6
     CONSTRAINT external_multicast_ip_valid CHECK (
         (family(multicast_ip) = 4 AND multicast_ip << '224.0.0.0/4') OR
         (family(multicast_ip) = 6 AND multicast_ip << 'ff00::/8' AND
@@ -7098,7 +7102,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
 );
 
 /*
- * Underlay multicast groups (admin-scoped IPv6 for VPC internal forwarding)
+ * Underlay multicast groups (admin-local IPv6 for VPC internal forwarding)
  */
 CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     /* Identity */
@@ -7107,7 +7111,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    /* Admin-scoped IPv6 multicast address (NAT target) */
+    /* Admin-local IPv6 multicast address (NAT target) */
     multicast_ip INET NOT NULL,
 
     /* DPD tag to couple external/underlay state for this group */
@@ -7152,7 +7156,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
 
     /* Denormalized multicast IP from the group (for API convenience) */
     /* Note: Column added via migration, must be at end for schema compatibility */
-    multicast_ip INET NOT NULL
+    multicast_ip INET NOT NULL,
+
+    /* Source IPs for this member's multicast subscription */
+    /* Each member can subscribe to different sources */
+    /* Empty array means any source is allowed (ASM) */
+    /* Non-empty array enables source filtering (IGMPv3/MLDv2) */
+    /* The group's source_ips in API views is the union of all active members */
+    source_ips INET[] DEFAULT ARRAY[]::INET[]
 );
 
 /* External Multicast Group Indexes */
@@ -7242,7 +7253,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS underlay_multicast_group_version_removed ON om
     time_deleted
 );
 
--- Admin-scoped IPv6 address uniqueness
+-- Admin-local IPv6 address uniqueness
 -- Supports: SELECT ... WHERE multicast_ip = ? AND time_deleted IS NULL
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_underlay_multicast_by_ip ON omicron.public.underlay_multicast_group (
     multicast_ip

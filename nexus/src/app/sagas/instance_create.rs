@@ -1054,7 +1054,7 @@ async fn sic_join_instance_multicast_group(
     let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let saga_params = repeat_saga_params.saga_params;
     let group_index = repeat_saga_params.which;
-    let Some(group_name_or_id) =
+    let Some(join_spec) =
         saga_params.create_params.multicast_groups.get(group_index)
     else {
         return Ok(None);
@@ -1070,33 +1070,44 @@ async fn sic_join_instance_multicast_group(
         debug!(osagactx.log(),
                "multicast not enabled, skipping multicast group member attachment";
                "instance_id" => %instance_id,
-               "group_name_or_id" => ?group_name_or_id);
+               "join_spec" => ?join_spec);
         return Ok(Some(()));
     }
 
-    // Look up the multicast group by name or ID using the existing nexus method
-    let multicast_group_selector = params::MulticastGroupSelector {
-        multicast_group: group_name_or_id.clone(),
-    };
-    let multicast_group_lookup = osagactx
+    // Resolve the multicast group identifier to a group ID.
+    // a) For IP-based identifiers, this implicitly auto-creates the group if it
+    //    doesn't exist.
+    // b) For name/ID identifiers, the group must already exist.
+    // Validation (address family + SSM) happens inside resolve.
+    let group_id = osagactx
         .nexus()
-        .multicast_group_lookup(&opctx, &multicast_group_selector)
+        .resolve_multicast_group_identifier_with_sources(
+            &opctx,
+            &join_spec.group,
+            &join_spec.source_ips,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Multicast groups are fleet-scoped - users only need Read permission on the group
-    // (and implicit permission on the instance being created)
-    let (.., db_group) = multicast_group_lookup
-        .fetch_for(authz::Action::Read)
-        .await
-        .map_err(ActionError::action_failed)?;
+    // Convert source IPs to IpNetwork for storage
+    let source_networks: Option<Vec<ipnetwork::IpNetwork>> =
+        join_spec.source_ips.as_ref().map(|ips| {
+            ips.iter().copied().map(ipnetwork::IpNetwork::from).collect()
+        });
 
-    // Add the instance as a member of the multicast group in "Joining" state
+    // Add the instance as a member of the multicast group in "Joining" state.
+    //
+    // We use `multicast_group_member_attach_to_instance` (same as explicit join API) which
+    // doesn't require the group to be in "Active" state. This supports
+    // auto-created groups (which start in "Creating" state)
+    //
+    // The RPW reconciler handles transitioning both group and member to active states.
     if let Err(e) = datastore
         .multicast_group_member_attach_to_instance(
             &opctx,
-            MulticastGroupUuid::from_untyped_uuid(db_group.id()),
+            group_id,
             instance_id,
+            source_networks,
         )
         .await
     {
@@ -1104,7 +1115,7 @@ async fn sic_join_instance_multicast_group(
             Error::ObjectAlreadyExists { .. } => {
                 debug!(
                     opctx.log,
-                    "multicast member alredy exists";
+                    "multicast member already exists";
                     "instance_id" => %instance_id,
                 );
                 return Ok(Some(()));
@@ -1116,8 +1127,7 @@ async fn sic_join_instance_multicast_group(
     info!(
         osagactx.log(),
         "successfully joined instance to multicast group";
-        "external_group_id" => %db_group.id(),
-        "external_group_ip" => %db_group.multicast_ip,
+        "group_id" => %group_id,
         "instance_id" => %instance_id
     );
 
@@ -1137,8 +1147,8 @@ async fn sic_join_instance_multicast_group_undo(
         &saga_params.serialized_authn,
     );
 
-    // Check if we actually joined a group and get the group name/ID using chain
-    let Some(group_name_or_id) =
+    // Check if we actually joined a group and get the join spec
+    let Some(join_spec) =
         saga_params.create_params.multicast_groups.get(group_index)
     else {
         return Ok(());
@@ -1148,13 +1158,16 @@ async fn sic_join_instance_multicast_group_undo(
     if !osagactx.nexus().multicast_enabled() {
         debug!(osagactx.log(),
                "multicast not enabled, skipping multicast group member undo";
-               "group_name_or_id" => ?group_name_or_id);
+               "join_spec" => ?join_spec);
         return Ok(());
     }
 
-    // Look up the multicast group by name or ID using the existing nexus method
+    // Get the instance ID from the saga context
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
+
+    // Look up the multicast group by identifier using the existing nexus method
     let multicast_group_selector = params::MulticastGroupSelector {
-        multicast_group: group_name_or_id.clone(),
+        multicast_group: join_spec.group.clone(),
     };
     let multicast_group_lookup = osagactx
         .nexus()
@@ -1164,11 +1177,14 @@ async fn sic_join_instance_multicast_group_undo(
     let (.., db_group) =
         multicast_group_lookup.fetch_for(authz::Action::Read).await?;
 
-    // Delete the record outright.
+    // Delete only this instance's membership in the group, not all members.
+    // This ensures saga undo doesn't affect other instances that may have
+    // independently joined the same group.
     datastore
-        .multicast_group_members_delete_by_group(
+        .multicast_group_member_delete_by_group_and_instance(
             &opctx,
             MulticastGroupUuid::from_untyped_uuid(db_group.id()),
+            instance_id,
         )
         .await?;
 

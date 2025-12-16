@@ -4,19 +4,25 @@
 
 //! Atomic CTE for attaching instances to multicast groups.
 //!
-//! Uses three CTEs to atomically validate group is "Active" and instance exists,
-//! then inserts or updates the member row. Idempotent operation handles:
+//! Uses CTEs to atomically validate group exists (not in "Deleting" state)
+//! and instance exists, then inserts or updates the member row. This
+//! operation handles:
 //!
 //! - **No existing member**: Insert new row in "Joining" state
 //! - **Member in "Left" (time_deleted=NULL)**: Transition to "Joining", update sled_id
 //! - **Member in "Left" (time_deleted set)**: Insert new row (soft-delete ignored / not reactivated)
 //! - **Member in "Joining"/"Joined"**: No-op (already attached)
 //!
-//! Upsert only runs if group is "Active" and instance exists (validated by
-//! `active_group` and `instance_sled` CTEs). Returns the member ID.
+//! Upsert only runs if group exists ("Creating" or "Active") and instance exists
+//! (validated by `valid_group` and `instance_sled` CTEs). The operation returns
+//! the full member record in a single database round-trip.
 //!
 //! Prevents TOCTOU races: group validation, instance sled_id lookup, and member
 //! upsert all happen in one atomic database operation.
+//!
+//! We use sentinel-based error handling (like `network_interface.rs`): validation
+//! failures trigger a CAST error with a sentinel string, which is decoded in
+//! error handling to return the appropriate error type.
 
 use std::fmt::Debug;
 
@@ -26,41 +32,33 @@ use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::result::Error as DieselError;
-use diesel::sql_types::{Bool, Nullable, Timestamptz, Uuid as SqlUuid};
+use diesel::sql_types::{Array, Timestamptz};
+use ipnetwork::IpNetwork;
 use uuid::Uuid;
 
+use crate::db::true_or_cast_error::matches_sentinel;
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::MulticastGroupMemberState;
-use omicron_common::api::external::Error as ExternalError;
+use nexus_db_model::{MulticastGroupMember, MulticastGroupMemberState};
+use omicron_common::api::external;
 
-/// True if the group exists and is in "Active" state.
-type GroupIsActive = Option<bool>;
-
-/// True if the instance exists and has not been deleted.
-type InstanceExists = Option<bool>;
-
-/// UUID of the member row (new or existing).
-type MemberId = Option<Uuid>;
-
-/// Raw result tuple from the CTE query before parsing.
-///
-/// All fields are `Option` because CTEs return zero rows when validation fails
-/// (group not active, instance not found, etc.).
-type RawAttachMemberResult = (GroupIsActive, InstanceExists, MemberId);
+// Sentinel strings for validation errors.
+// These trigger a CAST error when validation fails, allowing us to decode
+// the specific failure reason from the error message.
+const GROUP_NOT_FOUND_SENTINEL: &str = "group-not-found";
+const INSTANCE_NOT_FOUND_SENTINEL: &str = "instance-not-found";
 
 /// Result of attaching an instance to a multicast group.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AttachMemberResult {
-    /// Member UUID for this (group, instance) pair. New on first attach,
-    /// existing ID on subsequent calls.
-    pub member_id: Uuid,
+    /// Full member record for this (group, instance) pair.
+    pub member: MulticastGroupMember,
 }
 
 /// Errors from attaching an instance to a multicast group.
 #[derive(Debug)]
 pub(crate) enum AttachMemberError {
-    /// Multicast group doesn't exist or isn't "Active"
-    GroupNotActive,
+    /// Multicast group doesn't exist or is being deleted
+    GroupNotFound,
     /// Instance doesn't exist or has been deleted
     InstanceNotFound,
     /// Database constraint violation (unique index, etc.)
@@ -69,26 +67,62 @@ pub(crate) enum AttachMemberError {
     DatabaseError(DieselError),
 }
 
-impl From<AttachMemberError> for ExternalError {
+impl AttachMemberError {
+    /// Construct an `AttachMemberError` from a database error.
+    ///
+    /// This catches the sentinel errors that indicate validation failures
+    /// (group not found, instance not found) as well as constraint violations.
+    fn from_diesel(err: DieselError) -> Self {
+        // Check for sentinel errors first
+        let sentinels = [GROUP_NOT_FOUND_SENTINEL, INSTANCE_NOT_FOUND_SENTINEL];
+        if let Some(sentinel) = matches_sentinel(&err, &sentinels) {
+            return match sentinel {
+                GROUP_NOT_FOUND_SENTINEL => AttachMemberError::GroupNotFound,
+                INSTANCE_NOT_FOUND_SENTINEL => {
+                    AttachMemberError::InstanceNotFound
+                }
+                _ => unreachable!("Unknown sentinel: {sentinel}"),
+            };
+        }
+
+        // Check for constraint violations
+        if let DieselError::DatabaseError(kind, info) = &err {
+            if matches!(
+                kind,
+                diesel::result::DatabaseErrorKind::UniqueViolation
+            ) {
+                return AttachMemberError::ConstraintViolation(
+                    info.message().to_string(),
+                );
+            }
+        }
+
+        AttachMemberError::DatabaseError(err)
+    }
+}
+
+impl From<AttachMemberError> for external::Error {
     fn from(err: AttachMemberError) -> Self {
         match err {
-            AttachMemberError::GroupNotActive => {
-                ExternalError::invalid_request(
-                    "Multicast group is not active (may be creating, deleting, or deleted)",
+            AttachMemberError::GroupNotFound => {
+                external::Error::invalid_request(
+                    "Multicast group not found or is being deleted",
                 )
             }
             AttachMemberError::InstanceNotFound => {
-                ExternalError::invalid_request(
+                external::Error::invalid_request(
                     "Instance does not exist or has been deleted",
                 )
             }
             AttachMemberError::ConstraintViolation(msg) => {
-                ExternalError::invalid_request(&format!(
+                external::Error::invalid_request(&format!(
                     "Constraint violation: {msg}"
                 ))
             }
             AttachMemberError::DatabaseError(e) => {
-                ExternalError::internal_error(&format!("Database error: {e:?}"))
+                external::Error::internal_error(&format!(
+                    "Database error: {e:?}"
+                ))
             }
         }
     }
@@ -99,12 +133,22 @@ impl From<AttachMemberError> for ExternalError {
 /// Single database round-trip performs unconditional upsert:
 ///
 /// - **Insert**: No member exists → create in "Joining" state
-/// - **Reactivate**: Member in "Left" (time_deleted=NULL) → transition to "Joining", update sled_id
+/// - **Reactivate**: Member in "Left" (time_deleted=NULL) → transition to
+///   "Joining", update `sled_id`
 /// - **Insert new**: Member in "Left" (time_deleted set) → create new row
 /// - **Idempotent**: Member already "Joining" or "Joined" → no-op
 ///
 /// Atomically validates group and instance exist, retrieves instance's current
 /// sled_id, and performs member upsert. Returns member ID.
+///
+/// Source IPs handling:
+/// - `None` → preserve existing source_ips on reactivation, empty for new inserts
+/// - `Some([])` → clear source_ips (only valid for ASM addresses as SSM requires sources)
+/// - `Some([a,b])` → set/replace with new source_ips
+///
+/// Note: The address range (not sources) determines SSM vs ASM mode. SSM
+/// addresses (232/8, ff3x::/32) require sources and the app layer validates
+/// this before calling.
 #[must_use = "Queries must be executed"]
 pub(crate) struct AttachMemberToGroupStatement {
     group_id: Uuid,
@@ -112,6 +156,10 @@ pub(crate) struct AttachMemberToGroupStatement {
     new_member_id: Uuid,
     time_created: DateTime<Utc>,
     time_modified: DateTime<Utc>,
+    /// Whether (or not) to update `source_ips` on reactivation
+    update_source_ips_on_reactivation: bool,
+    /// Source IPs for INSERT operation
+    source_ips_for_insert: Vec<IpNetwork>,
 }
 
 impl AttachMemberToGroupStatement {
@@ -122,10 +170,17 @@ impl AttachMemberToGroupStatement {
     /// - `group_id`: Multicast group to attach to
     /// - `instance_id`: Instance being attached as member
     /// - `new_member_id`: UUID for new member row (if creating)
+    /// - `source_ips`: Source IPs for SSM (`None` preserves existing on reactivation)
     ///
-    /// Three CTEs atomically validate group is "Active", instance exists, and
-    /// retrieve current sled_id from VMM table, then perform upsert.
-    pub fn new(group_id: Uuid, instance_id: Uuid, new_member_id: Uuid) -> Self {
+    /// CTEs atomically validate group is not in a "Deleting" state,
+    /// that the instance exists, retrieves the current `sled_id` from
+    /// VMM table, then performs the upsert.
+    pub fn new(
+        group_id: Uuid,
+        instance_id: Uuid,
+        new_member_id: Uuid,
+        source_ips: Option<Vec<IpNetwork>>,
+    ) -> Self {
         let now = Utc::now();
         Self {
             group_id,
@@ -133,6 +188,8 @@ impl AttachMemberToGroupStatement {
             new_member_id,
             time_created: now,
             time_modified: now,
+            update_source_ips_on_reactivation: source_ips.is_some(),
+            source_ips_for_insert: source_ips.unwrap_or_default(),
         }
     }
 
@@ -141,43 +198,10 @@ impl AttachMemberToGroupStatement {
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<AttachMemberResult, AttachMemberError> {
-        self.get_result_async::<RawAttachMemberResult>(conn)
+        self.get_result_async::<MulticastGroupMember>(conn)
             .await
-            .map_err(|e| match &e {
-                DieselError::DatabaseError(kind, info) => match kind {
-                    diesel::result::DatabaseErrorKind::UniqueViolation => {
-                        AttachMemberError::ConstraintViolation(
-                            info.message().to_string(),
-                        )
-                    }
-                    _ => AttachMemberError::DatabaseError(e),
-                },
-                _ => AttachMemberError::DatabaseError(e),
-            })
-            .and_then(Self::parse_result)
-    }
-
-    fn parse_result(
-        result: RawAttachMemberResult,
-    ) -> Result<AttachMemberResult, AttachMemberError> {
-        let (group_is_active, instance_exists, member_id) = result;
-
-        // Check validations in priority order for most helpful error messages.
-        // Instance errors first since users attach their own instances to groups,
-        // making instance-not-found more actionable than group-state errors.
-        if instance_exists != Some(true) {
-            return Err(AttachMemberError::InstanceNotFound);
-        }
-
-        // Group must be active
-        if group_is_active != Some(true) {
-            return Err(AttachMemberError::GroupNotActive);
-        }
-
-        // If validations passed, we must have a member_id
-        let member_id = member_id
-            .ok_or(AttachMemberError::DatabaseError(DieselError::NotFound))?;
-        Ok(AttachMemberResult { member_id })
+            .map_err(AttachMemberError::from_diesel)
+            .map(|member| AttachMemberResult { member })
     }
 }
 
@@ -187,31 +211,27 @@ impl QueryId for AttachMemberToGroupStatement {
 }
 
 impl Query for AttachMemberToGroupStatement {
-    type SqlType = (
-        // group_is_active: true if group exists and is Active
-        Nullable<Bool>,
-        // instance_exists: true if instance exists and not deleted
-        Nullable<Bool>,
-        // member_id: UUID of member row
-        Nullable<SqlUuid>,
-    );
+    // Return type matches the MulticastGroupMember model directly
+    type SqlType = <<MulticastGroupMember as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression>::SqlType;
 }
 
 impl RunQueryDsl<DbConnection> for AttachMemberToGroupStatement {}
 
-/// Generates SQL for atomic member attachment via three CTEs.
+/// Generates SQL for atomic member attachment via CTEs.
 ///
-/// CTEs validate group and instance exist, retrieve instance's current sled_id,
-/// then perform unconditional upsert (handles insert, reactivation, and
-/// idempotent cases). ON CONFLICT DO UPDATE only modifies rows in "Left" state.
+/// CTEs validate group and instance exist (triggering sentinel errors on failure),
+/// retrieve instance's current sled_id, then perform unconditional upsert
+/// (handles insert, reactivation, and idempotent cases). ON CONFLICT DO UPDATE
+/// only modifies rows in "Left" state.
 ///
 /// Prevents TOCTOU races by performing all validation and updates in one atomic
 /// database operation.
 impl AttachMemberToGroupStatement {
-    /// Generates the `active_group` CTE (checks if group exists and is active).
+    /// Generates the `valid_group` CTE (checks group exists and is attachable).
     ///
     /// Returns id and multicast_ip for use in the member insert.
-    fn push_active_group_cte<'a>(
+    /// Allows "Creating" and "Active" groups, but rejects "Deleting" groups.
+    fn push_valid_group_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
@@ -220,9 +240,9 @@ impl AttachMemberToGroupStatement {
             "SELECT id, multicast_ip FROM multicast_group WHERE id = ",
         );
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.group_id)?;
-        out.push_sql(" AND state = ");
+        out.push_sql(" AND state != ");
         out.push_sql(super::group_state_as_sql_literal(
-            MulticastGroupState::Active,
+            MulticastGroupState::Deleting,
         ));
         out.push_sql(" AND time_deleted IS NULL");
         Ok(())
@@ -230,8 +250,8 @@ impl AttachMemberToGroupStatement {
 
     /// Generates the `instance_sled` CTE (validates instance and gets sled_id).
     ///
-    /// Joins instance and VMM tables via active_propolis_id to get current sled_id.
-    /// Returns one row with (instance_id, sled_id) if instance exists and not deleted.
+    /// Joins instance and VMM tables via active_propolis_id to get current `sled_id`.
+    /// Returns one row with (`instance_id`, `sled_id`) if instance exists and not deleted.
     fn push_instance_sled_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -247,27 +267,63 @@ impl AttachMemberToGroupStatement {
         Ok(())
     }
 
+    /// Generates the `validation` CTE that triggers sentinel errors on failure.
+    ///
+    /// Uses CAST to trigger a predictable error when validation fails:
+    /// - If group not found → CAST('group-not-found' AS BOOL) fails
+    /// - If instance not found → CAST('instance-not-found' AS BOOL) fails
+    /// - If both valid → CAST('TRUE' AS BOOL) succeeds
+    ///
+    /// This follows the pattern used in `network_interface.rs` and `external_ip.rs`.
+    fn push_validation_cte<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        // SELECT CAST(
+        //   CASE
+        //     WHEN NOT EXISTS (SELECT 1 FROM instance_sled) THEN 'instance-not-found'
+        //     WHEN NOT EXISTS (SELECT 1 FROM valid_group) THEN 'group-not-found'
+        //     ELSE 'TRUE'
+        //   END AS BOOL
+        // ) AS validated
+        //
+        // Instance is checked first to provide more those errors up front
+        out.push_sql("SELECT CAST(CASE ");
+        out.push_sql("WHEN NOT EXISTS (SELECT 1 FROM instance_sled) THEN '");
+        out.push_sql(INSTANCE_NOT_FOUND_SENTINEL);
+        out.push_sql("' ");
+        out.push_sql("WHEN NOT EXISTS (SELECT 1 FROM valid_group) THEN '");
+        out.push_sql(GROUP_NOT_FOUND_SENTINEL);
+        out.push_sql("' ");
+        out.push_sql("ELSE 'TRUE' END AS BOOL) AS validated");
+        Ok(())
+    }
+
     /// Generates the `upserted_member` CTE (performs unconditional upsert).
     ///
-    /// SELECT joins with both `active_group` and `instance_sled` CTEs to:
-    /// 1. Ensure group is active (FROM active_group)
-    /// 2. Retrieve group's multicast_ip (FROM active_group)
+    /// SELECT joins with both `valid_group` and `instance_sled` CTEs to:
+    /// 1. Ensure group exists and is attachable (FROM valid_group)
+    /// 2. Retrieve group's multicast_ip (FROM valid_group)
     /// 3. Retrieve instance's current sled_id (CROSS JOIN instance_sled)
     ///
     /// ON CONFLICT clause uses partial unique index (only rows with time_deleted IS NULL):
     /// - Conflict only for members with time_deleted=NULL (active or stopped)
     /// - Members with time_deleted set ignored by constraint (INSERT new row)
     /// - UPDATE path preserves time_deleted=NULL for reactivated members
+    ///
+    /// Source IPs handling on conflict:
+    /// - If `update_source_ips_on_reactivation` → use EXCLUDED.source_ips
+    /// - Otherwise → preserve existing (no update)
     fn push_upserted_member_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
         // Column order matches schema: id, time_created, time_modified,
-        // external_group_id, multicast_ip, parent_id, sled_id, state
+        // external_group_id, multicast_ip, parent_id, sled_id, source_ips, state
         out.push_sql(
             "INSERT INTO multicast_group_member (\
                  id, time_created, time_modified, external_group_id, \
-                 multicast_ip, parent_id, sled_id, state) SELECT ",
+                 multicast_ip, parent_id, sled_id, source_ips, state) SELECT ",
         );
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.new_member_id)?;
         out.push_sql(", ");
@@ -276,13 +332,19 @@ impl AttachMemberToGroupStatement {
         out.push_bind_param::<Timestamptz, _>(&self.time_modified)?;
         out.push_sql(", ");
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.group_id)?;
-        out.push_sql(", active_group.multicast_ip, ");
+        out.push_sql(", valid_group.multicast_ip, ");
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.instance_id)?;
         out.push_sql(", instance_sled.sled_id, ");
+        out.push_bind_param::<Array<diesel::sql_types::Inet>, _>(
+            &self.source_ips_for_insert,
+        )?;
+        out.push_sql(", ");
         out.push_sql(super::member_state_as_sql_literal(
             MulticastGroupMemberState::Joining,
         ));
-        out.push_sql(" FROM active_group CROSS JOIN instance_sled ");
+        out.push_sql(" FROM valid_group CROSS JOIN instance_sled ");
+
+        // ON CONFLICT: only update "Left" members, preserve other states
         out.push_sql("ON CONFLICT (external_group_id, parent_id) WHERE time_deleted IS NULL DO UPDATE SET state = CASE WHEN multicast_group_member.state = ");
         out.push_sql(super::member_state_as_sql_literal(
             MulticastGroupMemberState::Left,
@@ -303,27 +365,47 @@ impl AttachMemberToGroupStatement {
         out.push_sql(super::member_state_as_sql_literal(
             MulticastGroupMemberState::Left,
         ));
-        out.push_sql(" THEN NULL ELSE multicast_group_member.time_deleted END RETURNING id");
+        out.push_sql(" THEN NULL ELSE multicast_group_member.time_deleted END");
+
+        // source_ips: update on reactivation only if caller provided source_ips
+        out.push_sql(
+            ", source_ips = CASE WHEN multicast_group_member.state = ",
+        );
+        out.push_sql(super::member_state_as_sql_literal(
+            MulticastGroupMemberState::Left,
+        ));
+        out.push_sql(" THEN ");
+        if self.update_source_ips_on_reactivation {
+            // source_ips was provided → use the new value
+            out.push_sql("EXCLUDED.source_ips");
+        } else {
+            // source_ips was `None` → preserve existing
+            out.push_sql("multicast_group_member.source_ips");
+        }
+        out.push_sql(" ELSE multicast_group_member.source_ips END");
+
+        // Return all columns so caller gets full member record
+        out.push_sql(
+            " RETURNING id, time_created, time_modified, time_deleted, \
+             external_group_id, multicast_ip, parent_id, sled_id, state, \
+             source_ips, version_added, version_removed",
+        );
         Ok(())
     }
 
-    /// Generates the final SELECT (always returns exactly one row).
+    /// Generates the final SELECT (returns member columns directly).
     ///
-    /// LEFT JOIN pattern ensures we return a row even when group isn't active
-    /// or instance doesn't exist (which causes `upserted_member` CTE to return
-    /// zero rows).
-    ///
+    /// The validation CTE has already triggered an error if validation failed,
+    /// so we can assume the upserted_member CTE returned exactly one row.
     fn push_final_select<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
         out.push_sql(
-            "SELECT \
-               EXISTS(SELECT 1 FROM active_group) AS group_is_active, \
-               EXISTS(SELECT 1 FROM instance_sled) AS instance_exists, \
-               u.id AS member_id \
-             FROM (SELECT 1) AS dummy \
-             LEFT JOIN upserted_member u ON TRUE",
+            "SELECT id, time_created, time_modified, time_deleted, \
+             external_group_id, multicast_ip, parent_id, sled_id, state, \
+             source_ips, version_added, version_removed \
+             FROM upserted_member",
         );
         Ok(())
     }
@@ -334,8 +416,8 @@ impl QueryFragment<Pg> for AttachMemberToGroupStatement {
         out.unsafe_to_cache_prepared();
 
         // CTE: Check if group exists and is active
-        out.push_sql("WITH active_group AS (");
-        self.push_active_group_cte(out.reborrow())?;
+        out.push_sql("WITH valid_group AS (");
+        self.push_valid_group_cte(out.reborrow())?;
         out.push_sql("), ");
 
         // CTE: Validate instance exists and get sled_id
@@ -343,28 +425,20 @@ impl QueryFragment<Pg> for AttachMemberToGroupStatement {
         self.push_instance_sled_cte(out.reborrow())?;
         out.push_sql("), ");
 
+        // CTE: Validation that triggers sentinel errors on failure
+        out.push_sql("validation AS MATERIALIZED (");
+        self.push_validation_cte(out.reborrow())?;
+        out.push_sql("), ");
+
         // CTE: Unconditional upsert (INSERT or UPDATE)
+        // This depends on validation CTE being evaluated first (MATERIALIZED ensures this)
         out.push_sql("upserted_member AS (");
         self.push_upserted_member_cte(out.reborrow())?;
         out.push_sql(") ");
 
-        // Final SELECT: always return a row with group validity check.
-        //
-        // We ensure that we are always returning a constant number of columns.
-        //
-        // In our case, the `upserted_member` CTE returns zero rows if the group
-        // is not active (because `FROM active_group` returns nothing). Without
-        // the LEFT JOIN, the final SELECT would return zero rows, which would be
-        // unparseable by Diesel (it expects exactly one row).
-        //
-        // The pattern we use is:
-        // - Start with a dummy scalar query `(SELECT 1)` to anchor the result
-        // - LEFT JOIN the `upserted_member` CTE, which may have zero or one row
-        // - Use `EXISTS(SELECT 1 FROM active_group)` to check group validity
-        //
-        // This ensures we always return exactly one row with a constant number
-        // of columns, even when the group doesn't exist or the upsert CTE returns
-        // nothing.
+        // Final SELECT: return member columns directly
+        // The validation CTE already triggered an error if validation failed,
+        // so upserted_member is guaranteed to have exactly one row.
         self.push_final_select(out.reborrow())?;
 
         Ok(())

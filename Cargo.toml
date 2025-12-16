@@ -73,7 +73,6 @@ members = [
     "live-tests/macros",
     "nexus",
     "nexus-config",
-    "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
@@ -131,6 +130,7 @@ members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/types/versions",
     "sled-agent/zone-images",
     "sled-agent/zone-images-examples",
     "sled-diagnostics",
@@ -235,7 +235,6 @@ default-members = [
     "live-tests/macros",
     "nexus",
     "nexus-config",
-    "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
@@ -293,6 +292,7 @@ default-members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/types/versions",
     "sled-agent/zone-images",
     "sled-agent/zone-images-examples",
     "sled-diagnostics",
@@ -441,7 +441,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
-dropshot = { version = "0.16.5", features = [ "usdt-probes" ] }
+dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.2.4"
 dropshot-api-manager-types = "0.2.4"
 dyn-clone = "1.0.20"
@@ -538,8 +538,8 @@ newtype_derive = "0.1.6"
 ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "08f2a34d487658e87545ffbba3add632a82baf0d" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "08f2a34d487658e87545ffbba3add632a82baf0d" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -568,7 +568,6 @@ nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
 nexus-reconfigurator-rendezvous = { path = "nexus/reconfigurator/rendezvous" }
 nexus-reconfigurator-simulation = { path = "nexus/reconfigurator/simulation" }
 nexus-saga-recovery = { path = "nexus/saga-recovery" }
-nexus-sled-agent-shared = { path = "nexus-sled-agent-shared" }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
@@ -664,9 +663,11 @@ rand_distr = "0.5.1"
 rand_seeder = "0.4.0"
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
+rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f0d5d5168d3d31487a56df32c676b0c6240bcc6b" }
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
+rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"
@@ -712,6 +713,7 @@ sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
+sled-agent-types-versions = { path = "sled-agent/types/versions" }
 sled-agent-zone-images = { path = "sled-agent/zone-images" }
 sled-agent-zone-images-examples = { path = "sled-agent/zone-images-examples" }
 sled-diagnostics = { path = "sled-diagnostics" }
@@ -971,8 +973,9 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-# [patch.crates-io]
+[patch.crates-io]
 # diesel = { path = "../../diesel/diesel" }
+# drift = { path = "../drift" }
 # dropshot = { path = "../dropshot/dropshot" }
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
 # dropshot-api-manager = { path = "../dropshot-api-manager/crates/dropshot-api-manager" }

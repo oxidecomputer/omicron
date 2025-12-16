@@ -115,6 +115,8 @@ pub struct ControlPlaneTestContext<N> {
     pub gateway: BTreeMap<SwitchLocation, GatewayTestContext>,
     pub dendrite:
         RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
+    /// Ports of stopped dendrite instances (for use by start_dendrite)
+    pub stopped_dendrite_ports: RwLock<HashMap<SwitchLocation, u16>>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
@@ -214,6 +216,8 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     }
 
     /// Stop a Dendrite instance for testing failure scenarios.
+    ///
+    /// Stores the port so that [`Self::restart_dendrite`] can restart on the same port.
     pub async fn stop_dendrite(
         &self,
         switch_location: omicron_common::api::external::SwitchLocation,
@@ -225,6 +229,11 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         let dendrite_opt =
             { self.dendrite.write().unwrap().remove(&switch_location) };
         if let Some(mut dendrite) = dendrite_opt {
+            // Store the port for later restart via start_dendrite
+            self.stopped_dendrite_ports
+                .write()
+                .unwrap()
+                .insert(switch_location, dendrite.port);
             dendrite.cleanup().await.unwrap();
         }
     }
@@ -233,18 +242,28 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     ///
     /// Simulates a switch restart where DPD loses its programmed state.
     /// Restarts on the same port so test DNS stays valid.
+    ///
+    /// Works both when Dendrite is currently running (will stop and restart)
+    /// or when it was previously stopped via [`Self::stop_dendrite`].
     pub async fn restart_dendrite(
         &self,
         switch_location: omicron_common::api::external::SwitchLocation,
     ) {
-        let mut old = self
-            .dendrite
-            .write()
-            .unwrap()
-            .remove(&switch_location)
-            .expect("Dendrite should be running");
-        let port = old.port;
-        old.cleanup().await.unwrap();
+        // Get port either from running instance or from stored port after stop
+        // Extract from mutex first to avoid holding lock across await
+        let old = self.dendrite.write().unwrap().remove(&switch_location);
+        let port = if let Some(mut old) = old {
+            let port = old.port;
+            old.cleanup().await.unwrap();
+            port
+        } else {
+            // Must have been stopped - get stored port
+            self.stopped_dendrite_ports
+                .write()
+                .unwrap()
+                .remove(&switch_location)
+                .expect("Dendrite not running and no stored port from stop_dendrite")
+        };
 
         let mgs = self.gateway.get(&switch_location).unwrap();
         let mgs_addr = std::net::SocketAddrV6::new(

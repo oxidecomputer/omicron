@@ -11,6 +11,9 @@ use std::net::IpAddr;
 ///
 /// Groups are created implicitly when the first member joins. This struct
 /// is used internally by Nexus to pass creation parameters to the datastore.
+///
+/// Note: Source IPs are now per-member, not per-group. Groups are created
+/// without sources; sources are specified when members join.
 #[derive(Clone, Debug)]
 pub struct MulticastGroupCreate {
     pub identity: IdentityMetadataCreateParams,
@@ -18,10 +21,10 @@ pub struct MulticastGroupCreate {
     ///
     /// If `None`, one will be allocated from the default pool.
     pub multicast_ip: Option<IpAddr>,
-    /// Source IP addresses for Source-Specific Multicast (SSM).
+    /// Whether the joining member has source IPs.
     ///
-    /// None uses default behavior (Any-Source Multicast).
-    /// Empty list explicitly allows any source (Any-Source Multicast).
-    /// Non-empty list restricts to specific sources (SSM).
-    pub source_ips: Option<Vec<IpAddr>>,
+    /// Used for default pool selection when `multicast_ip` is `None`:
+    /// - If true: prefer SSM pool (232/8), fall back to ASM (224/8)
+    /// - If false: use ASM pool directly
+    pub has_sources: bool,
 }
