@@ -26,7 +26,7 @@ use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_project,
 };
 
-/// Helper for PUT that returns 201 Created (like instance_multicast_group_join)
+/// Helper for PUT that returns 201 Created
 async fn put_created<InputType, OutputType>(
     client: &dropshot::test_util::ClientTestContext,
     path: &str,
@@ -322,12 +322,12 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
         "Expected started instance in joined state, got: {output_joined}"
     );
 
-    // Verify started instance is NOT in left state
+    // Verify started instance is not in "Left" state
     let output_left =
         run_omdb(&db_url, &["db", "multicast", "members", "--state", "left"]);
     assert!(
         !output_left.contains(&started_instance.identity.id.to_string()),
-        "Started instance should NOT be in left state, got: {output_left}"
+        "Started instance should not be in 'Left' state, got: {output_left}"
     );
 
     // Test: combined filters (--group-name + --state)
@@ -362,11 +362,11 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
             "joined",
         ],
     );
-    // test-mcast-group has a non-started instance, so it should NOT be in joined state
+    // test-mcast-group has a non-started instance, so it should not be in "Joined" state
     assert!(
         !output_combined_empty
             .contains(&started_instance.identity.id.to_string()),
-        "Started instance should NOT appear in wrong group filter, got: {output_combined_empty}"
+        "Started instance should not appear in wrong group filter, got: {output_combined_empty}"
     );
 
     // Test: omdb db multicast info --name
@@ -494,10 +494,10 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
         output.contains(&ssm_instance.identity.id.to_string()),
         "Expected SSM instance with source-ip filter, got: {output}"
     );
-    // Members without sources should NOT appear for any source-ip filter
+    // Members without sources should not appear for any source-ip filter
     assert!(
         !output.contains(&instance.identity.id.to_string()),
-        "Member without sources should NOT appear, got: {output}"
+        "Member without sources should not appear, got: {output}"
     );
 
     // Test: --source-ip with non-existent IP returns no members
