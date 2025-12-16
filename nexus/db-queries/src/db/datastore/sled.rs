@@ -740,7 +740,7 @@ impl DataStore {
                 info!(
                     &log,
                     "attempting to insert sled resource record";
-                    "local storage required" => "no",
+                    "local_storage_required" => false,
                 );
 
                 // If no local storage allocation is required, then simply try
@@ -1078,7 +1078,7 @@ impl DataStore {
                     info!(
                         &log,
                         "attempting to insert sled resource record";
-                        "local storage required" => "yes",
+                        "local_storage_required" => true,
                         "allocations" => ?allocations,
                     );
 
