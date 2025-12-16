@@ -1041,9 +1041,9 @@ mod tests {
 
     /// Test that different external addresses with identical lower bits
     /// but different upper bits (scopes) map to different underlay addresses.
-    /// XOR folding mixes upper and lower halves to avoid collisions.
+    /// XOR folding mixes upper and lower halves for better distribution.
     #[test]
-    fn test_xor_folding_prevents_collisions() {
+    fn test_xor_folding_distinguishes_scopes() {
         let ipv6_site = Ipv6Addr::new(
             0xff05, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1122, 0x3344, 0x5566,
         );

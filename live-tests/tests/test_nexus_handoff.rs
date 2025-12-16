@@ -36,6 +36,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[live_test]
@@ -163,10 +164,18 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         .await
         .expect("obtained latest reconfigurator config")
         .map_or_else(PlannerConfig::default, |cs| cs.config.planner_config);
-    let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, planner_config)
-            .await
-            .expect("planning input");
+    let (_, parent_blueprint) = datastore
+        .blueprint_target_get_current_full(opctx)
+        .await
+        .expect("getting latest target blueprint");
+    let planning_input = PlanningInputFromDb::assemble(
+        opctx,
+        datastore,
+        planner_config,
+        Arc::new(parent_blueprint),
+    )
+    .await
+    .expect("planning input");
     let (_blueprint_initial, blueprint_new_nexus) =
         blueprint_edit_current_target(
             log,

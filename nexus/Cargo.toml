@@ -87,6 +87,7 @@ qorb.workspace = true
 rand.workspace = true
 range-requests.workspace = true
 ref-cast.workspace = true
+rdb-types.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 ring.workspace = true
@@ -129,7 +130,6 @@ nexus-reconfigurator-execution.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-reconfigurator-rendezvous.workspace = true
-nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true

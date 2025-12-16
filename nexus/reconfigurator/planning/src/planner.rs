@@ -27,10 +27,6 @@ use crate::planner::omicron_zone_placement::PlacementError;
 use iddqd::IdOrdMap;
 use itertools::Either;
 use itertools::Itertools;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSource;
@@ -66,6 +62,10 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::OmicronZoneImageSource;
+use sled_agent_types::inventory::OmicronZoneType;
+use sled_agent_types::inventory::ZoneKind;
 use slog::error;
 use slog::{Logger, info, o, warn};
 use slog_error_chain::InlineErrorChain;
@@ -175,7 +175,6 @@ pub struct Planner<'a> {
 impl<'a> Planner<'a> {
     pub fn new_based_on(
         log: Logger,
-        parent_blueprint: &'a Blueprint,
         input: &'a PlanningInput,
         creator: &str,
         // NOTE: Right now, we just assume that this is the latest inventory
@@ -185,7 +184,7 @@ impl<'a> Planner<'a> {
     ) -> anyhow::Result<Planner<'a>> {
         let mut blueprint = BlueprintBuilder::new_based_on(
             &log,
-            parent_blueprint,
+            input.parent_blueprint(),
             creator,
             rng,
         )?;
@@ -1276,7 +1275,14 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::ExternalDns => {
                 // TODO-cleanup: When external DNS addresses are
                 // in the policy, this can use the input, too.
-                self.blueprint.count_parent_external_dns_zones()
+                //
+                // The target number of external DNS zones is exactly equal to
+                // the number of distinct external DNS IPs we're supposed to
+                // service.
+                self.input
+                    .parent_blueprint()
+                    .all_external_dns_external_ips()
+                    .len()
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()

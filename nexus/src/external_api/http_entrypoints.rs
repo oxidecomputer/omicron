@@ -2413,10 +2413,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v2025120300_multicast_group_view(
+    async fn v2025121200_multicast_group_view(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v2025120300::MulticastGroupPath>,
-    ) -> Result<HttpResponseOk<v2025120300::MulticastGroup>, HttpError> {
+        path_params: Path<v2025121200::MulticastGroupPath>,
+    ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError> {
         // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
         // and can't construct Path<T> (Dropshot extractor with private fields).
         let apictx = rqctx.context();
@@ -2441,10 +2441,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v2025120300_lookup_multicast_group_by_ip(
+    async fn v2025121200_lookup_multicast_group_by_ip(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v2025120300::MulticastGroupByIpPath>,
-    ) -> Result<HttpResponseOk<v2025120300::MulticastGroup>, HttpError> {
+        path_params: Path<v2025121200::MulticastGroupByIpPath>,
+    ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError> {
         // Cannot delegate inline: need to transform IP → MulticastGroupIdentifier
         // and can't construct Path<T> (Dropshot extractor with private fields).
         let apictx = rqctx.context();
@@ -2471,12 +2471,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     // Multicast Group Member Management
 
-    async fn v2025120300_multicast_group_member_list(
+    async fn v2025121200_multicast_group_member_list(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v2025120300::MulticastGroupPath>,
+        path_params: Path<v2025121200::MulticastGroupPath>,
         query_params: Query<PaginatedById>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2025120300::MulticastGroupMember>>,
+        HttpResponseOk<ResultsPage<v2025121200::MulticastGroupMember>>,
         HttpError,
     > {
         // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
@@ -2512,7 +2512,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 results.into_iter().map(Into::into).collect(),
-                &|_, m: &v2025120300::MulticastGroupMember| m.id,
+                &|_, m: &v2025121200::MulticastGroupMember| m.id,
             )?))
         };
         apictx
@@ -5721,9 +5721,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v2025120300_instance_multicast_group_leave(
+    async fn v2025121200_instance_multicast_group_leave(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v2025120300::InstanceMulticastGroupPath>,
+        path_params: Path<v2025121200::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
@@ -5820,11 +5820,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v2025120300_instance_multicast_group_join(
+    async fn v2025121200_instance_multicast_group_join(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v2025120300::InstanceMulticastGroupPath>,
+        path_params: Path<v2025121200::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroupMember>, HttpError>
+    ) -> Result<HttpResponseCreated<v2025121200::MulticastGroupMember>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {

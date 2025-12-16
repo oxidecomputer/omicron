@@ -35,7 +35,8 @@ use openapiv3::OpenAPI;
 
 /// Copies of data types that changed between versions
 mod v2025112000;
-pub mod v2025120300;
+mod v2025120300;
+pub mod v2025121200;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -65,7 +66,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2025120500, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
+    (2025121600, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
+    (2025121200, BGP_PEER_COLLISION_STATE),
     (2025120300, LOCAL_STORAGE),
     (2025112000, INITIAL),
 ]);
@@ -1295,11 +1297,11 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_list",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025120300_multicast_group_list(
+    async fn v2025121200_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2025120300::MulticastGroup>>,
+        HttpResponseOk<ResultsPage<v2025121200::MulticastGroup>>,
         HttpError,
     > {
         match Self::multicast_group_list(rqctx, query_params).await {
@@ -1333,10 +1335,10 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025120300_multicast_group_create(
+    async fn v2025121200_multicast_group_create(
         _rqctx: RequestContext<Self::Context>,
-        _new_group: TypedBody<v2025120300::MulticastGroupCreate>,
-    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroup>, HttpError>
+        _new_group: TypedBody<v2025121200::MulticastGroupCreate>,
+    ) -> Result<HttpResponseCreated<v2025121200::MulticastGroup>, HttpError>
     {
         Err(HttpError::for_bad_request(
             None,
@@ -1359,10 +1361,10 @@ pub trait NexusExternalApi {
     }]
     // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
     // and can't construct Path<T> (Dropshot extractor with private fields).
-    async fn v2025120300_multicast_group_view(
+    async fn v2025121200_multicast_group_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025120300::MulticastGroupPath>,
-    ) -> Result<HttpResponseOk<v2025120300::MulticastGroup>, HttpError>;
+        path_params: Path<v2025121200::MulticastGroupPath>,
+    ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError>;
 
     /// Fetch a multicast group.
     ///
@@ -1388,11 +1390,11 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025120300_multicast_group_update(
+    async fn v2025121200_multicast_group_update(
         _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<v2025120300::MulticastGroupPath>,
-        _update_params: TypedBody<v2025120300::MulticastGroupUpdate>,
-    ) -> Result<HttpResponseOk<v2025120300::MulticastGroup>, HttpError> {
+        _path_params: Path<v2025121200::MulticastGroupPath>,
+        _update_params: TypedBody<v2025121200::MulticastGroupUpdate>,
+    ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError> {
         Err(HttpError::for_bad_request(
             None,
             "multicast group update is deprecated; groups are managed \
@@ -1410,9 +1412,9 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025120300_multicast_group_delete(
+    async fn v2025121200_multicast_group_delete(
         _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<v2025120300::MulticastGroupPath>,
+        _path_params: Path<v2025121200::MulticastGroupPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         Err(HttpError::for_bad_request(
             None,
@@ -1434,12 +1436,12 @@ pub trait NexusExternalApi {
     }]
     // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
     // and can't construct Path<T> (Dropshot extractor with private fields).
-    async fn v2025120300_multicast_group_member_list(
+    async fn v2025121200_multicast_group_member_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025120300::MulticastGroupPath>,
+        path_params: Path<v2025121200::MulticastGroupPath>,
         query_params: Query<PaginatedById>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2025120300::MulticastGroupMember>>,
+        HttpResponseOk<ResultsPage<v2025121200::MulticastGroupMember>>,
         HttpError,
     >;
 
@@ -1469,12 +1471,12 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_member_add",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025120300_multicast_group_member_add(
+    async fn v2025121200_multicast_group_member_add(
         _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<v2025120300::MulticastGroupPath>,
+        _path_params: Path<v2025121200::MulticastGroupPath>,
         _query_params: Query<params::OptionalProjectSelector>,
-        _member_params: TypedBody<v2025120300::MulticastGroupMemberAdd>,
-    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroupMember>, HttpError>
+        _member_params: TypedBody<v2025121200::MulticastGroupMemberAdd>,
+    ) -> Result<HttpResponseCreated<v2025121200::MulticastGroupMember>, HttpError>
     {
         Err(HttpError::for_bad_request(
             None,
@@ -1495,9 +1497,9 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_member_remove",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025120300_multicast_group_member_remove(
+    async fn v2025121200_multicast_group_member_remove(
         _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<v2025120300::MulticastGroupMemberPath>,
+        _path_params: Path<v2025121200::MulticastGroupMemberPath>,
         _query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         Err(HttpError::for_bad_request(
@@ -1517,10 +1519,10 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025120300_lookup_multicast_group_by_ip(
+    async fn v2025121200_lookup_multicast_group_by_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025120300::MulticastGroupByIpPath>,
-    ) -> Result<HttpResponseOk<v2025120300::MulticastGroup>, HttpError>;
+        path_params: Path<v2025121200::MulticastGroupByIpPath>,
+    ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError>;
 
     // Disks
 
@@ -1744,7 +1746,7 @@ pub trait NexusExternalApi {
     async fn v2025120300_instance_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<v2025120300::InstanceCreate>,
+        new_instance: TypedBody<v2025121200::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
         Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
             .await
@@ -1798,7 +1800,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
-        instance_config: TypedBody<v2025120300::InstanceUpdate>,
+        instance_config: TypedBody<v2025121200::InstanceUpdate>,
     ) -> Result<HttpResponseOk<Instance>, HttpError> {
         Self::instance_update(
             rqctx,
@@ -2592,12 +2594,60 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
 
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-status",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_PEER_COLLISION_STATE,
+    }]
+    async fn v2025120300_networking_bgp_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v2025120300::BgpPeerStatus>>, HttpError>
+    {
+        let result = Self::networking_bgp_status(rqctx).await?.0;
+        Ok(HttpResponseOk(
+            result
+                .into_iter()
+                .map(|x| v2025120300::BgpPeerStatus {
+                    addr: x.addr,
+                    local_asn: x.local_asn,
+                    remote_asn: x.remote_asn,
+                    state: match x.state {
+                        BgpPeerState::Idle => v2025120300::BgpPeerState::Idle,
+                        BgpPeerState::Connect => {
+                            v2025120300::BgpPeerState::Connect
+                        }
+                        BgpPeerState::Active => {
+                            v2025120300::BgpPeerState::Active
+                        }
+                        BgpPeerState::OpenSent => {
+                            v2025120300::BgpPeerState::OpenSent
+                        }
+                        BgpPeerState::OpenConfirm => {
+                            v2025120300::BgpPeerState::OpenConfirm
+                        }
+                        BgpPeerState::ConnectionCollision
+                        | BgpPeerState::SessionSetup => {
+                            v2025120300::BgpPeerState::SessionSetup
+                        }
+                        BgpPeerState::Established => {
+                            v2025120300::BgpPeerState::Established
+                        }
+                    },
+                    state_duration_millis: x.state_duration_millis,
+                    switch: x.switch,
+                })
+                .collect(),
+        ))
+    }
+
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP peer status
     #[endpoint {
         method = GET,
         path = "/v1/system/networking/bgp-status",
         tags = ["system/networking"],
+        versions = VERSION_BGP_PEER_COLLISION_STATE..,
     }]
     async fn networking_bgp_status(
         rqctx: RequestContext<Self::Context>,
@@ -2975,12 +3025,12 @@ pub trait NexusExternalApi {
         operation_id = "instance_multicast_group_list",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025120300_instance_multicast_group_list(
+    async fn v2025121200_instance_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2025120300::MulticastGroupMember>>,
+        HttpResponseOk<ResultsPage<v2025121200::MulticastGroupMember>>,
         HttpError,
     > {
         match Self::instance_multicast_group_list(
@@ -3029,11 +3079,11 @@ pub trait NexusExternalApi {
         operation_id = "instance_multicast_group_join",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025120300_instance_multicast_group_join(
+    async fn v2025121200_instance_multicast_group_join(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025120300::InstanceMulticastGroupPath>,
+        path_params: Path<v2025121200::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroupMember>, HttpError>;
+    ) -> Result<HttpResponseCreated<v2025121200::MulticastGroupMember>, HttpError>;
 
     /// Join a multicast group.
     ///
@@ -3086,9 +3136,9 @@ pub trait NexusExternalApi {
     }]
     // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
     // and can't construct Path<T> (Dropshot extractor with private fields).
-    async fn v2025120300_instance_multicast_group_leave(
+    async fn v2025121200_instance_multicast_group_leave(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025120300::InstanceMulticastGroupPath>,
+        path_params: Path<v2025121200::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
