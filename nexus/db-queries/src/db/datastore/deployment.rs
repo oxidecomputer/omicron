@@ -3524,10 +3524,7 @@ mod tests {
         // Take the first two zones and set their image sources.
         {
             let zone_ids: Vec<OmicronZoneUuid> = builder
-                .current_sled_zones(
-                    new_sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                )
+                .current_in_service_sled_zones(new_sled_id)
                 .map(|zone| zone.id)
                 .take(2)
                 .collect();

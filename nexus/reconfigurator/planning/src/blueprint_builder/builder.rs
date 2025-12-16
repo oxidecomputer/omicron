@@ -26,6 +26,7 @@ use itertools::Either;
 use nexus_inventory::now_db_precision;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
@@ -110,13 +111,10 @@ pub enum Error {
     #[error("no Boundary NTP zones exist in parent blueprint")]
     NoBoundaryNtpZonesInParentBlueprint,
     #[error(
-        "invariant violation: found decommissioned sled with \
-         {num_zones} non-expunged zones: {sled_id}"
+        "invariant violation: commissioned sled missing from planning input's \
+         list of sleds: {sled_id}"
     )]
-    DecommissionedSledWithNonExpungedZones {
-        sled_id: SledUuid,
-        num_zones: usize,
-    },
+    CommissionedSledMissingFromInput { sled_id: SledUuid },
     #[error("programming error in planner")]
     Planner(#[source] anyhow::Error),
     #[error("error editing sled {sled_id}")]
@@ -704,10 +702,11 @@ impl<'a> BlueprintBuilder<'a> {
 
         // Compute the "in use" subnets; this includes all in-service internal
         // DNS zones _and_ any "expunged but not yet confirmed to be gone"
-        // zones, so we use the somewhat unusual `could_be_running` filter
-        // instead of the more typical `is_in_service`.
+        // zones, so we use the somewhat unusual
+        // `current_could_be_running_zones()` instead of the more typical
+        // `current_in_service_zones()`.
         let internal_dns_subnets_in_use = self
-            .current_zones(BlueprintZoneDisposition::could_be_running)
+            .current_could_be_running_zones()
             .filter_map(|(_sled_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::InternalDns(internal_dns) => {
                     Some(DnsSubnet::from_addr(*internal_dns.dns_address.ip()))
@@ -721,49 +720,82 @@ impl<'a> BlueprintBuilder<'a> {
         }))
     }
 
-    /// Iterates over the list of sled IDs for which we have zones.
-    ///
-    /// This may include decommissioned sleds.
-    pub fn sled_ids_with_zones(&self) -> impl Iterator<Item = SledUuid> + '_ {
-        self.sled_editors.keys().copied()
+    /// TODO-john
+    pub fn current_commissioned_sleds(
+        &self,
+    ) -> impl Iterator<Item = SledUuid> + '_ {
+        self.sled_editors.iter().filter_map(|(sled_id, editor)| {
+            match editor.state() {
+                SledState::Active => Some(*sled_id),
+                SledState::Decommissioned => None,
+            }
+        })
     }
 
-    /// Iterates over all zones on a sled.
-    ///
-    /// This will include both zones from the parent blueprint, as well
-    /// as the changes made within this builder.
-    pub fn current_sled_zones<F>(
+    /// TODO-john
+    pub fn current_in_service_sled_zones(
         &self,
         sled_id: SledUuid,
-        filter: F,
-    ) -> impl Iterator<Item = &BlueprintZoneConfig>
-    where
-        F: FnMut(BlueprintZoneDisposition) -> bool,
-    {
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
         let Some(editor) = self.sled_editors.get(&sled_id) else {
             return Either::Left(iter::empty());
         };
-        Either::Right(editor.zones(filter))
+        Either::Right(editor.zones(BlueprintZoneDisposition::is_in_service))
     }
 
-    /// Iterates over all zones on all sleds.
-    ///
-    /// Acts like a combination of [`Self::sled_ids_with_zones`] and
-    /// [`Self::current_sled_zones`].
-    ///
-    /// This will include both zones from the parent blueprint, as well
-    /// as the changes made within this builder.
-    pub fn current_zones<F>(
-        &'a self,
-        filter: F,
-    ) -> impl Iterator<Item = (SledUuid, &'a BlueprintZoneConfig)>
-    where
-        F: FnMut(BlueprintZoneDisposition) -> bool + Clone,
-    {
-        self.sled_ids_with_zones().flat_map(move |sled_id| {
-            self.current_sled_zones(sled_id, filter.clone())
-                .map(move |config| (sled_id, config))
+    /// TODO-john
+    pub fn current_in_service_zones(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        self.current_commissioned_sleds().flat_map(|sled_id| {
+            self.current_in_service_sled_zones(sled_id)
+                .map(move |zone| (sled_id, zone))
         })
+    }
+
+    /// TODO-john
+    pub fn current_expunged_sled_zones(
+        &self,
+        sled_id: SledUuid,
+        _reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        let Some(editor) = self.sled_editors.get(&sled_id) else {
+            return Either::Left(iter::empty());
+        };
+        Either::Right(editor.zones(BlueprintZoneDisposition::is_expunged))
+    }
+
+    /// TODO-john
+    pub fn current_could_be_running_sled_zones(
+        &self,
+        sled_id: SledUuid,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        let Some(editor) = self.sled_editors.get(&sled_id) else {
+            return Either::Left(iter::empty());
+        };
+        Either::Right(editor.zones(BlueprintZoneDisposition::could_be_running))
+    }
+
+    /// TODO-john
+    pub fn current_could_be_running_zones(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        self.current_commissioned_sleds().flat_map(|sled_id| {
+            self.current_could_be_running_sled_zones(sled_id)
+                .map(move |zone| (sled_id, zone))
+        })
+    }
+
+    /// TODO-john
+    pub fn current_in_service_and_expunged_sled_zones(
+        &self,
+        sled_id: SledUuid,
+        _reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        let Some(editor) = self.sled_editors.get(&sled_id) else {
+            return Either::Left(iter::empty());
+        };
+        Either::Right(editor.zones(BlueprintZoneDisposition::any))
     }
 
     pub fn current_sled_disks<F>(
@@ -1277,10 +1309,7 @@ impl<'a> BlueprintBuilder<'a> {
 
     fn next_internal_dns_gz_address_index(&self, sled_id: SledUuid) -> u32 {
         let used_internal_dns_gz_address_indices = self
-            .current_sled_zones(
-                sled_id,
-                BlueprintZoneDisposition::is_in_service,
-            )
+            .current_in_service_sled_zones(sled_id)
             .filter_map(|z| match z.zone_type {
                 BlueprintZoneType::InternalDns(
                     blueprint_zone_type::InternalDns {
@@ -2095,10 +2124,7 @@ impl<'a> BlueprintBuilder<'a> {
         // up a set of invalid zpools for this sled/kind pair.
         let mut skip_zpools = BTreeSet::new();
         for zone_config in self
-            .current_sled_zones(
-                sled_id,
-                BlueprintZoneDisposition::is_in_service,
-            )
+            .current_in_service_sled_zones(sled_id)
             .filter(|z| z.zone_type.kind() == zone_kind)
         {
             if let Some(zpool) = zone_config.zone_type.durable_zpool() {
