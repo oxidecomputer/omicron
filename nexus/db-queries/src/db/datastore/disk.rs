@@ -1004,9 +1004,8 @@ impl DataStore {
 
                                         if record.is_some() {
                                             let s = "cannot attach local \
-                                                storage disk: sled reservation \
-                                                has already occurred for \
-                                                instance";
+                                                storage disk: instance is \
+                                                starting";
 
                                             return Err(
                                                 Error::invalid_request(
