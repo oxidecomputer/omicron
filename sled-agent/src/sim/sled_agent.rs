@@ -57,7 +57,7 @@ use sled_agent_types::early_networking::{
 };
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
-    VmmPutStateResponse, VmmSpecExt, VmmStateRequested, VmmUnregisterResponse,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,

@@ -64,7 +64,6 @@ pub mod instance {
     pub use crate::v1::instance::VmmPutStateBody;
     pub use crate::v1::instance::VmmPutStateResponse;
     pub use crate::v1::instance::VmmSpec;
-    pub use crate::v1::instance::VmmSpecExt;
     pub use crate::v1::instance::VmmStateRequested;
     pub use crate::v1::instance::VmmUnregisterResponse;
     pub use crate::v1::instance::VpcPathParam;
@@ -113,6 +112,15 @@ pub mod inventory {
     pub use crate::v11::inventory::OmicronZoneConfig;
     pub use crate::v11::inventory::OmicronZoneType;
     pub use crate::v11::inventory::OmicronZonesConfig;
+
+    pub use crate::impls::inventory::ManifestBootInventoryDisplay;
+    pub use crate::impls::inventory::ManifestInventoryDisplay;
+    pub use crate::impls::inventory::ManifestNonBootInventoryDisplay;
+    pub use crate::impls::inventory::MupdateOverrideBootInventoryDisplay;
+    pub use crate::impls::inventory::MupdateOverrideInventoryDisplay;
+    pub use crate::impls::inventory::MupdateOverrideNonBootInventoryDisplay;
+    pub use crate::impls::inventory::ZoneArtifactInventoryDisplay;
+    pub use crate::impls::inventory::ZoneImageResolverInventoryDisplay;
 }
 
 pub mod probes {

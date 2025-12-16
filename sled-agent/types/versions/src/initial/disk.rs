@@ -59,16 +59,3 @@ pub enum DiskStateRequested {
     Destroyed,
     Faulted,
 }
-
-impl DiskStateRequested {
-    /// Returns whether the requested state is attached to an Instance or not.
-    pub fn is_attached(&self) -> bool {
-        match self {
-            DiskStateRequested::Detached => false,
-            DiskStateRequested::Destroyed => false,
-            DiskStateRequested::Faulted => false,
-
-            DiskStateRequested::Attached(_) => true,
-        }
-    }
-}

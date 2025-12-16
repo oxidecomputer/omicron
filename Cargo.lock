@@ -12972,7 +12972,6 @@ dependencies = [
  "serde",
  "serde_human_bytes",
  "serde_json",
- "sha3",
  "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
