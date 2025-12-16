@@ -181,9 +181,8 @@ mod tests {
         };
         config.generate_xml_file().unwrap();
 
-        let expected_file = Utf8PathBuf::from_str("./testutils")
-            .unwrap()
-            .join("replica-server-config.xml");
+        let expected_file =
+            Utf8PathBuf::from("../testutils").join("replica-server-config.xml");
         let generated_file = Utf8PathBuf::from(config_dir.path())
             .join("replica-server-config.xml");
         let generated_content = std::fs::read_to_string(generated_file).expect(

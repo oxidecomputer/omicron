@@ -279,7 +279,7 @@ impl Collection {
         self.clickhouse_keeper_cluster_membership
             .iter()
             .max_by_key(|membership| membership.leader_committed_log_index)
-            .map(|membership| (membership.clone()))
+            .map(|membership| membership.clone())
     }
 
     /// Return a type which can be used to display a collection in a

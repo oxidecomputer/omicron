@@ -3095,7 +3095,7 @@ async fn test_instance_create_delete_network_interface(
     );
 
     // Parameters for the interfaces to create/attach
-    let if_params = vec![
+    let if_params = [
         params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if0".parse().unwrap(),
@@ -3340,7 +3340,7 @@ async fn test_instance_update_network_interfaces(
     );
 
     // Parameters for each interface to try to modify.
-    let if_params = vec![
+    let if_params = [
         params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if0".parse().unwrap(),

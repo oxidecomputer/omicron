@@ -3842,7 +3842,7 @@ dependencies = [
  "dropshot",
  "dropshot-api-manager-types",
  "ereport-types",
- "gateway-types",
+ "gateway-types-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -3991,11 +3991,18 @@ dependencies = [
 name = "gateway-types"
 version = "0.1.0"
 dependencies = [
+ "gateway-types-versions",
+ "omicron-workspace-hack",
+]
+
+[[package]]
+name = "gateway-types-versions"
+version = "0.1.0"
+dependencies = [
  "daft",
  "dropshot",
  "gateway-messages",
  "hex",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
@@ -7095,9 +7102,11 @@ dependencies = [
  "nexus-db-lookup",
  "nexus-db-queries",
  "omicron-common",
+ "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
+ "pq-sys",
  "reqwest",
  "sled-agent-client",
  "slog",
@@ -7275,8 +7284,10 @@ dependencies = [
  "nexus-db-queries",
  "nexus-types",
  "omicron-common",
+ "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "pq-sys",
  "slog",
  "slog-error-chain",
 ]
@@ -7416,6 +7427,7 @@ dependencies = [
  "omicron-cockroach-admin",
  "omicron-common",
  "omicron-passwords",
+ "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -7424,6 +7436,7 @@ dependencies = [
  "oximeter-collector",
  "oximeter-producer",
  "oxnet",
+ "pq-sys",
  "pretty_assertions",
  "serde",
  "serde_json",
@@ -7685,11 +7698,10 @@ dependencies = [
 
 [[package]]
 name = "num-bigint-dig"
-version = "0.8.4"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc84195820f291c7697304f3cbdadd1cb7199c0efc917ff5eafd71225c136151"
+checksum = "e661dda6640fad38e827a6d4a310ff4763082116fe217f279885c97f511bb0b7"
 dependencies = [
- "byteorder",
  "lazy_static",
  "libm",
  "num-integer",
@@ -8147,6 +8159,7 @@ dependencies = [
  "gateway-sp-comms",
  "gateway-test-utils",
  "gateway-types",
+ "gateway-types-versions",
  "hex",
  "http",
  "hyper",
@@ -12980,7 +12993,6 @@ dependencies = [
  "serde",
  "serde_human_bytes",
  "serde_json",
- "sha3",
  "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",

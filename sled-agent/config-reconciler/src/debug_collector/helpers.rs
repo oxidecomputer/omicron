@@ -13,7 +13,6 @@ use illumos_utils::dumpadm::{DumpAdm, DumpContentType};
 use illumos_utils::zone::ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolName;
 use sled_storage::config::MountConfig;
-use slog::error;
 use std::ffi::OsString;
 use zone::{Zone, ZoneError};
 

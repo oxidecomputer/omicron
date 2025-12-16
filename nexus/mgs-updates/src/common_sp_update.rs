@@ -19,7 +19,6 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::inventory::SpType;
 use omicron_common::disk::M2Slot;
-use slog::error;
 use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;

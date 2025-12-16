@@ -687,9 +687,8 @@ mod tests {
 
         config.generate_xml_file().unwrap();
 
-        let expected_file = Utf8PathBuf::from_str("./testutils")
-            .unwrap()
-            .join("keeper_config.xml");
+        let expected_file =
+            Utf8PathBuf::from("../testutils").join("keeper_config.xml");
         let generated_file =
             Utf8PathBuf::from(config_dir.path()).join("keeper_config.xml");
         let generated_content = std::fs::read_to_string(generated_file)
