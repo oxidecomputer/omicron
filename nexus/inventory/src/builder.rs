@@ -12,7 +12,7 @@ use anyhow::Context;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use cockroach_admin_types::NodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;

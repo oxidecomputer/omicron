@@ -13,7 +13,7 @@ use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UninitializedSledId;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;

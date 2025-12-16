@@ -4,10 +4,13 @@
 
 use anyhow::Result;
 use camino::Utf8PathBuf;
-use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperId, Lgif, OXIMETER_CLUSTER, RaftConfig, SystemTimeSeries,
-    SystemTimeSeriesSettings,
+use clickhouse_admin_types::OXIMETER_CLUSTER;
+use clickhouse_admin_types::keeper::{
+    ClickhouseKeeperClusterMembership, KeeperConf, KeeperId, Lgif, RaftConfig,
+};
+use clickhouse_admin_types::server::DistributedDdlQueue;
+use clickhouse_admin_types::timeseries::{
+    SystemTimeSeries, SystemTimeSeriesSettings,
 };
 use dropshot::HttpError;
 use illumos_utils::{ExecutionError, output_to_exec_error};

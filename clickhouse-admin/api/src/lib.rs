@@ -2,12 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, DistributedDdlQueue,
-    GenerateConfigResult, KeeperConf, KeeperConfigurableSettings, Lgif,
-    MetricInfoPath, RaftConfig, ServerConfigurableSettings, SystemTimeSeries,
-    TimeSeriesSettingsQuery,
-};
+use clickhouse_admin_types_versions::latest;
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
@@ -73,8 +68,11 @@ pub trait ClickhouseAdminKeeperApi {
     }]
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<KeeperConfigurableSettings>,
-    ) -> Result<HttpResponseCreated<GenerateConfigResult>, HttpError>;
+        body: TypedBody<latest::keeper::KeeperConfigurableSettings>,
+    ) -> Result<
+        HttpResponseCreated<latest::config::GenerateConfigResult>,
+        HttpError,
+    >;
 
     /// Retrieve the generation number of a configuration
     #[endpoint {
@@ -94,7 +92,7 @@ pub trait ClickhouseAdminKeeperApi {
     }]
     async fn lgif(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Lgif>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::keeper::Lgif>, HttpError>;
 
     /// Retrieve information from ClickHouse virtual node /keeper/config which
     /// contains last committed cluster configuration.
@@ -104,7 +102,7 @@ pub trait ClickhouseAdminKeeperApi {
     }]
     async fn raft_config(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RaftConfig>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::keeper::RaftConfig>, HttpError>;
 
     /// Retrieve configuration information from a keeper node.
     #[endpoint {
@@ -113,7 +111,7 @@ pub trait ClickhouseAdminKeeperApi {
     }]
     async fn keeper_conf(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<KeeperConf>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::keeper::KeeperConf>, HttpError>;
 
     /// Retrieve cluster membership information from a keeper node.
     #[endpoint {
@@ -122,7 +120,10 @@ pub trait ClickhouseAdminKeeperApi {
     }]
     async fn keeper_cluster_membership(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ClickhouseKeeperClusterMembership>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::keeper::ClickhouseKeeperClusterMembership>,
+        HttpError,
+    >;
 }
 
 /// API interface for our clickhouse-admin-server server
@@ -148,8 +149,11 @@ pub trait ClickhouseAdminServerApi {
     }]
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<ServerConfigurableSettings>,
-    ) -> Result<HttpResponseCreated<GenerateConfigResult>, HttpError>;
+        body: TypedBody<latest::server::ServerConfigurableSettings>,
+    ) -> Result<
+        HttpResponseCreated<latest::config::GenerateConfigResult>,
+        HttpError,
+    >;
 
     /// Retrieve the generation number of a configuration
     #[endpoint {
@@ -168,7 +172,10 @@ pub trait ClickhouseAdminServerApi {
     }]
     async fn distributed_ddl_queue(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<Vec<latest::server::DistributedDdlQueue>>,
+        HttpError,
+    >;
 
     /// Retrieve time series from the system database.
     ///
@@ -181,9 +188,12 @@ pub trait ClickhouseAdminServerApi {
     }]
     async fn system_timeseries_avg(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<MetricInfoPath>,
-        query_params: Query<TimeSeriesSettingsQuery>,
-    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
+        path_params: Path<latest::timeseries::MetricInfoPath>,
+        query_params: Query<latest::timeseries::TimeSeriesSettingsQuery>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::timeseries::SystemTimeSeries>>,
+        HttpError,
+    >;
 
     /// Idempotently initialize a replicated ClickHouse cluster database.
     #[endpoint {
@@ -225,7 +235,10 @@ pub trait ClickhouseAdminSingleApi {
     }]
     async fn system_timeseries_avg(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<MetricInfoPath>,
-        query_params: Query<TimeSeriesSettingsQuery>,
-    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
+        path_params: Path<latest::timeseries::MetricInfoPath>,
+        query_params: Query<latest::timeseries::TimeSeriesSettingsQuery>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::timeseries::SystemTimeSeries>>,
+        HttpError,
+    >;
 }

@@ -1518,7 +1518,7 @@ dependencies = [
 name = "clickhouse-admin-api"
 version = "0.1.0"
 dependencies = [
- "clickhouse-admin-types",
+ "clickhouse-admin-types-versions",
  "dropshot",
  "dropshot-api-manager-types",
  "omicron-common",
@@ -1587,6 +1587,14 @@ dependencies = [
 
 [[package]]
 name = "clickhouse-admin-types"
+version = "0.1.0"
+dependencies = [
+ "clickhouse-admin-types-versions",
+ "omicron-workspace-hack",
+]
+
+[[package]]
+name = "clickhouse-admin-types-versions"
 version = "0.1.0"
 dependencies = [
  "anyhow",
