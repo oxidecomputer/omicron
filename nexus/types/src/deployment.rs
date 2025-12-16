@@ -373,19 +373,17 @@ impl Blueprint {
     /// running: either they're in-service, or they're expunged but have not yet
     /// been confirmed shut down.
     ///
-    /// Like [`Self::expunged_zones()`], callers are required to specify a
-    /// reason to access expunged zones.
-    ///
     /// The set of zones returned by this method is equivalent to the set of
     /// zones returned by chaining together calls to `Self::in_service_zones()`
     /// and `Self::expunged_zones(ZoneRunningStatus::MaybeRunning, reason)`, but
-    /// only iterates over the zones once.
+    /// only iterates over the zones once and does not require a `reason`.
     pub fn all_maybe_running_zones(
         &self,
-        _reason: BlueprintExpungedZoneAccessReason,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
-        // Danger note: this call will definitely access expunged zones, but we
-        // know the caller has provided a known reason to do so.
+        // Danger note: this call will definitely access expunged zones, but
+        // only those that are not yet `ready_for_cleanup`. The planner's
+        // pruning only acts on `ready_for_cleanup` zones, so we don't need to
+        // track accesses of this kind of expunged zone.
         self.danger_all_omicron_zones(
             BlueprintZoneDisposition::could_be_running,
         )
@@ -574,9 +572,7 @@ impl Blueprint {
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<Generation, Error> {
-        for (_sled_id, zone_config) in self.all_maybe_running_zones(
-            BlueprintExpungedZoneAccessReason::NexusSelfGeneration,
-        ) {
+        for (_sled_id, zone_config) in self.all_maybe_running_zones() {
             if let BlueprintZoneType::Nexus(nexus_config) =
                 &zone_config.zone_type
             {
@@ -823,13 +819,6 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// The planner must not prune a Nexus zone if it's the last zone
     /// remaining with the set of configuration.
     NexusExternalConfig,
-
-    /// Nexus needs to determine its own generation. If the actively-running
-    /// Nexus has been expunged (but not yet shut down), it should still be able
-    /// to find its own generation!
-    ///
-    /// The planner does not need to account for this when pruning Nexus zones.
-    NexusSelfGeneration,
 
     /// Nexus needs to whether it itself should be quiescing. If the
     /// actively-running Nexus has been expunged (but not yet shut down), it
