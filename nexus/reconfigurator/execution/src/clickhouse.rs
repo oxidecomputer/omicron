@@ -74,11 +74,8 @@ pub(crate) async fn deploy_nodes(
     //
     // This is tracked in https://github.com/oxidecomputer/omicron/issues/7724
     use BlueprintExpungedZoneAccessReason::ClickhouseKeeperServerConfigIps;
-    let all_zones =
-        blueprint.in_service_zones().chain(blueprint.expunged_zones(
-            ZoneRunningStatus::Any,
-            ClickhouseKeeperServerConfigIps,
-        ));
+    let all_zones = blueprint
+        .all_in_service_and_expunged_zones(ClickhouseKeeperServerConfigIps);
 
     deploy_nodes_impl(opctx, all_zones, clickhouse_cluster_config).await
 }

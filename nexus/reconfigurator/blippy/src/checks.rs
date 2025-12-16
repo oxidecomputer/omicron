@@ -2132,11 +2132,8 @@ fn check_planning_input_network_records_appear_in_blueprint(
     // constructed above in `BuilderExternalNetworking::new()`, we do not
     // check for duplicates here: we could very well see reuse of IPs
     // between expunged zones or between expunged -> running zones.
-    for (_, z) in blippy.blueprint().in_service_zones().chain(
-        blippy.blueprint().expunged_zones(
-            ZoneRunningStatus::Any,
-            BlueprintExpungedZoneAccessReason::Blippy,
-        ),
+    for (_, z) in blippy.blueprint().all_in_service_and_expunged_zones(
+        BlueprintExpungedZoneAccessReason::Blippy,
     ) {
         let zone_type = &z.zone_type;
         match zone_type {

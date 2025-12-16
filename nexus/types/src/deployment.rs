@@ -350,15 +350,33 @@ impl Blueprint {
         })
     }
 
+    /// Iterate over all zones in the blueprint, regardless of whether they're
+    /// in-service or expunged.
+    ///
+    /// Like [`Self::expunged_zones()`], callers are required to specify a
+    /// reason to access expunged zones.
+    ///
+    /// The set of zones returned by this method is equivalent to the set of
+    /// zones returned by chaining together calls to `Self::in_service_zones()`
+    /// and `Self::expunged_zones(ZoneRunningStatus::Any, reason)`, but only
+    /// iterates over the zones once.
+    pub fn all_in_service_and_expunged_zones(
+        &self,
+        _reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        // Danger note: this call will definitely access expunged zones, but we
+        // know the caller has provided a known reason to do so.
+        self.danger_all_omicron_zones(BlueprintZoneDisposition::any)
+    }
+
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
     /// that match the provided filter, along with the associated sled id.
     ///
     /// This method is prefixed with `danger_` and is private because it allows
     /// the caller to potentially act on expunged zones without providing a
     /// reason for doing so. It should only be called by `in_service_zones()`
-    /// and `expunged_zones()` above; all other callers that want access to
-    /// expunged zones must go through `expunged_zones()`, which forces them to
-    /// specify a [`BlueprintExpungedZoneAccessReason`].
+    /// and the helper methods that require callers to specify a
+    /// [`BlueprintExpungedZoneAccessReason`] defined above.
     fn danger_all_omicron_zones<F>(
         &self,
         mut filter: F,
@@ -485,11 +503,9 @@ impl Blueprint {
         nexus_id: OmicronZoneUuid,
     ) -> Result<bool, anyhow::Error> {
         let zone = self
-            .in_service_zones()
-            .chain(self.expunged_zones(
-                ZoneRunningStatus::Any,
+            .all_in_service_and_expunged_zones(
                 BlueprintExpungedZoneAccessReason::NexusSelfIsQuiescing,
-            ))
+            )
             .find(|(_sled_id, zone_config)| zone_config.id == nexus_id)
             .ok_or_else(|| {
                 anyhow!("zone {} does not exist in blueprint", nexus_id)
@@ -536,12 +552,9 @@ impl Blueprint {
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<Generation, Error> {
-        for (_sled_id, zone_config) in
-            self.in_service_zones().chain(self.expunged_zones(
-                ZoneRunningStatus::Any,
-                BlueprintExpungedZoneAccessReason::NexusSelfGeneration,
-            ))
-        {
+        for (_sled_id, zone_config) in self.all_in_service_and_expunged_zones(
+            BlueprintExpungedZoneAccessReason::NexusSelfGeneration,
+        ) {
             if let BlueprintZoneType::Nexus(nexus_config) =
                 &zone_config.zone_type
             {
@@ -576,21 +589,19 @@ impl Blueprint {
         // zones. (Real racks will always have at least one in-service boundary
         // NTP zone, but some test or test systems may have 0 if they have only
         // a single sled and that sled's boundary NTP zone is being upgraded.)
-        self.in_service_zones()
-            .chain(self.expunged_zones(
-                ZoneRunningStatus::Any,
-                BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig,
-            ))
-            .find_map(|(_sled_id, zone)| match &zone.zone_type {
-                BlueprintZoneType::BoundaryNtp(ntp_config) => {
-                    Some(UpstreamNtpConfig {
-                        ntp_servers: &ntp_config.ntp_servers,
-                        dns_servers: &ntp_config.dns_servers,
-                        domain: ntp_config.domain.as_deref(),
-                    })
-                }
-                _ => None,
-            })
+        self.all_in_service_and_expunged_zones(
+            BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig,
+        )
+        .find_map(|(_sled_id, zone)| match &zone.zone_type {
+            BlueprintZoneType::BoundaryNtp(ntp_config) => {
+                Some(UpstreamNtpConfig {
+                    ntp_servers: &ntp_config.ntp_servers,
+                    dns_servers: &ntp_config.dns_servers,
+                    domain: ntp_config.domain.as_deref(),
+                })
+            }
+            _ => None,
+        })
     }
 
     /// Return the operator-specified configuration of Nexus.
@@ -609,21 +620,18 @@ impl Blueprint {
         // zones. (Real racks will always have at least one in-service Nexus
         // zone - the one calling this code - but some tests create blueprints
         // without any.)
-        self.in_service_zones()
-            .chain(self.expunged_zones(
-                ZoneRunningStatus::Any,
-                BlueprintExpungedZoneAccessReason::NexusExternalConfig,
-            ))
-            .find_map(|(_sled_id, zone)| match &zone.zone_type {
-                BlueprintZoneType::Nexus(nexus_config) => {
-                    Some(OperatorNexusConfig {
-                        external_tls: nexus_config.external_tls,
-                        external_dns_servers: &nexus_config
-                            .external_dns_servers,
-                    })
-                }
-                _ => None,
-            })
+        self.all_in_service_and_expunged_zones(
+            BlueprintExpungedZoneAccessReason::NexusExternalConfig,
+        )
+        .find_map(|(_sled_id, zone)| match &zone.zone_type {
+            BlueprintZoneType::Nexus(nexus_config) => {
+                Some(OperatorNexusConfig {
+                    external_tls: nexus_config.external_tls,
+                    external_dns_servers: &nexus_config.external_dns_servers,
+                })
+            }
+            _ => None,
+        })
     }
 
     /// Returns the complete set of external IP addresses assigned to external
@@ -663,18 +671,16 @@ impl Blueprint {
         // don't check for that here. That would be an illegal blueprint; blippy
         // would complain, and attempting to execute it would fail due to
         // database constraints on external IP uniqueness.
-        self.in_service_zones()
-            .chain(self.expunged_zones(
-                ZoneRunningStatus::Any,
-                BlueprintExpungedZoneAccessReason::ExternalDnsExternalIps,
-            ))
-            .filter_map(|(_id, zone)| match &zone.zone_type {
-                BlueprintZoneType::ExternalDns(dns) => {
-                    Some(dns.dns_address.addr.ip())
-                }
-                _ => None,
-            })
-            .collect()
+        self.all_in_service_and_expunged_zones(
+            BlueprintExpungedZoneAccessReason::ExternalDnsExternalIps,
+        )
+        .filter_map(|(_id, zone)| match &zone.zone_type {
+            BlueprintZoneType::ExternalDns(dns) => {
+                Some(dns.dns_address.addr.ip())
+            }
+            _ => None,
+        })
+        .collect()
     }
 }
 
