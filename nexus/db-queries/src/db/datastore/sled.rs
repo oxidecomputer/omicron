@@ -5881,10 +5881,10 @@ pub(in crate::db::datastore) mod test {
             .expect_err("instance_attach_disk succeeded");
 
         let expected_message =
-            "sled reservation has already occurred for instance";
+            "cannot attach local storage disk: instance is starting";
 
         match e {
-            Error::InvalidRequest { message } => {
+            Error::Conflict { message } => {
                 assert!(message.external_message().contains(&expected_message));
             }
 
