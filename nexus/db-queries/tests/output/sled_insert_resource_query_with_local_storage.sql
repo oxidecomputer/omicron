@@ -112,12 +112,11 @@ WITH
       UPDATE
         rendezvous_local_storage_dataset
       SET
-        size_used = size_used + new_local_storage_allocation_records.dataset_size
+        size_used = size_used + new_records.dataset_size
       FROM
-        new_local_storage_allocation_records
+        new_local_storage_allocation_records AS new_records
       WHERE
-        new_local_storage_allocation_records.local_storage_dataset_id
-        = rendezvous_local_storage_dataset.id
+        new_records.local_storage_dataset_id = rendezvous_local_storage_dataset.id
         AND rendezvous_local_storage_dataset.time_tombstoned IS NULL
       RETURNING
         *
@@ -139,14 +138,14 @@ WITH
                 sum(
                   crucible_dataset.size_used
                   + rendezvous_local_storage_dataset.size_used
-                  + new_local_storage_allocation_records.dataset_size
+                  + new_records.dataset_size
                 )
               FROM
                 crucible_dataset
                 JOIN rendezvous_local_storage_dataset ON
                     crucible_dataset.pool_id = rendezvous_local_storage_dataset.pool_id
-                JOIN new_local_storage_allocation_records ON
-                    crucible_dataset.pool_id = new_local_storage_allocation_records.pool_id
+                JOIN new_local_storage_allocation_records AS new_records ON
+                    crucible_dataset.pool_id = new_records.pool_id
               WHERE
                 (crucible_dataset.size_used IS NOT NULL)
                 AND (crucible_dataset.time_deleted IS NULL)
@@ -196,14 +195,14 @@ WITH
                   sum(
                     crucible_dataset.size_used
                     + rendezvous_local_storage_dataset.size_used
-                    + new_local_storage_allocation_records.dataset_size
+                    + new_records.dataset_size
                   )
                 FROM
                   crucible_dataset
                   JOIN rendezvous_local_storage_dataset ON
                       crucible_dataset.pool_id = rendezvous_local_storage_dataset.pool_id
-                  JOIN new_local_storage_allocation_records ON
-                      crucible_dataset.pool_id = new_local_storage_allocation_records.pool_id
+                  JOIN new_local_storage_allocation_records AS new_records ON
+                      crucible_dataset.pool_id = new_records.pool_id
                 WHERE
                   (crucible_dataset.size_used IS NOT NULL)
                   AND (crucible_dataset.time_deleted IS NULL)
