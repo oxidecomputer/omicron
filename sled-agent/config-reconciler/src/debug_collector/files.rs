@@ -13,6 +13,7 @@
 //   - add test that the behavior is streaming
 //     - custom lister could record when its listed and we could compare that to
 //       when archive steps get spit out
+//   - failure to list one directory does not affect archiving others
 //   - what else?
 // - figure out what will happen for file conflicts outside of log files and
 //   what to do about it
@@ -698,6 +699,7 @@ mod test {
     use slog::debug;
     use std::collections::BTreeSet;
     use std::sync::LazyLock;
+    use std::sync::Mutex;
     use strum::Display;
     use strum::EnumDiscriminants;
     use strum::EnumIter;
@@ -885,11 +887,12 @@ mod test {
 
     struct TestLister<'a> {
         files: &'a IdOrdMap<TestFile>,
+        last_listed: Mutex<Option<Utf8PathBuf>>,
     }
 
     impl<'a> TestLister<'a> {
         fn new(files: &'a IdOrdMap<TestFile>) -> Self {
-            Self { files }
+            Self { files, last_listed: Mutex::new(None) }
         }
     }
     impl FileLister for TestLister<'_> {
@@ -897,6 +900,7 @@ mod test {
             &self,
             path: &Utf8Path,
         ) -> Vec<Result<Filename, anyhow::Error>> {
+            *self.last_listed.lock().unwrap() = Some(path.to_owned());
             self.files
                 .iter()
                 .filter_map(|test_file| {
@@ -1224,6 +1228,57 @@ mod test {
             panic!(
                 "did not archive some of the files we expected: {:?}",
                 expected_unarchived
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Verifies that the archive plan streams rather than pre-computing all the
+    /// steps it has to do at once
+    ///
+    /// This property is important for scalability and memory usage.
+    #[test]
+    fn test_archiving_is_streaming() {
+        // Set up the test.
+        let logctx = test_setup_log("test_archiving_is_streaming");
+        let log = &logctx.log;
+
+        // Load the test data
+        let files = load_test_files().unwrap();
+
+        // Begin a simulated archive.
+        let fake_output_dir = Utf8Path::new("/fake-output-directory");
+        let lister = TestLister::new(&files);
+        let plan = test_archive(
+            log,
+            &files,
+            fake_output_dir,
+            ArchiveWhat::Everything,
+            &lister,
+        );
+
+        // Verify that the archiver operates in a streaming way by checking that
+        // each archived file is contained in the most-recently-listed
+        // directory.  If it's not, then it must have come from some previously
+        // listed directory, which means that the archiver should have returned
+        // it before listing the next directory.  In other words, that would
+        // mean that the archiver read ahead of the directory whose files it's
+        // currently archiving, which is the thing we're trying to check
+        // doesn't happen.
+        for step in plan.to_steps() {
+            let step = step.expect("test lister does not produce errors");
+            let ArchiveStep::ArchiveFile { input_path, .. } = &step else {
+                continue;
+            };
+
+            let last_listed = lister.last_listed.lock().unwrap();
+            let last = last_listed
+                .as_ref()
+                .expect("listed a directory before archiving any files");
+            assert!(
+                input_path.starts_with(last),
+                "archived file is not in the most-recently-listed directory",
             );
         }
 
