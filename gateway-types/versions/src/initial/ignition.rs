@@ -5,7 +5,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::v1::component::SpIdentifier;
+use super::component::SpIdentifier;
 
 #[derive(
     Debug,
