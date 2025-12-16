@@ -55,6 +55,11 @@ zones = [
     { kind = "fake", artifact_name = "oximeter", file_name = "oximeter.tar.gz", size = "128KiB" },
 ]
 
+[[artifact.measurement_corpus]]
+name = "fake-corpus"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }
+
 [[artifact.psc_sp]]
 name = "fake-psc-sp"
 version = "0.0.1"

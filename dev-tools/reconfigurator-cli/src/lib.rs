@@ -57,7 +57,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::disk::M2Slot;
 use omicron_common::policy::NEXUS_REDUNDANCY;
-use omicron_common::update::OmicronZoneManifestSource;
+use omicron_common::update::OmicronInstallManifestSource;
 use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::GenericUuid;
@@ -3306,9 +3306,9 @@ fn mupdate_source_to_description(
 ) -> anyhow::Result<SimTufRepoDescription> {
     let manifest_source = match source.mupdate_id {
         Some(mupdate_id) => {
-            OmicronZoneManifestSource::Installinator { mupdate_id }
+            OmicronInstallManifestSource::Installinator { mupdate_id }
         }
-        None => OmicronZoneManifestSource::SledAgent,
+        None => OmicronInstallManifestSource::SledAgent,
     };
     if let Some(repo_path) = &source.valid.from_repo {
         let description = extract_tuf_repo_description(&sim.log, repo_path)?;
