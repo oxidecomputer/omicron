@@ -286,6 +286,8 @@ pub fn sled_insert_resource_query(
 ) -> TypedSqlQuery<(sql_types::Numeric,)> {
     let mut query = QueryBuilder::new();
 
+    let instance_id = resource.instance_id.unwrap().into_untyped_uuid();
+
     // This is similar to the "sled_targets" subquery in
     // "sled_find_targets_query", but it's scoped to the single sled we're
     // trying to select.
@@ -316,16 +318,12 @@ pub fn sled_insert_resource_query(
 
     // "our_aa_groups": All the anti-affinity group_ids to which our instance belongs.
     subquery_our_aa_groups(&mut query);
-    query.bind::<sql_types::Uuid, _>(
-        resource.instance_id.unwrap().into_untyped_uuid(),
-    );
+    query.bind::<sql_types::Uuid, _>(instance_id);
 
     // "other_aa_instances": All the group_id,instance_ids of instances (other
     // than our own) belonging to "our_aa_groups".
     subquery_other_aa_instances(&mut query);
-    query.bind::<sql_types::Uuid, _>(
-        resource.instance_id.unwrap().into_untyped_uuid(),
-    );
+    query.bind::<sql_types::Uuid, _>(instance_id);
 
     // Find instances with a strict anti-affinity policy in the sled failure
     // domain. We must ensure we do not co-locate with these instances.
@@ -355,16 +353,12 @@ pub fn sled_insert_resource_query(
 
     // "our_a_groups": All the affinity group_ids to which our instance belongs.
     subquery_our_a_groups(&mut query);
-    query.bind::<sql_types::Uuid, _>(
-        resource.instance_id.unwrap().into_untyped_uuid(),
-    );
+    query.bind::<sql_types::Uuid, _>(instance_id);
 
     // "other_a_instances": All the group_id,instance_ids of instances (other
     // than our own) belonging to "our_a_instances").
     subquery_other_a_instances(&mut query);
-    query.bind::<sql_types::Uuid, _>(
-        resource.instance_id.unwrap().into_untyped_uuid(),
-    );
+    query.bind::<sql_types::Uuid, _>(instance_id);
 
     // Find instances with a strict affinity policy in the sled failure
     // domain. We must ensure we co-locate with these instances.
@@ -711,7 +705,7 @@ pub fn sled_insert_resource_query(
     .bind::<sql_types::BigInt, _>(resource.resources.hardware_threads)
     .bind::<sql_types::BigInt, _>(resource.resources.rss_ram)
     .bind::<sql_types::BigInt, _>(resource.resources.reservoir_ram)
-    .bind::<sql_types::Uuid, _>(resource.instance_id.unwrap().into_untyped_uuid());
+    .bind::<sql_types::Uuid, _>(instance_id);
 
     query.query()
 }
