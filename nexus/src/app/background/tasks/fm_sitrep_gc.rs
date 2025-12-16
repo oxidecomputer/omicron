@@ -266,9 +266,13 @@ mod tests {
                 comment: format!("test sitrep v{i}; orphan {i}"),
                 time_created: Utc::now(),
                 parent_sitrep_id,
-                // TODO(eliza): we should populate cases and assert they get
-                // cleaned up...
             },
+            // We could populate the orphan sitreps with cases and ereports
+            // here, but there's a unit test
+            // `test_sitrep_delete_deletes_cases()` in the
+            // `nexus_db_queries::db::datastore::fm` module which ensures that
+            // deleting a sitrep removes all the other records associated with
+            // it, so it should be safe to trust that this works properly.
             cases: Default::default(),
         };
         match datastore.fm_sitrep_insert(&opctx, sitrep).await {

@@ -1400,14 +1400,13 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_sitrep_cases_roundtrip() {
-        let logctx = dev::test_setup_log("test_sitrep_cases_roundtrip");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // Case ereport assignments require that an actual ereport exists in the
-        // database, so we must first create some.
+    async fn make_sitrep_with_cases(
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> fm::Sitrep {
+        // In order to read sitreps with case ereport assignments, the
+        // corresponding entries in the `ereport` table must also exist, so
+        // we'll make those here first.
         let restart_id = omicron_uuid_kinds::EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
 
@@ -1446,11 +1445,8 @@ mod tests {
             .await
             .expect("failed to insert ereports");
 
-        // Create a sitrep with cases and ereport assignments
         let sitrep_id = SitrepUuid::new_v4();
         let creator_id = OmicronZoneUuid::new_v4();
-
-        // Create cases
         let case1 = {
             let mut ereports = iddqd::IdOrdMap::new();
             ereports
@@ -1492,28 +1488,31 @@ mod tests {
             }
         };
 
-        // Create and insert the sitrep
-        let sitrep = {
-            let mut cases = iddqd::IdOrdMap::new();
-            cases
-                .insert_unique(case1.clone())
-                .expect("failed to insert case 1");
-            cases
-                .insert_unique(case2.clone())
-                .expect("failed to insert case 2");
-            fm::Sitrep {
-                metadata: fm::SitrepMetadata {
-                    id: sitrep_id,
-                    inv_collection_id: CollectionUuid::new_v4(),
-                    creator_id,
-                    comment: "i made this sitrep because i felt like it"
-                        .to_string(),
-                    time_created: Utc::now(),
-                    parent_sitrep_id: None,
-                },
-                cases,
-            }
-        };
+        let mut cases = iddqd::IdOrdMap::new();
+        cases.insert_unique(case1.clone()).expect("failed to insert case 1");
+        cases.insert_unique(case2.clone()).expect("failed to insert case 2");
+        fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: sitrep_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id,
+                comment: "i made this sitrep because i felt like it"
+                    .to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+            cases,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sitrep_cases_roundtrip() {
+        let logctx = dev::test_setup_log("test_sitrep_cases_roundtrip");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
+        let sitrep_id = sitrep.id();
 
         datastore
             .fm_sitrep_insert(&opctx, sitrep.clone())
@@ -1575,6 +1574,99 @@ mod tests {
             }
             eprintln!();
         }
+
+        // Clean up
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sitrep_delete_deletes_cases() {
+        let logctx = dev::test_setup_log("test_sitrep_delete_deletes_cases");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
+        let sitrep_id = sitrep.id();
+
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .await
+            .expect("failed to insert sitrep");
+
+        // Verify the sitrep, cases, and ereport assignments exist
+        let conn = db
+            .datastore()
+            .pool_connection_authorized(&opctx)
+            .await
+            .expect("failed to get connection");
+
+        let sitreps_before: i64 = sitrep_dsl::fm_sitrep
+            .filter(sitrep_dsl::id.eq(sitrep_id.into_untyped_uuid()))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .expect("failed to count sitreps before deletion");
+        assert_eq!(sitreps_before, 1, "sitrep should exist before deletion");
+
+        let cases_before: i64 = case_dsl::fm_case
+            .filter(case_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .expect("failed to count cases before deletion");
+        assert_eq!(cases_before, 2, "two cases should exist before deletion");
+
+        let case_ereports_before: i64 = case_ereport_dsl::fm_ereport_in_case
+            .filter(
+                case_ereport_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()),
+            )
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .expect("failed to count case ereports before deletion");
+        assert_eq!(
+            case_ereports_before, 2,
+            "two case ereport assignments should exist before deletion"
+        );
+
+        // Now delete the sitrep
+        let deleted_count = datastore
+            .fm_sitrep_delete_all(&opctx, vec![sitrep_id])
+            .await
+            .expect("failed to delete sitrep");
+        assert_eq!(deleted_count, 1, "should have deleted 1 sitrep");
+
+        // Check that the sitrep and all the cases and associated records no
+        // longer exist after deletion.
+        let sitreps_after: i64 = sitrep_dsl::fm_sitrep
+            .filter(sitrep_dsl::id.eq(sitrep_id.into_untyped_uuid()))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .expect("failed to count sitreps after deletion");
+        assert_eq!(sitreps_after, 0, "sitrep should not exist after deletion");
+
+        let cases_after: i64 = case_dsl::fm_case
+            .filter(case_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .expect("failed to count cases after deletion");
+        assert_eq!(cases_after, 0, "cases should not exist after deletion");
+
+        let case_ereports_after: i64 = case_ereport_dsl::fm_ereport_in_case
+            .filter(
+                case_ereport_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()),
+            )
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .expect("failed to count case ereports after deletion");
+        assert_eq!(
+            case_ereports_after, 0,
+            "case ereport assignments should not exist after deletion"
+        );
 
         // Clean up
         db.terminate().await;
