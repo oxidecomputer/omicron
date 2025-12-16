@@ -13,9 +13,10 @@ use crate::latest::keeper::{
     KeeperConf, KeeperConfigurableSettings, KeeperId, KeeperServerInfo,
     KeeperServerType, KeeperSettings, Lgif, RaftConfig,
 };
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
+use itertools::Itertools;
 use omicron_common::api::external::Generation;
 use slog::{Logger, info};
 use std::fs::create_dir;
@@ -81,8 +82,6 @@ impl KeeperConfigurableSettings {
         self.settings.datastore_path.clone()
     }
 }
-
-use anyhow::Context;
 
 impl KeeperSettings {
     pub fn new(
@@ -315,8 +314,6 @@ impl RaftConfig {
         Ok(RaftConfig { keeper_servers })
     }
 }
-
-use itertools::Itertools;
 
 impl KeeperConf {
     pub fn parse(log: &Logger, data: &[u8]) -> Result<Self> {
