@@ -136,7 +136,6 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::PhysicalDiskState;

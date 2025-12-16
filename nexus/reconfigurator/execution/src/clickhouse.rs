@@ -26,7 +26,6 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
-use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;

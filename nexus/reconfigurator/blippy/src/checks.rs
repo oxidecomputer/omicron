@@ -19,7 +19,6 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
