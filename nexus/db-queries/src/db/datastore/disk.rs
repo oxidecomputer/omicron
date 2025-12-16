@@ -1008,9 +1008,7 @@ impl DataStore {
                                                 starting";
 
                                             return Err(
-                                                Error::invalid_request(
-                                                    &s.to_string(),
-                                                ),
+                                                Error::invalid_request(s),
                                             );
                                         }
                                     }
