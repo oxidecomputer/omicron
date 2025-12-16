@@ -861,11 +861,14 @@ mod tests {
     use crate::db::raw_query_builder::expectorate_query_contents;
     use chrono::Utc;
     use diesel::pg::Pg;
+    use ereport_types;
     use nexus_types::fm;
+    use nexus_types::fm::ereport::{EreportData, Reporter};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::collections::BTreeSet;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn expectorate_insert_sitrep_version_query() {
@@ -1395,5 +1398,186 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_sitrep_cases_roundtrip() {
+        let logctx = dev::test_setup_log("test_sitrep_cases_roundtrip");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Case ereport assignments require that an actual ereport exists in the
+        // database, so we must first create some.
+        let restart_id = omicron_uuid_kinds::EreporterRestartUuid::new_v4();
+        let collector_id = OmicronZoneUuid::new_v4();
+
+        let ereport1 = EreportData {
+            id: fm::EreportId { restart_id, ena: ereport_types::Ena(2) },
+            time_collected: Utc::now(),
+            collector_id,
+            part_number: Some("930-55555".to_string()),
+            serial_number: Some("BRM6900420".to_string()),
+            class: Some("ereport.my_cool_ereport.wow".to_string()),
+            report: serde_json::json!({"severity": "critical"}),
+        };
+
+        let ereport2 = EreportData {
+            id: fm::EreportId { restart_id, ena: ereport_types::Ena(3) },
+            time_collected: Utc::now(),
+            collector_id,
+            part_number: Some("930-55555".to_string()),
+            serial_number: Some("BRM6900420".to_string()),
+            class: Some("ereport.gov.nasa.apollo".to_string()),
+            report: serde_json::json!({"message": "houston, we have a problem", "mission": 13,}),
+        };
+
+        // Insert the ereports
+        let reporter = Reporter::Sp {
+            sp_type: nexus_types::inventory::SpType::Sled,
+            slot: 0,
+        };
+
+        datastore
+            .ereports_insert(
+                &opctx,
+                reporter,
+                vec![ereport1.clone(), ereport2.clone()],
+            )
+            .await
+            .expect("failed to insert ereports");
+
+        // Create a sitrep with cases and ereport assignments
+        let sitrep_id = SitrepUuid::new_v4();
+        let creator_id = OmicronZoneUuid::new_v4();
+
+        // Create cases
+        let case1 = {
+            let mut ereports = iddqd::IdOrdMap::new();
+            ereports
+                .insert_unique(fm::case::CaseEreport {
+                    id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
+                    ereport: Arc::new(fm::Ereport { data: ereport1, reporter }),
+                    assigned_sitrep_id: sitrep_id,
+                    comment: "this has something to do with case 1".to_string(),
+                })
+                .unwrap();
+
+            fm::Case {
+                id: omicron_uuid_kinds::CaseUuid::new_v4(),
+                created_sitrep_id: sitrep_id,
+                closed_sitrep_id: None,
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                ereports,
+                comment: "my cool case".to_string(),
+            }
+        };
+
+        let case2 = {
+            let mut ereports = iddqd::IdOrdMap::new();
+            ereports
+                .insert_unique(fm::case::CaseEreport {
+                    id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
+                    ereport: Arc::new(fm::Ereport { data: ereport2, reporter }),
+                    assigned_sitrep_id: sitrep_id,
+                    comment: "this has something to do with case 2".to_string(),
+                })
+                .unwrap();
+            fm::Case {
+                id: omicron_uuid_kinds::CaseUuid::new_v4(),
+                created_sitrep_id: sitrep_id,
+                closed_sitrep_id: None,
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                ereports,
+                comment: "break in case of emergency".to_string(),
+            }
+        };
+
+        // Create and insert the sitrep
+        let sitrep = {
+            let mut cases = iddqd::IdOrdMap::new();
+            cases
+                .insert_unique(case1.clone())
+                .expect("failed to insert case 1");
+            cases
+                .insert_unique(case2.clone())
+                .expect("failed to insert case 2");
+            fm::Sitrep {
+                metadata: fm::SitrepMetadata {
+                    id: sitrep_id,
+                    inv_collection_id: CollectionUuid::new_v4(),
+                    creator_id,
+                    comment: "i made this sitrep because i felt like it"
+                        .to_string(),
+                    time_created: Utc::now(),
+                    parent_sitrep_id: None,
+                },
+                cases,
+            }
+        };
+
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .await
+            .expect("failed to insert sitrep");
+
+        // Read the sitrep back
+        let read_sitrep = datastore
+            .fm_sitrep_read(&opctx, sitrep_id)
+            .await
+            .expect("failed to read sitrep");
+
+        // Verify the sitrep metadata matches --- ignore the timestamp.
+        assert_eq!(read_sitrep.id(), sitrep.id());
+        assert_eq!(read_sitrep.metadata.creator_id, sitrep.metadata.creator_id);
+        assert_eq!(read_sitrep.metadata.comment, sitrep.metadata.comment);
+        assert_eq!(read_sitrep.metadata.parent_sitrep_id, None);
+
+        // Verify all the expected cases were read back
+        for case in &read_sitrep.cases {
+            let fm::Case {
+                id,
+                created_sitrep_id,
+                closed_sitrep_id,
+                comment,
+                de,
+                ereports,
+            } = dbg!(case);
+            let Some(expected) = sitrep.cases.get(&case.id) else {
+                panic!("expected case {id} to exist in the original sitrep")
+            };
+            // N.B.: we must assert each bit of the case manually, as ereports
+            // contain `time_collected` timestamps which will lose a bit of
+            // precision when roundtripped through the database.
+            // :(
+            assert_eq!(id, &expected.id);
+            assert_eq!(created_sitrep_id, &expected.created_sitrep_id);
+            assert_eq!(closed_sitrep_id, &expected.closed_sitrep_id);
+            assert_eq!(comment, &expected.comment);
+            assert_eq!(de, &expected.de);
+            for expected in &expected.ereports {
+                let Some(ereport) = ereports.get(&expected.ereport.id()) else {
+                    panic!(
+                        "expected ereport {id} to exist in the original case"
+                    )
+                };
+                let fm::case::CaseEreport {
+                    id,
+                    ereport,
+                    assigned_sitrep_id,
+                    comment,
+                } = dbg!(ereport);
+                assert_eq!(id, &expected.id);
+                // This is where we go out of our way to avoid the timestamp,
+                // btw.
+                assert_eq!(ereport.id(), expected.ereport.id());
+                assert_eq!(assigned_sitrep_id, &expected.assigned_sitrep_id);
+                assert_eq!(comment, &expected.comment);
+            }
+            eprintln!();
+        }
+
+        // Clean up
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }
