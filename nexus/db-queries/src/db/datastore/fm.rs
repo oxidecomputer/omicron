@@ -164,78 +164,80 @@ impl DataStore {
         // JOINed query *will* potentially load the same ereport multiple times
         // in that case, but this is still probably much more efficient than
         // issuing a bunch of smaller queries to load ereports individually.
-        let mut case_ereports =
-            {
-                // TODO(eliza): as a potential optimization, since ereport
-                // records are immutable, we might consider hanging onto this
-                // map of all ereports in the `Sitrep` structure. Then, when we
-                // load the next sitrep, we could first check if the ereports in
-                // that sitrep are contained in the map before loading them
-                // again. That would require changing the rest of this code to
-                // not `JOIN` with the ereports table here, and instead populate
-                // a list of additional ereports we need to load, and issue a
-                // separate query for that. But, it's worth considering maybe if
-                // this becomes a bottleneck...
-                let mut ereports = iddqd::IdOrdMap::<Arc<fm::Ereport>>::new();
-                let mut map = HashMap::<CaseUuid, iddqd::IdOrdMap<_>>::new();
+        let mut case_ereports = {
+            // TODO(eliza): as a potential optimization, since ereport
+            // records are immutable, we might consider hanging onto this
+            // map of all ereports in the `Sitrep` structure. Then, when we
+            // load the next sitrep, we could first check if the ereports in
+            // that sitrep are contained in the map before loading them
+            // again. That would require changing the rest of this code to
+            // not `JOIN` with the ereports table here, and instead populate
+            // a list of additional ereports we need to load, and issue a
+            // separate query for that. But, it's worth considering maybe if
+            // this becomes a bottleneck...
+            let mut ereports = iddqd::IdOrdMap::<Arc<fm::Ereport>>::new();
+            let mut map = HashMap::<CaseUuid, iddqd::IdOrdMap<_>>::new();
 
-                let mut paginator =
-                    Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-                while let Some(p) = paginator.next() {
-                    let batch = DataStore::fm_sitrep_read_ereports_query(
-                        id,
-                        &p.current_pagparams(),
-                    )
-                    .load_async(conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                            .internal_context(
-                                "failed to load case ereport assignments",
-                            )
-                    })?;
+            let mut paginator =
+                Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+            while let Some(p) = paginator.next() {
+                let batch = DataStore::fm_sitrep_read_ereports_query(
+                    id,
+                    &p.current_pagparams(),
+                )
+                .load_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to load case ereport assignments",
+                        )
+                })?;
 
-                    paginator =
-                        p.found_batch(&batch, &|(assignment, _)| assignment.id);
-                    for (assignment, ereport) in batch {
-                        let ereport_id = fm::EreportId {
-                            restart_id: ereport.restart_id.into(),
-                            ena: ereport.ena.into(),
-                        };
-                        let ereport = match ereports.entry(&ereport_id) {
-                            iddqd::id_ord_map::Entry::Occupied(entry) => {
-                                entry.get().clone()
-                            }
-                            iddqd::id_ord_map::Entry::Vacant(entry) => {
-                                let ereport =
-                                    Arc::new(fm::Ereport::try_from(ereport)?);
-                                entry.insert(ereport.clone());
-                                ereport
-                            }
-                        };
-                        let id = assignment.id.into();
-                        let case_id = assignment.case_id.into();
-                        map.entry(case_id).or_default().insert_unique(
-                    fm::case::CaseEreport {
-                        id,
-                        ereport,
-                        assigned_sitrep_id: assignment
-                            .assigned_sitrep_id
-                            .into(),
-                        comment: assignment.comment,
-                    },
-                ).map_err(|_| Error::InternalError { internal_message:
-                    format!(
-                        "encountered multiple case ereports for case \
-                            {case_id} with the same UUID {id}. this should \
-                            really not be possible, as the assignment UUID \
-                            is a primary key!",
-                    )})?;
-                    }
+                paginator =
+                    p.found_batch(&batch, &|(assignment, _)| assignment.id);
+                for (assignment, ereport) in batch {
+                    let ereport_id = fm::EreportId {
+                        restart_id: ereport.restart_id.into(),
+                        ena: ereport.ena.into(),
+                    };
+                    let ereport = match ereports.entry(&ereport_id) {
+                        iddqd::id_ord_map::Entry::Occupied(entry) => {
+                            entry.get().clone()
+                        }
+                        iddqd::id_ord_map::Entry::Vacant(entry) => {
+                            let ereport =
+                                Arc::new(fm::Ereport::try_from(ereport)?);
+                            entry.insert(ereport.clone());
+                            ereport
+                        }
+                    };
+                    let id = assignment.id.into();
+                    let case_id = assignment.case_id.into();
+                    map.entry(case_id)
+                        .or_default()
+                        .insert_unique(fm::case::CaseEreport {
+                            id,
+                            ereport,
+                            assigned_sitrep_id: assignment
+                                .assigned_sitrep_id
+                                .into(),
+                            comment: assignment.comment,
+                        })
+                        .map_err(|_| {
+                            let internal_message = format!(
+                                "encountered multiple case ereports for case \
+                                 {case_id} with the same UUID {id}. this \
+                                 should really not be possible, as the \
+                                 assignment UUID is a primary key!",
+                            );
+                            Error::InternalError { internal_message }
+                        })?;
                 }
+            }
 
-                map
-            };
+            map
+        };
         // Next, load the case metadata entries and marry them to the sets of
         // ereports assigned to those cases that we loaded in the previous step.
         let cases = {
