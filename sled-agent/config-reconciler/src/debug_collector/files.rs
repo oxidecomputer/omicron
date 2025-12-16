@@ -10,6 +10,10 @@
 //   - ArchiveStep::ArchiveFile should have a method to compute the filename and
 //     we should verify it
 //     - this will also cover the case of a conflict with an existing file
+//   - add test that the behavior is streaming
+//     - custom lister could record when its listed and we could compare that to
+//       when archive steps get spit out
+//   - what else?
 // - figure out what will happen for file conflicts outside of log files and
 //   what to do about it
 // - lots of cleanup to do
@@ -674,6 +678,7 @@ enum ArchiveStep<'a> {
 mod test {
     use super::Filename;
     use crate::debug_collector::files::ALL_RULES;
+    use crate::debug_collector::files::ArchivePlan;
     use crate::debug_collector::files::ArchivePlanner;
     use crate::debug_collector::files::ArchiveStep;
     use crate::debug_collector::files::ArchiveWhat;
@@ -689,6 +694,8 @@ mod test {
     use iddqd::id_upcast;
     use omicron_test_utils::dev::test_setup_log;
     use regex::Regex;
+    use slog::Logger;
+    use slog::debug;
     use std::collections::BTreeSet;
     use std::sync::LazyLock;
     use strum::Display;
@@ -947,13 +954,14 @@ mod test {
         }
     }
 
-    /// Fully tests archive planning with a bunch of real-world file paths
-    #[test]
-    fn test_archiving_basic() {
-        let files = load_test_files().unwrap();
-
+    fn test_archive<'a>(
+        log: &Logger,
+        files: &IdOrdMap<TestFile>,
+        output_dir: &Utf8Path,
+        what: ArchiveWhat,
+        lister: &'a TestLister,
+    ) -> ArchivePlan<'a> {
         // Construct sources that correspond with the test data.
-        let fake_output_dir = Utf8Path::new("/fake-output-directory");
         let cores_datasets: BTreeSet<_> = files
             .iter()
             .filter_map(|test_file| test_file.kind.cores_directory())
@@ -963,27 +971,48 @@ mod test {
             .filter_map(|test_file| test_file.kind.zone_info())
             .collect();
 
-        // Make a test-only file lister for our test data.
-        let lister = TestLister::new(&files);
-
         // Plan an archival pass.
-        let logctx = test_setup_log("test_real_files_match_one_rule");
-        let log = &logctx.log;
-        let mut planner = ArchivePlanner::new_with_lister(
-            log,
-            ArchiveWhat::Everything,
-            fake_output_dir,
-            &lister,
-        );
+        let mut planner =
+            ArchivePlanner::new_with_lister(log, what, output_dir, lister);
+
         for cores_dir in cores_datasets {
-            println!("including cores directory: {cores_dir:?}");
+            debug!(log, "including cores directory"; "cores_dir" => %cores_dir);
             planner.include_cores_directory(cores_dir);
         }
+
         for (zone_name, zone_root) in zone_infos {
-            println!("including zone {zone_name:?} at {zone_root:?}");
+            debug!(
+                log,
+                "including zone";
+                "zone_name" => zone_name,
+                "zone_root" => %zone_root,
+            );
             planner.include_zone(zone_name, zone_root);
         }
-        let plan = planner.into_plan();
+
+        planner.into_plan()
+    }
+
+    /// Fully tests archive planning with a bunch of real-world file paths
+    #[test]
+    fn test_archiving_basic() {
+        // Set up the test.
+        let logctx = test_setup_log("test_archiving_basic");
+        let log = &logctx.log;
+
+        // Load the test data
+        let files = load_test_files().unwrap();
+
+        // Run a simulated archive.
+        let fake_output_dir = Utf8Path::new("/fake-output-directory");
+        let lister = TestLister::new(&files);
+        let plan = test_archive(
+            log,
+            &files,
+            fake_output_dir,
+            ArchiveWhat::Everything,
+            &lister,
+        );
 
         // Now, walk through the archive plan and verify it.
         let mut directories_created = BTreeSet::new();
@@ -1105,6 +1134,97 @@ mod test {
                     test_file.path
                 );
             }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    // Tests that when we archive "immutable-only" files:
+    // - we do archive the stuff we expect
+    // - we don't archive the stuff that we don't expect
+    #[test]
+    fn test_archiving_immutable_only() {
+        // Set up the test.
+        let logctx = test_setup_log("test_archiving_immutable_only");
+        let log = &logctx.log;
+
+        // Load the test data
+        let files = load_test_files().unwrap();
+
+        // Run a simulated archive.
+        let fake_output_dir = Utf8Path::new("/fake-output-directory");
+        let lister = TestLister::new(&files);
+        let plan = test_archive(
+            log,
+            &files,
+            fake_output_dir,
+            ArchiveWhat::ImmutableOnly,
+            &lister,
+        );
+
+        let mut expected_unarchived: BTreeSet<_> = files
+            .iter()
+            .filter_map(|test_file| {
+                let expected = match test_file.kind {
+                    TestFileKind::KernelCrashDump { .. }
+                    | TestFileKind::ProcessCoreDump { .. }
+                    | TestFileKind::LogSmfRotated { .. }
+                    | TestFileKind::LogSyslogRotated { .. }
+                    | TestFileKind::GlobalLogSmfRotated
+                    | TestFileKind::GlobalLogSyslogRotated => true,
+                    TestFileKind::LogSmfLive { .. }
+                    | TestFileKind::LogSyslogLive { .. }
+                    | TestFileKind::GlobalLogSmfLive
+                    | TestFileKind::GlobalLogSyslogLive
+                    | TestFileKind::Ignored => false,
+                };
+
+                expected.then_some(&test_file.path)
+            })
+            .collect();
+
+        // Check that precisely the expected files were collected.
+        // We do not check all the other expected behaviors around archiving
+        // here.  That's tested in `test_archive_basic` for all files.
+        for step in plan.to_steps() {
+            let step = step.expect("no errors with test lister");
+            let ArchiveStep::ArchiveFile {
+                input_path, delete_original, ..
+            } = step
+            else {
+                continue;
+            };
+
+            let test_file = files.get(input_path.as_path()).expect(
+                "unexpectedly archived file that was not in the test data",
+            );
+            if matches!(test_file.kind, TestFileKind::Ignored) {
+                // We don't care whether "ignored" files get archived or not.
+                continue;
+            }
+
+            if !expected_unarchived.remove(&input_path) {
+                panic!(
+                    "unexpectedly archived file (either it should not have \
+                     been at all or it was archived more than once): \
+                     {input_path:?}",
+                );
+            }
+
+            // This is technically checked in the other test, but since it's
+            // related to the file being immutable, we may as well check it
+            // again here.
+            assert!(
+                delete_original,
+                "expected to delete the original when archiving immutable files"
+            );
+        }
+
+        if !expected_unarchived.is_empty() {
+            panic!(
+                "did not archive some of the files we expected: {:?}",
+                expected_unarchived
+            );
         }
 
         logctx.cleanup_successful();
