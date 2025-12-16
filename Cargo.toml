@@ -64,6 +64,7 @@ members = [
     "illumos-utils",
     "installinator-api",
     "installinator-common",
+    "installinator-common/versions",
     "installinator",
     "internal-dns/cli",
     "internal-dns/resolver",
@@ -227,6 +228,7 @@ default-members = [
     "illumos-utils",
     "installinator-api",
     "installinator-common",
+    "installinator-common/versions",
     "installinator",
     "internal-dns/cli",
     "internal-dns/resolver",
@@ -516,6 +518,7 @@ installinator = { path = "installinator" }
 installinator-api = { path = "installinator-api" }
 installinator-client = { path = "clients/installinator-client" }
 installinator-common = { path = "installinator-common" }
+installinator-common-versions = { path = "installinator-common/versions" }
 internal-dns-resolver = { path = "internal-dns/resolver" }
 internal-dns-types = { path = "internal-dns/types" }
 ipcc = { path = "ipcc" }
