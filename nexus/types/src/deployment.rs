@@ -369,6 +369,28 @@ impl Blueprint {
         self.danger_all_omicron_zones(BlueprintZoneDisposition::any)
     }
 
+    /// Iterate over all zones in the blueprint, returning any that could be
+    /// running: either they're in-service, or they're expunged but have not yet
+    /// been confirmed shut down.
+    ///
+    /// Like [`Self::expunged_zones()`], callers are required to specify a
+    /// reason to access expunged zones.
+    ///
+    /// The set of zones returned by this method is equivalent to the set of
+    /// zones returned by chaining together calls to `Self::in_service_zones()`
+    /// and `Self::expunged_zones(ZoneRunningStatus::MaybeRunning, reason)`, but
+    /// only iterates over the zones once.
+    pub fn all_maybe_running_zones(
+        &self,
+        _reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        // Danger note: this call will definitely access expunged zones, but we
+        // know the caller has provided a known reason to do so.
+        self.danger_all_omicron_zones(
+            BlueprintZoneDisposition::could_be_running,
+        )
+    }
+
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
     /// that match the provided filter, along with the associated sled id.
     ///
@@ -552,7 +574,7 @@ impl Blueprint {
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<Generation, Error> {
-        for (_sled_id, zone_config) in self.all_in_service_and_expunged_zones(
+        for (_sled_id, zone_config) in self.all_maybe_running_zones(
             BlueprintExpungedZoneAccessReason::NexusSelfGeneration,
         ) {
             if let BlueprintZoneType::Nexus(nexus_config) =
