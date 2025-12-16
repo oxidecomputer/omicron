@@ -207,8 +207,10 @@ async fn sdd_deallocate_local_storage(
     );
 
     let datastore::Disk::LocalStorage(disk) = params.disk else {
-        // Check during make_saga_dag prevents this case.
-        unreachable!();
+        unreachable!(
+            "check during `make_saga_dag` should have ensured disk type is \
+            local storage"
+        );
     };
 
     let Some(allocation) = disk.local_storage_dataset_allocation else {
@@ -236,8 +238,10 @@ async fn sdd_delete_local_storage(
     );
 
     let datastore::Disk::LocalStorage(disk) = params.disk else {
-        // Check during make_saga_dag prevents this case.
-        unreachable!();
+        unreachable!(
+            "check during `make_saga_dag` should have ensured disk type is \
+            local storage"
+        );
     };
 
     let Some(allocation) = disk.local_storage_dataset_allocation else {
