@@ -17,7 +17,8 @@ use maplit::btreeset;
 use omicron_common::{
     disk::DiskIdentity,
     update::{
-        MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
+        MupdateOverrideInfo, OmicronInstallManifest,
+        OmicronInstallManifestSource,
     },
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
@@ -518,43 +519,72 @@ async fn installinator_fetch_impl(
 
     // Ensure that the zone manifest can be parsed.
     let a_manifest_path =
-        a_path.join("install").join(OmicronZoneManifest::FILE_NAME);
+        a_path.join("install").join(OmicronInstallManifest::ZONES_FILE_NAME);
     let a_manifest_bytes = std::fs::read(a_manifest_path)
         .expect("zone manifest file successfully read");
-    let a_manifest =
-        serde_json::from_slice::<OmicronZoneManifest>(&a_manifest_bytes)
+    let a_zone_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&a_manifest_bytes)
             .expect("zone manifest file successfully deserialized");
 
     // Check that the source was correctly specified and that the mupdate ID
     // matches.
     assert_eq!(
-        a_manifest.source,
-        OmicronZoneManifestSource::Installinator { mupdate_id },
+        a_zone_manifest.source,
+        OmicronInstallManifestSource::Installinator { mupdate_id },
         "mupdate ID matches",
     );
 
     // Check that the images are present in the zone set.
     for file_name in FAKE_NON_SEMVER_ZONE_FILE_NAMES {
         assert!(
-            a_manifest.zones.contains_key(file_name),
+            a_zone_manifest.files.contains_key(file_name),
             "{file_name} is present in the zone set"
         );
     }
 
     // Ensure that the B path also had the same file written out.
     let b_manifest_path =
-        b_path.join("install").join(OmicronZoneManifest::FILE_NAME);
+        b_path.join("install").join(OmicronInstallManifest::ZONES_FILE_NAME);
     assert!(b_manifest_path.is_file(), "{b_manifest_path} was written out");
     // Ensure that the zone manifest can be parsed.
     let b_override_bytes = std::fs::read(b_manifest_path)
         .expect("zone manifest file successfully read");
-    let b_manifest =
-        serde_json::from_slice::<OmicronZoneManifest>(&b_override_bytes)
+    let b_zone_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&b_override_bytes)
             .expect("zone manifest file successfully deserialized");
 
     assert_eq!(
-        a_manifest, b_manifest,
+        a_zone_manifest, b_zone_manifest,
         "zone manifests match across A and B drives"
+    );
+
+    // Ensure that the measurement manifest can be parsed.
+    let a_manifest_path = a_path
+        .join("install")
+        .join("measurements")
+        .join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
+    let a_manifest_bytes = std::fs::read(a_manifest_path)
+        .expect("measurement manifest file successfully read");
+    let a_measurement_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&a_manifest_bytes)
+            .expect("measurement manifest file successfully deserialized");
+
+    // Ensure that the B path also had the same file written out.
+    let b_manifest_path = b_path
+        .join("install")
+        .join("measurements")
+        .join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
+    assert!(b_manifest_path.is_file(), "{b_manifest_path} was written out");
+    // Ensure that the measurement manifest can be parsed.
+    let b_override_bytes = std::fs::read(b_manifest_path)
+        .expect("zone manifest file successfully read");
+    let b_measurement_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&b_override_bytes)
+            .expect("measurement manifest file successfully deserialized");
+
+    assert_eq!(
+        a_measurement_manifest, b_measurement_manifest,
+        "measurement manifests match across A and B drives"
     );
 
     // Run sled-agent-zone-images against these paths, and ensure that the
@@ -575,7 +605,7 @@ async fn installinator_fetch_impl(
         .expect("zone manifest successful");
     assert!(result.is_valid(), "zone manifest: boot disk result is valid");
     assert_eq!(
-        result.manifest, a_manifest,
+        result.manifest, a_zone_manifest,
         "zone manifest: manifest matches a_manifest"
     );
 

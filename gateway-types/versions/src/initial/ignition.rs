@@ -55,30 +55,6 @@ pub enum SpIgnition {
     },
 }
 
-impl From<gateway_messages::IgnitionState> for SpIgnition {
-    fn from(state: gateway_messages::IgnitionState) -> Self {
-        use gateway_messages::ignition::SystemPowerState;
-
-        if let Some(target_state) = state.target {
-            Self::Present {
-                id: target_state.system_type.into(),
-                power: matches!(
-                    target_state.power_state,
-                    SystemPowerState::On | SystemPowerState::PoweringOn
-                ),
-                ctrl_detect_0: target_state.controller0_present,
-                ctrl_detect_1: target_state.controller1_present,
-                flt_a3: target_state.faults.power_a3,
-                flt_a2: target_state.faults.power_a2,
-                flt_rot: target_state.faults.rot,
-                flt_sp: target_state.faults.sp,
-            }
-        } else {
-            Self::Absent
-        }
-    }
-}
-
 /// TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?
 #[derive(
     Debug,
@@ -100,20 +76,6 @@ pub enum SpIgnitionSystemType {
     Unknown { id: u16 },
 }
 
-impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
-    fn from(st: gateway_messages::ignition::SystemType) -> Self {
-        use gateway_messages::ignition::SystemType;
-        match st {
-            SystemType::Gimlet => Self::Gimlet,
-            SystemType::Sidecar => Self::Sidecar,
-            SystemType::Psc => Self::Psc,
-            SystemType::Unknown(id) => Self::Unknown { id },
-            // `0x4` is the ignition value per RFD 142
-            SystemType::Cosmo => Self::Unknown { id: 0x4 },
-        }
-    }
-}
-
 /// Ignition command.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
@@ -123,22 +85,6 @@ pub enum IgnitionCommand {
     PowerOn,
     PowerOff,
     PowerReset,
-}
-
-impl From<IgnitionCommand> for gateway_messages::IgnitionCommand {
-    fn from(cmd: IgnitionCommand) -> Self {
-        match cmd {
-            IgnitionCommand::PowerOn => {
-                gateway_messages::IgnitionCommand::PowerOn
-            }
-            IgnitionCommand::PowerOff => {
-                gateway_messages::IgnitionCommand::PowerOff
-            }
-            IgnitionCommand::PowerReset => {
-                gateway_messages::IgnitionCommand::PowerReset
-            }
-        }
-    }
 }
 
 #[derive(Deserialize, JsonSchema)]

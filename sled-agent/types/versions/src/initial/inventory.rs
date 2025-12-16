@@ -24,7 +24,7 @@ use omicron_common::disk::{
 };
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
-use omicron_common::update::{ArtifactId, OmicronZoneManifestSource};
+use omicron_common::update::{ArtifactId, OmicronInstallManifestSource};
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     DatasetUuid, InternalZpoolUuid, MupdateOverrideUuid, MupdateUuid,
@@ -341,7 +341,7 @@ impl From<Result<(), String>> for ConfigReconcilerInventoryResult {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct ZoneImageResolverInventory {
     /// The zone manifest status.
-    pub zone_manifest: ZoneManifestInventory,
+    pub zone_manifest: ManifestInventory,
 
     /// The mupdate override status.
     pub mupdate_override: MupdateOverrideInventory,
@@ -351,7 +351,7 @@ impl ZoneImageResolverInventory {
     /// Returns a new, fake inventory for tests.
     pub fn new_fake() -> Self {
         Self {
-            zone_manifest: ZoneManifestInventory::new_fake(),
+            zone_manifest: ManifestInventory::new_fake(),
             mupdate_override: MupdateOverrideInventory::new_fake(),
         }
     }
@@ -389,15 +389,17 @@ impl fmt::Display for ZoneImageResolverInventoryDisplay<'_> {
     }
 }
 
-/// Inventory representation of a zone manifest.
+/// Inventory representation of a manifest.
 ///
 /// Part of [`ZoneImageResolverInventory`].
 ///
+/// A manifest is used for both zones and reference measurements.
 /// A zone manifest is a listing of all the zones present in a system's install
-/// dataset. This struct contains information about the install dataset gathered
-/// from a system.
+/// dataset. A measurement manifset is a listing of all the reference measurements
+/// present in a system's install dataset. This struct contains information
+/// about the install dataset gathered from a system.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-pub struct ZoneManifestInventory {
+pub struct ManifestInventory {
     /// The full path to the zone manifest file on the boot disk.
     #[schemars(schema_with = "path_schema")]
     pub boot_disk_path: Utf8PathBuf,
@@ -405,41 +407,41 @@ pub struct ZoneManifestInventory {
     /// The manifest read from the boot disk, and whether the manifest is valid.
     #[serde(with = "snake_case_result")]
     #[schemars(
-        schema_with = "SnakeCaseResult::<ZoneManifestBootInventory, String>::json_schema"
+        schema_with = "SnakeCaseResult::<ManifestBootInventory, String>::json_schema"
     )]
-    pub boot_inventory: Result<ZoneManifestBootInventory, String>,
+    pub boot_inventory: Result<ManifestBootInventory, String>,
 
     /// Information about the install dataset on non-boot disks.
-    pub non_boot_status: IdOrdMap<ZoneManifestNonBootInventory>,
+    pub non_boot_status: IdOrdMap<ManifestNonBootInventory>,
 }
 
-impl ZoneManifestInventory {
+impl ManifestInventory {
     /// Returns a new, empty inventory for tests.
     pub fn new_fake() -> Self {
         Self {
             boot_disk_path: Utf8PathBuf::from("/fake/path/install/zones.json"),
-            boot_inventory: Ok(ZoneManifestBootInventory::new_fake()),
+            boot_inventory: Ok(ManifestBootInventory::new_fake()),
             non_boot_status: IdOrdMap::new(),
         }
     }
 
     /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneManifestInventoryDisplay<'_> {
-        ZoneManifestInventoryDisplay { inner: self }
+    pub fn display(&self) -> ManifestInventoryDisplay<'_> {
+        ManifestInventoryDisplay { inner: self }
     }
 }
 
-/// Displayer for a [`ZoneManifestInventory`]
+/// Displayer for a [`ManifestInventory`]
 #[derive(Clone, Debug)]
-pub struct ZoneManifestInventoryDisplay<'a> {
-    inner: &'a ZoneManifestInventory,
+pub struct ManifestInventoryDisplay<'a> {
+    inner: &'a ManifestInventory,
 }
 
-impl fmt::Display for ZoneManifestInventoryDisplay<'_> {
+impl fmt::Display for ManifestInventoryDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut f = f;
 
-        let ZoneManifestInventory {
+        let ManifestInventory {
             boot_disk_path,
             boot_inventory,
             non_boot_status,
@@ -480,29 +482,29 @@ impl fmt::Display for ZoneManifestInventoryDisplay<'_> {
 
 /// Inventory representation of zone artifacts on the boot disk.
 ///
-/// Part of [`ZoneManifestInventory`].
+/// Part of [`ManifestInventory`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-pub struct ZoneManifestBootInventory {
+pub struct ManifestBootInventory {
     /// The manifest source.
     ///
-    /// In production this is [`OmicronZoneManifestSource::Installinator`], but
+    /// In production this is [`OmicronInstallManifestSource::Installinator`], but
     /// in some development and testing flows Sled Agent synthesizes zone
     /// manifests. In those cases, the source is
-    /// [`OmicronZoneManifestSource::SledAgent`].
-    pub source: OmicronZoneManifestSource,
+    /// [`OmicronInstallManifestSource::SledAgent`].
+    pub source: OmicronInstallManifestSource,
 
     /// The artifacts on disk.
     pub artifacts: IdOrdMap<ZoneArtifactInventory>,
 }
 
-impl ZoneManifestBootInventory {
+impl ManifestBootInventory {
     /// Returns a new, empty inventory for tests.
     ///
     /// For a more representative selection of real zones, see `representative`
     /// in `nexus-inventory`.
     pub fn new_fake() -> Self {
         Self {
-            source: OmicronZoneManifestSource::Installinator {
+            source: OmicronInstallManifestSource::Installinator {
                 mupdate_id: MupdateUuid::nil(),
             },
             artifacts: IdOrdMap::new(),
@@ -510,22 +512,22 @@ impl ZoneManifestBootInventory {
     }
 
     /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneManifestBootInventoryDisplay<'_> {
-        ZoneManifestBootInventoryDisplay { inner: self }
+    pub fn display(&self) -> ManifestBootInventoryDisplay<'_> {
+        ManifestBootInventoryDisplay { inner: self }
     }
 }
 
-/// Displayer for a [`ZoneManifestBootInventory`].
+/// Displayer for a [`ManifestBootInventory`].
 #[derive(Clone, Debug)]
-pub struct ZoneManifestBootInventoryDisplay<'a> {
-    inner: &'a ZoneManifestBootInventory,
+pub struct ManifestBootInventoryDisplay<'a> {
+    inner: &'a ManifestBootInventory,
 }
 
-impl fmt::Display for ZoneManifestBootInventoryDisplay<'_> {
+impl fmt::Display for ManifestBootInventoryDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut f = f;
 
-        let ZoneManifestBootInventory { source, artifacts } = self.inner;
+        let ManifestBootInventory { source, artifacts } = self.inner;
         writeln!(f, "manifest generated by {}", source)?;
         if artifacts.is_empty() {
             writeln!(
@@ -549,7 +551,7 @@ impl fmt::Display for ZoneManifestBootInventoryDisplay<'_> {
 
 /// Inventory representation of a single zone artifact on a boot disk.
 ///
-/// Part of [`ZoneManifestBootInventory`].
+/// Part of [`ManifestBootInventory`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct ZoneArtifactInventory {
     /// The name of the zone file on disk, for example `nexus.tar.gz`. Zone
@@ -623,12 +625,12 @@ impl fmt::Display for ZoneArtifactInventoryDisplay<'_> {
 
 /// Inventory representation of a zone manifest on a non-boot disk.
 ///
-/// Unlike [`ZoneManifestBootInventory`] which is structured since
+/// Unlike [`ManifestBootInventory`] which is structured since
 /// Reconfigurator makes decisions based on it, information about non-boot disks
 /// is purely advisory. For simplicity, we store information in an unstructured
 /// format.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-pub struct ZoneManifestNonBootInventory {
+pub struct ManifestNonBootInventory {
     /// The ID of the non-boot zpool.
     pub zpool_id: InternalZpoolUuid,
 
@@ -650,14 +652,14 @@ pub struct ZoneManifestNonBootInventory {
     pub message: String,
 }
 
-impl ZoneManifestNonBootInventory {
+impl ManifestNonBootInventory {
     /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneManifestNonBootInventoryDisplay<'_> {
-        ZoneManifestNonBootInventoryDisplay { inner: self }
+    pub fn display(&self) -> ManifestNonBootInventoryDisplay<'_> {
+        ManifestNonBootInventoryDisplay { inner: self }
     }
 }
 
-impl IdOrdItem for ZoneManifestNonBootInventory {
+impl IdOrdItem for ManifestNonBootInventory {
     type Key<'a> = InternalZpoolUuid;
     fn key(&self) -> Self::Key<'_> {
         self.zpool_id
@@ -665,15 +667,15 @@ impl IdOrdItem for ZoneManifestNonBootInventory {
     id_upcast!();
 }
 
-/// Displayer for a [`ZoneManifestNonBootInventory`].
+/// Displayer for a [`ManifestNonBootInventory`].
 #[derive(Clone, Debug)]
-pub struct ZoneManifestNonBootInventoryDisplay<'a> {
-    inner: &'a ZoneManifestNonBootInventory,
+pub struct ManifestNonBootInventoryDisplay<'a> {
+    inner: &'a ManifestNonBootInventory,
 }
 
-impl fmt::Display for ZoneManifestNonBootInventoryDisplay<'_> {
+impl fmt::Display for ManifestNonBootInventoryDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ZoneManifestNonBootInventory {
+        let ManifestNonBootInventory {
             // The zpool ID is part of the path, so displaying it is redundant.
             zpool_id: _,
             path,

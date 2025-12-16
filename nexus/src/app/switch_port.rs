@@ -94,7 +94,16 @@ impl super::Nexus {
         params: params::SwitchPortSettingsCreate,
         id: Option<Uuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
-        self.db_datastore.switch_port_settings_create(opctx, &params, id).await
+        let result = self
+            .db_datastore
+            .switch_port_settings_create(opctx, &params, id)
+            .await?;
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
+
+        Ok(result)
     }
 
     pub(crate) async fn switch_port_settings_update(

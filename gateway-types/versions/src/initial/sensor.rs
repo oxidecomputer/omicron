@@ -29,18 +29,6 @@ pub struct SpSensorReading {
     pub result: SpSensorReadingResult,
 }
 
-impl From<gateway_messages::SensorReading> for SpSensorReading {
-    fn from(value: gateway_messages::SensorReading) -> Self {
-        Self {
-            timestamp: value.timestamp,
-            result: match value.value {
-                Ok(value) => SpSensorReadingResult::Success { value },
-                Err(err) => err.into(),
-            },
-        }
-    }
-}
-
 /// Single reading (or error) from an SP sensor.
 #[derive(
     Debug,
@@ -60,19 +48,6 @@ pub enum SpSensorReadingResult {
     DeviceNotPresent,
     DeviceUnavailable,
     DeviceTimeout,
-}
-
-impl From<gateway_messages::SensorDataMissing> for SpSensorReadingResult {
-    fn from(value: gateway_messages::SensorDataMissing) -> Self {
-        use gateway_messages::SensorDataMissing;
-        match value {
-            SensorDataMissing::DeviceOff => Self::DeviceOff,
-            SensorDataMissing::DeviceError => Self::DeviceError,
-            SensorDataMissing::DeviceNotPresent => Self::DeviceNotPresent,
-            SensorDataMissing::DeviceUnavailable => Self::DeviceUnavailable,
-            SensorDataMissing::DeviceTimeout => Self::DeviceTimeout,
-        }
-    }
 }
 
 #[derive(Deserialize, JsonSchema)]
