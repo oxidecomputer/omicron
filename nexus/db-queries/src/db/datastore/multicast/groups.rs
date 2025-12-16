@@ -56,10 +56,8 @@ use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 /// External multicast group with computed source IPs from members.
 ///
 /// The `source_ips` field contains the union of all member source IPs,
-/// computed via a separate query. This struct enables a clean `TryFrom`
+/// computed via a separate query. This struct enables a clean `From`
 /// conversion to the API view.
-///
-// TODO(multicast): Remove mvlan field, being deprecated from multicast groups
 #[derive(Clone, Debug)]
 pub struct ExternalMulticastGroupWithSources {
     pub group: ExternalMulticastGroup,

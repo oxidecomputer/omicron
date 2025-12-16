@@ -168,11 +168,9 @@ pub struct MulticastGroupByIpPath {
 impl From<MulticastGroupCreate> for InternalMulticastGroupCreate {
     fn from(old: MulticastGroupCreate) -> Self {
         // Note: `source_ips` is ignored because it's per-member in new version,
-        // not per-group.
-        //
-        // The old API field is kept for backward compatibility but ignored.
-        // We still use `has_sources` for pool selection preference.
-        // Note: `mvlan` is ignored - being deprecated from multicast groups.
+        // not per-group. The old API field is kept for backward compatibility
+        // but ignored. We still use `has_sources` for pool selection preference.
+        // Also, `mvlan` is ignored, as it's deprecated from multicast groups.
         let has_sources =
             old.source_ips.as_ref().is_some_and(|s| !s.is_empty());
         Self {
@@ -211,7 +209,7 @@ impl From<views::MulticastGroup> for MulticastGroup {
             identity: v.identity,
             multicast_ip: v.multicast_ip,
             source_ips: v.source_ips,
-            mvlan: None, // mvlan deprecated, always None for backward compat
+            mvlan: None, // mvlan deprecated, always `None` for backward compat
             ip_pool_id: v.ip_pool_id,
             state: v.state,
         }
