@@ -52,6 +52,7 @@ use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
+use diesel::PgArrayExpressionMethods;
 use diesel::TextExpressionMethods;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
@@ -153,6 +154,7 @@ use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::CollectionDisplayCliFilter;
+use omicron_common::address::is_ssm_address;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
@@ -164,6 +166,7 @@ use omicron_uuid_kinds::DownstairsRegionUuid;
 use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::MulticastGroupUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -917,6 +920,9 @@ struct MulticastMembersArgs {
     /// Filter by sled ID
     #[arg(long)]
     sled_id: Option<SledUuid>,
+    /// Filter by source IP (members subscribed to this source)
+    #[arg(long)]
+    source_ip: Option<std::net::IpAddr>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1459,8 +1465,10 @@ impl DbArgs {
                     DbCommands::Multicast(MulticastArgs {
                         command: MulticastCommands::Groups(args),
                     }) => {
-                        cmd_db_multicast_groups(&datastore, &fetch_opts, &args)
-                            .await
+                        cmd_db_multicast_groups(
+                            &opctx, &datastore, &fetch_opts, &args,
+                        )
+                        .await
                     }
                     DbCommands::Multicast(MulticastArgs {
                         command: MulticastCommands::Members(args),
@@ -1476,8 +1484,10 @@ impl DbArgs {
                     DbCommands::Multicast(MulticastArgs {
                         command: MulticastCommands::Info(args),
                     }) => {
-                        cmd_db_multicast_info(&datastore, &fetch_opts, &args)
-                            .await
+                        cmd_db_multicast_info(
+                            &opctx, &datastore, &fetch_opts, &args,
+                        )
+                        .await
                     }
                     DbCommands::Snapshots(SnapshotArgs {
                         command: SnapshotCommands::Info(uuid),
@@ -7528,6 +7538,7 @@ impl From<&'_ Migration> for SingleInstanceMigrationRow {
 // Multicast
 
 async fn cmd_db_multicast_groups(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &MulticastGroupsArgs,
@@ -7586,6 +7597,26 @@ async fn cmd_db_multicast_groups(
                 .collect()
         };
 
+    // Derive source IPs union from members for each group
+    // Source IPs are stored per-member; groups show the union of all member sources
+    let group_uuids: Vec<MulticastGroupUuid> = groups
+        .iter()
+        .map(|group| MulticastGroupUuid::from_untyped_uuid(group.identity.id))
+        .collect();
+    let source_ips_raw = datastore
+        .multicast_groups_source_ips_union(opctx, &group_uuids)
+        .await
+        .context("failed to fetch source IPs union")?;
+    let source_ips_map: HashMap<Uuid, BTreeSet<std::net::IpAddr>> =
+        source_ips_raw
+            .into_iter()
+            .map(|(k, v)| (k, v.into_iter().collect()))
+            .collect();
+
+    // Display labels for multicast address range classification
+    const RANGE_SSM: &str = "SSM";
+    const RANGE_ASM: &str = "ASM";
+
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct MulticastGroupRow {
@@ -7593,9 +7624,11 @@ async fn cmd_db_multicast_groups(
         name: String,
         state: MulticastGroupState,
         multicast_ip: std::net::IpAddr,
+        /// ASM (any-source) or SSM (source-specific) based on IP range
+        range: &'static str,
         #[tabled(display_with = "display_option_blank")]
         underlay_ip: Option<std::net::IpAddr>,
-        /// SSM source IPs or "ASM" for any-source multicast
+        /// Source IPs union from members ("-" = any source)
         sources: String,
         vni: u32,
         #[tabled(display_with = "datetime_rfc3339_concise")]
@@ -7605,16 +7638,21 @@ async fn cmd_db_multicast_groups(
     let rows: Vec<MulticastGroupRow> = groups
         .into_iter()
         .map(|group| {
-            let sources = if group.source_ips.is_empty() {
-                "ASM".to_string()
-            } else {
-                group
-                    .source_ips
-                    .iter()
-                    .map(|ip| ip.ip().to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            };
+            let mcast_ip = group.multicast_ip.ip();
+            let range =
+                if is_ssm_address(mcast_ip) { RANGE_SSM } else { RANGE_ASM };
+            // Format source IPs union (derived from members)
+            let sources = source_ips_map
+                .get(&group.identity.id)
+                .filter(|source_ips| !source_ips.is_empty())
+                .map(|source_ips| {
+                    source_ips
+                        .iter()
+                        .map(|ip| ip.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_else(|| "-".to_string());
             let underlay_ip = group
                 .underlay_group_id
                 .and_then(|id| underlay_map.get(&id))
@@ -7623,7 +7661,8 @@ async fn cmd_db_multicast_groups(
                 id: group.identity.id,
                 name: group.identity.name.to_string(),
                 state: group.state,
-                multicast_ip: group.multicast_ip.ip(),
+                multicast_ip: mcast_ip,
+                range,
                 underlay_ip,
                 sources,
                 vni: u32::from(group.vni.0),
@@ -7694,6 +7733,10 @@ async fn cmd_db_multicast_members(
     if let Some(sled_id) = args.sled_id {
         query = query.filter(dsl::sled_id.eq(sled_id.into_untyped_uuid()));
     }
+    if let Some(source_ip) = args.source_ip {
+        let ip_network = ipnetwork::IpNetwork::from(source_ip);
+        query = query.filter(dsl::source_ips.contains(vec![ip_network]));
+    }
 
     let members: Vec<MulticastGroupMember> = query
         .order_by(dsl::time_created.desc())
@@ -7730,6 +7773,8 @@ async fn cmd_db_multicast_members(
         parent_id: Uuid,
         state: MulticastGroupMemberState,
         multicast_ip: std::net::IpAddr,
+        /// Source IPs for source filtering ("-" = any source)
+        sources: String,
         #[tabled(display_with = "display_option_blank")]
         sled_id: Option<SledUuid>,
         #[tabled(display_with = "datetime_rfc3339_concise")]
@@ -7743,12 +7788,22 @@ async fn cmd_db_multicast_members(
                 .get(&member.external_group_id)
                 .cloned()
                 .unwrap_or_else(|| member.external_group_id.to_string());
+            let sources = Some(&member.source_ips)
+                .filter(|ips| !ips.is_empty())
+                .map(|ips| {
+                    ips.iter()
+                        .map(|ip| ip.ip().to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_else(|| "-".to_string());
             MulticastMemberRow {
                 id: member.id,
                 group_name,
                 parent_id: member.parent_id,
                 state: member.state,
                 multicast_ip: member.multicast_ip.ip(),
+                sources,
                 sled_id: member.sled_id.map(SledUuid::from),
                 created: member.time_created,
             }
@@ -7857,6 +7912,7 @@ async fn cmd_db_multicast_pools(
 }
 
 async fn cmd_db_multicast_info(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &MulticastInfoArgs,
@@ -7936,6 +7992,20 @@ async fn cmd_db_multicast_info(
         .await
         .unwrap_or_else(|_| "<unknown>".into());
 
+    // Derive source_ips union from members (source_ips is per-member, not per-group)
+    let group_uuid = MulticastGroupUuid::from_untyped_uuid(group.identity.id);
+    let source_ips_map = datastore
+        .multicast_groups_source_ips_union(opctx, &[group_uuid])
+        .await
+        .context("failed to fetch source IPs union")?;
+    let source_ips_display = source_ips_map
+        .get(&group.identity.id)
+        .filter(|ips| !ips.is_empty())
+        .map(|ips| {
+            ips.iter().map(|ip| ip.to_string()).collect::<Vec<_>>().join(",")
+        })
+        .unwrap_or_else(|| "-".to_string());
+
     // Print group details
     println!("MULTICAST GROUP");
     println!("  id:              {}", group.identity.id);
@@ -7943,7 +8013,7 @@ async fn cmd_db_multicast_info(
     println!("  state:           {:?}", group.state);
     println!("  multicast_ip:    {}", group.multicast_ip);
     println!("  vni:             {}", u32::from(group.vni.0));
-    println!("  source_ips:      {:?}", group.source_ips);
+    println!("  source_ips:      {source_ips_display}");
     println!("  ip_pool:         {pool_name} ({})", group.ip_pool_id);
     println!("  underlay_group:  {:?}", group.underlay_group_id);
     println!("  tag:             {:?}", group.tag);

@@ -89,7 +89,7 @@ EXECUTING COMMAND: omdb ["db", "multicast", "groups"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID NAME STATE MULTICAST_IP UNDERLAY_IP SOURCES VNI CREATED 
+ID NAME STATE MULTICAST_IP RANGE UNDERLAY_IP SOURCES VNI CREATED 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -99,7 +99,7 @@ EXECUTING COMMAND: omdb ["db", "multicast", "members"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID GROUP_NAME PARENT_ID STATE MULTICAST_IP SLED_ID CREATED 
+ID GROUP_NAME PARENT_ID STATE MULTICAST_IP SOURCES SLED_ID CREATED 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable

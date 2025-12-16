@@ -9,11 +9,10 @@
 //! and checking the output.
 
 use futures::future::join3;
-use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::MulticastGroupMemberAdd;
+use nexus_types::external_api::params::InstanceMulticastGroupJoin;
 use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
-use omicron_common::api::external::NameOrId;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::process::Command;
@@ -24,8 +23,31 @@ use super::{
     mcast_group_url, wait_for_group_active, wait_for_member_state,
 };
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_project, object_create,
+    create_default_ip_pool, create_project,
 };
+
+/// Helper for PUT that returns 201 Created (like instance_multicast_group_join)
+async fn put_created<InputType, OutputType>(
+    client: &dropshot::test_util::ClientTestContext,
+    path: &str,
+    input: &InputType,
+) -> OutputType
+where
+    InputType: serde::Serialize,
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, path)
+            .body(Some(input))
+            .expect_status(Some(http::StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|e| panic!("failed to make PUT request to {path}: {e}"))
+    .parsed_body()
+    .unwrap()
+}
 
 const PROJECT_NAME: &str = "omdb-test-project";
 const TARGET_DIR: &str = "target";
@@ -125,15 +147,16 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Add a multicast member via API (this implicitly creates the group)
-    let member_add_url = format!(
-        "/v1/multicast-groups/test-mcast-group/members?project={PROJECT_NAME}"
+    // Use instance-centric join endpoint: POST /v1/instances/{instance}/multicast-groups/{group}
+    let join_url = format!(
+        "/v1/instances/{}/multicast-groups/test-mcast-group?project={PROJECT_NAME}",
+        instance.identity.id
     );
 
-    object_create::<_, MulticastGroupMember>(
+    put_created::<_, MulticastGroupMember>(
         client,
-        &member_add_url,
-        &MulticastGroupMemberAdd {
-            instance: NameOrId::Id(instance.identity.id),
+        &join_url,
+        &InstanceMulticastGroupJoin {
             source_ips: None, // ASM (Any-Source Multicast)
         },
     )
@@ -159,10 +182,10 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
         "Expected group name in groups output, got: {output}"
     );
 
-    // Verify ASM (any-source multicast) is shown since we didn't specify source_ips
+    // Verify ASM is shown in RANGE column (224.x.x.x = ASM range)
     assert!(
         output.contains("ASM"),
-        "Expected ASM in sources column, got: {output}"
+        "Expected ASM in range column, got: {output}"
     );
 
     // Test: omdb db multicast groups --state active
@@ -257,16 +280,14 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Add member to a new group for the started instance
-    let sled_member_url = format!(
-        "/v1/multicast-groups/sled-test-group/members?project={PROJECT_NAME}"
+    let sled_join_url = format!(
+        "/v1/instances/{}/multicast-groups/sled-test-group?project={PROJECT_NAME}",
+        started_instance.identity.id
     );
-    object_create::<_, MulticastGroupMember>(
+    put_created::<_, MulticastGroupMember>(
         client,
-        &sled_member_url,
-        &MulticastGroupMemberAdd {
-            instance: NameOrId::Id(started_instance.identity.id),
-            source_ips: None,
-        },
+        &sled_join_url,
+        &InstanceMulticastGroupJoin { source_ips: None },
     )
     .await;
 
@@ -388,8 +409,8 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
         "Expected group name when querying by ID, got: {output}"
     );
 
-    // Test SSM (Source-Specific Multicast) - create a group with source IPs
-    // SSM requires IPs from the 232.x.x.x range, so create an SSM pool first
+    // Test SSM (Source-Specific Multicast) - group in 232/8 range
+    // SSM range is 232.0.0.0/8 for IPv4, ff3x::/32 for IPv6
     create_multicast_ip_pool_with_range(
         client,
         "test-ssm-pool",
@@ -407,14 +428,14 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let ssm_member_url = format!(
-        "/v1/multicast-groups/ssm-group/members?project={PROJECT_NAME}"
+    let ssm_join_url = format!(
+        "/v1/instances/{}/multicast-groups/ssm-group?project={PROJECT_NAME}",
+        ssm_instance.identity.id
     );
-    object_create::<_, MulticastGroupMember>(
+    put_created::<_, MulticastGroupMember>(
         client,
-        &ssm_member_url,
-        &MulticastGroupMemberAdd {
-            instance: NameOrId::Id(ssm_instance.identity.id),
+        &ssm_join_url,
+        &InstanceMulticastGroupJoin {
             source_ips: Some(vec![
                 "10.0.0.1".parse::<IpAddr>().unwrap(),
                 "10.0.0.2".parse::<IpAddr>().unwrap(),
@@ -425,12 +446,23 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
 
     wait_for_group_active(client, "ssm-group").await;
 
-    // Verify SSM sources show in groups list
+    // Verify SSM group shows in groups list with sources
     let output = run_omdb(&db_url, &["db", "multicast", "groups"]);
     assert!(
         output.contains("ssm-group"),
         "Expected SSM group in output, got: {output}"
     );
+    // Verify SSM is shown in RANGE column (232.x.x.x = SSM range)
+    assert!(
+        output.contains("SSM"),
+        "Expected SSM in range column, got: {output}"
+    );
+    // Verify ASM is shown for 224.x.x.x range (test-mcast-group)
+    assert!(
+        output.contains("ASM"),
+        "Expected ASM in range column, got: {output}"
+    );
+    // Verify SSM source IPs
     assert!(
         output.contains("10.0.0.1") && output.contains("10.0.0.2"),
         "Expected SSM source IPs in output, got: {output}"
@@ -442,5 +474,39 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
     assert!(
         output.contains("10.0.0.1") || output.contains("10.0.0.2"),
         "Expected SSM source IPs in info output, got: {output}"
+    );
+
+    // Test: omdb db multicast members shows sources per member
+    let output = run_omdb(&db_url, &["db", "multicast", "members"]);
+    // SSM member should show its sources
+    assert!(
+        output.contains("10.0.0.1") || output.contains("10.0.0.2"),
+        "Expected SSM member sources in members output, got: {output}"
+    );
+
+    // Test: omdb db multicast members --source-ip
+    // Filter by SSM source IP - should find SSM member
+    let output = run_omdb(
+        &db_url,
+        &["db", "multicast", "members", "--source-ip", "10.0.0.1"],
+    );
+    assert!(
+        output.contains(&ssm_instance.identity.id.to_string()),
+        "Expected SSM instance with source-ip filter, got: {output}"
+    );
+    // Members without sources should NOT appear for any source-ip filter
+    assert!(
+        !output.contains(&instance.identity.id.to_string()),
+        "Member without sources should NOT appear, got: {output}"
+    );
+
+    // Test: --source-ip with non-existent IP returns no members
+    let output = run_omdb(
+        &db_url,
+        &["db", "multicast", "members", "--source-ip", "10.99.99.99"],
+    );
+    assert!(
+        !output.contains(&ssm_instance.identity.id.to_string()),
+        "No members should match non-existent source IP, got: {output}"
     );
 }
