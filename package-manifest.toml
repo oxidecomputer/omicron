@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "0df320d42b356e689a3c7a7600eec9b16770237a"
+source.commit = "48bc9972bbd2df6e61e4bbe875a58b6bc9075182"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "0c6b756f317decd857b1641e300ed38c0f4cdfad4b77ee2322b2c8365fe95274"
+source.sha256 = "eb7e25a37d0cff663ea947c5e7429e7074cde8e9228cecc2b63be7c0b056a87c"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -670,10 +670,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "0df320d42b356e689a3c7a7600eec9b16770237a"
+source.commit = "48bc9972bbd2df6e61e4bbe875a58b6bc9075182"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "5ef5389215ca3c1aaeef19a4abb0a01d85a6dabb0c2d6f02449883651e937fef"
+source.sha256 = "ff9a875a6e354293de3e6ec08fa1da597fee768a9548ec95df3d53344974e7e6"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -685,10 +685,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "0df320d42b356e689a3c7a7600eec9b16770237a"
+source.commit = "48bc9972bbd2df6e61e4bbe875a58b6bc9075182"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "e32f8202e69f7238efde2470f2f62e533fd78355a28e4ae99664fba3d91e8ae4"
+source.sha256 = "adbf955030d7233764d425baad4e319a16e530cafacf1360e93ef4b6e61ab266"
 output.type = "zone"
 output.intermediate_only = true
 

@@ -46,6 +46,7 @@ Downstairs Controller (debugging only) (client: dsc-client)
 
 Management Gateway Service (client: gateway-client)
     consumed by: dpd (dendrite/dpd) via 1 path
+    consumed by: mgd (maghemite/mgd) via 1 path
     consumed by: omicron-nexus (omicron/nexus) via 4 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
     consumed by: wicketd (omicron/wicketd) via 3 paths
