@@ -9,6 +9,7 @@
 
 mod component;
 mod component_details;
+mod host;
 mod ignition;
 mod rot;
 mod sensor;
