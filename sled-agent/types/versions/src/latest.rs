@@ -89,6 +89,9 @@ pub mod inventory {
     pub use crate::v1::inventory::InventoryDataset;
     pub use crate::v1::inventory::InventoryDisk;
     pub use crate::v1::inventory::InventoryZpool;
+    pub use crate::v1::inventory::ManifestBootInventory;
+    pub use crate::v1::inventory::ManifestInventory;
+    pub use crate::v1::inventory::ManifestNonBootInventory;
     pub use crate::v1::inventory::MupdateOverrideBootInventory;
     pub use crate::v1::inventory::MupdateOverrideInventory;
     pub use crate::v1::inventory::MupdateOverrideNonBootInventory;
@@ -102,9 +105,6 @@ pub mod inventory {
     pub use crate::v1::inventory::ZoneArtifactInventory;
     pub use crate::v1::inventory::ZoneImageResolverInventory;
     pub use crate::v1::inventory::ZoneKind;
-    pub use crate::v1::inventory::ZoneManifestBootInventory;
-    pub use crate::v1::inventory::ZoneManifestInventory;
-    pub use crate::v1::inventory::ZoneManifestNonBootInventory;
 
     pub use crate::v11::inventory::ConfigReconcilerInventory;
     pub use crate::v11::inventory::ConfigReconcilerInventoryStatus;

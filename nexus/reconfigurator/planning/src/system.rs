@@ -66,13 +66,13 @@ use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
+use sled_agent_types::inventory::ManifestBootInventory;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZoneImageResolverInventory;
 use sled_agent_types::inventory::ZoneKind;
-use sled_agent_types::inventory::ZoneManifestBootInventory;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -675,7 +675,7 @@ impl SystemDescription {
     pub fn sled_set_zone_manifest(
         &mut self,
         sled_id: SledUuid,
-        boot_inventory: Result<ZoneManifestBootInventory, String>,
+        boot_inventory: Result<ManifestBootInventory, String>,
     ) -> anyhow::Result<&mut Self> {
         let sled = self.get_sled_mut(sled_id)?;
         sled.set_zone_manifest(boot_inventory);
@@ -1741,7 +1741,7 @@ impl Sled {
 
     fn set_zone_manifest(
         &mut self,
-        boot_inventory: Result<ZoneManifestBootInventory, String>,
+        boot_inventory: Result<ManifestBootInventory, String>,
     ) {
         self.inventory_sled_agent
             .zone_image_resolver

@@ -527,7 +527,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "hubpack",
- "rats-corim",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
  "salty",
  "serde",
  "serde_with",
@@ -546,7 +546,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "hubpack",
- "rats-corim",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
  "salty",
  "serde",
  "serde_with",
@@ -567,7 +567,7 @@ dependencies = [
  "hubpack",
  "knuffel",
  "miette",
- "rats-corim",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
  "serde_json",
 ]
 
@@ -759,7 +759,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -782,7 +782,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -2711,7 +2711,7 @@ dependencies = [
  "libipcc",
  "log",
  "p384",
- "rats-corim",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
  "sha3",
  "tempfile",
  "thiserror 2.0.17",
@@ -3935,7 +3935,7 @@ dependencies = [
  "gateway-messages",
  "hex",
  "hubpack",
- "hubtools 0.4.7",
+ "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "lru-cache",
  "lzss",
  "nix 0.27.1",
@@ -4739,8 +4739,8 @@ dependencies = [
 
 [[package]]
 name = "hubtools"
-version = "0.4.6"
-source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#cec2560e9a0126e9e687d51b385a57891abc87c3"
+version = "0.4.7"
+source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#2b1ef9b38d75563ea800baa3b17327eec17b1b7a"
 dependencies = [
  "digest",
  "hex",
@@ -7048,7 +7048,7 @@ dependencies = [
  "gateway-test-utils",
  "gateway-types",
  "http",
- "hubtools 0.4.7",
+ "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "iddqd",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -8276,7 +8276,7 @@ dependencies = [
  "http-body-util",
  "httpmock",
  "httptest",
- "hubtools 0.4.7",
+ "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "hyper",
  "hyper-rustls",
  "hyper-staticfile",
@@ -8648,6 +8648,7 @@ dependencies = [
  "omicron-pins",
  "omicron-workspace-hack",
  "omicron-zone-package",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim.git?rev=f0d5d5168d3d31487a56df32c676b0c6240bcc6b)",
  "reqwest",
  "semver 1.0.27",
  "serde",
@@ -8968,8 +8969,6 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.10.5",
- "itertools 0.12.1",
- "itertools 0.13.0",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -11264,6 +11263,21 @@ dependencies = [
 [[package]]
 name = "rats-corim"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/rats-corim.git?rev=f0d5d5168d3d31487a56df32c676b0c6240bcc6b#f0d5d5168d3d31487a56df32c676b0c6240bcc6b"
+dependencies = [
+ "ciborium",
+ "ciborium-io",
+ "clap",
+ "hex",
+ "serde",
+ "serde_with",
+ "strum 0.26.3",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "rats-corim"
+version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/rats-corim#f0d5d5168d3d31487a56df32c676b0c6240bcc6b"
 dependencies = [
  "ciborium",
@@ -13376,7 +13390,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -13415,7 +13429,7 @@ dependencies = [
  "gateway-messages",
  "gateway-types",
  "hex",
- "hubtools 0.4.7",
+ "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "nexus-types",
  "nix 0.30.1",
  "omicron-common",
@@ -15036,7 +15050,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#1eacfcf0cade44f77d433f31744dbee4abb96465"
 dependencies = [
  "anyhow",
  "camino",
@@ -15057,7 +15071,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#1eacfcf0cade44f77d433f31744dbee4abb96465"
 dependencies = [
  "daft",
  "hex",
@@ -15074,7 +15088,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#1eacfcf0cade44f77d433f31744dbee4abb96465"
 dependencies = [
  "semver 1.0.27",
  "serde",
@@ -15086,7 +15100,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#1eacfcf0cade44f77d433f31744dbee4abb96465"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -15103,7 +15117,7 @@ dependencies = [
  "fs-err 2.11.0",
  "futures",
  "hex",
- "hubtools 0.4.6",
+ "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?branch=main)",
  "indent_write",
  "itertools 0.13.0",
  "parse-size",
@@ -15448,7 +15462,7 @@ dependencies = [
  "fs-err 3.1.1",
  "futures",
  "hex",
- "hubtools 0.4.7",
+ "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -16139,7 +16153,7 @@ dependencies = [
  "hickory-resolver 0.25.2",
  "http",
  "http-body-util",
- "hubtools 0.4.7",
+ "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "hyper",
  "illumos-utils",
  "installinator",

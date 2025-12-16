@@ -83,4 +83,3 @@ somewhere consistent and predictable.
 * `sled_info.json` - Mapping of sled identifiers to cubby location
 * `sp_task_dumps/` - All SP dumps
 * `sp_task_dumps/{SP type}_{SP slot}/dump-{id}.zip` - Individual SP dumps
-
