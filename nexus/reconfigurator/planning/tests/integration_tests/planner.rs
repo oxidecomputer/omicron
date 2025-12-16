@@ -29,9 +29,9 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
-use nexus_types::deployment::ReadyForCleanup;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::blueprint_zone_type::InternalDns;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
@@ -2576,7 +2576,7 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
     // `ready_for_cleanup` yet.
     let expunged_zones: Vec<_> = blueprint3
         .expunged_zones(
-            ReadyForCleanup::No,
+            ZoneRunningStatus::MaybeRunning,
             BlueprintExpungedZoneAccessReason::Test,
         )
         .map(|(_, z)| z.clone())
@@ -2602,7 +2602,7 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
     // enabled our clickhouse policy should be expunged when we disable it.
     let expunged_zones: Vec<_> = blueprint4
         .expunged_zones(
-            ReadyForCleanup::No,
+            ZoneRunningStatus::MaybeRunning,
             BlueprintExpungedZoneAccessReason::Test,
         )
         .map(|(_, z)| z.clone())
@@ -3301,7 +3301,7 @@ fn test_update_crucible_pantry_before_nexus() {
     assert_eq!(
         blueprint
             .expunged_zones(
-                ReadyForCleanup::Yes,
+                ZoneRunningStatus::Shutdown,
                 BlueprintExpungedZoneAccessReason::Test
             )
             .filter(|(_, z)| is_old_pantry(z))

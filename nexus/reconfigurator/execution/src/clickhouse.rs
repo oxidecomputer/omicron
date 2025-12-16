@@ -26,7 +26,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
-use nexus_types::deployment::ReadyForCleanup;
+use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -76,7 +76,7 @@ pub(crate) async fn deploy_nodes(
     use BlueprintExpungedZoneAccessReason::ClickhouseKeeperServerConfigIps;
     let all_zones =
         blueprint.in_service_zones().chain(blueprint.expunged_zones(
-            ReadyForCleanup::Both,
+            ZoneRunningStatus::Any,
             ClickhouseKeeperServerConfigIps,
         ));
 

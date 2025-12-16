@@ -23,8 +23,8 @@ use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
-use nexus_types::deployment::ReadyForCleanup;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -210,7 +210,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     .expect("editing blueprint to expunge zone");
     let (_, expunged_zone_config) = blueprint3
         .expunged_zones(
-            ReadyForCleanup::No,
+            ZoneRunningStatus::MaybeRunning,
             BlueprintExpungedZoneAccessReason::Test,
         )
         .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
@@ -312,7 +312,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // message if something has gone wrong up to this point.
     let (_, expunged_zone_config) = new_blueprint
         .expunged_zones(
-            ReadyForCleanup::Yes,
+            ZoneRunningStatus::Shutdown,
             BlueprintExpungedZoneAccessReason::Test,
         )
         .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)

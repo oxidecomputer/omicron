@@ -91,7 +91,7 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::deployment::ReadyForCleanup;
+use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -1968,7 +1968,7 @@ impl DataStore {
                     // <https://github.com/oxidecomputer/omicron/issues/9506>
                     blueprint
                         .expunged_zones(
-                            ReadyForCleanup::Both,
+                            ZoneRunningStatus::Any,
                             BlueprintExpungedZoneAccessReason
                                 ::DeallocateExternalNetworkingResources
                         )
@@ -4525,7 +4525,7 @@ mod tests {
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
             .expunged_zones(
-                ReadyForCleanup::Both,
+                ZoneRunningStatus::Any,
                 BlueprintExpungedZoneAccessReason::Test,
             )
             .collect::<Vec<_>>();

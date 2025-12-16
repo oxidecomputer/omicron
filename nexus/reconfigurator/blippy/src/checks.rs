@@ -18,8 +18,8 @@ use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::ReadyForCleanup;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
@@ -2134,7 +2134,7 @@ fn check_planning_input_network_records_appear_in_blueprint(
     // between expunged zones or between expunged -> running zones.
     for (_, z) in blippy.blueprint().in_service_zones().chain(
         blippy.blueprint().expunged_zones(
-            ReadyForCleanup::Both,
+            ZoneRunningStatus::Any,
             BlueprintExpungedZoneAccessReason::Blippy,
         ),
     ) {

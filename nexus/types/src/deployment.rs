@@ -329,7 +329,7 @@ impl Blueprint {
     /// from the blueprint.
     pub fn expunged_zones(
         &self,
-        ready_for_cleanup: ReadyForCleanup,
+        ready_for_cleanup: ZoneRunningStatus,
         _reason: BlueprintExpungedZoneAccessReason,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
         // Danger note: this call will definitely access expunged zones, but we
@@ -343,9 +343,9 @@ impl Blueprint {
                 } => this_zone_ready_for_cleanup,
             };
             match ready_for_cleanup {
-                ReadyForCleanup::Yes => this_zone_ready_for_cleanup,
-                ReadyForCleanup::No => !this_zone_ready_for_cleanup,
-                ReadyForCleanup::Both => true,
+                ZoneRunningStatus::Shutdown => this_zone_ready_for_cleanup,
+                ZoneRunningStatus::MaybeRunning => !this_zone_ready_for_cleanup,
+                ZoneRunningStatus::Any => true,
             }
         })
     }
@@ -397,7 +397,7 @@ impl Blueprint {
     ) -> impl Iterator<
         Item = (SledUuid, &BlueprintZoneConfig, &blueprint_zone_type::Nexus),
     > {
-        self.expunged_zones(ReadyForCleanup::Yes, reason).filter_map(
+        self.expunged_zones(ZoneRunningStatus::Shutdown, reason).filter_map(
             |(sled_id, zone)| {
                 if let BlueprintZoneType::Nexus(nexus_config) = &zone.zone_type
                 {
@@ -487,7 +487,7 @@ impl Blueprint {
         let zone = self
             .in_service_zones()
             .chain(self.expunged_zones(
-                ReadyForCleanup::Both,
+                ZoneRunningStatus::Any,
                 BlueprintExpungedZoneAccessReason::NexusSelfIsQuiescing,
             ))
             .find(|(_sled_id, zone_config)| zone_config.id == nexus_id)
@@ -538,7 +538,7 @@ impl Blueprint {
     ) -> Result<Generation, Error> {
         for (_sled_id, zone_config) in
             self.in_service_zones().chain(self.expunged_zones(
-                ReadyForCleanup::Both,
+                ZoneRunningStatus::Any,
                 BlueprintExpungedZoneAccessReason::NexusSelfGeneration,
             ))
         {
@@ -578,7 +578,7 @@ impl Blueprint {
         // a single sled and that sled's boundary NTP zone is being upgraded.)
         self.in_service_zones()
             .chain(self.expunged_zones(
-                ReadyForCleanup::Both,
+                ZoneRunningStatus::Any,
                 BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig,
             ))
             .find_map(|(_sled_id, zone)| match &zone.zone_type {
@@ -611,7 +611,7 @@ impl Blueprint {
         // without any.)
         self.in_service_zones()
             .chain(self.expunged_zones(
-                ReadyForCleanup::Both,
+                ZoneRunningStatus::Any,
                 BlueprintExpungedZoneAccessReason::NexusExternalConfig,
             ))
             .find_map(|(_sled_id, zone)| match &zone.zone_type {
@@ -665,7 +665,7 @@ impl Blueprint {
         // database constraints on external IP uniqueness.
         self.in_service_zones()
             .chain(self.expunged_zones(
-                ReadyForCleanup::Both,
+                ZoneRunningStatus::Any,
                 BlueprintExpungedZoneAccessReason::ExternalDnsExternalIps,
             ))
             .filter_map(|(_id, zone)| match &zone.zone_type {
@@ -691,18 +691,30 @@ pub struct OperatorNexusConfig<'a> {
     pub external_dns_servers: &'a [IpAddr],
 }
 
-/// Argument to [`Blueprint::expunged_zones()`] allowing the caller whether they
-/// zones that are ready for cleanup, not ready for cleanup, or both/either.
+/// `ZoneRunningStatus` is an argument to [`Blueprint::expunged_zones()`]
+/// allowing the caller to to specify whether they want to operate on zones that
+/// are shut down, could still be running, or both/either.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ReadyForCleanup {
-    /// Only return zones that are ready for cleanup (i.e., have been confirmed
-    /// shut down by sled-agent and will not be restarted).
-    Yes,
-    /// Only return zones that are NOT YET ready for cleanup. These zones are
-    /// expunged but could still be running.
-    No,
-    /// Return expunged zones regardless in either "ready for cleanup" state.
-    Both,
+pub enum ZoneRunningStatus {
+    /// Only return zones that are guaranteed to be shutdown and will not be
+    /// restarted.
+    ///
+    /// This corresponds to `ready_for_cleanup: true` in a zone's
+    /// [`BlueprintZoneDisposition::Expunged`] state.
+    Shutdown,
+    /// Only return expunged zones that could still be running. This is
+    /// inherently racy. Zones in this state may already be stopped, and if they
+    /// aren't they are likely (but not guaranteed) to be stopped soon.
+    ///
+    /// This corresponds to `ready_for_cleanup: false` in a zone's
+    /// [`BlueprintZoneDisposition::Expunged`] state.
+    MaybeRunning,
+    /// Return expunged zones regardless of whether they're shut down or could
+    /// still be running.
+    ///
+    /// This corresponds to ignoring the `ready_for_cleanup` field of a zone's
+    /// [`BlueprintZoneDisposition::Expunged`] state.
+    Any,
 }
 
 /// Argument to [`Blueprint::expunged_zones()`] requiring the caller to specify

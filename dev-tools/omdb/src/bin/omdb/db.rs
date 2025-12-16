@@ -135,8 +135,8 @@ use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
-use nexus_types::deployment::ReadyForCleanup;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::PhysicalDiskState;
@@ -1628,7 +1628,7 @@ async fn lookup_service_info(
     // be expunged. Check all the zone states.
     let mut all_zones =
         blueprint.in_service_zones().chain(blueprint.expunged_zones(
-            ReadyForCleanup::Both,
+            ZoneRunningStatus::Any,
             BlueprintExpungedZoneAccessReason::Omdb,
         ));
 
