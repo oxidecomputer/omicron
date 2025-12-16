@@ -756,7 +756,7 @@ pub enum ZoneRunningStatus {
 /// an expunged Oximeter zone until it knows that all possible such
 /// reassignments are complete.
 ///
-/// These reasons are not used at runtime; they exist soley to document and
+/// These reasons are not used at runtime; they exist solely to document and
 /// attempt to statically guard against new code adding a new call to
 /// `expunged_zones()` that the planner doesn't know about (and therefore
 /// doesn't get updated to account for!). If you are attempting to call
@@ -764,7 +764,7 @@ pub enum ZoneRunningStatus {
 ///
 /// 1. Add a new variant to this enum.
 /// 2. Update the planner to account for it, to prevent the planner from pruning
-///    the zone before whatever your use of it is completes.
+///    the zone before whatever your use of it is completed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BlueprintExpungedZoneAccessReason {
     // --------------------------------------------------------------------
