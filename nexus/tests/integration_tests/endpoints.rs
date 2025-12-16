@@ -761,6 +761,10 @@ pub static MULTICAST_GROUPS_URL: LazyLock<String> =
 pub static DEMO_MULTICAST_GROUP_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/multicast-groups/{}", *DEMO_MULTICAST_GROUP_NAME)
 });
+pub static DEMO_MULTICAST_GROUP_MEMBERS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/multicast-groups/{}/members", *DEMO_MULTICAST_GROUP_NAME)
+    });
 pub static DEMO_INSTANCE_MULTICAST_GROUPS_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
@@ -3138,6 +3142,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &DEMO_MULTICAST_GROUP_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::Full,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_MULTICAST_GROUP_MEMBERS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::Full,
                 allowed_methods: vec![AllowedMethod::Get],
