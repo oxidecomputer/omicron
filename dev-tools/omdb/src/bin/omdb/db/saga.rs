@@ -781,7 +781,6 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
     }
 
     struct SagaNodeRow {
-        saga_id: Uuid,
         event_time: String,
         sub_saga_id: Option<u32>,
         node_id: String,
@@ -935,7 +934,6 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
         };
 
         rows.push(SagaNodeRow {
-            saga_id: saga_node.saga_id.0.into(),
             event_time: datetime_rfc3339_concise(&saga_node.event_time),
             sub_saga_id,
             node_id,
@@ -955,7 +953,6 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
         .iter()
         .map(|x| {
             (
-                format!("{}", x.saga_id).chars().count(),
                 x.event_time.chars().count(),
                 if let Some(sub_saga_id) = x.sub_saga_id {
                     format!("{}", sub_saga_id).chars().count()
@@ -969,32 +966,24 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
         })
         .collect();
 
-    let (width0, width1, width2, width3, width4): (
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-    ) = (
+    let (width0, width1, width2, width3): (usize, usize, usize, usize) = (
         row_char_counts.iter().map(|x| x.0).max().unwrap(),
-        row_char_counts.iter().map(|x| x.1).max().unwrap(),
         std::cmp::max(
-            row_char_counts.iter().map(|x| x.2).max().unwrap(),
+            row_char_counts.iter().map(|x| x.1).max().unwrap(),
             "sub saga".len(),
         ),
         std::cmp::max(
-            row_char_counts.iter().map(|x| x.3).max().unwrap(),
+            row_char_counts.iter().map(|x| x.2).max().unwrap(),
             "node id".len(),
         ),
         std::cmp::max(
-            row_char_counts.iter().map(|x| x.4).max().unwrap(),
+            row_char_counts.iter().map(|x| x.3).max().unwrap(),
             "event type".len(),
         ),
     );
 
     println!(
-        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {:width4$} | {}",
-        String::from("saga id"),
+        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
         String::from("event time"),
         String::from("sub saga"),
         String::from("node id"),
@@ -1003,19 +992,17 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
     );
 
     println!(
-        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {:width4$} | {}",
+        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
         (0..width0).map(|_| "-").collect::<String>(),
         (0..width1).map(|_| "-").collect::<String>(),
         (0..width2).map(|_| "-").collect::<String>(),
         (0..width3).map(|_| "-").collect::<String>(),
-        (0..width4).map(|_| "-").collect::<String>(),
         String::from("---"),
     );
 
     for row in rows {
         println!(
-            "{:>width0$} | {:width1$} | {:>width2$} | {:width3$} | {:width4$} | {}",
-            row.saga_id,
+            "{:>width0$} | {:width1$} | {:>width2$} | {:width3$} | {}",
             row.event_time,
             if let Some(sub_saga_id) = row.sub_saga_id {
                 format!("{}", sub_saga_id)
