@@ -31,6 +31,7 @@
 
 #[path = "bootstrap_initial/mod.rs"]
 pub mod bootstrap_v1;
+mod impls;
 pub mod latest;
 #[path = "initial/mod.rs"]
 pub mod v1;

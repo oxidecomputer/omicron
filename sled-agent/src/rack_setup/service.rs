@@ -119,7 +119,6 @@ use sled_agent_types::rack_init::{
 };
 use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::BaseboardId;
-use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -250,12 +249,6 @@ pub enum SetupServiceError {
 
     #[error("Trust quorum proxy commit incorrectly 'pending' from {0}")]
     TrustQuorumProxyCommitPending(BaseboardId),
-}
-
-// The workload / information allocated to a single sled.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-struct SledAllocation {
-    initialization_request: StartSledAgentRequest,
 }
 
 /// The interface to the Rack Setup Service.

@@ -4,16 +4,13 @@
 
 //! Sled-related types for the Sled Agent API.
 
-use std::net::{Ipv6Addr, SocketAddrV6};
-
 use async_trait::async_trait;
 use daft::Diffable;
-use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
+use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use omicron_common::ledger::Ledgerable;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sha3::{Digest, Sha3_256};
 use uuid::Uuid;
 
 /// A representation of a Baseboard ID as used in the inventory subsystem
@@ -69,28 +66,6 @@ pub struct StartSledAgentRequest {
 
     // The actual configuration details
     pub body: StartSledAgentRequestBody,
-}
-
-impl StartSledAgentRequest {
-    pub fn sled_address(&self) -> SocketAddrV6 {
-        address::get_sled_address(self.body.subnet)
-    }
-
-    pub fn switch_zone_ip(&self) -> Ipv6Addr {
-        address::get_switch_zone_address(self.body.subnet)
-    }
-
-    /// Compute the sha3_256 digest of `self.rack_id` to use as a `salt`
-    /// for disk encryption. We don't want to include other values that are
-    /// consistent across sleds as it would prevent us from moving drives
-    /// between sleds.
-    pub fn hash_rack_id(&self) -> [u8; 32] {
-        // We know the unwrap succeeds as a Sha3_256 digest is 32 bytes
-        Sha3_256::digest(self.body.rack_id.as_bytes())
-            .as_slice()
-            .try_into()
-            .unwrap()
-    }
 }
 
 /// This is the actual app level data of `StartSledAgentRequest`

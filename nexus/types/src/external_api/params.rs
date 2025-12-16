@@ -1147,6 +1147,7 @@ pub struct FloatingIpAttach {
 // in the path of endpoints handling instance operations.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "params", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum InstanceNetworkInterfaceAttachment {
     /// Create one or more `InstanceNetworkInterface`s for the `Instance`.
     ///
@@ -1157,16 +1158,11 @@ pub enum InstanceNetworkInterfaceAttachment {
     /// The default networking configuration for an instance is to create a
     /// single primary interface with an automatically-assigned IP address. The
     /// IP will be pulled from the Project's default VPC / VPC Subnet.
+    #[default]
     Default,
 
     /// No network interfaces at all will be created for the instance.
     None,
-}
-
-impl Default for InstanceNetworkInterfaceAttachment {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 /// Describe the instance's disks at creation time

@@ -19,7 +19,6 @@ use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::zone_images::ResolverStatus;
 use sled_hardware::PooledDiskError;
 use slog::Logger;
-use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
@@ -488,7 +487,7 @@ mod boot_partition_details {
         // `MediaInfoExtended`; we'll allocate a buffer of this size when we
         // read, so if we get back something wild as the logical block size,
         // we'll assume that's wrong and cap it at 128 MiB.
-        if block_size < ONE_MIB && ONE_MIB % block_size == 0 {
+        if block_size < ONE_MIB && ONE_MIB.is_multiple_of(block_size) {
             block_size = ONE_MIB;
         } else if block_size > 128 * ONE_MIB {
             block_size = 128 * ONE_MIB;
