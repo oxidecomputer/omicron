@@ -823,7 +823,7 @@ impl DataStore {
                     // required. Find another sled!
                     info!(
                         &log,
-                        "sled {sled_target:?} does not have enough zpools to \
+                        "sled {sled_target} does not have enough zpools to \
                         satisfy local storage allocations";
                         "zpools" => zpools_for_sled.len(),
                         "allocations" =>
@@ -896,7 +896,7 @@ impl DataStore {
                         // this request's size, then try another sled.
                         info!(
                             &log,
-                            "sled {sled_target:?} does not have any \
+                            "sled {sled_target} does not have any \
                             candidate datasets with available space to \
                             satisfy local storage allocation";
                             "request" => ?request,
