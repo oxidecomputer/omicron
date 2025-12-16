@@ -3571,7 +3571,7 @@ fn test_update_cockroach() {
         let mut result = BTreeMap::new();
         for i in 1..=COCKROACHDB_REDUNDANCY {
             result.insert(
-                cockroach_admin_types::NodeId(i.to_string()),
+                cockroach_admin_types::node::InternalNodeId(i.to_string()),
                 CockroachStatus {
                     ranges_underreplicated: Some(0),
                     liveness_live_nodes: Some(GOAL_REDUNDANCY),

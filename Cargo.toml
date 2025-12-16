@@ -26,6 +26,7 @@ members = [
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
+    "cockroach-admin/types/versions",
     "cockroach-metrics",
     "common",
     "dev-tools/cert-dev",
@@ -187,6 +188,7 @@ default-members = [
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
+    "cockroach-admin/types/versions",
     "cockroach-metrics",
     "common",
     "dev-tools/cert-dev",
@@ -410,6 +412,7 @@ clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "e3d9a1c
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 cockroach-admin-types = { path = "cockroach-admin/types" }
+cockroach-admin-types-versions = { path = "cockroach-admin/types/versions" }
 colored = "2.1"
 const_format = "0.2.34"
 cookie = "0.18"

@@ -12,7 +12,7 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
 use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
-use cockroach_admin_types::NodeId as CockroachNodeId;
+use cockroach_admin_types::node::InternalNodeId as CockroachNodeId;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
