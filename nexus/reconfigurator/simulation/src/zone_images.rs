@@ -9,11 +9,11 @@ use std::collections::BTreeSet;
 use anyhow::bail;
 use camino::Utf8Path;
 use itertools::Itertools;
-use nexus_sled_agent_shared::inventory::{
-    ZoneArtifactInventory, ZoneKind, ZoneManifestBootInventory,
-};
 use omicron_common::{
-    api::external::TufRepoDescription, update::OmicronZoneManifestSource,
+    api::external::TufRepoDescription, update::OmicronInstallManifestSource,
+};
+use sled_agent_types::inventory::{
+    ManifestBootInventory, ZoneArtifactInventory, ZoneKind,
 };
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::KnownArtifactKind;
@@ -43,10 +43,8 @@ impl SimTufRepoDescription {
         Self { source: Err(message.clone()), message }
     }
 
-    /// Generates a simulated [`ZoneManifestBootInventory`] or an error.
-    pub fn to_boot_inventory(
-        &self,
-    ) -> Result<ZoneManifestBootInventory, String> {
+    /// Generates a simulated [`ManifestBootInventory`] or an error.
+    pub fn to_boot_inventory(&self) -> Result<ManifestBootInventory, String> {
         match &self.source {
             Ok(source) => Ok(source.to_boot_inventory()),
             Err(error) => {
@@ -61,7 +59,7 @@ impl SimTufRepoDescription {
 #[derive(Clone, Debug)]
 pub struct SimTufRepoSource {
     description: TufRepoDescription,
-    manifest_source: OmicronZoneManifestSource,
+    manifest_source: OmicronInstallManifestSource,
     message: String,
     known_artifact_id_names: BTreeSet<String>,
     error_artifact_id_names: BTreeSet<String>,
@@ -73,7 +71,7 @@ impl SimTufRepoSource {
     /// The message should be of the form "from repo at ..." or "to target release".
     pub fn new(
         description: TufRepoDescription,
-        manifest_source: OmicronZoneManifestSource,
+        manifest_source: OmicronInstallManifestSource,
         message: String,
     ) -> anyhow::Result<Self> {
         let mut unknown = BTreeSet::new();
@@ -143,8 +141,8 @@ impl SimTufRepoSource {
         Ok(())
     }
 
-    /// Generates a simulated [`ZoneManifestBootInventory`].
-    pub fn to_boot_inventory(&self) -> ZoneManifestBootInventory {
+    /// Generates a simulated [`ManifestBootInventory`].
+    pub fn to_boot_inventory(&self) -> ManifestBootInventory {
         let artifacts = self
             .description
             .artifacts
@@ -180,7 +178,7 @@ impl SimTufRepoSource {
                 })
             })
             .collect();
-        ZoneManifestBootInventory { source: self.manifest_source, artifacts }
+        ManifestBootInventory { source: self.manifest_source, artifacts }
     }
 
     /// Returns a message including the system version and the number of zone

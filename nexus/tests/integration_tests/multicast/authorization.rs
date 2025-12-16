@@ -16,35 +16,34 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::test_params::UserPassword;
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_instance, create_local_user, create_project,
-    grant_iam, link_ip_pool, object_create, object_get,
+    grant_iam, link_ip_pool, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment,
-    MulticastGroupMemberAdd, ProjectCreate, SiloCreate, SiloQuotasCreate,
+    InstanceCreate, InstanceMulticastGroupJoin,
+    InstanceNetworkInterfaceAttachment, ProjectCreate, SiloCreate,
+    SiloQuotasCreate,
 };
 use nexus_types::external_api::shared::{
     ProjectRole, SiloIdentityMode, SiloRole,
 };
-use nexus_types::external_api::views::{
-    MulticastGroup, MulticastGroupMember, Silo,
-};
+use nexus_types::external_api::views::{MulticastGroup, Silo};
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
-    InstanceCpuCount, NameOrId,
+    InstanceCpuCount,
 };
 use omicron_uuid_kinds::SiloUserUuid;
 
 use super::*;
 
-/// Create a multicast group via the member-add implicitly create pattern.
+/// Create a multicast group via the instance-centric join API.
 ///
-/// This creates a project and instance for the user, then adds the instance
-/// as a member to the specified group name. Since there's no explicit create
-/// endpoint, adding the first member implicitly creates the group.
+/// This creates a project and instance for the user, then joins the instance
+/// to the specified group name. Since there's no explicit create endpoint,
+/// joining the first member implicitly creates the group.
 ///
 /// Returns the implicitly created multicast group.
-async fn create_group_via_member_add(
+async fn create_group_via_instance_join(
     client: &dropshot::test_util::ClientTestContext,
     user_id: SiloUserUuid,
     group_name: &str,
@@ -105,24 +104,22 @@ async fn create_group_via_member_add(
     .await
     .expect("User should be able to create instance");
 
-    // Case: Add the instance as a member (implicitly creates the group)
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
+    // Case: Join the instance to the group (implicitly creates the group)
+    // Uses the instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
 
     NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &member_add_url)
-            .body(Some(&member_params))
+        RequestBuilder::new(client, http::Method::PUT, &join_url)
+            .body(Some(&join_params))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(user_id))
     .execute()
     .await
-    .expect("User should be able to add member (implicitly creates group)");
+    .expect("User should be able to join instance to group (implicitly creates group)");
 
     // Case: Fetch and return the implicitly created group
     let group_url = mcast_group_url(group_name);
@@ -174,8 +171,8 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
     )
     .await;
 
-    // User creates group via member-add (implicitly creates the group with first instance)
-    let group = create_group_via_member_add(
+    // User creates group via instance join (implicitly creates the group with first instance)
+    let group = create_group_via_instance_join(
         client,
         user.id,
         "shared-group",
@@ -240,30 +237,22 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
     .unwrap();
 
     // User can attach additional instance to existing multicast group
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance.identity.id),
-        source_ips: None,
-    };
-    let member_add_url = mcast_group_member_add_url(
-        &group.identity.name.to_string(),
-        &member_params.instance,
-        "second-project",
+    // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
+    let join_url = format!(
+        "/v1/instances/{}/multicast-groups/{}?project=second-project",
+        instance.identity.name, group.identity.name
     );
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
 
-    let member: MulticastGroupMember = NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &member_add_url)
-            .body(Some(&member_params))
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, &join_url)
+            .body(Some(&join_params))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(user.id))
     .execute()
     .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-
-    assert_eq!(member.instance_id, instance.identity.id);
-    assert_eq!(member.multicast_group_id, group.identity.id);
+    .expect("User should be able to attach their instance to the group");
 }
 
 /// Test that authenticated silo users can read multicast groups without
@@ -311,8 +300,8 @@ async fn test_authenticated_users_can_read_multicast_groups(
     )
     .await;
 
-    // Creator creates a multicast group via member-add
-    let group = create_group_via_member_add(
+    // Creator creates a multicast group via instance join
+    let group = create_group_via_instance_join(
         client,
         creator.id,
         "readable-group",
@@ -395,41 +384,45 @@ async fn test_cross_project_instance_attachment_allowed(
     let instance1 = create_instance(client, "project1", "instance1").await;
     let instance2 = create_instance(client, "project2", "instance2").await;
 
-    // First member-add implicitly creates the group
-    let member_params1 = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance1.identity.id),
-        source_ips: None,
-    };
-    let member_add_url1 = mcast_group_member_add_url(
-        "cross-project-group",
-        &member_params1.instance,
-        "project1",
-    );
-    let member1: MulticastGroupMember =
-        object_create(client, &member_add_url1, &member_params1).await;
+    // First instance join implicitly creates the group
+    let join_url1 = "/v1/instances/instance1/multicast-groups/cross-project-group?project=project1";
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, join_url1)
+            .body(Some(&join_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should join instance1 to group");
 
     // Fetch the implicitly created group
     let group: MulticastGroup =
         object_get(client, &mcast_group_url("cross-project-group")).await;
 
-    // Attach instance from project2 to the SAME group - should succeed
-    let member_params2 = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance2.identity.id),
-        source_ips: None,
-    };
-    let member_add_url2 = mcast_group_member_add_url(
-        &group.identity.name.to_string(),
-        &member_params2.instance,
-        "project2",
+    // Attach instance from project2 to the same group
+    let join_url2 = format!(
+        "/v1/instances/instance2/multicast-groups/{}?project=project2",
+        group.identity.name
     );
-    let member2: MulticastGroupMember =
-        object_create(client, &member_add_url2, &member_params2).await;
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, &join_url2)
+            .body(Some(&join_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should join instance2 to group");
 
-    // Both instances should be members of the same group
-    assert_eq!(member1.multicast_group_id, group.identity.id);
-    assert_eq!(member2.multicast_group_id, group.identity.id);
-    assert_eq!(member1.instance_id, instance1.identity.id);
-    assert_eq!(member2.instance_id, instance2.identity.id);
+    // Verify both instances are members of the same group
+    let members =
+        list_multicast_group_members(client, "cross-project-group").await;
+    assert_eq!(members.len(), 2, "Should have 2 members");
+    let instance_ids: Vec<_> = members.iter().map(|m| m.instance_id).collect();
+    assert!(instance_ids.contains(&instance1.identity.id));
+    assert!(instance_ids.contains(&instance2.identity.id));
 }
 
 /// Verify that unauthenticated users cannot list multicast groups without
@@ -468,9 +461,14 @@ async fn test_unauthenticated_cannot_list_multicast_groups(
     )
     .await;
 
-    // Creator creates a multicast group via member-add
-    create_group_via_member_add(client, creator.id, "test-group", "mcast-pool")
-        .await;
+    // Creator creates a multicast group via instance join
+    create_group_via_instance_join(
+        client,
+        creator.id,
+        "test-group",
+        "mcast-pool",
+    )
+    .await;
 
     // Try to list multicast groups without authentication - should get 401 Unauthorized
     let group_url = "/v1/multicast-groups";
@@ -517,8 +515,8 @@ async fn test_unauthenticated_cannot_access_member_operations(
     )
     .await;
 
-    // Creator creates a multicast group via member-add
-    let group = create_group_via_member_add(
+    // Creator creates a multicast group via instance join
+    let group = create_group_via_instance_join(
         client,
         creator.id,
         "auth-test-group",
@@ -526,8 +524,8 @@ async fn test_unauthenticated_cannot_access_member_operations(
     )
     .await;
 
-    // Create a second project and instance for testing unauthenticated add
-    let project = create_project(client, "test-project").await;
+    // Create a second project and instance for testing unauthenticated operations
+    create_project(client, "test-project").await;
     let instance =
         create_instance(client, "test-project", "test-instance").await;
 
@@ -539,40 +537,30 @@ async fn test_unauthenticated_cannot_access_member_operations(
         .await
         .expect("Expected 401 Unauthorized for unauthenticated list members request");
 
-    // Try to ADD member without authentication - should get 401
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance.identity.id),
-        source_ips: None,
-    };
-    let member_add_url = mcast_group_member_add_url(
-        &group.identity.name.to_string(),
-        &member_params.instance,
-        project.identity.name.as_str(),
+    // Try to JOIN without authentication - should get 401
+    // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
+    let join_url = format!(
+        "/v1/instances/{}/multicast-groups/{}?project=test-project",
+        instance.identity.name, group.identity.name
     );
-    RequestBuilder::new(client, http::Method::POST, &member_add_url)
-        .body(Some(&member_params))
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    RequestBuilder::new(client, http::Method::PUT, &join_url)
+        .body(Some(&join_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
-        .expect(
-            "Expected 401 Unauthorized for unauthenticated add member request",
-        );
+        .expect("Expected 401 Unauthorized for unauthenticated join request");
 
-    // Try to REMOVE member without authentication - should get 401
-    let member_delete_url = format!(
-        "{}/{}?project={}",
-        mcast_group_members_url(&group.identity.name.to_string()),
-        instance.identity.name,
-        project.identity.name.as_str()
-    );
-    RequestBuilder::new(client, http::Method::DELETE, &member_delete_url)
+    // Try to leave without authentication - should get 401
+    // Uses instance-centric API: DELETE /v1/instances/{instance}/multicast-groups/{group}
+    RequestBuilder::new(client, http::Method::DELETE, &join_url)
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
-        .expect("Expected 401 Unauthorized for unauthenticated remove member request");
+        .expect("Expected 401 Unauthorized for unauthenticated leave request");
 }
 
-/// Test the asymmetric authorization behavior: unprivileged users CAN list
+/// Test the asymmetric authorization behavior: unprivileged users can list
 /// group members even though they don't have access to the member instances.
 ///
 /// This validates that listing members only requires Read permission on the
@@ -620,8 +608,8 @@ async fn test_unprivileged_users_can_list_group_members(
     )
     .await;
 
-    // Privileged user creates group via member-add (implicitly creates group with first instance)
-    let group = create_group_via_member_add(
+    // Privileged user creates group via instance join (implicitly creates group with first instance)
+    let group = create_group_via_instance_join(
         client,
         privileged_user.id,
         "asymmetric-test-group",
@@ -633,7 +621,7 @@ async fn test_unprivileged_users_can_list_group_members(
     let members_url = mcast_group_members_url(&group.identity.name.to_string());
 
     // Unprivileged user (who does not have access to the privileged user's project
-    // or instances) CAN list the group members - this is the asymmetric authorization
+    // or instances) can list the group members - this is the asymmetric authorization
     let members_response: dropshot::ResultsPage<MulticastGroupMember> =
         NexusRequest::object_get(client, &members_url)
             .authn_as(AuthnMode::SiloUser(unprivileged_user.id))
@@ -679,46 +667,37 @@ async fn test_unprivileged_users_can_list_group_members(
     let instance_name = "asymmetric-test-group-instance";
     let project_name = "asymmetric-test-group-project";
 
-    // Try to ADD the existing instance again (should get 404 because unprivileged user
+    // Try to JOIN the existing instance again (should get 404 because unprivileged user
     // can't see the instance, not 403 which would leak its existence)
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    let member_add_url = mcast_group_member_add_url(
-        &group.identity.name.to_string(),
-        &member_params.instance,
-        project_name,
+    // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
+    let join_url = format!(
+        "/v1/instances/{}/multicast-groups/{}?project={}",
+        instance_name, group.identity.name, project_name
     );
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
 
     NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &member_add_url)
-            .body(Some(&member_params))
+        RequestBuilder::new(client, http::Method::PUT, &join_url)
+            .body(Some(&join_params))
             .expect_status(Some(StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::SiloUser(unprivileged_user.id))
     .execute()
     .await
     .expect(
-        "Should get 404 when trying to add instance from inaccessible project",
+        "Should get 404 when trying to join instance from inaccessible project",
     );
 
-    // Try to REMOVE the instance (should get 404, not 403)
-    let member_delete_url = format!(
-        "{}/{}?project={}",
-        mcast_group_members_url(&group.identity.name.to_string()),
-        instance_name,
-        project_name
-    );
-
+    // Try to leave the instance (should get 404, not 403)
+    // Uses instance-centric API: DELETE /v1/instances/{instance}/multicast-groups/{group}
     NexusRequest::new(
-        RequestBuilder::new(client, http::Method::DELETE, &member_delete_url)
+        RequestBuilder::new(client, http::Method::DELETE, &join_url)
             .expect_status(Some(StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::SiloUser(unprivileged_user.id))
     .execute()
     .await
-    .expect("Should get 404 when trying to remove instance from inaccessible project");
+    .expect("Should get 404 when trying to leave instance from inaccessible project");
 
     // Verify the member still exists (unauthorized operations didn't modify anything)
     let final_members: dropshot::ResultsPage<MulticastGroupMember> =
@@ -759,7 +738,7 @@ async fn test_unprivileged_users_can_list_group_members(
         "Instance-centric join should return 404 for inaccessible instance",
     );
 
-    // Attempt LEAVE via instance-centric path (by ID) as unprivileged user
+    // Attempt leave via instance-centric path (by ID) as unprivileged user
     let inst_leave_url_id = inst_join_url_id.clone();
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::DELETE, &inst_leave_url_id)
@@ -780,7 +759,7 @@ async fn test_unprivileged_users_can_list_group_members(
 ///
 /// This verifies that project-only users can:
 /// - List and read multicast groups (fleet-scoped discovery)
-/// - Implicitly create groups via member-add API (group owned by their silo)
+/// - Implicitly create groups via instance join API (group owned by their silo)
 /// - Create instances and attach them to groups
 #[nexus_test]
 async fn test_project_only_users_can_access_multicast_groups(
@@ -844,8 +823,8 @@ async fn test_project_only_users_can_access_multicast_groups(
     )
     .await;
 
-    // Creator creates a multicast group via member-add
-    let group = create_group_via_member_add(
+    // Creator creates a multicast group via instance join
+    let group = create_group_via_instance_join(
         client,
         creator.id,
         "project-user-test",
@@ -885,7 +864,7 @@ async fn test_project_only_users_can_access_multicast_groups(
 
     assert_eq!(read_group.identity.id, group.identity.id);
 
-    // Project-only user CAN CREATE a multicast group via member-add
+    // Project-only user CAN CREATE a multicast group via instance join
     // They create an instance in their project, then add it as a member
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -926,30 +905,23 @@ async fn test_project_only_users_can_access_multicast_groups(
     .parsed_body()
     .unwrap();
 
-    // Add instance as member to implicitly create the group
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance.identity.id),
-        source_ips: None,
-    };
-    let member_add_url = mcast_group_member_add_url(
-        "created-by-project-user",
-        &member_params.instance,
-        "project-only",
+    // Join instance to implicitly create the group
+    // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
+    let join_url = format!(
+        "/v1/instances/{}/multicast-groups/created-by-project-user?project={}",
+        instance.identity.id, project.identity.id
     );
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
 
     NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            http::Method::POST,
-            &member_add_url,
-        )
-        .body(Some(&member_params))
-        .expect_status(Some(StatusCode::CREATED)),
+        RequestBuilder::new(client, http::Method::PUT, &join_url)
+            .body(Some(&join_params))
+            .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(project_user.id))
     .execute()
     .await
-    .expect("Project-only user should be able to add member (implicitly creates group)");
+    .expect("Project-only user should be able to join group (implicitly creates group)");
 
     // Fetch the implicitly created group
     let user_created_group: MulticastGroup =
@@ -1000,31 +972,30 @@ async fn test_project_only_users_can_access_multicast_groups(
     .parsed_body()
     .expect("Should parse created instance");
 
-    // Project-only user CAN ATTACH the instance they own to a fleet-scoped group
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name2.parse().unwrap()),
-        source_ips: None,
-    };
-    let member_add_url = mcast_group_member_add_url(
-        &group.identity.name.to_string(),
-        &member_params.instance,
-        &project.identity.name.to_string(),
+    // Project-only user can attach the instance they own to a fleet-scoped group
+    // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
+    let join_url2 = format!(
+        "/v1/instances/{}/multicast-groups/{}?project={}",
+        instance2.identity.id, group.identity.name, project.identity.id
     );
-    let member: MulticastGroupMember = NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &member_add_url)
-            .body(Some(&member_params))
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, &join_url2)
+            .body(Some(&join_params))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(project_user.id))
     .execute()
     .await
-    .expect("Project-only user should be able to attach their instance to the group")
-    .parsed_body()
-    .unwrap();
+    .expect("Project-only user should be able to attach their instance to the group");
 
-    // Verify the member was created successfully
-    assert_eq!(member.instance_id, instance2.identity.id);
-    assert_eq!(member.multicast_group_id, group.identity.id);
+    // Verify both instances are now members
+    let members =
+        list_multicast_group_members(client, &group.identity.name.to_string())
+            .await;
+    assert!(
+        members.iter().any(|m| m.instance_id == instance2.identity.id),
+        "Instance2 should be a member of the group"
+    );
 }
 
 /// Test that users from different silos can both read multicast groups
@@ -1136,8 +1107,8 @@ async fn test_silo_admins_cannot_modify_other_silos_groups(
     )
     .await;
 
-    // Admin A creates a multicast group via member-add (owned by Silo A)
-    let group_a = create_group_via_member_add(
+    // Admin A creates a multicast group via instance join (owned by Silo A)
+    let group_a = create_group_via_instance_join(
         client,
         admin_a.id,
         "group-owned-by-silo-a",
@@ -1145,8 +1116,8 @@ async fn test_silo_admins_cannot_modify_other_silos_groups(
     )
     .await;
 
-    // Admin B creates a multicast group via member-add (owned by Silo B)
-    let group_b = create_group_via_member_add(
+    // Admin B creates a multicast group via instance join (owned by Silo B)
+    let group_b = create_group_via_instance_join(
         client,
         admin_b.id,
         "group-owned-by-silo-b",
@@ -1396,63 +1367,45 @@ async fn test_cross_silo_instance_attachment(
     .parsed_body()
     .unwrap();
 
-    // User A attaches their instance (from Silo A) to a new group (implicitly creates it)
+    // User A joins their instance (from Silo A) to a new group (implicitly creates it)
+    // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
     let group_name = "cross-silo-group";
-    let member_a_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance_a.identity.id),
-        source_ips: None,
-    };
-    let member_add_a_url = mcast_group_member_add_url(
-        group_name,
-        &member_a_params.instance,
-        "project-silo-a",
+    let join_url_a = format!(
+        "/v1/instances/{}/multicast-groups/{}?project=project-silo-a",
+        instance_a.identity.id, group_name
     );
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
 
-    let member_a: MulticastGroupMember = NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &member_add_a_url)
-            .body(Some(&member_a_params))
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, &join_url_a)
+            .body(Some(&join_params))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(user_a.id))
     .execute()
     .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    .expect("User A should be able to join instance to group");
 
     // Fetch the implicitly created group
     let group: MulticastGroup =
         object_get(client, &mcast_group_url(group_name)).await;
 
-    assert_eq!(member_a.instance_id, instance_a.identity.id);
-    assert_eq!(member_a.multicast_group_id, group.identity.id);
-
-    // User B attaches their instance (from Silo B) to the SAME fleet-scoped group
+    // User B joins their instance (from Silo B) to the same fleet-scoped group
     // This is the key test: cross-silo instance attachment should succeed
-    let member_b_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance_b.identity.id),
-        source_ips: None,
-    };
-    let member_add_b_url = mcast_group_member_add_url(
-        &group.identity.name.to_string(),
-        &member_b_params.instance,
-        "project-silo-b",
+    let join_url_b = format!(
+        "/v1/instances/{}/multicast-groups/{}?project=project-silo-b",
+        instance_b.identity.id, group.identity.name
     );
 
-    let member_b: MulticastGroupMember = NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &member_add_b_url)
-            .body(Some(&member_b_params))
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, &join_url_b)
+            .body(Some(&join_params))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(user_b.id))
     .execute()
     .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-
-    assert_eq!(member_b.instance_id, instance_b.identity.id);
-    assert_eq!(member_b.multicast_group_id, group.identity.id);
+    .expect("User B should be able to join instance to the same group");
 
     // Both instances should be visible in the group's member list
     let members_url = mcast_group_members_url(&group.identity.name.to_string());
@@ -1533,36 +1486,21 @@ async fn test_cross_silo_instance_attachment(
     // User B (from Silo B, which has mcast-pool linked) can create a new
     // multicast group. Pool linking is the mechanism of access control.
     let new_group_name = "user-b-created-group";
-    let member_add_new_group_url = format!(
-        "{}/members?project=project-silo-b",
-        mcast_group_url(new_group_name)
+    let join_new_group_url = format!(
+        "/v1/instances/{}/multicast-groups/{}?project=project-silo-b",
+        instance_b.identity.id, new_group_name
     );
-    let new_group_member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance_b.identity.id),
-        source_ips: None,
-    };
 
     // This should succeed because mcast-pool is linked to Silo B
-    let new_group_member: MulticastGroupMember = NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            http::Method::POST,
-            &member_add_new_group_url,
-        )
-        .body(Some(&new_group_member_params))
-        .expect_status(Some(StatusCode::CREATED)),
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, &join_new_group_url)
+            .body(Some(&join_params))
+            .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(user_b.id))
     .execute()
     .await
-    .expect("User B should create new group (pool linked to silo)")
-    .parsed_body()
-    .unwrap();
-
-    assert_eq!(
-        new_group_member.instance_id, instance_b.identity.id,
-        "New group member should reference User B's instance"
-    );
+    .expect("User B should create new group (pool linked to silo)");
 
     // Verify the new group was created and is accessible
     let new_group: MulticastGroup =
@@ -1573,48 +1511,35 @@ async fn test_cross_silo_instance_attachment(
         "New group should have correct name"
     );
 
-    // Remove member from new group (triggers implicit deletion)
-    let new_group_member_delete_url = format!(
-        "{}/members/{}",
-        mcast_group_url(new_group_name),
-        instance_b.identity.id
-    );
+    // Leave the new group (triggers implicit deletion)
     NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            http::Method::DELETE,
-            &new_group_member_delete_url,
-        )
-        .expect_status(Some(StatusCode::NO_CONTENT)),
+        RequestBuilder::new(client, http::Method::DELETE, &join_new_group_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
     )
     .authn_as(AuthnMode::SiloUser(user_b.id))
     .execute()
     .await
     .expect("Should clean up new group member");
 
-    // Re-add User B's instance to the original group for subsequent tests
-    let rejoin_member: MulticastGroupMember = NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &member_add_b_url)
-            .body(Some(&member_b_params))
+    // Rejoin User B's instance to the original group for subsequent tests
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, &join_url_b)
+            .body(Some(&join_params))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(user_b.id))
     .execute()
     .await
-    .expect("User B should rejoin original group")
-    .parsed_body()
-    .unwrap();
-
-    assert_eq!(rejoin_member.instance_id, instance_b.identity.id);
+    .expect("User B should rejoin original group");
 
     // Case: Cross-silo detach
+    // Using instance-centric API: DELETE /v1/instances/{instance}/multicast-groups/{group}
 
-    // User A CANNOT detach User B's instance (404 - can't see Silo B's instance)
+    // User A cannot detach User B's instance (404 - can't see Silo B's instance)
     // Using instance ID since we're crossing silo boundaries
     let member_delete_b_by_a_url = format!(
-        "{}/{}",
-        mcast_group_members_url(&group.identity.name.to_string()),
-        instance_b.identity.id,
+        "/v1/instances/{}/multicast-groups/{}",
+        instance_b.identity.id, group.identity.name,
     );
 
     NexusRequest::new(
@@ -1630,11 +1555,10 @@ async fn test_cross_silo_instance_attachment(
     .await
     .expect("User A should get 404 when trying to detach Silo B's instance");
 
-    // User B CAN detach their own instance from the group (even though owned by different silo)
+    // User BcanN detach their own instance from the group (even though owned by different silo)
     let member_delete_b_url = format!(
-        "{}/{}",
-        mcast_group_members_url(&group.identity.name.to_string()),
-        instance_b.identity.id,
+        "/v1/instances/{}/multicast-groups/{}",
+        instance_b.identity.id, group.identity.name,
     );
 
     NexusRequest::new(
@@ -1667,7 +1591,7 @@ async fn test_cross_silo_instance_attachment(
     );
 }
 
-/// Test that both member-add endpoints have identical permission behavior
+/// Test that both instance join endpoints have identical permission behavior
 /// when project-level IAM grants are used.
 ///
 /// This verifies that:
@@ -1773,27 +1697,23 @@ async fn test_both_member_endpoints_have_same_permissions(
     .parsed_body()
     .unwrap();
 
-    // User A adds the instance as a member (implicitly creates the group)
+    // User A joins their instance to a group (implicitly creates the group)
     let group_name = "parity-test-group";
-    let member_params_create = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance_a.identity.id),
-        source_ips: None,
-    };
-    // When using instance ID, do not provide ?project= parameter (causes 400 Bad Request)
-    let member_add_url = mcast_group_member_add_url(
-        group_name,
-        &member_params_create.instance,
-        project_a.identity.name.as_str(),
+    let join_url_a = format!(
+        "/v1/instances/{}/multicast-groups/{}?project={}",
+        instance_a.identity.id, group_name, project_a.identity.name
     );
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+
     NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &member_add_url)
-            .body(Some(&member_params_create))
+        RequestBuilder::new(client, http::Method::PUT, &join_url_a)
+            .body(Some(&join_params))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(user_a.id))
     .execute()
     .await
-    .unwrap();
+    .expect("User A should be able to join group");
 
     // Fetch the implicitly created group
     let group_a: MulticastGroup =
@@ -1801,46 +1721,21 @@ async fn test_both_member_endpoints_have_same_permissions(
 
     // Case: Permission enforcement without project access
 
-    // Build URLs for both endpoints
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance_a.identity.id),
-        source_ips: None,
-    };
-    let group_centric_url = mcast_group_member_add_url(
-        &group_a.identity.name.to_string(),
-        &member_params.instance,
-        project_a.identity.name.as_str(),
-    );
-
+    // User B should get 404 via the instance-centric endpoint (no access to instance)
     let instance_centric_url = format!(
         "/v1/instances/{}/multicast-groups/{}",
         instance_a.identity.id, group_a.identity.id
     );
-    let inst_body = serde_json::json!({});
 
-    // User B should get 404 via the group-centric endpoint (no access to instance)
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &group_centric_url)
-            .body(Some(&member_params))
-            .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::SiloUser(user_b.id))
-    .execute()
-    .await
-    .expect(
-        "User B should get 404 via group-centric endpoint without permission",
-    );
-
-    // User B should ALSO get 404 via the instance-centric endpoint (same permission check)
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &instance_centric_url)
-            .body(Some(&inst_body))
+            .body(Some(&join_params))
             .expect_status(Some(StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::SiloUser(user_b.id))
     .execute()
     .await
-    .expect("User B should get 404 via instance-centric endpoint without permission");
+    .expect("User B should get 404 without permission to access instance");
 
     // Case: Permission enforcement with project-level access
 
@@ -1864,30 +1759,27 @@ async fn test_both_member_endpoints_have_same_permissions(
     )
     .await;
 
-    // User B should now succeed via the group-centric endpoint (has Instance::Modify permission)
-    let member_b_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Id(instance_b.identity.id),
-        source_ips: None,
-    };
-    let group_centric_url_b = mcast_group_member_add_url(
-        &group_a.identity.name.to_string(),
-        &member_b_params.instance,
-        project_a.identity.name.as_str(),
+    // User B should now succeed via the instance-centric endpoint (has Instance::Modify permission)
+    let join_url_b = format!(
+        "/v1/instances/{}/multicast-groups/{}?project={}",
+        instance_b.identity.id, group_a.identity.name, project_a.identity.name
     );
-    let member: MulticastGroupMember = NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &group_centric_url_b)
-            .body(Some(&member_b_params))
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, &join_url_b)
+            .body(Some(&join_params))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(user_b.id))
     .execute()
     .await
-    .expect("User B should succeed via group-centric endpoint with permission")
-    .parsed_body()
-    .unwrap();
+    .expect("User B should succeed with project-level access");
 
-    assert_eq!(member.instance_id, instance_b.identity.id);
-    assert_eq!(member.multicast_group_id, group_a.identity.id);
+    // Verify the member was created
+    let members = list_multicast_group_members(client, group_name).await;
+    assert!(
+        members.iter().any(|m| m.instance_id == instance_b.identity.id),
+        "Instance B should be a member of the group"
+    );
 
     // Create a third instance for testing the instance-centric endpoint
     let instance_c = create_instance(
@@ -1902,9 +1794,10 @@ async fn test_both_member_endpoints_have_same_permissions(
         "/v1/instances/{}/multicast-groups/{}",
         instance_c.identity.id, group_a.identity.id
     );
+    let join_body = InstanceMulticastGroupJoin { source_ips: None };
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &instance_centric_url_c)
-            .body(Some(&inst_body))
+            .body(Some(&join_body))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(user_b.id))
@@ -2042,16 +1935,13 @@ async fn test_silo_cannot_use_unlinked_pool(
 
     // User B tries to join a multicast group - should fail because mcast-pool
     // is not linked to Silo B
-    let member_add_url =
-        "/v1/multicast-groups/test-group/members?project=project-silo-b";
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name("instance-silo-b".parse().unwrap()),
-        source_ips: None,
-    };
+    // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
+    let join_url = "/v1/instances/instance-silo-b/multicast-groups/test-group?project=project-silo-b";
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, member_add_url)
-            .body(Some(&member_params))
+        RequestBuilder::new(client, http::Method::PUT, join_url)
+            .body(Some(&join_params))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
     .authn_as(AuthnMode::SiloUser(user_b.id))

@@ -381,6 +381,14 @@ impl MulticastGroupReconciler {
                             "group" => ?group
                         );
                     }
+                    StateTransition::EntityGone => {
+                        debug!(
+                            opctx.log,
+                            "member deleted during processing";
+                            "member" => ?member,
+                            "group" => ?group
+                        );
+                    }
                 },
                 Err(e) => {
                     warn!(
@@ -412,7 +420,7 @@ impl MulticastGroupReconciler {
         // If so, delete the member so cleanup can proceed.
         //
         // This should be impossible under normal operation because:
-        // 1. Members can only be added to "Active" groups (member_attach CTE)
+        // 1. Members can only be added to "Creating" or "Active" groups
         // 2. Groups only transition to "Deleting" when there are no active
         //    members (`mark_multicast_group_for_removal_if_no_members`)
         //
@@ -1454,11 +1462,8 @@ impl MulticastGroupReconciler {
         sled_id: SledUuid,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<(), anyhow::Error> {
-        let underlay_group_id = group.underlay_group_id.ok_or_else(|| {
-            anyhow::Error::msg(format!(
-                "no underlay group for external group {}",
-                group.id()
-            ))
+        let underlay_group_id = group.underlay_group_id.with_context(|| {
+            format!("no underlay group for external group {}", group.id())
         })?;
 
         let underlay_group = self
@@ -1772,11 +1777,11 @@ impl MulticastGroupReconciler {
             .await
             .context("failed to fetch group for member removal")?;
 
-        let underlay_group_id = group.underlay_group_id.ok_or_else(|| {
-            anyhow::Error::msg(format!(
+        let underlay_group_id = group.underlay_group_id.with_context(|| {
+            format!(
                 "no underlay group for external group {}",
                 member.external_group_id
-            ))
+            )
         })?;
 
         let underlay_group = self
@@ -1895,11 +1900,8 @@ impl MulticastGroupReconciler {
         };
 
         // Get underlay group
-        let underlay_group_id = group.underlay_group_id.ok_or_else(|| {
-            anyhow::Error::msg(format!(
-                "no underlay group for external group {}",
-                group.id()
-            ))
+        let underlay_group_id = group.underlay_group_id.with_context(|| {
+            format!("no underlay group for external group {}", group.id())
         })?;
 
         let underlay_group = self

@@ -763,17 +763,7 @@ pub static DEMO_MULTICAST_GROUP_URL: LazyLock<String> = LazyLock::new(|| {
 });
 pub static DEMO_MULTICAST_GROUP_MEMBERS_URL: LazyLock<String> =
     LazyLock::new(|| {
-        format!(
-            "/v1/multicast-groups/{}/members?project={}",
-            *DEMO_MULTICAST_GROUP_NAME, *DEMO_PROJECT_NAME
-        )
-    });
-pub static DEMO_MULTICAST_GROUP_MEMBER_URL: LazyLock<String> =
-    LazyLock::new(|| {
-        format!(
-            "/v1/multicast-groups/{}/members/{}?project={}",
-            *DEMO_MULTICAST_GROUP_NAME, *DEMO_INSTANCE_NAME, *DEMO_PROJECT_NAME
-        )
+        format!("/v1/multicast-groups/{}/members", *DEMO_MULTICAST_GROUP_NAME)
     });
 pub static DEMO_INSTANCE_MULTICAST_GROUPS_URL: LazyLock<String> =
     LazyLock::new(|| {
@@ -789,12 +779,6 @@ pub static DEMO_INSTANCE_MULTICAST_GROUP_JOIN_URL: LazyLock<String> =
             *DEMO_INSTANCE_NAME, *DEMO_MULTICAST_GROUP_NAME, *DEMO_PROJECT_NAME
         )
     });
-pub static DEMO_MULTICAST_MEMBER_ADD: LazyLock<
-    params::MulticastGroupMemberAdd,
-> = LazyLock::new(|| params::MulticastGroupMemberAdd {
-    instance: DEMO_INSTANCE_NAME.clone().into(),
-    source_ips: None,
-});
 pub static DEMO_INSTANCE_MULTICAST_GROUP_JOIN: LazyLock<
     params::InstanceMulticastGroupJoin,
 > = LazyLock::new(|| params::InstanceMulticastGroupJoin { source_ips: None });
@@ -3162,35 +3146,11 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 unprivileged_access: UnprivilegedAccess::Full,
                 allowed_methods: vec![AllowedMethod::Get],
             },
-            // Multicast member endpoints have asymmetric authorization:
-            // - GET operations only check fleet-scoped group Read permission (accessible to all authenticated users)
-            // - POST/DELETE operations require project-scoped instance Modify permission
-            //
-            // When unprivileged users try to add/remove instances from inaccessible projects,
-            // the instance lookup fails with 404 (not 403) to prevent information leakage.
-            // This is correct security behavior.
-            //
-            // Configuration: Protected + ReadOnly
-            // - GET: Not tested for unprivileged access here (verified in authorization.rs tests)
-            // - POST/DELETE: Correctly expect 404 when instance is in inaccessible project
             VerifyEndpoint {
                 url: &DEMO_MULTICAST_GROUP_MEMBERS_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::ReadOnly,
-                allowed_methods: vec![
-                    AllowedMethod::GetVolatile,
-                    AllowedMethod::Post(
-                        serde_json::to_value(&*DEMO_MULTICAST_MEMBER_ADD).unwrap(),
-                    ),
-                ],
-            },
-            VerifyEndpoint {
-                url: &DEMO_MULTICAST_GROUP_MEMBER_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::ReadOnly,
-                allowed_methods: vec![
-                    AllowedMethod::Delete,
-                ],
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::Full,
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &DEMO_INSTANCE_MULTICAST_GROUPS_URL,

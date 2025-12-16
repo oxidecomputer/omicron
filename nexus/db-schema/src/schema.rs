@@ -2777,9 +2777,9 @@ table! {
         ip_pool_range_id -> Uuid,
         vni -> Int4,
         multicast_ip -> Inet,
-        source_ips -> Array<Inet>,
         mvlan -> Nullable<Int2>,
         underlay_group_id -> Nullable<Uuid>,
+        underlay_salt -> Nullable<Int2>,
         tag -> Nullable<Text>,
         state -> crate::enums::MulticastGroupStateEnum,
         version_added -> Int8,
@@ -2800,6 +2800,7 @@ table! {
         state -> crate::enums::MulticastGroupMemberStateEnum,
         version_added -> Int8,
         version_removed -> Nullable<Int8>,
+        source_ips -> Array<Inet>,
     }
 }
 

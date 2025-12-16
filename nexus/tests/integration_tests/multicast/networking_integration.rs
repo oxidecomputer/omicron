@@ -2,11 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Integration tests for multicast groups with other networking features
+//! Integration tests for multicast groups with other networking features.
 //!
-//! This module contains tests that verify multicast functionality works correctly
-//! when combined with other networking features like external IPs, floating IPs,
-//! and complex network configurations.
+//! Tests multicast + networking feature interactions:
+//!
+//! - External IPs: Instances with ephemeral/floating IPs can join multicast groups
+//! - Floating IP attach/detach: Multicast membership unaffected by IP changes
+//! - Complex network configs: Multiple NICs, VPCs, subnets with multicast
 
 use http::{Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -17,9 +19,9 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
     EphemeralIpCreate, ExternalIpCreate, FloatingIpAttach, InstanceCreate,
-    InstanceNetworkInterfaceAttachment, MulticastGroupMemberAdd,
+    InstanceNetworkInterfaceAttachment,
 };
-use nexus_types::external_api::views::{FloatingIp, MulticastGroupMember};
+use nexus_types::external_api::views::FloatingIp;
 
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
@@ -99,22 +101,9 @@ async fn test_multicast_with_external_ip_basic(
     ensure_multicast_test_ready(cptestctx).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    // Add instance to multicast group
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
     wait_for_group_active(client, group_name).await;
 
     // Wait for multicast member to reach "Joined" state
@@ -277,22 +266,9 @@ async fn test_multicast_external_ip_lifecycle(
     ensure_multicast_test_ready(cptestctx).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    // Add instance to multicast group
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
     wait_for_group_active(client, group_name).await;
 
     // Wait for member to transition from "Joining"->"Joined"
@@ -466,22 +442,9 @@ async fn test_multicast_with_external_ip_at_creation(
         "Instance should have external IP from creation"
     );
 
-    // Add to multicast group
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
     wait_for_group_active(client, group_name).await;
 
     // Verify both features work together - wait for member to reach Joined state
@@ -580,22 +543,9 @@ async fn test_multicast_with_floating_ip_basic(
     ensure_multicast_test_ready(cptestctx).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    // Add instance to multicast group
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
     wait_for_group_active(client, group_name).await;
 
     // Wait for multicast member to reach "Joined" state

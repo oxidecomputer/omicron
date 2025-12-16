@@ -10,9 +10,7 @@ use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
-use ipnet::Ipv6Net;
 use nexus_types::deployment::ReconfiguratorConfig;
-use omicron_common::address::IPV6_ADMIN_SCOPED_MULTICAST_PREFIX;
 use omicron_common::address::Ipv6Subnet;
 pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX;
 pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
@@ -31,7 +29,6 @@ use serde_with::serde_as;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
@@ -943,15 +940,6 @@ impl Default for FmTasksConfig {
         }
     }
 }
-
-/// Fixed underlay admin-scoped IPv6 multicast network (ff04::/64) used for
-/// internal multicast group allocation and external→underlay mapping.
-/// This /64 subnet within the admin-scoped space provides 2^64 host addresses
-/// (ample for collision resistance) and is not configurable.
-pub const DEFAULT_UNDERLAY_MULTICAST_NET: Ipv6Net = Ipv6Net::new_assert(
-    Ipv6Addr::new(IPV6_ADMIN_SCOPED_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0),
-    64,
-);
 
 /// Configuration for multicast options.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
