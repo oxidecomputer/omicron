@@ -1007,9 +1007,7 @@ impl DataStore {
                                                 storage disk: instance is \
                                                 starting";
 
-                                            return Err(
-                                                Error::invalid_request(s),
-                                            );
+                                            return Err(Error::conflict(s));
                                         }
                                     }
 
