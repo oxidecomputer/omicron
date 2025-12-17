@@ -5,6 +5,7 @@
 use crate::blueprint_builder::EditCounts;
 use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
@@ -69,7 +70,67 @@ impl ZonesEditor {
         self.counts
     }
 
-    pub fn zones<F>(
+    /// TODO-john
+    pub fn in_service_zones(
+        &self,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        // Danger note: this call has no danger of accessing expunged zones,
+        // because we're filtering to in-service.
+        self.danger_all_zones(BlueprintZoneDisposition::is_in_service)
+    }
+
+    /// Iterate over all zones on this sled that could be running; this includes
+    /// in-service zones and expunged zones that are not yet ready for cleanup
+    /// (because we haven't confirmed via inventory that they've been shut
+    /// down).
+    pub fn could_be_running_zones(
+        &self,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        // Danger note: this may access expunged zones, but only if they're not
+        // yet ready for cleanup. We don't need the caller to provide a `reason`
+        // for that - we only need to track access reasons for cleanup purposes,
+        // which only acts on ready-to-clean-up expunged zones.
+        self.danger_all_zones(BlueprintZoneDisposition::could_be_running)
+    }
+
+    /// TODO-john
+    pub fn expunged_zones(
+        &self,
+        _reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        // Danger note: we will definitely access expunged zones, but the caller
+        // has provided a known `_reason`.
+        self.danger_all_zones(BlueprintZoneDisposition::is_expunged)
+    }
+
+    /// Iterate over all zones on this sled, regardless of whether they're
+    /// in-service or expunged.
+    ///
+    /// Like [`Self::expunged_zones()`], callers are required to specify a
+    /// reason to access expunged zones.
+    ///
+    /// The set of zones returned by this method is equivalent to the set of
+    /// zones returned by chaining together calls to `Self::in_service_zones()`
+    /// and `Self::expunged_zones(reason)`, but only iterates over the zones
+    /// once.
+    pub fn all_in_service_and_expunged_zones(
+        &self,
+        _reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        // Danger note: this call will definitely access expunged zones, but we
+        // know the caller has provided a known reason to do so.
+        self.danger_all_zones(BlueprintZoneDisposition::any)
+    }
+
+    /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
+    /// that match the provided filter, along with the associated sled id.
+    ///
+    /// This method is prefixed with `danger_` and is private because it allows
+    /// the caller to potentially act on expunged zones without providing a
+    /// reason for doing so. It should only be called by `in_service_zones()`
+    /// and the helper methods that require callers to specify a
+    /// [`BlueprintExpungedZoneAccessReason`] defined above.
+    fn danger_all_zones<F>(
         &self,
         mut filter: F,
     ) -> impl Iterator<Item = &BlueprintZoneConfig>
