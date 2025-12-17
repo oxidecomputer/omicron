@@ -36,7 +36,15 @@ async fn run_omdb(
 
     // Run the omdb command
     let omdb_path = &collection.omdb_config().bin_path;
-    let output = Command::new(omdb_path).args(args).output().await?;
+    let output =
+        Command::new(omdb_path).args(args).output().await.map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to execute omdb at {:?} with args {:?}: {}",
+                omdb_path,
+                args,
+                e
+            )
+        })?;
 
     // Format the output
     let output_text = if output.status.success() {

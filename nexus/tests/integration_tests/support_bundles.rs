@@ -521,6 +521,10 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
         step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS),
         "Should have attempted to list service processors"
     );
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_OMDB),
+        "Should have run omdb diagnostic commands"
+    );
 
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
     assert_eq!(bundle.state, SupportBundleState::Active);
@@ -528,17 +532,68 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     // Now we should be able to download the bundle
     let contents = bundle_download(&client, bundle.id).await.unwrap();
     let archive = ZipArchive::new(Cursor::new(&contents)).unwrap();
-    let mut names = archive.file_names().peekable();
+    let mut names = archive.file_names().collect::<Vec<_>>();
+    names.sort();
+    let mut names = names.into_iter().peekable();
+
     assert_eq!(names.next(), Some("bundle_id.txt"));
     assert_eq!(names.next(), Some("meta/"));
     assert_eq!(names.next(), Some("meta/trace.json"));
     assert_eq!(names.next(), Some("omdb/"));
+
+    // Collect omdb file names and verify they exist
+    let mut omdb_files = Vec::new();
     while let Some(name) = names.peek() {
         if !name.starts_with("omdb/") {
             break;
         }
+        omdb_files.push(*name);
         let _ = names.next();
     }
+
+    // Verify we have omdb output files
+    assert!(!omdb_files.is_empty(), "Should have omdb output files");
+
+    // Verify that none of the omdb output files contain "error: unrecognized
+    // subcommand" This catches regressions where omdb's command structure
+    // changes and our hardcoded commands become invalid.
+    let mut archive = ZipArchive::new(Cursor::new(&contents)).unwrap();
+    let mut files_checked = 0;
+    for file_name in &omdb_files {
+        // Skip directories
+        if file_name.ends_with('/') {
+            continue;
+        }
+
+        let mut file = archive
+            .by_name(file_name)
+            .unwrap_or_else(|_| panic!("Should be able to open {}", file_name));
+        let mut content = String::new();
+        std::io::Read::read_to_string(&mut file, &mut content)
+            .unwrap_or_else(|_| panic!("Should be able to read {}", file_name));
+
+        files_checked += 1;
+
+        // Validate that the omdb command is valid, even if it can't connect
+        // to a runnine Nexus right now.
+        assert!(
+            !content.contains("error: unrecognized subcommand"),
+            "File {} contains 'error: unrecognized subcommand'.\n\
+             This indicates the omdb command is invalid. Content:\n{}",
+            file_name,
+            content
+        );
+    }
+
+    // Make sure we actually checked at least one omdb output file.
+    // If this fails, it means the bundle had omdb directories but no actual
+    // output files, which would be a bug.
+    assert!(
+        files_checked > 0,
+        "Expected to check at least one omdb output file, but found only directories. Files: {:?}",
+        omdb_files
+    );
+
     assert_eq!(names.next(), Some("rack/"));
     assert!(names.any(|n| n == "sp_task_dumps/"));
     // There's much more data in the bundle, but validating it isn't the point

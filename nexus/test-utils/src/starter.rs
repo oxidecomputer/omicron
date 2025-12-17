@@ -560,6 +560,33 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 .clone(),
         };
 
+        // Configure the omdb binary path for tests.
+        // The binary is built by cargo at the workspace root in target/<profile>/omdb.
+        // Tests run from the nexus directory, so we need to go up one level.
+        let workspace_root = std::env::current_dir()
+            .expect("Failed to get current directory")
+            .parent()
+            .expect("Current directory should have a parent")
+            .to_path_buf();
+        let omdb_debug = workspace_root.join("target/debug/omdb");
+        let omdb_release = workspace_root.join("target/release/omdb");
+
+        self.config.pkg.omdb.bin_path = if omdb_release.exists() {
+            camino::Utf8PathBuf::try_from(omdb_release)
+                .expect("Failed to convert release path to UTF-8")
+        } else if omdb_debug.exists() {
+            camino::Utf8PathBuf::try_from(omdb_debug)
+                .expect("Failed to convert debug path to UTF-8")
+        } else {
+            // omdb hasn't been built yet - use a path that will fail gracefully
+            // when tests try to use it.
+            //
+            // Our rules in ".config/nextest.toml" should prevent this, but this
+            // acts as a defensive buffer against running without nextest, or
+            // changing the directory layout.
+            camino::Utf8PathBuf::from("/nonexistent/omdb")
+        };
+
         let nexus_internal = N::start_internal(&self.config, &log).await?;
         let nexus_internal_addr =
             nexus_internal.get_http_server_internal_address();
