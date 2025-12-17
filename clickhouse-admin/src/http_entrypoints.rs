@@ -10,11 +10,8 @@ use clickhouse_admin_types::keeper::{
     Lgif, RaftConfig,
 };
 use clickhouse_admin_types::server::{
-    DistributedDdlQueue, ServerConfigurableSettings,
-};
-use clickhouse_admin_types::timeseries::{
-    MetricInfoPath, SystemTimeSeries, SystemTimeSeriesSettings,
-    TimeSeriesSettingsQuery,
+    DistributedDdlQueue, MetricInfoPath, ServerConfigurableSettings,
+    SystemTimeSeries, SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
 };
 use dropshot::{
     ApiDescription, ClientErrorStatusCode, HttpError, HttpResponseCreated,

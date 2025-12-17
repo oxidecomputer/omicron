@@ -18,9 +18,16 @@ pub mod keeper {
 
 pub mod server {
     pub use crate::v1::server::DistributedDdlQueue;
+    pub use crate::v1::server::MetricInfoPath;
     pub use crate::v1::server::ServerConfigurableSettings;
     pub use crate::v1::server::ServerId;
     pub use crate::v1::server::ServerSettings;
+    pub use crate::v1::server::SystemTable;
+    pub use crate::v1::server::SystemTimeSeries;
+    pub use crate::v1::server::SystemTimeSeriesSettings;
+    pub use crate::v1::server::TimeSeriesSettingsQuery;
+    pub use crate::v1::server::Timestamp;
+    pub use crate::v1::server::TimestampFormat;
 }
 
 pub mod config {
@@ -41,14 +48,4 @@ pub mod config {
     pub use crate::v1::config::ReplicaConfig;
     pub use crate::v1::config::ServerNodeConfig;
     pub use crate::v1::config::path_schema;
-}
-
-pub mod timeseries {
-    pub use crate::v1::timeseries::MetricInfoPath;
-    pub use crate::v1::timeseries::SystemTable;
-    pub use crate::v1::timeseries::SystemTimeSeries;
-    pub use crate::v1::timeseries::SystemTimeSeriesSettings;
-    pub use crate::v1::timeseries::TimeSeriesSettingsQuery;
-    pub use crate::v1::timeseries::Timestamp;
-    pub use crate::v1::timeseries::TimestampFormat;
 }

@@ -11,7 +11,6 @@
 pub mod config;
 pub mod keeper;
 pub mod server;
-pub mod timeseries;
 
 // Constants for file paths - not API-published
 pub const CLICKHOUSE_SERVER_CONFIG_DIR: &str =

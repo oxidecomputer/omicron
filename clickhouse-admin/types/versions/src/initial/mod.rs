@@ -7,4 +7,3 @@
 pub mod config;
 pub mod keeper;
 pub mod server;
-pub mod timeseries;

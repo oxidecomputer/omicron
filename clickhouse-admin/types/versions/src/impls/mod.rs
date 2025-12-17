@@ -7,4 +7,3 @@
 mod config;
 mod keeper;
 mod server;
-mod timeseries;

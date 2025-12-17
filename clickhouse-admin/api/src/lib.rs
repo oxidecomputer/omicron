@@ -188,12 +188,9 @@ pub trait ClickhouseAdminServerApi {
     }]
     async fn system_timeseries_avg(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::timeseries::MetricInfoPath>,
-        query_params: Query<latest::timeseries::TimeSeriesSettingsQuery>,
-    ) -> Result<
-        HttpResponseOk<Vec<latest::timeseries::SystemTimeSeries>>,
-        HttpError,
-    >;
+        path_params: Path<latest::server::MetricInfoPath>,
+        query_params: Query<latest::server::TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<latest::server::SystemTimeSeries>>, HttpError>;
 
     /// Idempotently initialize a replicated ClickHouse cluster database.
     #[endpoint {
@@ -235,10 +232,7 @@ pub trait ClickhouseAdminSingleApi {
     }]
     async fn system_timeseries_avg(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::timeseries::MetricInfoPath>,
-        query_params: Query<latest::timeseries::TimeSeriesSettingsQuery>,
-    ) -> Result<
-        HttpResponseOk<Vec<latest::timeseries::SystemTimeSeries>>,
-        HttpError,
-    >;
+        path_params: Path<latest::server::MetricInfoPath>,
+        query_params: Query<latest::server::TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<latest::server::SystemTimeSeries>>, HttpError>;
 }
