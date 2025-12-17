@@ -6,14 +6,11 @@
 //! (e.g., log files)
 
 // XXX-dap current status:
-// - write battery of other automated tests
-//   - ArchiveStep::ArchiveFile should have a method to compute the filename and
-//     we should verify it
-//     - this will also cover the case of a conflict with an existing file
-//   - what else?
-// - figure out what will happen for file conflicts outside of log files and
-//   what to do about it
+// - write one smoke test for actual execution
+//   - cover case: filename conflict for rotated log file
+//   - cover case: filename conflict for core file?
 // - lots of cleanup to do
+// - split this into modules
 
 use anyhow::Context;
 use anyhow::anyhow;
@@ -1642,5 +1639,18 @@ mod test {
         assert!(
             error.to_string().contains("too many files with colliding names")
         );
+    }
+
+    #[test]
+    fn test_filename() {
+        assert_eq!(
+            Filename::try_from(String::from("foo")).unwrap().as_ref(),
+            "foo"
+        );
+        assert!(Filename::try_from(String::from(".")).is_err());
+        assert!(Filename::try_from(String::from("..")).is_err());
+        assert!(Filename::try_from(String::from("foo/bar")).is_err());
+        assert!(Filename::try_from(String::from("foo/")).is_err());
+        assert!(Filename::try_from(String::from("/bar")).is_err());
     }
 }
