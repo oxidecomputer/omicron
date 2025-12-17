@@ -28,7 +28,6 @@ use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
-use slog::info;
 use std::collections::{BTreeMap, BTreeSet};
 use trust_quorum_protocol::{
     BaseboardId, EncryptedRackSecrets, Epoch, Salt, Sha3_256Digest, Threshold,
@@ -308,13 +307,13 @@ impl DataStore {
                     if db_config.state
                         != DbTrustQuorumConfigurationState::Preparing
                     {
-                        info!(
-                            opctx.log,
+                        let state = db_config.state;
+                        bail_txn!(
+                            err,
                             "Ignoring stale update of trust quorum prepare \
-                            status";
-                            "state" => ?db_config.state
+                            status. Expected state = preparing, Got {:?}",
+                            state
                         );
-                        return Ok(());
                     }
 
                     // Then get any members associated with the configuration
@@ -1055,7 +1054,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_tq_update_prepare_and_commit() {
+    async fn test_tq_update_prepare_and_commit_normal_case() {
         let logctx = test_setup_log("test_tq_update_prepare_and_commit");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -1065,7 +1064,7 @@ mod tests {
         let rack_id = RackUuid::new_v4();
 
         // Create an initial config
-        let mut config = TrustQuorumConfig {
+        let config = TrustQuorumConfig {
             rack_id,
             epoch: Epoch(1),
             state: TrustQuorumConfigState::Preparing,
@@ -1208,6 +1207,77 @@ mod tests {
                 .count()
         );
 
-        // Future prepare acks should fail because we have moved into the 'committed' state.
+        // Future prepare acks should fail because we have already committed.
+        datastore
+            .tq_update_prepare_status(
+                opctx,
+                coordinator_config.clone(),
+                coordinator_config
+                    .members
+                    .keys()
+                    .take(acked_prepares)
+                    .cloned()
+                    .collect(),
+            )
+            .await
+            .unwrap_err();
+
+        // Commit at all nodes
+        datastore
+            .tq_update_commit_status(
+                opctx,
+                rack_id,
+                config.epoch,
+                coordinator_config.members.keys().cloned().collect(),
+            )
+            .await
+            .unwrap();
+
+        let read_config = datastore
+            .tq_get_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        // We've acked a threshold of nodes, but still should not have committed
+        // because we haven't yet acked the `commit_crash_tolerance` number of
+        // nodes in addition.
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(read_config.state, TrustQuorumConfigState::Committed);
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert!(
+            read_config.members.iter().all(
+                |(_, info)| info.state == TrustQuorumMemberState::Committed
+            )
+        );
+
+        // Repeating the same update and read succeeds
+        datastore
+            .tq_update_commit_status(
+                opctx,
+                rack_id,
+                config.epoch,
+                coordinator_config.members.keys().cloned().collect(),
+            )
+            .await
+            .unwrap();
+
+        let read_config = datastore
+            .tq_get_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        // We've acked a threshold of nodes, but still should not have committed
+        // because we haven't yet acked the `commit_crash_tolerance` number of
+        // nodes in addition.
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(read_config.state, TrustQuorumConfigState::Committed);
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert!(
+            read_config.members.iter().all(
+                |(_, info)| info.state == TrustQuorumMemberState::Committed
+            )
+        );
     }
 }
