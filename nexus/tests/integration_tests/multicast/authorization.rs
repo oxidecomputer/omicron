@@ -387,15 +387,8 @@ async fn test_cross_project_instance_attachment_allowed(
     // First instance join implicitly creates the group
     let join_url1 = "/v1/instances/instance1/multicast-groups/cross-project-group?project=project1";
     let join_params = InstanceMulticastGroupJoin { source_ips: None };
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::PUT, join_url1)
-            .body(Some(&join_params))
-            .expect_status(Some(StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Should join instance1 to group");
+    put_upsert::<_, MulticastGroupMember>(client, join_url1, &join_params)
+        .await;
 
     // Fetch the implicitly created group
     let group: MulticastGroup =
@@ -406,15 +399,8 @@ async fn test_cross_project_instance_attachment_allowed(
         "/v1/instances/instance2/multicast-groups/{}?project=project2",
         group.identity.name
     );
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::PUT, &join_url2)
-            .body(Some(&join_params))
-            .expect_status(Some(StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Should join instance2 to group");
+    put_upsert::<_, MulticastGroupMember>(client, &join_url2, &join_params)
+        .await;
 
     // Verify both instances are members of the same group
     let members =

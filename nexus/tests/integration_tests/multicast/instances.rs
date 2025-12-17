@@ -81,7 +81,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     ];
 
     // Create instances first (groups will be implicitly created when members attach)
-    let instances = vec![
+    let instances = [
         // Instance for group-lifecycle-1 (will implicitly create the group)
         instance_for_multicast_groups(
             cptestctx,
@@ -1572,17 +1572,8 @@ async fn test_source_ips_preserved_on_instance_restart(
     let join_body =
         InstanceMulticastGroupJoin { source_ips: Some(vec![source_ip]) };
 
-    let member_before: MulticastGroupMember = NexusRequest::new(
-        RequestBuilder::new(client, Method::PUT, &join_url)
-            .body(Some(&join_body))
-            .expect_status(Some(StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Should join SSM group with sources")
-    .parsed_body()
-    .expect("Should parse member");
+    let member_before: MulticastGroupMember =
+        put_upsert(client, &join_url, &join_body).await;
 
     // Verify source_ips are set
     assert_eq!(
@@ -1749,17 +1740,8 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
     let join_body =
         InstanceMulticastGroupJoin { source_ips: Some(vec![source_ip]) };
 
-    let member_before: MulticastGroupMember = NexusRequest::new(
-        RequestBuilder::new(client, Method::PUT, &join_url)
-            .body(Some(&join_body))
-            .expect_status(Some(StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Should join SSM group with sources")
-    .parsed_body()
-    .expect("Should parse member");
+    let member_before: MulticastGroupMember =
+        put_upsert(client, &join_url, &join_body).await;
 
     // Verify source_ips are set
     let ssm_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
@@ -2197,17 +2179,9 @@ async fn test_member_state_transitions_on_reactivation(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{multicast_ip}?project={project_name}"
     );
-    let member: MulticastGroupMember = NexusRequest::new(
-        RequestBuilder::new(client, Method::PUT, &join_url)
-            .body(Some(&InstanceMulticastGroupJoin::default()))
-            .expect_status(Some(StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Join should succeed")
-    .parsed_body()
-    .unwrap();
+    let member: MulticastGroupMember =
+        put_upsert(client, &join_url, &InstanceMulticastGroupJoin::default())
+            .await;
 
     // Case: Stopped instance -> member in "Left" state
     wait_for_member_state(

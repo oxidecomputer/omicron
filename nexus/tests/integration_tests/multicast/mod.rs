@@ -63,10 +63,36 @@ mod failures;
 mod groups;
 mod instances;
 mod networking_integration;
+mod pool_selection;
 
 // Timeout constants for test operations
 const POLL_INTERVAL: Duration = Duration::from_millis(80);
 const MULTICAST_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Generic helper for PUT upsert requests that return 201 Created.
+///
+/// Useful for idempotent create-or-update APIs like multicast group join.
+pub(crate) async fn put_upsert<InputType, OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+) -> OutputType
+where
+    InputType: serde::Serialize,
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, path)
+            .body(Some(input))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|e| panic!("failed to make PUT request to {path}: {e}"))
+    .parsed_body()
+    .unwrap()
+}
 
 /// Build URL for listing multicast groups.
 pub(crate) fn mcast_groups_url() -> String {
@@ -1033,23 +1059,8 @@ pub(crate) async fn multicast_group_attach_with_sources(
     let url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-
     let body = InstanceMulticastGroupJoin { source_ips };
-
-    // Use PUT to attach instance to multicast group
-    let response = NexusRequest::new(
-        RequestBuilder::new(client, Method::PUT, &url)
-            .body(Some(&body))
-            .expect_status(Some(StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Should attach instance to multicast group");
-
-    response
-        .parsed_body::<MulticastGroupMember>()
-        .expect("Should parse member");
+    put_upsert::<_, MulticastGroupMember>(client, &url, &body).await;
 }
 
 /// Wait for multiple groups to become "Active".

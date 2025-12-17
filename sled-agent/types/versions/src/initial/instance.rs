@@ -14,13 +14,7 @@ use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
-use propolis_api_types::instance_spec::{
-    SpecKey,
-    components::backends::{
-        CrucibleStorageBackend, FileStorageBackend, VirtioNetworkBackend,
-    },
-    v0::{ComponentV0, InstanceSpecV0},
-};
+use propolis_api_types::instance_spec::v0::InstanceSpecV0;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -113,56 +107,6 @@ pub struct InstanceMetadata {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VmmSpec(pub InstanceSpecV0);
 
-/// Extension trait for VmmSpec to provide helper methods.
-pub trait VmmSpecExt {
-    fn crucible_backends(
-        &self,
-    ) -> impl Iterator<Item = (&SpecKey, &CrucibleStorageBackend)>;
-
-    fn viona_backends(
-        &self,
-    ) -> impl Iterator<Item = (&SpecKey, &VirtioNetworkBackend)>;
-
-    fn file_backends(
-        &self,
-    ) -> impl Iterator<Item = (&SpecKey, &FileStorageBackend)>;
-}
-
-impl VmmSpecExt for VmmSpec {
-    fn crucible_backends(
-        &self,
-    ) -> impl Iterator<Item = (&SpecKey, &CrucibleStorageBackend)> {
-        self.0.components.iter().filter_map(
-            |(key, component)| match component {
-                ComponentV0::CrucibleStorageBackend(be) => Some((key, be)),
-                _ => None,
-            },
-        )
-    }
-
-    fn viona_backends(
-        &self,
-    ) -> impl Iterator<Item = (&SpecKey, &VirtioNetworkBackend)> {
-        self.0.components.iter().filter_map(
-            |(key, component)| match component {
-                ComponentV0::VirtioNetworkBackend(be) => Some((key, be)),
-                _ => None,
-            },
-        )
-    }
-
-    fn file_backends(
-        &self,
-    ) -> impl Iterator<Item = (&SpecKey, &FileStorageBackend)> {
-        self.0.components.iter().filter_map(
-            |(key, component)| match component {
-                ComponentV0::FileStorageBackend(be) => Some((key, be)),
-                _ => None,
-            },
-        )
-    }
-}
-
 /// VPC firewall rule after object name resolution has been performed by Nexus
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ResolvedVpcFirewallRule {
@@ -211,33 +155,6 @@ pub enum VmmStateRequested {
     /// Immediately reset the instance, as though it had stopped and immediately
     /// began to run again.
     Reboot,
-}
-
-impl std::fmt::Display for VmmStateRequested {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.label())
-    }
-}
-
-impl VmmStateRequested {
-    fn label(&self) -> &str {
-        match self {
-            VmmStateRequested::MigrationTarget(_) => "migrating in",
-            VmmStateRequested::Running => "running",
-            VmmStateRequested::Stopped => "stopped",
-            VmmStateRequested::Reboot => "reboot",
-        }
-    }
-
-    /// Returns true if the state represents a stopped Instance.
-    pub fn is_stopped(&self) -> bool {
-        match self {
-            VmmStateRequested::MigrationTarget(_) => false,
-            VmmStateRequested::Running => false,
-            VmmStateRequested::Stopped => true,
-            VmmStateRequested::Reboot => false,
-        }
-    }
 }
 
 /// The response sent from a request to unregister an instance.

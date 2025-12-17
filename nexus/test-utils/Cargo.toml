@@ -7,6 +7,9 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 anyhow.workspace = true
 bytes.workspace = true
@@ -47,6 +50,8 @@ oximeter.workspace = true
 oximeter-collector.workspace = true
 oximeter-producer.workspace = true
 oxnet.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 pretty_assertions.workspace = true
 serde.workspace = true
 serde_json.workspace = true
