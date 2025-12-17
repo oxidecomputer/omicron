@@ -10,6 +10,7 @@ use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_attach::AttachError;
+use crate::db::collection_attach::AttachToCollectionStatement;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
@@ -37,6 +38,8 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
+use diesel::dsl::exists;
+use diesel::dsl::not;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
@@ -434,13 +437,24 @@ impl DataStore {
         authz_instance: &authz::Instance,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Disk> {
-        use nexus_db_schema::schema::disk::dsl;
-        use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
-        use nexus_db_schema::schema::disk_type_local_storage::dsl as disk_type_local_storage_dsl;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
-        let conn = self.pool_connection_authorized(opctx).await?;
+        self.instance_list_disks_on_conn(&conn, authz_instance.id(), pagparams)
+            .await
+    }
+
+    /// List disks associated with a given instance by name.
+    pub async fn instance_list_disks_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        instance_id: Uuid,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<Disk> {
+        use nexus_db_schema::schema::disk::dsl;
+        use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
+        use nexus_db_schema::schema::disk_type_local_storage::dsl as disk_type_local_storage_dsl;
 
         let results = match pagparams {
             PaginatedBy::Id(pagparams) => {
@@ -461,13 +475,13 @@ impl DataStore {
                 .on(dsl::id.eq(disk_type_local_storage_dsl::disk_id)),
         )
         .filter(dsl::time_deleted.is_null())
-        .filter(dsl::attach_instance_id.eq(authz_instance.id()))
+        .filter(dsl::attach_instance_id.eq(instance_id))
         .select((
             model::Disk::as_select(),
             Option::<DiskTypeCrucible>::as_select(),
             Option::<DiskTypeLocalStorage>::as_select(),
         ))
-        .get_results_async(&*conn)
+        .get_results_async(conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -494,7 +508,7 @@ impl DataStore {
                         let allocation = dsl::local_storage_dataset_allocation
                             .filter(dsl::id.eq(to_db_typed_uuid(allocation_id)))
                             .select(LocalStorageDatasetAllocation::as_select())
-                            .first_async(&*conn)
+                            .first_async(conn)
                             .await
                             .map_err(|e| {
                                 public_error_from_diesel(
@@ -747,7 +761,9 @@ impl DataStore {
         authz_disk: &authz::Disk,
         max_disks: u32,
     ) -> Result<(Instance, Disk), Error> {
-        use nexus_db_schema::schema::{disk, instance};
+        use nexus_db_schema::schema::disk;
+        use nexus_db_schema::schema::instance;
+        use nexus_db_schema::schema::sled_resource_vmm;
 
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
@@ -771,117 +787,282 @@ impl DataStore {
 
         let attach_update = DiskSetClauseForAttach::new(authz_instance.id());
 
-        let query = Instance::attach_resource(
-            authz_instance.id(),
-            authz_disk.id(),
-            instance::table.into_boxed().filter(
-                instance::dsl::state
-                    .eq_any(ok_to_attach_instance_states)
-                    .and(instance::dsl::active_propolis_id.is_null()),
-            ),
-            disk::table.into_boxed().filter(
-                disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels),
-            ),
-            max_disks,
-            diesel::update(disk::dsl::disk).set(attach_update),
-        );
+        let disk = self.disk_get(&opctx, authz_disk.id()).await?;
+        let (resource_query, local_storage_disk) = match &disk {
+            Disk::Crucible(_) => {
+                let query = disk::table.into_boxed().filter(
+                    disk::dsl::disk_state
+                        .eq_any(ok_to_attach_disk_state_labels),
+                );
+                (query, false)
+            }
+
+            // Attaching a local storage disk to the instance has to be blocked
+            // if sled reservation has occured for this instance: local storage
+            // allocation records are only created during sled reservation, and
+            // importantly a particular configuration of local storage
+            // allocations for an instance are only _validated_ during the sled
+            // reservation.
+            //
+            // The instance start saga performs sled reservation, creates the
+            // corresponding VMM record, and changes the instance's runtime
+            // state all in _separate saga nodes_. This means that there could
+            // be an indeterminate amount of time between running the sled
+            // reservation query and changing the instance's state.
+            //
+            // This separation is due to how the VMM state machine is defined:
+            //
+            // - we cannot create the `omicron.public.vmm` record until we have
+            //   allocated sled resources to it (and allocated the Propolis IP),
+            //   because that record includes what sled it resides on (as well
+            //   as the IP)
+            //
+            // - we cannot move the `omicron.public.instance` record to the
+            //   "starting" state until the `vmm` record exists, because
+            //   "starting" is not a real instance state; instead, it is
+            //   represented by the instance being in `InstanceState::Vmm` and
+            //   having a non-`NULL` `propolis_id` UUID pointing to the `vmm`
+            //   record. When an instance has an active VMM, its state is
+            //   actually the state of the VMM record, so a "starting" instance
+            //   is an instance with a non-`NULL` VMM ID and the corresponding
+            //   VMM record is in the "starting" state
+            //
+            // - it would be _Considered Bad_ to populate the instance record's
+            //   `propolis_id` before a corresponding vmm record exists, as
+            //   anything looking at the instance's state would try to follow
+            //   that foreign key and be unpleasantly surprised when it doesn't
+            //   exist. so we can't just make up a UUID and put it in there; we
+            //   must actually allocate the VMM before we can transition to
+            //   "starting"
+            //
+            // Execution occurring in different saga nodes means that there
+            // could be an indeterminate amount of time between running the sled
+            // reservation query and changing the instance's state (see RFD 419,
+            // section 3.4). Other client requests can race in those gaps.
+            //
+            // If a client attaches a local storage disk to an instance after
+            // sled reservation occurs but before the instance's start saga
+            // moves to starting, and we do not block it, there are several
+            // problems that result:
+            //
+            // - if an allocation does not already exist for the local storage
+            //   disk, the instance_start saga will fail (and unwind) when
+            //   trying to ensure that the allocation's dataset and zvol exist,
+            //   because the allocation_id column is None.
+            //
+            // - if an allocation does already exist for the local storage disk,
+            //   _it may not be for the same sled the VMM is on_. the sled
+            //   reservation query would prevent this, but this attach (if not
+            //   blocked) happened afterwards. This would mean Nexus would
+            //   construct a InstanceSledLocalConfig that contains DelegatedZvol
+            //   entries that refer to different sleds, and send that request to
+            //   a single sled. Sled-agent would either fail to construct a
+            //   propolis zone due to the missing zvol device, or construct the
+            //   zone anyway and the device would be missing.
+            //
+            // - if an allocation does exist already, and it's for the same sled
+            //   the VMM is on, it may be colocated on a zpool with another
+            //   local storage disk's allocation. again, the sled reservation
+            //   query prevents this.
+            //
+            // - if an allocation does exist already, and it's for the same
+            //   sled the VMM is on, and it's on a distinct zpool, then it's
+            //   probably fine, but it's safer to let the sled reservation query
+            //   validate everything, and it makes a much smaller query here to
+            //   block this case as well.
+            //
+            // `reserve_on_random_sled` will create an entry in
+            // `SledResourcesVmm` when the query is successful in finding a VMM
+            // reservation, so use that here: if there is a `SledResourcesVmm`
+            // record for this instance, then block attachment.
+            //
+            // Note that depending on our implementation, this may be the code
+            // path responsible for attaching disks to already-running instances
+            // when we support hot-plug. Local storage disks may never support
+            // hot-plug because running zones cannot be reconfigured (aka a new
+            // zvol rdsk device cannot be added to a running propolis zone).
+            Disk::LocalStorage(_) => {
+                let query = disk::table
+                    .into_boxed()
+                    .filter(
+                        disk::dsl::disk_state
+                            .eq_any(ok_to_attach_disk_state_labels),
+                    )
+                    .filter(not(exists(
+                        sled_resource_vmm::table.filter(
+                            sled_resource_vmm::dsl::instance_id
+                                .eq(authz_instance.id()),
+                        ),
+                    )));
+
+                (query, true)
+            }
+        };
+
+        let query: AttachToCollectionStatement<model::Disk, _, _> =
+            Instance::attach_resource(
+                authz_instance.id(),
+                authz_disk.id(),
+                instance::table.into_boxed().filter(
+                    instance::dsl::state
+                        .eq_any(ok_to_attach_instance_states)
+                        .and(instance::dsl::active_propolis_id.is_null()),
+                ),
+                resource_query,
+                max_disks,
+                diesel::update(disk::dsl::disk).set(attach_update),
+            );
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let (instance, _db_disk) = query.attach_and_get_result_async(&conn)
-        .await
-        .or_else(|e: AttachError<model::Disk, _, _>| {
-            match e {
+        let instance = match query.attach_and_get_result_async(&conn).await {
+            Ok((instance, _db_disk)) => {
+                // We'll re-fetch the datastore::Disk later, so ignore the
+                // model::Disk here
+                instance
+            }
+
+            Err(e) => match e {
                 AttachError::CollectionNotFound => {
-                    Err(Error::not_found_by_id(
+                    return Err(Error::not_found_by_id(
                         ResourceType::Instance,
                         &authz_instance.id(),
-                    ))
-                },
+                    ));
+                }
                 AttachError::ResourceNotFound => {
-                    Err(Error::not_found_by_id(
+                    return Err(Error::not_found_by_id(
                         ResourceType::Disk,
                         &authz_disk.id(),
-                    ))
-                },
-                AttachError::NoUpdate { attached_count, resource, collection } => {
+                    ));
+                }
+                AttachError::NoUpdate {
+                    attached_count,
+                    resource,
+                    collection,
+                } => {
                     let disk_state = resource.state().into();
                     match disk_state {
                         // Idempotent errors: We did not perform an update,
                         // because we're already in the process of attaching.
-                        api::external::DiskState::Attached(id) if id == authz_instance.id() => {
-                            return Ok((collection, resource));
+                        api::external::DiskState::Attached(id)
+                            if id == authz_instance.id() =>
+                        {
+                            collection
                         }
-                        api::external::DiskState::Attaching(id) if id == authz_instance.id() => {
-                            return Ok((collection, resource));
+                        api::external::DiskState::Attaching(id)
+                            if id == authz_instance.id() =>
+                        {
+                            collection
                         }
                         // Ok-to-attach disk states: Inspect the state to infer
                         // why we did not attach.
-                        api::external::DiskState::Creating |
-                        api::external::DiskState::Detached => {
+                        api::external::DiskState::Creating
+                        | api::external::DiskState::Detached => {
                             if collection.runtime_state.propolis_id.is_some() {
-                                return Err(
-                                    Error::invalid_request(
-                                        "cannot attach disk: instance is not \
-                                        fully stopped"
-                                    )
-                                );
+                                return Err(Error::invalid_request(
+                                    "cannot attach disk: instance is not \
+                                        fully stopped",
+                                ));
                             }
                             match collection.runtime_state.nexus_state.state() {
                                 // Ok-to-be-attached instance states:
-                                api::external::InstanceState::Creating |
-                                api::external::InstanceState::Stopped => {
+                                api::external::InstanceState::Creating
+                                | api::external::InstanceState::Stopped => {
                                     // The disk is ready to be attached, and the
                                     // instance is ready to be attached. Perhaps
                                     // we are at attachment capacity?
                                     if attached_count == i64::from(max_disks) {
-                                        return Err(Error::invalid_request(&format!(
-                                            "cannot attach more than {} disks to instance",
-                                            max_disks
-                                        )));
+                                        return Err(Error::invalid_request(
+                                            &format!(
+                                                "cannot attach more than \
+                                                {max_disks} disks to instance",
+                                            ),
+                                        ));
+                                    }
+
+                                    // Was this attach of a local storage disk
+                                    // blocked due to an existing sled resource
+                                    // record?
+                                    if local_storage_disk {
+                                        use sled_resource_vmm::dsl;
+
+                                        let record = dsl::sled_resource_vmm
+                                            .filter(
+                                                dsl::instance_id
+                                                    .eq(authz_instance.id()),
+                                            )
+                                            .select(dsl::instance_id)
+                                            .execute_async(&*conn)
+                                            .await
+                                            .optional()
+                                            .map_err(|e| {
+                                                public_error_from_diesel(
+                                                    e,
+                                                    ErrorHandler::Server,
+                                                )
+                                            })?;
+
+                                        if record.is_some() {
+                                            let s = "cannot attach local \
+                                                storage disk: instance is \
+                                                starting";
+
+                                            return Err(Error::conflict(s));
+                                        }
                                     }
 
                                     // We can't attach, but the error hasn't
                                     // helped us infer why.
                                     return Err(Error::internal_error(
-                                        "cannot attach disk"
+                                        "cannot attach disk",
                                     ));
                                 }
                                 // Not okay-to-be-attached instance states:
                                 _ => {
-                                    Err(Error::invalid_request(&format!(
-                                        "cannot attach disk to instance in {} state",
-                                        collection.runtime_state.nexus_state.state(),
-                                    )))
+                                    return Err(Error::invalid_request(
+                                        &format!(
+                                            "cannot attach disk to instance in \
+                                            {} state",
+                                            collection
+                                                .runtime_state
+                                                .nexus_state
+                                                .state(),
+                                        ),
+                                    ));
                                 }
                             }
-                        },
-                        // Not-okay-to-attach disk states: The disk is attached elsewhere.
-                        api::external::DiskState::Attached(_) |
-                        api::external::DiskState::Attaching(_) |
-                        api::external::DiskState::Detaching(_) => {
-                            Err(Error::invalid_request(&format!(
-                                "cannot attach disk \"{}\": disk is attached to another instance",
+                        }
+                        // Not-okay-to-attach disk states: The disk is attached
+                        // elsewhere.
+                        api::external::DiskState::Attached(_)
+                        | api::external::DiskState::Attaching(_)
+                        | api::external::DiskState::Detaching(_) => {
+                            return Err(Error::invalid_request(&format!(
+                                "cannot attach disk \"{}\": disk is attached \
+                                to another instance",
                                 resource.name().as_str(),
-                            )))
+                            )));
                         }
                         _ => {
-                            Err(Error::invalid_request(&format!(
+                            return Err(Error::invalid_request(&format!(
                                 "cannot attach disk \"{}\": invalid state {}",
                                 resource.name().as_str(),
                                 disk_state,
-                            )))
+                            )));
                         }
                     }
-                },
+                }
                 AttachError::DatabaseError(e) => {
-                    Err(public_error_from_diesel(e, ErrorHandler::Server))
-                },
-            }
-        })?;
+                    return Err(public_error_from_diesel(
+                        e,
+                        ErrorHandler::Server,
+                    ));
+                }
+            },
+        };
 
+        // Re-fetch the disk to get the updates
         let disk = self.disk_get(&opctx, authz_disk.id()).await?;
-
         Ok((instance, disk))
     }
 

@@ -84,10 +84,6 @@ use itertools::Itertools;
 use nexus_lockstep_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
-use nexus_sled_agent_shared::inventory::{
-    ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-};
 use nexus_types::deployment::{BlueprintZoneType, blueprint_zone_type};
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
@@ -113,13 +109,16 @@ use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
+use sled_agent_types::inventory::{
+    ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
+};
 use sled_agent_types::rack_init::{
     BootstrapAddressDiscovery, RackInitializeRequest as Config,
     RackInitializeRequestParams,
 };
 use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::BaseboardId;
-use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -250,12 +249,6 @@ pub enum SetupServiceError {
 
     #[error("Trust quorum proxy commit incorrectly 'pending' from {0}")]
     TrustQuorumProxyCommitPending(BaseboardId),
-}
-
-// The workload / information allocated to a single sled.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-struct SledAllocation {
-    initialization_request: StartSledAgentRequest,
 }
 
 /// The interface to the Rack Setup Service.
@@ -1723,17 +1716,16 @@ mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
-    use nexus_sled_agent_shared::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
-        Inventory, InventoryDisk, OmicronZoneType, SledCpuFamily, SledRole,
-        ZoneImageResolverInventory,
-    };
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
         api::external::{ByteCount, Generation},
         disk::{DiskIdentity, DiskVariant},
     };
     use omicron_uuid_kinds::SledUuid;
+    use sled_agent_types::inventory::{
+        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
+        OmicronZoneType, SledCpuFamily, SledRole, ZoneImageResolverInventory,
+    };
 
     fn make_sled_info(
         sled_id: SledUuid,

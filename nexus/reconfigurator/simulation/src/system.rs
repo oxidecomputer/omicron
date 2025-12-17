@@ -881,14 +881,15 @@ impl SimSystemBuilderInner {
         // XXX: it's not normal, but hypothetically possible, that the initial
         // and target blueprints have the same ID. This will panic if so. Maybe
         // we should make it not panic.
-        self.add_blueprint_inner(Arc::new(example.initial_blueprint))
-            .unwrap_or_else(|_| {
+        self.add_blueprint_inner(example.initial_blueprint).unwrap_or_else(
+            |_| {
                 panic!(
                     "possible conflict between initial blueprint \
-                 (ID {initial_blueprint_id}) and target blueprint \
-                 (ID {target_blueprint_id})"
+                     (ID {initial_blueprint_id}) and target blueprint \
+                     (ID {target_blueprint_id})"
                 )
-            });
+            },
+        );
     }
 
     // This method MUST be infallible. It should only be called after checking

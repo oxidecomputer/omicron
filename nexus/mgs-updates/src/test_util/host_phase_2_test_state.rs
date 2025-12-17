@@ -9,10 +9,10 @@ use anyhow::Context as _;
 use dropshot::ConfigDropshot;
 use dropshot::HttpServer;
 use dropshot::ServerBuilder;
-use nexus_sled_agent_shared::inventory::Baseboard;
-use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::Baseboard;
+use sled_agent_types::inventory::SledRole;
 use slog::Logger;
 use sp_sim::GimletPowerState;
 use std::net::SocketAddr;
@@ -197,21 +197,6 @@ mod api_impl {
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
     use iddqd::IdOrdMap;
-    use nexus_sled_agent_shared::inventory::BootImageHeader;
-    use nexus_sled_agent_shared::inventory::BootPartitionContents;
-    use nexus_sled_agent_shared::inventory::BootPartitionDetails;
-    use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-    use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-    use nexus_sled_agent_shared::inventory::HealthMonitorInventory;
-    use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
-    use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
-    use nexus_sled_agent_shared::inventory::Inventory;
-    use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
-    use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-    use nexus_sled_agent_shared::inventory::SledCpuFamily;
-    use nexus_sled_agent_shared::inventory::SledRole;
-    use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
-    use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::nexus::SledVmmState;
@@ -221,23 +206,66 @@ mod api_impl {
     use omicron_common::api::internal::shared::{
         ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
     };
-    use sled_agent_api::*;
+    use sled_agent_types::artifact::ArtifactConfig;
+    use sled_agent_types::artifact::ArtifactCopyFromDepotBody;
+    use sled_agent_types::artifact::ArtifactCopyFromDepotResponse;
+    use sled_agent_types::artifact::ArtifactListResponse;
+    use sled_agent_types::artifact::ArtifactPathParam;
+    use sled_agent_types::artifact::ArtifactPutResponse;
+    use sled_agent_types::artifact::ArtifactQueryParam;
     use sled_agent_types::bootstore::BootstoreStatus;
+    use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+    use sled_agent_types::dataset::LocalStoragePathParam;
+    use sled_agent_types::debug::ChickenSwitchDestroyOrphanedDatasets;
+    use sled_agent_types::debug::OperatorSwitchZonePolicy;
+    use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadPathParm;
+    use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
     use sled_agent_types::disk::DiskEnsureBody;
+    use sled_agent_types::disk::DiskPathParam;
     use sled_agent_types::early_networking::EarlyNetworkConfig;
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
+    use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
     use sled_agent_types::instance::InstanceMulticastBody;
+    use sled_agent_types::instance::VmmIssueDiskSnapshotRequestBody;
+    use sled_agent_types::instance::VmmIssueDiskSnapshotRequestPathParam;
+    use sled_agent_types::instance::VmmIssueDiskSnapshotRequestResponse;
+    use sled_agent_types::instance::VmmPathParam;
     use sled_agent_types::instance::VmmPutStateBody;
     use sled_agent_types::instance::VmmPutStateResponse;
     use sled_agent_types::instance::VmmUnregisterResponse;
+    use sled_agent_types::instance::VpcPathParam;
+    use sled_agent_types::inventory::BootImageHeader;
+    use sled_agent_types::inventory::BootPartitionContents;
+    use sled_agent_types::inventory::BootPartitionDetails;
+    use sled_agent_types::inventory::ConfigReconcilerInventory;
+    use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HostPhase2DesiredContents;
+    use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::Inventory;
+    use sled_agent_types::inventory::ManifestInventory;
+    use sled_agent_types::inventory::MupdateOverrideInventory;
+    use sled_agent_types::inventory::OmicronSledConfig;
+    use sled_agent_types::inventory::SledCpuFamily;
+    use sled_agent_types::inventory::SledRole;
+    use sled_agent_types::inventory::ZoneImageResolverInventory;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
+    use sled_agent_types::support_bundle::RangeRequestHeaders;
+    use sled_agent_types::support_bundle::SupportBundleFilePathParam;
+    use sled_agent_types::support_bundle::SupportBundleFinalizeQueryParams;
+    use sled_agent_types::support_bundle::SupportBundleListPathParam;
+    use sled_agent_types::support_bundle::SupportBundleMetadata;
+    use sled_agent_types::support_bundle::SupportBundlePathParam;
+    use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
+    use sled_agent_types::zone_bundle::CleanupContextUpdate;
     use sled_agent_types::zone_bundle::CleanupCount;
+    use sled_agent_types::zone_bundle::ZoneBundleFilter;
     use sled_agent_types::zone_bundle::ZoneBundleId;
     use sled_agent_types::zone_bundle::ZoneBundleMetadata;
+    use sled_agent_types::zone_bundle::ZonePathParam;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::time::Duration;
@@ -340,7 +368,7 @@ mod api_impl {
                     boot_partitions,
                 }),
                 zone_image_resolver: ZoneImageResolverInventory {
-                    zone_manifest: ZoneManifestInventory {
+                    zone_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
                         boot_inventory: Err(
                             "not implemented by HostPhase2SledAgentImpl"
@@ -526,7 +554,7 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn sled_role_get(
+        async fn sled_role_get_v1(
             _rqctx: RequestContext<Self::Context>,
         ) -> Result<HttpResponseOk<SledRole>, HttpError> {
             unimplemented!()
@@ -535,7 +563,7 @@ mod api_impl {
         async fn vmm_register(
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<VmmPathParam>,
-            _body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
+            _body: TypedBody<InstanceEnsureBody>,
         ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
             unimplemented!()
         }
@@ -856,7 +884,7 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn chicken_switch_destroy_orphaned_datasets_get(
+        async fn chicken_switch_destroy_orphaned_datasets_get_v1(
             _request_context: RequestContext<Self::Context>,
         ) -> Result<
             HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>,
@@ -865,7 +893,7 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn chicken_switch_destroy_orphaned_datasets_put(
+        async fn chicken_switch_destroy_orphaned_datasets_put_v1(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
