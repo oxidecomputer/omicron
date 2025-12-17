@@ -1191,9 +1191,7 @@ mod tests {
             .expect("no error")
             .expect("returned config");
 
-        // We've acked a threshold of nodes, but still should not have committed
-        // because we haven't yet acked the `commit_crash_tolerance` number of
-        // nodes in addition.
+        // We've acked enough nodes and should have committed
         assert_eq!(read_config.epoch, config.epoch);
         assert_eq!(read_config.state, TrustQuorumConfigState::Committed);
         assert!(read_config.encrypted_rack_secrets.is_none());
