@@ -99,7 +99,9 @@ impl DataStore {
 
         // First, retrieve our configuration if there is one.
         let Some(latest) =
-            Self::tq_get_latest_config_conn(opctx, conn, rack_id).await?
+            Self::tq_get_latest_config_conn(opctx, conn, rack_id)
+                .await
+                .map_err(|err| err.into_public_ignore_retries())?
         else {
             return Ok(None);
         };
@@ -107,7 +109,8 @@ impl DataStore {
         // Then get any members associated with the configuration
         let members =
             Self::tq_get_members_conn(opctx, conn, rack_id, latest.epoch)
-                .await?;
+                .await
+                .map_err(|err| err.into_public_ignore_retries())?;
 
         let mut tq_members: BTreeMap<BaseboardId, TrustQuorumMemberData> =
             BTreeMap::new();
@@ -246,7 +249,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(err) => err.into(),
+                Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
@@ -452,7 +455,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(err) => err.into(),
+                Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
@@ -531,7 +534,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(err) => err.into(),
+                Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
@@ -611,7 +614,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(err) => err.into(),
+                Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
