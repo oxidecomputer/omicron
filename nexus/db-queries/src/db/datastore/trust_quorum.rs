@@ -536,6 +536,86 @@ impl DataStore {
             })
     }
 
+    pub async fn tq_abort_config(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+
+        let epoch = epoch_to_i64(epoch)?;
+
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("tq_abort_config")
+            .transaction(&conn, |c| {
+                let err = err.clone();
+                async move {
+                    // First, retrieve our configuration if there is one.
+                    let latest =
+                        Self::tq_get_latest_config_conn(opctx, &c, rack_id)
+                            .await
+                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                    let Some(db_config) = latest else {
+                        bail_txn!(
+                            err,
+                            "No trust quorum config for rack_id {} at epoch {}",
+                            rack_id,
+                            epoch
+                        );
+                    };
+
+                    if db_config.epoch != epoch {
+                        let actual = db_config.epoch;
+                        bail_txn!(
+                            err,
+                            "Cannot abort trust quorum config. \
+                             Latest epoch does not match. Expected {}, Got {}",
+                            epoch,
+                            actual
+                        );
+                    }
+
+                    if db_config.state
+                        == DbTrustQuorumConfigurationState::Aborted
+                    {
+                        // Abort is idempotent
+                        return Ok(());
+                    }
+
+                    // If we've already committed, we can't abort
+                    if db_config.state
+                        == DbTrustQuorumConfigurationState::Committed
+                    {
+                        bail_txn!(
+                            err,
+                            "Invalid update of trust quorum abort status. \
+                            Expected `Preparing`, got `Committed`"
+                        );
+                    }
+
+                    Self::update_tq_abort_state_in_txn(
+                        opctx,
+                        conn,
+                        db_config.rack_id,
+                        db_config.epoch,
+                    )
+                    .await
+                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err.into(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
+    }
+
     // Unconditional insert that should only run inside a transaction
     async fn insert_tq_config_in_txn(
         opctx: &OpContext,
@@ -769,7 +849,28 @@ impl DataStore {
         Ok(())
     }
 
+    /// Returns the number of rows update
     async fn update_tq_commit_state_in_txn(
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: DbTypedUuid<RackKind>,
+        epoch: i64,
+    ) -> Result<usize, TransactionError<Error>> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+
+        let num_rows_updated = diesel::update(dsl::trust_quorum_configuration)
+            .filter(dsl::rack_id.eq(rack_id))
+            .filter(dsl::epoch.eq(epoch))
+            .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Preparing))
+            .set(dsl::state.eq(DbTrustQuorumConfigurationState::Committed))
+            .execute_async(conn)
+            .await?;
+
+        Ok(num_rows_updated)
+    }
+
+    async fn update_tq_abort_state_in_txn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
@@ -782,7 +883,7 @@ impl DataStore {
             .filter(dsl::rack_id.eq(rack_id))
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Preparing))
-            .set(dsl::state.eq(DbTrustQuorumConfigurationState::Committed))
+            .set(dsl::state.eq(DbTrustQuorumConfigurationState::Aborted))
             .execute_async(conn)
             .await?;
 
@@ -1272,5 +1373,141 @@ mod tests {
                 |(_, info)| info.state == TrustQuorumMemberState::Committed
             )
         );
+    }
+
+    #[tokio::test]
+    async fn test_tq_abort() {
+        let logctx = test_setup_log("test_tq_abort");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+
+        let rack_id = RackUuid::new_v4();
+
+        // Create an initial config
+        let config = TrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(1),
+            state: TrustQuorumConfigState::Preparing,
+            threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
+            commit_crash_tolerance: 2,
+            coordinator: hw_ids.first().unwrap().clone().into(),
+            encrypted_rack_secrets: None,
+            members: hw_ids
+                .clone()
+                .into_iter()
+                .map(|m| (m.into(), TrustQuorumMemberData::new()))
+                .collect(),
+        };
+
+        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
+
+        // Aborting should succeed, since we haven't committed
+        datastore
+            .tq_abort_config(opctx, config.rack_id, config.epoch)
+            .await
+            .unwrap();
+
+        // Aborting is idempotent
+        datastore
+            .tq_abort_config(opctx, config.rack_id, config.epoch)
+            .await
+            .unwrap();
+
+        // Committing will fail to update any rows
+        // (This is not directly callable from a public API).
+        {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let num_rows_updated = DataStore::update_tq_commit_state_in_txn(
+                opctx,
+                &*conn,
+                config.rack_id.into(),
+                config.epoch.0 as i64,
+            )
+            .await
+            .unwrap();
+            assert_eq!(num_rows_updated, 0);
+        }
+
+        // A configuration returned from a coordinator is different
+        let coordinator_config = trust_quorum_protocol::Configuration {
+            rack_id: config.rack_id,
+            epoch: config.epoch,
+            coordinator: hw_ids.first().unwrap().clone().into(),
+            members: config
+                .members
+                .keys()
+                .cloned()
+                .map(|id| (id, Sha3_256Digest([0u8; 32])))
+                .collect(),
+            threshold: config.threshold.clone(),
+            encrypted_rack_secrets: None,
+        };
+
+        // This is how we actually try to trigger commit operations. This should fail outright.
+        let acked_prepares = config.threshold.0 as usize
+            + config.commit_crash_tolerance as usize;
+        datastore
+            .tq_update_prepare_status(
+                opctx,
+                coordinator_config.clone(),
+                coordinator_config
+                    .members
+                    .keys()
+                    .take(acked_prepares)
+                    .cloned()
+                    .collect(),
+            )
+            .await
+            .unwrap_err();
+
+        // Retrieve the configuration and ensure it is actually aborted
+        let read_config = datastore
+            .tq_get_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+        assert_eq!(read_config.state, TrustQuorumConfigState::Aborted);
+
+        // Create a second config
+        let config2 = TrustQuorumConfig { epoch: Epoch(2), ..config.clone() };
+        datastore
+            .tq_insert_latest_config(opctx, config2.clone())
+            .await
+            .unwrap();
+
+        // Trying to abort the old config will fail because it's stale
+        datastore
+            .tq_abort_config(opctx, config.rack_id, config.epoch)
+            .await
+            .unwrap_err();
+
+        // Commit it
+        let coordinator_config2 = trust_quorum_protocol::Configuration {
+            epoch: config2.epoch,
+            ..coordinator_config
+        };
+        let acked_prepares = config2.threshold.0 as usize
+            + config2.commit_crash_tolerance as usize;
+        datastore
+            .tq_update_prepare_status(
+                opctx,
+                coordinator_config2.clone(),
+                coordinator_config2
+                    .members
+                    .keys()
+                    .take(acked_prepares)
+                    .cloned()
+                    .collect(),
+            )
+            .await
+            .unwrap();
+
+        // Abort of latest config should fail because it has already committed
+        datastore
+            .tq_abort_config(opctx, config2.rack_id, config2.epoch)
+            .await
+            .unwrap_err();
     }
 }
