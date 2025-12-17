@@ -84,7 +84,7 @@ impl DataStore {
                 hw_baseboard_id_dsl::id.eq(lrtq_member_dsl::hw_baseboard_id),
             ))
             .select(HwBaseboardId::as_select())
-            .load_async(&*conn)
+            .load_async(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -156,7 +156,7 @@ impl DataStore {
             None
         };
 
-        let encrypted_rack_secrets = if salt.is_some() {
+        let encrypted_rack_secrets = if let Some(salt) = salt {
             let Some(secrets) = latest.encrypted_rack_secrets else {
                 // This should never happend due to constraint checks
                 return Err(Error::internal_error(&format!(
@@ -165,10 +165,7 @@ impl DataStore {
                     latest.rack_id, latest.epoch
                 )));
             };
-            Some(EncryptedRackSecrets::new(
-                salt.unwrap(),
-                secrets.into_boxed_slice(),
-            ))
+            Some(EncryptedRackSecrets::new(salt, secrets.into_boxed_slice()))
         } else {
             None
         };
@@ -219,7 +216,7 @@ impl DataStore {
                     .await
                     .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
-                    let is_insertable = if let Some(epoch) = current.clone() {
+                    let is_insertable = if let Some(epoch) = current {
                         // Only insert if what is in the DB is immediately prior to
                         // this configuration.
                         Some(epoch) == config.epoch.previous()
@@ -910,7 +907,7 @@ impl DataStore {
             .filter(dsl::part_number.eq_any(parts))
             .filter(dsl::serial_number.eq_any(serials))
             .select(HwBaseboardId::as_select())
-            .load_async(&*conn)
+            .load_async(conn)
             .await
             .map_err(TransactionError::Database)
     }
@@ -980,7 +977,7 @@ impl DataStore {
                 DbTrustQuorumMember::as_select(),
                 HwBaseboardId::as_select(),
             ))
-            .load_async(&*conn)
+            .load_async(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -1197,7 +1194,7 @@ mod tests {
                 .cloned()
                 .map(|id| (id, Sha3_256Digest([0u8; 32])))
                 .collect(),
-            threshold: config.threshold.clone(),
+            threshold: config.threshold,
             encrypted_rack_secrets: None,
         };
 
@@ -1424,7 +1421,7 @@ mod tests {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let num_rows_updated = DataStore::update_tq_commit_state_in_txn(
                 opctx,
-                &*conn,
+                &conn,
                 config.rack_id.into(),
                 config.epoch.0 as i64,
             )
@@ -1444,7 +1441,7 @@ mod tests {
                 .cloned()
                 .map(|id| (id, Sha3_256Digest([0u8; 32])))
                 .collect(),
-            threshold: config.threshold.clone(),
+            threshold: config.threshold,
             encrypted_rack_secrets: None,
         };
 
