@@ -31,13 +31,12 @@ pub(crate) struct SledUnderlayIpAllocator {
 
 impl SledUnderlayIpAllocator {
     /// Create a new allocator for the given sled subnet that reserves all the
-    /// specified IPs.
-    ///
-    /// Fails if any of the specified IPs are not part of the sled subnet.
-    pub fn new<I>(sled_subnet: Ipv6Subnet<SLED_PREFIX>, in_use_ips: I) -> Self
-    where
-        I: Iterator<Item = Ipv6Addr>,
-    {
+    /// IPs from the "reserved for control plane usage" block up through
+    /// `last_allocated_ip_subnet_offset`.
+    pub fn new(
+        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+        last_allocated_ip_subnet_offset: u16,
+    ) -> Self {
         let sled_subnet_addr = sled_subnet.net().prefix();
         let minimum = sled_subnet_addr
             .saturating_add(u128::from(SLED_RESERVED_ADDRESSES));
@@ -57,10 +56,20 @@ impl SledUnderlayIpAllocator {
         assert!(sled_subnet.net().contains(minimum));
         assert!(sled_subnet.net().contains(maximum));
 
-        let mut slf = Self { subnet: sled_subnet, last: minimum, maximum };
-        for ip in in_use_ips {
-            slf.mark_as_allocated(ip);
-        }
+        // We ought to confirm that `last_allocated_ip_subnet_offset` isn't
+        // beyond `CP_SERVICES_RESERVED_ADDRESSES`, but that's guaranteed by the
+        // value of `CP_SERVICES_RESERVED_ADDRESSES`. Statically assert that
+        // this doesn't change; if it does, we should check that
+        // `last_allocated_ip_subnet_offset <= CP_SERVICES_RESERVED_ADDRESSES`.
+        static_assertions::const_assert_eq!(
+            CP_SERVICES_RESERVED_ADDRESSES,
+            u16::MAX
+        );
+
+        let last_allocated_ip = sled_subnet_addr
+            .saturating_add(u128::from(last_allocated_ip_subnet_offset));
+        let last = Ipv6Addr::max(last_allocated_ip, minimum);
+        let slf = Self { subnet: sled_subnet, last, maximum };
         assert!(minimum <= slf.last);
         assert!(slf.last < slf.maximum);
 
@@ -94,10 +103,9 @@ impl SledUnderlayIpAllocator {
             offset >= SLED_RESERVED_ADDRESSES,
             "offset unexpectedly inside reserved range: {offset}"
         );
-        assert!(
-            offset <= CP_SERVICES_RESERVED_ADDRESSES,
-            "offset unexpectedly above reserved range: {offset}"
-        );
+        // We should also assert `offset <= CP_SERVICES_RESERVED_ADDRESSES`, but
+        // the latter is set to u16::MAX, so clippy (correctly) complains that
+        // we're asserting something that can never be false.
 
         offset
     }
@@ -152,8 +160,7 @@ mod test {
         ];
         let reserved_ips = reserved.iter().copied().collect::<BTreeSet<_>>();
 
-        let mut allocator =
-            SledUnderlayIpAllocator::new(sled_subnet, reserved.iter().copied());
+        let mut allocator = SledUnderlayIpAllocator::new(sled_subnet, 0xd7);
 
         let mut allocated = Vec::new();
         for _ in 0..16 {
@@ -167,9 +174,8 @@ mod test {
         assert_eq!(
             allocated,
             [
-                // Because fd00::d7 was reserved, everything up to it is also
-                // skipped. It doesn't have to work that way, but it currently
-                // does.
+                // Because fd00::d7 is the highest we've previously allocated,
+                // all new allocations start just after it.
                 "fd00::d8".parse::<Ipv6Addr>().unwrap(),
                 "fd00::d9".parse().unwrap(),
                 "fd00::da".parse().unwrap(),
