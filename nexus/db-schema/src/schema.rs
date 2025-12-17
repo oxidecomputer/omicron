@@ -2963,3 +2963,32 @@ allow_tables_to_appear_in_same_query!(
     rendezvous_local_storage_dataset,
     local_storage_dataset_allocation
 );
+
+table! {
+    fm_case (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        de -> crate::enums::DiagnosisEngineEnum,
+
+        created_sitrep_id -> Uuid,
+        closed_sitrep_id -> Nullable<Uuid>,
+
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_ereport_in_case (sitrep_id, id) {
+        id -> Uuid,
+        restart_id -> Uuid,
+        ena -> Int8,
+        case_id -> Uuid,
+        sitrep_id -> Uuid,
+        assigned_sitrep_id -> Uuid,
+
+        comment -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);

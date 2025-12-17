@@ -15,8 +15,8 @@ use crate::db::model::{
     LldpLinkConfig, Name, SwitchInterfaceConfig, SwitchLinkFec,
     SwitchLinkSpeed, SwitchPort, SwitchPortAddressConfig,
     SwitchPortBgpPeerConfig, SwitchPortConfig, SwitchPortLinkConfig,
-    SwitchPortRouteConfig, SwitchPortSettings, SwitchPortSettingsGroup,
-    SwitchPortSettingsGroups, SwitchVlanInterfaceConfig, TxEqConfig,
+    SwitchPortRouteConfig, SwitchPortSettings, SwitchPortSettingsGroups,
+    SwitchVlanInterfaceConfig, TxEqConfig,
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
@@ -147,12 +147,6 @@ impl Into<external::SwitchPortSettings> for SwitchPortSettingsCombinedResult {
             addresses: self.addresses,
         }
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SwitchPortSettingsGroupCreateResult {
-    pub group: SwitchPortSettingsGroup,
-    pub settings: SwitchPortSettingsCombinedResult,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

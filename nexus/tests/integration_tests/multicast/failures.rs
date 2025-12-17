@@ -1231,15 +1231,8 @@ async fn test_left_member_waits_for_group_active(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
     let join_params = InstanceMulticastGroupJoin { source_ips: None };
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::PUT, &join_url)
-            .body(Some(&join_params))
-            .expect_status(Some(StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Should join group");
+    put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_params)
+        .await;
 
     // Verify group is stuck in "Creating" (DPD is down)
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;

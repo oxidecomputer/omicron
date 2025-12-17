@@ -1979,7 +1979,7 @@ impl oximeter::Producer for IntegrationProducer {
     fn produce(
         &mut self,
     ) -> Result<
-        Box<(dyn Iterator<Item = oximeter::types::Sample> + 'static)>,
+        Box<dyn Iterator<Item = oximeter::types::Sample> + 'static>,
         oximeter::MetricsError,
     > {
         use oximeter::Metric;
