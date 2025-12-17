@@ -46,6 +46,13 @@
 //! for collision avoidance.
 //!
 //! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
+//!
+//! # TODO: Egress Support
+//!
+//! The current implementation supports **ingress-into-the-rack multicast**:
+//! external multicast sources sending traffic to instances within the rack.
+//! Egress multicast (instances sending to external receivers out-of-the-rack)
+//! is not yet supported.
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -248,7 +255,7 @@ impl super::Nexus {
         let source_ips =
             source_ips_map.get(&group.identity.id).cloned().unwrap_or_default();
 
-        ExternalMulticastGroupWithSources { group, source_ips }.try_into()
+        Ok(ExternalMulticastGroupWithSources { group, source_ips }.into())
     }
 
     /// Resolve which multicast pool contains a given IP address.
@@ -307,17 +314,16 @@ impl super::Nexus {
             .multicast_groups_source_ips_union(opctx, &group_ids)
             .await?;
 
-        groups
+        Ok(groups
             .into_iter()
             .map(|group| {
                 let source_ips = source_ips_map
                     .get(&group.identity.id)
                     .cloned()
                     .unwrap_or_default();
-                ExternalMulticastGroupWithSources { group, source_ips }
-                    .try_into()
+                ExternalMulticastGroupWithSources { group, source_ips }.into()
             })
-            .collect()
+            .collect())
     }
 
     /// Join an instance to a multicast group by identifier (IP, name, or ID).
@@ -440,7 +446,6 @@ impl super::Nexus {
                 ),
             },
             multicast_ip: Some(ip),
-            mvlan: None,
             has_sources,
         };
 
@@ -518,7 +523,6 @@ impl super::Nexus {
                     .to_string(),
             },
             multicast_ip: None,
-            mvlan: None,
             has_sources,
         };
 

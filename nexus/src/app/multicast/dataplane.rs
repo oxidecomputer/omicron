@@ -61,7 +61,6 @@ use nexus_db_model::{ExternalMulticastGroup, UnderlayMulticastGroup};
 use nexus_types::identity::Resource;
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{Error, SwitchLocation};
-use omicron_common::vlan::VlanID;
 
 use crate::app::dpd_clients;
 
@@ -389,15 +388,6 @@ impl MulticastDataplaneClient {
             Error::internal_error("multicast group missing tag")
         })?;
 
-        // Convert MVLAN to u16 for DPD, validating through VlanID
-        let vlan_id = external_group
-            .mvlan
-            .map(|v| VlanID::new(v as u16))
-            .transpose()
-            .map_err(|e| {
-                Error::internal_error(&format!("invalid VLAN ID: {e:#}"))
-            })?
-            .map(u16::from);
         let underlay_ip_admin =
             underlay_group.multicast_ip.ip().into_admin_scoped()?;
         let underlay_ipv6 = match underlay_group.multicast_ip.ip() {
@@ -448,9 +438,14 @@ impl MulticastDataplaneClient {
                         )
                         .await?;
 
+                    // TODO: `vlan_id` is always `None` since we're not doing
+                    // egress in MVP. When egress support is added, this will
+                    // need to be populated from a dynamic configuration.
                     let external_entry = MulticastGroupCreateExternalEntry {
                         group_ip: external_group_ip,
-                        external_forwarding: ExternalForwarding { vlan_id },
+                        external_forwarding: ExternalForwarding {
+                            vlan_id: None,
+                        },
                         internal_forwarding: InternalForwarding {
                             nat_target: Some(nat_target),
                         },
@@ -536,16 +531,6 @@ impl MulticastDataplaneClient {
         let dpd_clients = &self.dpd_clients;
 
         // Pre-compute shared data once
-        // Convert MVLAN to u16 for DPD, validating through VlanID
-        let vlan_id = params
-            .external_group
-            .mvlan
-            .map(|v| VlanID::new(v as u16))
-            .transpose()
-            .map_err(|e| {
-                Error::internal_error(&format!("invalid VLAN ID: {e:#}"))
-            })?
-            .map(u16::from);
         let underlay_ip_admin =
             params.underlay_group.multicast_ip.ip().into_admin_scoped()?;
         let underlay_ipv6 = match params.underlay_group.multicast_ip.ip() {
@@ -646,7 +631,12 @@ impl MulticastDataplaneClient {
                         })?;
 
                     // Prepare external update/create entries with pre-computed data
-                    let external_forwarding = ExternalForwarding { vlan_id };
+                    //
+                    // TODO: `vlan_id` is always `None` since we're not doing
+                    // egress in MVP. When egress support is added, this will
+                    // need to be populated from a dynamic configuration.
+                    let external_forwarding =
+                        ExternalForwarding { vlan_id: None };
                     let internal_forwarding =
                         InternalForwarding { nat_target: Some(nat_target) };
 
