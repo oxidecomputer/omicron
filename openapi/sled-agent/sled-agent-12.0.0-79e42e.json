@@ -8324,6 +8324,12 @@
         "description": "Lists services in maintenance status if any, and the time the health check for SMF services ran",
         "type": "object",
         "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "services": {
             "type": "array",
             "items": {
@@ -8337,6 +8343,7 @@
           }
         },
         "required": [
+          "errors",
           "services"
         ]
       },
