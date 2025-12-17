@@ -25,8 +25,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::{
-    AffinityGroupUuid, AntiAffinityGroupUuid, GenericUuid, InstanceUuid,
-    MulticastGroupUuid,
+    AntiAffinityGroupUuid, GenericUuid, InstanceUuid, MulticastGroupUuid,
 };
 use ref_cast::RefCast;
 use serde::Deserialize;
@@ -62,25 +61,10 @@ struct NetParams {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct AffinityParams {
-    serialized_authn: authn::saga::Serialized,
-    instance_id: InstanceUuid,
-    group: AffinityGroupUuid,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 struct AntiAffinityParams {
     serialized_authn: authn::saga::Serialized,
     instance_id: InstanceUuid,
     group: AntiAffinityGroupUuid,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct NetworkConfigParams {
-    saga_params: Params,
-    instance_id: InstanceUuid,
-    which: usize,
-    switch_location: SwitchLocation,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

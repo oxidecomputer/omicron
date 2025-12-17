@@ -2612,7 +2612,10 @@ fn check_instance_cpu_memory_sizes(
 
     // Reject instances where the memory is not divisible by
     // MIN_MEMORY_BYTES_PER_INSTANCE
-    if (memory.to_bytes() % u64::from(MIN_MEMORY_BYTES_PER_INSTANCE)) != 0 {
+    if !memory
+        .to_bytes()
+        .is_multiple_of(u64::from(MIN_MEMORY_BYTES_PER_INSTANCE))
+    {
         return Err(Error::invalid_value(
             "size",
             format!(

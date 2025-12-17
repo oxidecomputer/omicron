@@ -8,7 +8,6 @@ use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
 use ntp_admin_api::*;
 use ntp_admin_types::TimeSync;
-use slog::error;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
