@@ -259,15 +259,14 @@ impl DataStore {
     pub async fn tq_update_prepare_status(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
-        epoch: Epoch,
         config: trust_quorum_protocol::Configuration,
         acked_prepares: BTreeSet<BaseboardId>,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
-        let epoch = epoch_to_i64(epoch)?;
+        let epoch = epoch_to_i64(config.epoch)?;
+        let rack_id = config.rack_id;
 
         let err = OptionalError::new();
 
@@ -363,6 +362,7 @@ impl DataStore {
                             && member.state == DbTrustQuorumMemberState::Unacked
                         {
                             update_prepared = true;
+                            total_acks += 1;
                         }
 
                         if member.state == DbTrustQuorumMemberState::Prepared {
@@ -782,8 +782,6 @@ impl DataStore {
         diesel::update(dsl::trust_quorum_configuration)
             .filter(dsl::rack_id.eq(rack_id))
             .filter(dsl::epoch.eq(epoch))
-            .filter(dsl::encrypted_rack_secrets_salt.is_not_null())
-            .filter(dsl::encrypted_rack_secrets.is_not_null())
             .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Preparing))
             .set(dsl::state.eq(DbTrustQuorumConfigurationState::Committed))
             .execute_async(conn)
@@ -892,7 +890,9 @@ mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::{HwBaseboardId, LrtqMember};
-    use nexus_types::TrustQuorumConfigState;
+    use nexus_types::trust_quorum::{
+        TrustQuorumConfigState, TrustQuorumMemberState,
+    };
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::RackUuid;
     use uuid::Uuid;
@@ -1052,5 +1052,162 @@ mod tests {
             .expect_err(
                 "insert should fail because previous epoch is incorrect",
             );
+    }
+
+    #[tokio::test]
+    async fn test_tq_update_prepare_and_commit() {
+        let logctx = test_setup_log("test_tq_update_prepare_and_commit");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+
+        let rack_id = RackUuid::new_v4();
+
+        // Create an initial config
+        let mut config = TrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(1),
+            state: TrustQuorumConfigState::Preparing,
+            threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
+            commit_crash_tolerance: 2,
+            coordinator: hw_ids.first().unwrap().clone().into(),
+            encrypted_rack_secrets: None,
+            members: hw_ids
+                .clone()
+                .into_iter()
+                .map(|m| (m.into(), TrustQuorumMemberData::new()))
+                .collect(),
+        };
+
+        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
+
+        // A configuration returned from a coordinator is different
+        let coordinator_config = trust_quorum_protocol::Configuration {
+            rack_id: config.rack_id,
+            epoch: config.epoch,
+            coordinator: hw_ids.first().unwrap().clone().into(),
+            members: config
+                .members
+                .keys()
+                .cloned()
+                .map(|id| (id, Sha3_256Digest([0u8; 32])))
+                .collect(),
+            threshold: config.threshold.clone(),
+            encrypted_rack_secrets: None,
+        };
+
+        // Ack only the coordinator
+        datastore
+            .tq_update_prepare_status(
+                opctx,
+                coordinator_config.clone(),
+                [coordinator_config.coordinator.clone()].into_iter().collect(),
+            )
+            .await
+            .unwrap();
+
+        let read_config = datastore
+            .tq_get_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        // Ensure that Nexus has only seen the coordinator ack and that it has
+        // not yet committed. There should also be no encrypted rack secrets,
+        // and all members should now have share digests.
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(read_config.state, TrustQuorumConfigState::Preparing);
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        for (id, info) in &read_config.members {
+            assert!(info.digest.is_some());
+            if *id == coordinator_config.coordinator {
+                assert_eq!(info.state, TrustQuorumMemberState::Prepared);
+            } else {
+                assert_eq!(info.state, TrustQuorumMemberState::Unacked);
+            }
+        }
+
+        // Ack a threshold of peers.
+        datastore
+            .tq_update_prepare_status(
+                opctx,
+                coordinator_config.clone(),
+                coordinator_config
+                    .members
+                    .keys()
+                    .take(config.threshold.0 as usize)
+                    .cloned()
+                    .collect(),
+            )
+            .await
+            .unwrap();
+
+        let read_config = datastore
+            .tq_get_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        // We've acked a threshold of nodes, but still should not have committed
+        // because we haven't yet acked the `commit_crash_tolerance` number of
+        // nodes in addition.
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(read_config.state, TrustQuorumConfigState::Preparing);
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert_eq!(
+            config.threshold.0 as usize,
+            read_config
+                .members
+                .iter()
+                .filter(
+                    |(_, info)| info.state == TrustQuorumMemberState::Prepared
+                )
+                .count()
+        );
+
+        // Ack an additional `commit_crash_tolerance` of nodes. This should
+        // trigger a commit.
+        let acked_prepares = config.threshold.0 as usize
+            + config.commit_crash_tolerance as usize;
+
+        datastore
+            .tq_update_prepare_status(
+                opctx,
+                coordinator_config.clone(),
+                coordinator_config
+                    .members
+                    .keys()
+                    .take(acked_prepares)
+                    .cloned()
+                    .collect(),
+            )
+            .await
+            .unwrap();
+
+        let read_config = datastore
+            .tq_get_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        // We've acked a threshold of nodes, but still should not have committed
+        // because we haven't yet acked the `commit_crash_tolerance` number of
+        // nodes in addition.
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(read_config.state, TrustQuorumConfigState::Committed);
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert_eq!(
+            acked_prepares,
+            read_config
+                .members
+                .iter()
+                .filter(
+                    |(_, info)| info.state == TrustQuorumMemberState::Prepared
+                )
+                .count()
+        );
+
+        // Future prepare acks should fail because we have moved into the 'committed' state.
     }
 }
