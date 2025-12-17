@@ -575,7 +575,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
         files_checked += 1;
 
         // Validate that the omdb command is valid, even if it can't connect
-        // to a runnine Nexus right now.
+        // to a running Nexus right now.
         assert!(
             !content.contains("error: unrecognized subcommand"),
             "File {} contains 'error: unrecognized subcommand'.\n\

@@ -78,6 +78,7 @@ somewhere consistent and predictable.
 * `ereports/{part number}-{serial number}/{id}.json` - Individual reports
 * `meta/` - Metadata about the bundle
 * `meta/trace.json` - Perfetto-formatted trace of the bundle's collection
+* `omdb/` - Output from omdb commands
 * `rack/{rack id}/sled/{sled id}/` - Sled-specific host OS info
 * `reconfigurator_state.json` - A dump of all reconfigurator state
 * `sled_info.json` - Mapping of sled identifiers to cubby location
