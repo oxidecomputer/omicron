@@ -121,6 +121,7 @@ members = [
     "oximeter/test-utils",
     "oximeter/timeseries-macro",
     "oximeter/types",
+    "oximeter/types/versions",
     "package",
     "parallel-task-set",
     "passwords",
@@ -285,6 +286,7 @@ default-members = [
     "oximeter/test-utils",
     "oximeter/timeseries-macro",
     "oximeter/types",
+    "oximeter/types/versions",
     "package",
     "parallel-task-set",
     "passwords",
@@ -628,6 +630,7 @@ oximeter-schema = { path = "oximeter/schema" }
 oximeter-test-utils = { path = "oximeter/test-utils" }
 oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 oximeter-types = { path = "oximeter/types" }
+oximeter-types-versions = { path = "oximeter/types/versions" }
 oxql-types = { path = "oximeter/oxql-types" }
 p256 = "0.13"
 parallel-task-set = { path = "parallel-task-set" }
