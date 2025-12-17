@@ -7118,9 +7118,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     ip_pool_range_id UUID NOT NULL,
     multicast_ip INET NOT NULL,
 
-    /* Source-Specific Multicast (SSM) support */
-    source_ips INET[] DEFAULT ARRAY[]::INET[],
-
     /* Associated underlay group for NAT */
     /* We fill this as part of the RPW */
     underlay_group_id UUID,

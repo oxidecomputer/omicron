@@ -2777,7 +2777,6 @@ table! {
         ip_pool_range_id -> Uuid,
         vni -> Int4,
         multicast_ip -> Inet,
-        source_ips -> Array<Inet>,
         underlay_group_id -> Nullable<Uuid>,
         underlay_salt -> Nullable<Int2>,
         tag -> Nullable<Text>,

@@ -92,7 +92,6 @@ use nexus_db_schema::schema::{
     multicast_group, multicast_group_member, underlay_multicast_group,
 };
 use nexus_types::external_api::views;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::{self, IdentityMetadata};
 use omicron_uuid_kinds::SledKind;
 
@@ -179,9 +178,6 @@ pub struct ExternalMulticastGroup {
     pub vni: Vni,
     /// Primary multicast IP address (overlay/external).
     pub multicast_ip: IpNetwork,
-    /// Source IP addresses for Source-Specific Multicast (SSM).
-    /// Empty array means any source is allowed.
-    pub source_ips: Vec<IpNetwork>,
     /// Associated underlay group for NAT.
     /// Initially None in ["Creating"](MulticastGroupState::Creating) state,
     /// populated by reconciler when group becomes ["Active"](MulticastGroupState::Active).
@@ -279,22 +275,6 @@ pub struct MulticastGroupMember {
 }
 
 // Conversions to external API views
-
-impl From<ExternalMulticastGroup> for views::MulticastGroup {
-    fn from(group: ExternalMulticastGroup) -> Self {
-        views::MulticastGroup {
-            identity: group.identity(),
-            multicast_ip: group.multicast_ip.ip(),
-            source_ips: group
-                .source_ips
-                .into_iter()
-                .map(|ip| ip.ip())
-                .collect(),
-            ip_pool_id: group.ip_pool_id,
-            state: group.state.to_string(),
-        }
-    }
-}
 
 impl TryFrom<MulticastGroupMember> for views::MulticastGroupMember {
     type Error = external::Error;
