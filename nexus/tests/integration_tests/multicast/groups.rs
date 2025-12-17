@@ -1045,6 +1045,9 @@ async fn test_source_ip_validation_on_join(
         "List endpoint should also return source_ips as union"
     );
 
+    // Wait for reconciler to sync all member sources to DPD
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
     // Verify DPD external group contains the union of sources
     let multicast_ip: IpAddr = ssm_ip.parse().unwrap();
     let dpd_response = dpd_client(cptestctx)
