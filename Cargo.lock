@@ -6803,6 +6803,7 @@ dependencies = [
  "nexus-reconfigurator-planning",
  "nexus-test-utils",
  "nexus-types",
+ "nonempty",
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-passwords",
@@ -7597,6 +7598,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "nonempty"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9737e026353e5cd0736f98eddae28665118eb6f6600902a7f50db585621fecb6"
+
+[[package]]
 name = "normalize-line-endings"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8380,6 +8387,7 @@ dependencies = [
  "scim2-rs",
  "scim2-test-client",
  "semver 1.0.27",
+ "seq-macro",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -8394,6 +8402,7 @@ dependencies = [
  "slog-error-chain",
  "slog-term",
  "sp-sim",
+ "static_assertions",
  "steno",
  "strum 0.27.2",
  "subprocess",
@@ -12436,6 +12445,12 @@ dependencies = [
  "serde",
  "serde_core",
 ]
+
+[[package]]
+name = "seq-macro"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bc711410fbe7399f390ca1c3b60ad0f53f80e95c5eb935e52268a0e2cd49acc"
 
 [[package]]
 name = "serde"
