@@ -104,9 +104,9 @@ impl super::Nexus {
     ) -> ListResultVec<BgpPeerStatus> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+        for (switch, client) in &self.mgd_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
-                "failed to get mg clients: {e}"
+                "failed to get mgd clients: {e}"
             ))
         })? {
             let router_info = match client.read_routers().await {
@@ -161,9 +161,9 @@ impl super::Nexus {
     ) -> LookupResult<BgpExported> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = BgpExported::default();
-        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+        for (switch, client) in &self.mgd_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
-                "failed to get mg clients: {e}"
+                "failed to get mgd clients: {e}"
             ))
         })? {
             let router_info = match client.read_routers().await {
@@ -231,9 +231,9 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+        for (switch, client) in &self.mgd_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
-                "failed to get mg clients: {e}"
+                "failed to get mgd clients: {e}"
             ))
         })? {
             let history = match client
@@ -273,9 +273,9 @@ impl super::Nexus {
     ) -> ListResultVec<BgpImportedRouteIpv4> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+        for (switch, client) in &self.mgd_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
-                "failed to get mg clients: {e}"
+                "failed to get mgd clients: {e}"
             ))
         })? {
             let mut imported: Vec<BgpImportedRouteIpv4> = Vec::new();

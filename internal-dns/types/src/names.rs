@@ -76,7 +76,6 @@ pub enum ServiceName {
     Crucible(OmicronZoneUuid),
     BoundaryNtp,
     InternalNtp,
-    Maghemite, //TODO change to Dpd - maghemite has several services.
     Mgd,
 }
 
@@ -120,7 +119,6 @@ impl ServiceName {
             ServiceName::Crucible(_) => "crucible",
             ServiceName::BoundaryNtp => "boundary-ntp",
             ServiceName::InternalNtp => "internal-ntp",
-            ServiceName::Maghemite => "maghemite",
             ServiceName::Mgd => "mgd",
         }
     }
@@ -152,7 +150,6 @@ impl ServiceName {
             | ServiceName::CruciblePantry
             | ServiceName::BoundaryNtp
             | ServiceName::InternalNtp
-            | ServiceName::Maghemite
             | ServiceName::Mgd => {
                 format!("_{}._tcp", self.service_kind())
             }

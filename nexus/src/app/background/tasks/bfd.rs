@@ -5,12 +5,8 @@
 //! Background task for managing switch bidirectional forwarding detection
 //! (BFD) sessions.
 
-use crate::app::{
-    background::tasks::networking::build_mgd_clients,
-    switch_zone_address_mappings,
-};
-
 use crate::app::background::BackgroundTask;
+use crate::app::mgd_clients;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
@@ -118,21 +114,23 @@ impl BackgroundTask for BfdManager {
 
             let mut current: HashSet<BfdSessionKey> = HashSet::new();
 
-            let mappings = match switch_zone_address_mappings(&self.resolver, log).await {
-                Ok(mappings) => mappings,
-                Err(e) => {
-                    error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-                    return json!({
-                        "error":
-                            format!(
-                                "failed to resolve addresses for Dendrite services: {:#}",
-                                e
-                            )
-                    });
-                },
-            };
-
-            let mgd_clients = build_mgd_clients(mappings, log, &self.resolver).await;
+            let mgd_clients = match mgd_clients(&self.resolver, log).await
+                {
+                    Ok(mappings) => mappings,
+                    Err(e) => {
+                        error!(
+                            log,
+                            "failed to resolve addresses for Maghemite";
+                            "error" => %e);
+                        return json!({
+                            "error":
+                                format!(
+                                    "failed to resolve addresses for Maghemite: {:#}",
+                                    e
+                                )
+                        });
+                    },
+                };
 
             for (location, c) in &mgd_clients {
                 let client_current = match c.get_bfd_peers().await {
