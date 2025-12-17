@@ -278,7 +278,7 @@ async fn spawn_bootstore_tasks(
 async fn spawn_health_monitor_tasks(log: &Logger) -> HealthMonitorHandle {
     info!(log, "Starting health monitor");
     let log = log.new(o!("component" => "HealthMonitor"));
-    HealthMonitorHandle::spawn(&log)
+    HealthMonitorHandle::spawn(log)
 }
 
 // `ZoneBundler::new` spawns a periodic cleanup task that runs indefinitely

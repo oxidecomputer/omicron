@@ -16,39 +16,39 @@ pub struct HealthMonitorHandle {
     // all types to be cloneable. The only error that could happen here is
     // the failure to execute `svcs`, which is a `illumos_utils::ExecutionError`
     // and this error cannot be cloned.
-    pub smf_services_in_maintenance_tx:
-        watch::Sender<Result<SvcsInMaintenanceResult, String>>,
+    pub smf_services_in_maintenance_rx:
+        watch::Receiver<Result<SvcsInMaintenanceResult, String>>,
 }
 
 impl HealthMonitorHandle {
     pub fn stub() -> Self {
-        let (smf_services_in_maintenance_tx, _rx) =
+        let (_tx, smf_services_in_maintenance_rx) =
             watch::channel(Ok(SvcsInMaintenanceResult::new()));
-        Self { smf_services_in_maintenance_tx }
+        Self { smf_services_in_maintenance_rx }
     }
 
-    pub fn spawn(log: &Logger) -> Self {
-        let health_handle = HealthMonitorHandle::stub();
-
+    pub fn spawn(log: Logger) -> Self {
         // Spawn a task to retrieve information about services in maintenance
         info!(log, "Starting SMF service health poller");
-        let health_handle2 = health_handle.clone();
-        let log = log.clone();
+
+        let (smf_services_in_maintenance_tx, smf_services_in_maintenance_rx) =
+            watch::channel(Ok(SvcsInMaintenanceResult::new()));
+
         tokio::spawn(async move {
             poll_smf_services_in_maintenance(
                 log,
-                health_handle2.smf_services_in_maintenance_tx,
+                smf_services_in_maintenance_tx,
             )
             .await
         });
 
-        health_handle
+        Self { smf_services_in_maintenance_rx }
     }
 
     pub fn to_inventory(&self) -> HealthMonitorInventory {
         HealthMonitorInventory {
             smf_services_in_maintenance: self
-                .smf_services_in_maintenance_tx
+                .smf_services_in_maintenance_rx
                 .borrow()
                 .clone(),
         }
