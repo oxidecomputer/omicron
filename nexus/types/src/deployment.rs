@@ -28,6 +28,7 @@ use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use iddqd::id_ord_map::RefMut;
 use iddqd::id_upcast;
+use ipnet::IpAdd;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
@@ -939,9 +940,13 @@ impl fmt::Display for BlueprintDisplay<'_> {
 
         // Loop through all sleds and print details of their configs.
         for (sled_id, config) in sleds {
+            let last_allocated_ip = config.last_allocated_ip();
+
             let BlueprintSledConfig {
                 state,
                 subnet,
+                // covered by `last_allocated_ip` computed above
+                last_allocated_ip_subnet_offset: _,
                 sled_agent_generation,
                 disks,
                 datasets,
@@ -952,10 +957,12 @@ impl fmt::Display for BlueprintDisplay<'_> {
 
             // Report toplevel sled info
             writeln!(f, "\n  sled: {sled_id}")?;
-            let mut rows = Vec::new();
-            rows.push((STATE, state.to_string()));
-            rows.push((CONFIG_GENERATION, sled_agent_generation.to_string()));
-            rows.push((SUBNET, subnet.to_string()));
+            let mut rows = vec![
+                (STATE, state.to_string()),
+                (CONFIG_GENERATION, sled_agent_generation.to_string()),
+                (SUBNET, subnet.to_string()),
+                (LAST_ALLOCATED_IP, last_allocated_ip.to_string()),
+            ];
 
             if let Some(id) = remove_mupdate_override {
                 rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
@@ -1055,6 +1062,21 @@ pub struct BlueprintSledConfig {
     pub state: SledState,
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
 
+    /// Each sled is assigned an IPv6 /64 `subnet` (above). Currently, the
+    /// lowest /112 subnet within the sled subnet is reserved for control plane
+    /// services, and of that the lowest 32 IPs are reserved for special zones
+    /// (global zone, switch zone) and rack setup.
+    /// `last_allocated_ip_subnet_offset` therefore starts at 32 for new sleds,
+    /// and the planner chooses IP addresses for new zones by incrementing it
+    /// and taking that offset into `subnet`.
+    ///
+    /// Planning will fail if `last_allocated_ip_subnet_offset` reaches
+    /// `u16::MAX`. This is very unlikely given current rates of updates and IP
+    /// assignments, but is well within the realm of "possible". Giving
+    /// Reconfigurator a larger chunk of IPs is tracked by
+    /// <https://github.com/oxidecomputer/omicron/issues/9534>.
+    pub last_allocated_ip_subnet_offset: u16,
+
     /// Generation number used when this type is converted into an
     /// `OmicronSledConfig` for use by sled-agent.
     ///
@@ -1074,6 +1096,13 @@ pub struct BlueprintSledConfig {
 }
 
 impl BlueprintSledConfig {
+    pub fn last_allocated_ip(&self) -> Ipv6Addr {
+        self.subnet
+            .net()
+            .prefix()
+            .saturating_add(u128::from(self.last_allocated_ip_subnet_offset))
+    }
+
     /// Converts self into [`OmicronSledConfig`].
     ///
     /// This function is effectively a `From` implementation, but

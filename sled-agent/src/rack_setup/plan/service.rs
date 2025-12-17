@@ -914,6 +914,7 @@ impl Plan {
                 BlueprintSledConfig {
                     state: SledState::Active,
                     subnet: sled_description.subnet,
+                    last_allocated_ip_subnet_offset: RSS_RESERVED_ADDRESSES,
                     sled_agent_generation: sled_agent_config_generation,
                     disks: sled_config.disks.clone(),
                     datasets,

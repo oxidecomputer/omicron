@@ -4815,6 +4815,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     -- the sled's /64 subnet on the underlay address
     subnet INET NOT NULL,
 
+    -- the last allocated IP within `subnet` used by the blueprint
+    last_allocated_ip_subnet_offset INT4 NOT NULL,
+
     PRIMARY KEY (blueprint_id, sled_id)
 );
 

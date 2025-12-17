@@ -1077,6 +1077,7 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP:   fd00:1122:3344:102::28
 
     host phase 2 contents:
     ------------------------------
@@ -1145,6 +1146,7 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP:   fd00:1122:3344:101::27
 
     host phase 2 contents:
     ------------------------------
@@ -1210,6 +1212,7 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP:   fd00:1122:3344:103::27
 
     host phase 2 contents:
     ------------------------------

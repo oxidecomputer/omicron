@@ -97,6 +97,7 @@ mod tests {
     use nexus_types::external_api::views::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::REPO_DEPOT_PORT;
+    use omicron_common::address::RSS_RESERVED_ADDRESSES;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::CompressionAlgorithm;
@@ -262,6 +263,7 @@ mod tests {
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
             subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            last_allocated_ip_subnet_offset: RSS_RESERVED_ADDRESSES,
             sled_agent_generation: sim_sled_agent_config_generation.next(),
             disks,
             datasets,

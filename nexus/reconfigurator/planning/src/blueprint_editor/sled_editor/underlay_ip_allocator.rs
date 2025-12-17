@@ -5,6 +5,7 @@
 //! Allocator for zone underlay IP addresses with a single sled's subnet.
 
 use ipnet::IpAdd;
+use ipnet::IpSub;
 use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -69,6 +70,36 @@ impl SledUnderlayIpAllocator {
     /// Get the subnet used to create this allocator.
     pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
         self.subnet
+    }
+
+    /// Get the last allocated IP as an offset into the sled subnet.
+    pub fn last_allocated_ip_subnet_offset(&self) -> u16 {
+        let last_allocated_ip = self.last;
+        let offset = self.last.saturating_sub(self.subnet.net().prefix());
+
+        // Based on the asserts made in `new()` and the error checking performed
+        // in `alloc()`, we know `self.last` must be in the range
+        // `[SLED_RESERVED_ADDRESSES, CP_SERVICES_RESERVED_ADDRESSES]` and
+        // therefore must fit in a u16.
+        let offset = match u16::try_from(offset) {
+            Ok(offset) => offset,
+            Err(_) => {
+                unreachable!(
+                    "last allocated ip ({last_allocated_ip}) is beyond \
+                     the range of expected allocations (offset = {offset})"
+                );
+            }
+        };
+        assert!(
+            offset >= SLED_RESERVED_ADDRESSES,
+            "offset unexpectedly inside reserved range: {offset}"
+        );
+        assert!(
+            offset <= CP_SERVICES_RESERVED_ADDRESSES,
+            "offset unexpectedly above reserved range: {offset}"
+        );
+
+        offset
     }
 
     /// Mark an address as used.

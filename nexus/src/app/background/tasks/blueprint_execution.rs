@@ -247,7 +247,7 @@ mod test {
         blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
-    use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::{Ipv6Subnet, RSS_RESERVED_ADDRESSES};
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
@@ -285,6 +285,7 @@ mod test {
                     BlueprintSledConfig {
                         state: SledState::Active,
                         subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                        last_allocated_ip_subnet_offset: RSS_RESERVED_ADDRESSES,
                         sled_agent_generation: Generation::new().next(),
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),

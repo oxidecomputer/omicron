@@ -278,6 +278,11 @@ pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
 // to assume that addresses in this subnet are available.
 pub const SLED_RESERVED_ADDRESSES: u16 = 32;
 
+static_assertions::const_assert_eq!(
+    RSS_RESERVED_ADDRESSES,
+    SLED_RESERVED_ADDRESSES
+);
+
 /// Wraps an [`Ipv6Net`] with a compile-time prefix length.
 #[derive(
     Debug,

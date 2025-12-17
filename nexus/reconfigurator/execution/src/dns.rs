@@ -368,6 +368,7 @@ mod test {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::REPO_DEPOT_PORT;
+    use omicron_common::address::RSS_RESERVED_ADDRESSES;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
@@ -695,6 +696,7 @@ mod test {
                 BlueprintSledConfig {
                     state: SledState::Active,
                     subnet: Ipv6Subnet::new(*sa.sled_agent_address.ip()),
+                    last_allocated_ip_subnet_offset: RSS_RESERVED_ADDRESSES,
                     sled_agent_generation: ledgered_sled_config.generation,
                     disks: IdOrdMap::new(),
                     datasets: IdOrdMap::new(),

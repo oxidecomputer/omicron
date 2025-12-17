@@ -260,6 +260,9 @@ impl DataStore {
                     .artifact_hash()
                     .map(ArtifactHash),
                 subnet: Ipv6Network::from(sled.subnet).into(),
+                last_allocated_ip_subnet_offset: sled
+                    .last_allocated_ip_subnet_offset
+                    .into(),
             })
             .collect::<Vec<_>>();
 
@@ -800,6 +803,8 @@ impl DataStore {
                         state: s.sled_state.into(),
                         subnet,
                         sled_agent_generation: *s.sled_agent_generation,
+                        last_allocated_ip_subnet_offset: *s
+                            .last_allocated_ip_subnet_offset,
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),
                         zones: IdOrdMap::new(),

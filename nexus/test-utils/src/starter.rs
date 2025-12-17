@@ -61,6 +61,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_PORT;
+use omicron_common::address::RSS_RESERVED_ADDRESSES;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
@@ -1389,6 +1390,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 BlueprintSledConfig {
                     state: SledState::Active,
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                    last_allocated_ip_subnet_offset: RSS_RESERVED_ADDRESSES,
                     sled_agent_generation,
                     disks,
                     datasets,

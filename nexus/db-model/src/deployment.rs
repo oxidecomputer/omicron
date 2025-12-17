@@ -223,6 +223,7 @@ pub struct BpSledMetadata {
     /// Public only for easy of writing queries; consumers should prefer the
     /// `subnet()` method.
     pub subnet: IpNetwork,
+    pub last_allocated_ip_subnet_offset: SqlU16,
 }
 
 impl BpSledMetadata {

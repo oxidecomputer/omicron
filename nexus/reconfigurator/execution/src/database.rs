@@ -87,6 +87,7 @@ mod test {
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::RSS_RESERVED_ADDRESSES;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
@@ -165,6 +166,7 @@ mod test {
             BlueprintSledConfig {
                 state: SledState::Active,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                last_allocated_ip_subnet_offset: RSS_RESERVED_ADDRESSES,
                 sled_agent_generation: Generation::new(),
                 zones,
                 disks: IdOrdMap::new(),

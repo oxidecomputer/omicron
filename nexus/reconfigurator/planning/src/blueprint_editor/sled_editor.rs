@@ -579,6 +579,9 @@ impl ActiveSledEditor {
             config: BlueprintSledConfig {
                 state: SledState::Active,
                 subnet: self.underlay_ip_allocator.subnet(),
+                last_allocated_ip_subnet_offset: self
+                    .underlay_ip_allocator
+                    .last_allocated_ip_subnet_offset(),
                 sled_agent_generation,
                 disks,
                 datasets,

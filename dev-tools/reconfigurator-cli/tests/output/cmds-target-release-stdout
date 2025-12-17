@@ -9059,6 +9059,7 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
     state:::::::::::::   active
     config generation:   18
     subnet::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP:   fd00:1122:3344:102::2c
 
     host phase 2 contents:
     ------------------------------
@@ -9139,6 +9140,7 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
     state:::::::::::::   active
     config generation:   19
     subnet::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP:   fd00:1122:3344:101::2c
 
     host phase 2 contents:
     ------------------------------
@@ -9218,6 +9220,7 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
     state:::::::::::::   active
     config generation:   17
     subnet::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP:   fd00:1122:3344:103::2b
 
     host phase 2 contents:
     ------------------------------
