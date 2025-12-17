@@ -2954,3 +2954,57 @@ allow_tables_to_appear_in_same_query!(
     rendezvous_local_storage_dataset,
     local_storage_dataset_allocation
 );
+
+table! {
+    fm_case (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        de -> crate::enums::DiagnosisEngineEnum,
+
+        time_created -> Timestamptz,
+        created_sitrep_id -> Uuid,
+
+        time_closed -> Nullable<Timestamptz>,
+        closed_sitrep_id -> Nullable<Uuid>,
+
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_ereport_in_case (sitrep_id, restart_id, ena) {
+        restart_id -> Uuid,
+        ena -> Int8,
+        case_id -> Uuid,
+        sitrep_id -> Uuid,
+        assigned_sitrep_id -> Uuid,
+
+        comment -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
+
+table! {
+    fm_case_impacts_location (sitrep_id, case_id, sp_type, sp_slot) {
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_alert_request (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        case_id -> Uuid,
+        class -> crate::enums::AlertClassEnum,
+        payload -> Jsonb,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_alert_request);

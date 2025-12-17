@@ -45,6 +45,7 @@ impl_typed_uuid_kinds! {
         AntiAffinityGroup = {},
         Blueprint = {},
         BuiltInUser = {},
+        Case = {},
         Collection = {},
         ConsoleSession = {},
         Dataset = {},

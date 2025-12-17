@@ -104,6 +104,7 @@ use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
+use super::tasks::fm_rendezvous;
 use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_load;
 use super::tasks::instance_reincarnation;
@@ -267,6 +268,7 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator: Activator::new(),
             task_sp_ereport_ingester: Activator::new(),
             task_reconfigurator_config_loader: Activator::new(),
+            task_fm_rendezvous: Activator::new(),
             task_fm_sitrep_loader: Activator::new(),
             task_fm_sitrep_gc: Activator::new(),
             task_probe_distributor: Activator::new(),
@@ -356,6 +358,7 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator,
             task_sp_ereport_ingester,
             task_reconfigurator_config_loader,
+            task_fm_rendezvous,
             task_fm_sitrep_loader,
             task_fm_sitrep_gc,
             task_probe_distributor,
@@ -1124,6 +1127,18 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_fm_sitrep_loader,
+        });
+
+        driver.register(TaskDefinition {
+            name: "fm_rendezvous",
+            description:
+                "updates externally visible database tables to match the \
+                 current fault management sitrep",
+            period: config.fm.rendezvouz_period_secs,
+            task_impl: Box::new(fm_rendezvous::FmRendezvous::new(datastore.clone(), sitrep_watcher.clone(), task_alert_dispatcher.clone())),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(sitrep_watcher.clone())],
+            activator: task_fm_rendezvous,
         });
 
         driver.register(TaskDefinition {

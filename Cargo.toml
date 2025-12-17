@@ -86,6 +86,7 @@ members = [
     "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
+    "nexus/fm",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",

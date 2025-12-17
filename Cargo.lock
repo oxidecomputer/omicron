@@ -6900,6 +6900,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-fm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ereport-types",
+ "iddqd",
+ "nexus-reconfigurator-planning",
+ "nexus-types",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "rand 0.9.2",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-error-chain",
+ "typed-rng",
+]
+
+[[package]]
 name = "nexus-internal-api"
 version = "0.1.0"
 dependencies = [
