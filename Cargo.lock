@@ -5363,6 +5363,7 @@ dependencies = [
  "dropshot",
  "dropshot-api-manager-types",
  "hyper",
+ "installinator-common-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -5398,6 +5399,7 @@ dependencies = [
  "anyhow",
  "camino",
  "illumos-utils",
+ "installinator-common-versions",
  "libc",
  "omicron-common",
  "omicron-workspace-hack",
@@ -5410,6 +5412,16 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "update-engine",
+]
+
+[[package]]
+name = "installinator-common-versions"
+version = "0.1.0"
+dependencies = [
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars 0.8.22",
+ "serde",
 ]
 
 [[package]]
