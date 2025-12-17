@@ -415,10 +415,21 @@ impl MulticastDataplaneClient {
             vni: Vni::from(u32::from(external_group.vni.0)),
         };
 
-        let sources_dpd =
-            sources.iter().map(|ip| IpSrc::Exact(ip.ip())).collect::<Vec<_>>();
-
         let external_group_ip = external_group.multicast_ip.ip();
+
+        // TODO: ASM source filtering will be accepted in dendrite in a follow-up
+        // PR stacked on this one. For now, we only send sources to DPD for SSM
+        // groups. ASM groups get `None`, meaning "any source allowed".
+        let sources_dpd = if is_ssm_address(external_group_ip) {
+            Some(
+                sources
+                    .iter()
+                    .map(|ip| IpSrc::Exact(ip.ip()))
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
 
         let create_operations =
             dpd_clients.into_iter().map(|(switch_location, client)| {
@@ -444,7 +455,7 @@ impl MulticastDataplaneClient {
                             nat_target: Some(nat_target),
                         },
                         tag: Some(tag.clone()),
-                        sources: Some(sources),
+                        sources,
                     };
 
                     let external_response = self
@@ -555,11 +566,20 @@ impl MulticastDataplaneClient {
         let new_name_str = params.new_name.to_string();
         let external_group_ip = params.external_group.multicast_ip.ip();
 
-        let sources_dpd = params
-            .new_sources
-            .iter()
-            .map(|ip| IpSrc::Exact(ip.ip()))
-            .collect::<Vec<_>>();
+        // TODO: ASM source filtering will be accepted in dendrite in a follow-up
+        // PR stacked on this one. For now, we only send sources to DPD for SSM
+        // groups. ASM groups get `None`, meaning "any source allowed".
+        let sources_dpd = if is_ssm_address(external_group_ip) {
+            Some(
+                params
+                    .new_sources
+                    .iter()
+                    .map(|ip| IpSrc::Exact(ip.ip()))
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
 
         let update_operations =
             dpd_clients.into_iter().map(|(switch_location, client)| {
@@ -634,14 +654,14 @@ impl MulticastDataplaneClient {
                         external_forwarding: external_forwarding.clone(),
                         internal_forwarding: internal_forwarding.clone(),
                         tag: Some(new_name.clone()),
-                        sources: Some(sources.clone()),
+                        sources: sources.clone(),
                     };
                     let create_entry = MulticastGroupCreateExternalEntry {
                         group_ip: external_group_ip,
                         external_forwarding,
                         internal_forwarding,
                         tag: Some(new_name.clone()),
-                        sources: Some(sources),
+                        sources,
                     };
 
                     let external_response = self
