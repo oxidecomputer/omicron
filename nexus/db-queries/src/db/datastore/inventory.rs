@@ -110,6 +110,7 @@ use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::ManifestNonBootInventory;
 use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::OmicronSledConfig;

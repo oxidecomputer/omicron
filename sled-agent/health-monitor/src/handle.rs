@@ -5,7 +5,7 @@
 use crate::health_checks::poll_smf_services_in_maintenance;
 
 use illumos_utils::svcs::SvcsInMaintenanceResult;
-use nexus_sled_agent_shared::inventory::HealthMonitorInventory;
+use sled_agent_types::inventory::HealthMonitorInventory;
 use slog::Logger;
 use slog::info;
 use tokio::sync::watch;

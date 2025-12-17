@@ -12995,7 +12995,6 @@ dependencies = [
  "dropshot",
  "futures",
  "illumos-utils",
- "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",

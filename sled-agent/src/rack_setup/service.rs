@@ -1723,8 +1723,9 @@ mod test {
     };
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        OmicronZoneType, SledCpuFamily, SledRole, ZoneImageResolverInventory,
+        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
+        Inventory, InventoryDisk, OmicronZoneType, SledCpuFamily, SledRole,
+        ZoneImageResolverInventory,
     };
 
     fn make_sled_info(

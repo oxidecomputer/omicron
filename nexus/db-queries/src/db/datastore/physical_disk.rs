@@ -346,8 +346,9 @@ mod test {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        SledCpuFamily, SledRole, ZoneImageResolverInventory,
+        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
+        Inventory, InventoryDisk, SledCpuFamily, SledRole,
+        ZoneImageResolverInventory,
     };
     use std::num::NonZeroU32;
 

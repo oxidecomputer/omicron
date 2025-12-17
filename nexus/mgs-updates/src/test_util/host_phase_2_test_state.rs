@@ -240,6 +240,7 @@ mod api_impl {
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::ConfigReconcilerInventory;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HealthMonitorInventory;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::Inventory;

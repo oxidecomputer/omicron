@@ -39,6 +39,7 @@ use serde_with::serde_as;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types_versions::latest::inventory::HealthMonitorInventory;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;

@@ -62,6 +62,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
