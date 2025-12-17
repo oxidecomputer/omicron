@@ -238,7 +238,7 @@ async fn cmd_db_sitrep_show(
         }
     };
 
-    let fm::Sitrep { metadata } = sitrep;
+    let fm::Sitrep { metadata, cases } = sitrep;
     let fm::SitrepMetadata {
         id,
         creator_id,
@@ -342,6 +342,13 @@ async fn cmd_db_sitrep_show(
                 "      note: this collection no longer exists (perhaps it has \
                  been pruned?)"
             )
+        }
+    }
+
+    if !cases.is_empty() {
+        println!("\n{:-<80}\n", "== CASES");
+        for case in cases {
+            println!("{}", case.display_indented(4, Some(id)));
         }
     }
 
