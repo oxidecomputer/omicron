@@ -307,16 +307,13 @@ pub enum InventoryError {
     BadByteCount(#[from] ByteCountRangeError),
     #[error(transparent)]
     InventoryError(#[from] sled_agent_config_reconciler::InventoryError),
-    #[error(transparent)]
-    ExecutionError(#[from] illumos_utils::ExecutionError),
 }
 
 impl From<InventoryError> for omicron_common::api::external::Error {
     fn from(inventory_error: InventoryError) -> Self {
         match inventory_error {
             e @ (InventoryError::BadByteCount(..)
-            | InventoryError::InventoryError(_)
-            | InventoryError::ExecutionError(_)) => {
+            | InventoryError::InventoryError(_)) => {
                 omicron_common::api::external::Error::internal_error(
                     &InlineErrorChain::new(&e).to_string(),
                 )

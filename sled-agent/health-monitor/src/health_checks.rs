@@ -30,6 +30,10 @@ pub(crate) async fn poll_smf_services_in_maintenance(
     loop {
         interval.tick().await;
         match Svcs::in_maintenance(&log).await {
+            // There isn't anything waiting for changes because we only look at
+            // the health check status when an inventory request comes in. This
+            // means we can safely use `send_modify` instead of
+            // `send_if_modified()`.
             Err(e) => smf_services_in_maintenance_tx.send_modify(|status| {
                 *status = Err(e.to_string());
             }),

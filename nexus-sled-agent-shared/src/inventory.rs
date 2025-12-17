@@ -150,7 +150,9 @@ impl HealthMonitorInventory {
     }
 
     pub fn is_empty(&self) -> bool {
-        if let Ok(svcs) = &self.smf_services_in_maintenance {
+        let Self { smf_services_in_maintenance } = self;
+
+        if let Ok(svcs) = smf_services_in_maintenance {
             svcs.is_empty()
         } else {
             false

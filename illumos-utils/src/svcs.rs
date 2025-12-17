@@ -34,11 +34,10 @@ impl Svcs {
     ) -> Result<SvcsInMaintenanceResult, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCS, "-Za", "-H", "-o", "state,fmri,zone"]);
+        info!(log, "Retrieving SMF services in maintenance");
         let output = execute_async(cmd).await?;
-        let svcs_result = SvcsInMaintenanceResult {
-            services: SvcInMaintenance::parse(log, &output.stdout),
-            time_of_status: Some(Utc::now()),
-        };
+        let svcs_result = SvcsInMaintenanceResult::parse(log, &output.stdout);
+        info!(log, "Successfully retrieved SMF services in maintenance");
         Ok(svcs_result)
     }
 
@@ -58,16 +57,95 @@ impl Svcs {
 #[serde(rename_all = "snake_case")]
 pub struct SvcsInMaintenanceResult {
     pub services: Vec<SvcInMaintenance>,
+    pub errors: Vec<String>,
     pub time_of_status: Option<DateTime<Utc>>,
 }
 
 impl SvcsInMaintenanceResult {
     pub fn new() -> Self {
-        Self { services: vec![], time_of_status: None }
+        Self { services: vec![], errors: vec![], time_of_status: None }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.services.is_empty() && self.time_of_status == None
+        self.services.is_empty()
+            && self.errors.is_empty()
+            && self.time_of_status == None
+    }
+
+    // This method is only used when the target OS is "illumos". It is not
+    // marked as a configuration option based on target OS because it is not
+    // Illumos specific itself. Additionally, we would not be able to run the
+    // unit tests on any other OS if we mark it to be used on Illumos only.
+    // We mark it as unused instead.
+    #[allow(dead_code)]
+    fn parse(log: &Logger, data: &[u8]) -> Self {
+        let mut services = vec![];
+        let mut errors = vec![];
+        if data.is_empty() {
+            return Self { services, errors, time_of_status: Some(Utc::now()) };
+        }
+
+        // Example of the reponse from running `svcs -Za -H -o state,fmri,zone`
+        //
+        // legacy_run     lrc:/etc/rc2_d/S20sysetup                          global
+        // maintenance    svc:/site/fake-service:default                     global
+        // disabled       svc:/network/tcpkey:default                        global
+        // disabled       svc:/system/omicron/baseline:default               global
+        // online         svc:/milestone/sysconfig:default                   global
+        let s = String::from_utf8_lossy(data);
+        let lines = s.trim().lines();
+        for line in lines {
+            let line = line.trim();
+            let mut svc = line.split_whitespace();
+
+            if let Some(state) = svc.next() {
+                // Only attempt to parse a service that is in maintenance.
+                match SvcState::from(state.to_string()) {
+                    SvcState::Maintenance => {
+                        // This is a new service, wipe the slate clean
+                        let mut current_svc = SvcInMaintenance::new();
+                        if let Some(fmri) = svc.next() {
+                            current_svc.fmri = fmri.to_string()
+                        }
+
+                        if let Some(zone) = svc.next() {
+                            current_svc.zone = zone.to_string()
+                        } else {
+                            // We only need to collect an error here. If the
+                            // previous svc.next() was `None`, this one will be
+                            // `None` as well.
+                            errors.push(format!(
+                                "Unexpected output line: {line}"
+                            ));
+                            error!(
+                                log,
+                                "unable to parse; output line missing zone: {line}",
+                            );
+                        }
+
+                        // We add a service even if we were only partially able to
+                        // parse it. If there is something in maintenance we want to
+                        // include it in inventory. This means there is something
+                        // going on and someone should take a look.
+                        services.push(current_svc.clone());
+                    }
+                    // If there is a weird state let's log it.
+                    SvcState::Unknown => {
+                        errors.push(format!(
+                            "Found a service with an unknown state: {line}"
+                        ));
+                        info!(
+                            log,
+                            "output from 'svcs' contains a service with an unknown \
+                            state: {}",
+                            state
+                        )
+                    }
+                    _ => (),
+                }
+            }
+        }
+        Self { services, errors, time_of_status: Some(Utc::now()) }
     }
 }
 
@@ -124,80 +202,11 @@ pub struct SvcInMaintenance {
 }
 
 impl SvcInMaintenance {
-    // These methods are only used when the target OS is "illumos". They are not
-    // marked as a configuration option based on target OS because they are not
-    // Illumos specific themselves. Additionally, we would not be able to run the
-    // unit tests on any other OS if we mark them to be used on Illumos only.
-    // We mark them as unused instead.
+    // As above, this method is marked as dead code as it only runs when the
+    // target OS is illumos
     #[allow(dead_code)]
     fn new() -> SvcInMaintenance {
         SvcInMaintenance { fmri: String::new(), zone: String::new() }
-    }
-
-    #[allow(dead_code)]
-    fn parse(log: &Logger, data: &[u8]) -> Vec<SvcInMaintenance> {
-        let mut svcs = vec![];
-        if data.is_empty() {
-            return svcs;
-        }
-
-        // Example of the reponse from running `svcs -Za -H -o state,fmri,zone`
-        //
-        // legacy_run     lrc:/etc/rc2_d/S20sysetup                          global
-        // maintenance    svc:/site/fake-service:default                     global
-        // disabled       svc:/network/tcpkey:default                        global
-        // disabled       svc:/system/omicron/baseline:default               global
-        // online         svc:/milestone/sysconfig:default                   global
-        let s = String::from_utf8_lossy(data);
-        let lines = s.trim().lines();
-        for line in lines {
-            let line = line.trim();
-            let mut svc = line.split_whitespace();
-
-            if let Some(state) = svc.next() {
-                // Only attempt to parse a service that is in maintenance.
-                match SvcState::from(state.to_string()) {
-                    SvcState::Maintenance => {
-                        // This is a new service, wipe the slate clean
-                        let mut current_svc = SvcInMaintenance::new();
-                        if let Some(fmri) = svc.next() {
-                            current_svc.fmri = fmri.to_string()
-                        } else {
-                            error!(
-                                log,
-                                "unable to parse; output line missing FMRI: {line}",
-                            );
-                        }
-
-                        if let Some(zone) = svc.next() {
-                            current_svc.zone = zone.to_string()
-                        } else {
-                            error!(
-                                log,
-                                "unable to parse; output line missing zone: {line}",
-                            );
-                        }
-
-                        // We add a service even if we were only partially able to
-                        // parse it. If there is something in maintenance we want to
-                        // include it in inventory. This means there is something
-                        // going on and someone should take a look.
-                        svcs.push(current_svc.clone());
-                    }
-                    // If there is a weird state let's log it.
-                    SvcState::Unknown => {
-                        info!(
-                            log,
-                            "output from 'svcs' contains a service with an unknown \
-                        state: {}",
-                            state
-                        )
-                    }
-                    _ => (),
-                }
-            }
-        }
-        svcs
     }
 }
 
@@ -236,13 +245,12 @@ online         svc:/milestone/sysconfig:default                   global
 "#;
 
         let log = log();
-        let services = SvcInMaintenance::parse(&log, output.as_bytes());
+        let result = SvcsInMaintenanceResult::parse(&log, output.as_bytes());
 
-        // We want to make sure we only have two entries
-        assert_eq!(services.len(), 2);
-
+        // We want to make sure we only have two services in maintenance
+        assert_eq!(result.services.len(), 2);
         assert_eq!(
-            services[0],
+            result.services[0],
             SvcInMaintenance {
                 fmri: "svc:/site/fake-service:default".to_string(),
                 zone: "global".to_string(),
@@ -250,12 +258,14 @@ online         svc:/milestone/sysconfig:default                   global
         );
 
         assert_eq!(
-            services[1],
+            result.services[1],
             SvcInMaintenance {
                 fmri: "svc:/system/omicron/baseline:default".to_string(),
                 zone: "global".to_string(),
             }
         );
+
+        assert_eq!(result.errors.len(), 0);
     }
 
     #[test]
@@ -268,9 +278,10 @@ online         svc:/milestone/sysconfig:default                   global
 "#;
 
         let log = log();
-        let services = SvcInMaintenance::parse(&log, output.as_bytes());
+        let result = SvcsInMaintenanceResult::parse(&log, output.as_bytes());
 
-        assert_eq!(services.len(), 0);
+        assert_eq!(result.services.len(), 0);
+        assert_eq!(result.errors.len(), 0);
     }
 
     #[test]
@@ -278,9 +289,10 @@ online         svc:/milestone/sysconfig:default                   global
         let output = r#""#;
 
         let log = log();
-        let services = SvcInMaintenance::parse(&log, output.as_bytes());
+        let result = SvcsInMaintenanceResult::parse(&log, output.as_bytes());
 
-        assert_eq!(services.len(), 0);
+        assert_eq!(result.services.len(), 0);
+        assert_eq!(result.errors.len(), 0);
     }
 
     #[test]
@@ -289,17 +301,25 @@ online         svc:/milestone/sysconfig:default                   global
 "#;
 
         let log = log();
-        let services = SvcInMaintenance::parse(&log, output.as_bytes());
+        let result = SvcsInMaintenanceResult::parse(&log, output.as_bytes());
 
         // We want to make sure we have an entry even if we're missing the zone
-        assert_eq!(services.len(), 1);
+        assert_eq!(result.services.len(), 1);
 
         assert_eq!(
-            services[0],
+            result.services[0],
             SvcInMaintenance {
                 fmri: "svc:/site/fake-service:default".to_string(),
                 zone: "".to_string(),
             }
+        );
+
+        assert_eq!(
+            result.errors,
+            vec![
+                "Unexpected output line: maintenance    svc:/site/fake-service:default"
+                .to_string(),
+            ]
         );
     }
 
@@ -309,14 +329,18 @@ online         svc:/milestone/sysconfig:default                   global
 "#;
 
         let log = log();
-        let services = SvcInMaintenance::parse(&log, output.as_bytes());
+        let result = SvcsInMaintenanceResult::parse(&log, output.as_bytes());
 
         // We want to make sure we have an entry even if we're missing all information
-        assert_eq!(services.len(), 1);
+        assert_eq!(result.services.len(), 1);
 
         assert_eq!(
-            services[0],
+            result.services[0],
             SvcInMaintenance { fmri: "".to_string(), zone: "".to_string() }
+        );
+        assert_eq!(
+            result.errors,
+            vec!["Unexpected output line: maintenance".to_string(),]
         );
     }
 
@@ -326,8 +350,55 @@ online         svc:/milestone/sysconfig:default                   global
 "#;
 
         let log = log();
-        let services = SvcInMaintenance::parse(&log, output.as_bytes());
+        let result = SvcsInMaintenanceResult::parse(&log, output.as_bytes());
 
-        assert_eq!(services.len(), 0);
+        assert_eq!(result.services.len(), 0);
+        assert_eq!(
+            result.errors,
+            vec![
+                "Found a service with an unknown state: Barnacles!".to_string()
+            ],
+        );
+    }
+
+    #[test]
+    fn test_svc_in_maintenance_parse_success_and_fail() {
+        let output = r#"legacy_run     lrc:/etc/rc2_d/S89PRESERVE                         global
+maintenance    svc:/site/fake-service:default                     global
+disabled       svc:/network/tcpkey:default                        global
+maintenance    svc:/system/omicron/baseline:default
+Barnacles!     svc:/milestone/sysconfig:default                   global
+maintenance
+"#;
+
+        let log = log();
+        let result = SvcsInMaintenanceResult::parse(&log, output.as_bytes());
+
+        // We want to make sure we only have three services in maintenance
+        assert_eq!(result.services.len(), 3);
+        assert_eq!(
+            result.services[0],
+            SvcInMaintenance {
+                fmri: "svc:/site/fake-service:default".to_string(),
+                zone: "global".to_string(),
+            }
+        );
+
+        assert_eq!(
+            result.services[1],
+            SvcInMaintenance {
+                fmri: "svc:/system/omicron/baseline:default".to_string(),
+                zone: "".to_string(),
+            }
+        );
+
+        assert_eq!(
+            result.errors[0],
+            "Unexpected output line: maintenance    svc:/system/omicron/baseline:default",
+        );
+        assert_eq!(
+            result.errors[1],
+            "Found a service with an unknown state: Barnacles!     svc:/milestone/sysconfig:default                   global"
+        );
     }
 }
