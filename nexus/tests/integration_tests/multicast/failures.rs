@@ -182,7 +182,7 @@ async fn test_multicast_reconciler_state_consistency_validation(
     });
     ops::join_all(create_futures).await;
 
-    // Stop DPD before attaching members to test failure recovery
+    // Stop DPD before attaching members to test state consistency during failure
     // Groups will be implicitly created but stay in "Creating" state
     cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
 
@@ -229,23 +229,27 @@ async fn test_multicast_reconciler_state_consistency_validation(
         );
     }
 
+    // Verify groups are still stuck in expected states before restarting DPD
+    // This explicitly validates that without DPD, groups cannot transition
+    for group_name in group_names.iter() {
+        verify_group_deleted_or_in_states(client, group_name, &["Creating"])
+            .await;
+    }
+
+    // Restart DPD before cleanup so instances can stop properly
+    cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+
     let instance_name_refs: Vec<&str> =
         instance_names.iter().map(|s| s.as_str()).collect();
     cleanup_instances(cptestctx, client, project_name, &instance_name_refs)
         .await;
 
-    // With DPD down, groups cannot complete state transitions - they may be stuck
-    // in "Creating" (never reached "Active") or "Deleting" state.
+    // With DPD now restored, groups should be cleaned up via implicit deletion
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    // Verify groups are either deleted or stuck in "Creating"/"Deleting" state
+    // Verify groups are deleted (implicit deletion completes with DPD available)
     for group_name in group_names.iter() {
-        verify_group_deleted_or_in_states(
-            client,
-            group_name,
-            &["Creating", "Deleting"],
-        )
-        .await;
+        wait_for_group_deleted(client, group_name).await;
     }
 }
 
