@@ -8,46 +8,18 @@
 //! actual multicast pools, groups, and members, then running omdb commands
 //! and checking the output.
 
-use futures::future::join3;
-use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
-use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::InstanceMulticastGroupJoin;
-use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::process::Command;
 
-use super::{
-    ControlPlaneTestContext, create_multicast_ip_pool,
-    create_multicast_ip_pool_with_range, instance_for_multicast_groups,
-    mcast_group_url, wait_for_group_active, wait_for_member_state,
-};
+use futures::future::join3;
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_project,
 };
+use nexus_test_utils_macros::nexus_test;
 
-/// Helper for PUT that returns 201 Created
-async fn put_created<InputType, OutputType>(
-    client: &dropshot::test_util::ClientTestContext,
-    path: &str,
-    input: &InputType,
-) -> OutputType
-where
-    InputType: serde::Serialize,
-    OutputType: serde::de::DeserializeOwned,
-{
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::PUT, path)
-            .body(Some(input))
-            .expect_status(Some(http::StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap_or_else(|e| panic!("failed to make PUT request to {path}: {e}"))
-    .parsed_body()
-    .unwrap()
-}
+use super::*;
 
 const PROJECT_NAME: &str = "omdb-test-project";
 const TARGET_DIR: &str = "target";
@@ -108,15 +80,22 @@ async fn test_omdb_multicast_pools(cptestctx: &ControlPlaneTestContext) {
     // Create a multicast pool
     create_multicast_ip_pool(client, "test-mcast-pool").await;
 
-    // Now should show the pool
+    // Now should show the pool with all columns
     let output = run_omdb(&db_url, &["db", "multicast", "pools"]);
+    // pool name
     assert!(
         output.contains("test-mcast-pool"),
         "Expected pool name in output, got: {output}"
     );
+    // first address
     assert!(
         output.contains("224.2.0.0"),
-        "Expected pool range start in output, got: {output}"
+        "Expected first address in output, got: {output}"
+    );
+    // last address
+    assert!(
+        output.contains("224.2.255.255"),
+        "Expected last address in output, got: {output}"
     );
 }
 
@@ -153,7 +132,7 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
         instance.identity.id
     );
 
-    put_created::<_, MulticastGroupMember>(
+    put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url,
         &InstanceMulticastGroupJoin {
@@ -177,15 +156,40 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
 
     // Test: omdb db multicast groups
     let output = run_omdb(&db_url, &["db", "multicast", "groups"]);
+    // group id
+    assert!(
+        output.contains(&group.identity.id.to_string()),
+        "Expected group id in output, got: {output}"
+    );
+    // group name
     assert!(
         output.contains("test-mcast-group"),
-        "Expected group name in groups output, got: {output}"
+        "Expected group name in output, got: {output}"
     );
-
-    // Verify ASM is shown in RANGE column (224.x.x.x = ASM range)
+    // state
+    assert!(
+        output.contains("Active"),
+        "Expected state 'Active' in output, got: {output}"
+    );
+    // multicast ip
+    assert!(
+        output.contains(&group.multicast_ip.to_string()),
+        "Expected multicast ip in output, got: {output}"
+    );
+    // range (ASM for 224.x.x.x)
     assert!(
         output.contains("ASM"),
-        "Expected ASM in range column, got: {output}"
+        "Expected range 'ASM' in output, got: {output}"
+    );
+    // vni (column exists but VNI is internal, not exposed in the external API)
+    assert!(
+        output.contains("VNI"),
+        "Expected VNI column in output, got: {output}"
+    );
+    // members (instance@sled format, "-" when not started)
+    assert!(
+        output.contains("test-instance@-"),
+        "Expected member 'test-instance@-' in output, got: {output}"
     );
 
     // Test: omdb db multicast groups --state active
@@ -208,16 +212,26 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
 
     // Test: omdb db multicast members
     let output = run_omdb(&db_url, &["db", "multicast", "members"]);
+    // group name
+    assert!(
+        output.contains("test-mcast-group"),
+        "Expected group name in members output, got: {output}"
+    );
+    // parent id (instance id)
     assert!(
         output.contains(&instance.identity.id.to_string()),
-        "Expected instance ID in members output, got: {output}"
+        "Expected parent id in members output, got: {output}"
     );
-
-    // Verify the IP column shows the group's allocated IP
+    // multicast ip
     let group_ip = group.multicast_ip.to_string();
     assert!(
         output.contains(&group_ip),
-        "Expected multicast IP {group_ip} in members output, got: {output}"
+        "Expected multicast ip in members output, got: {output}"
+    );
+    // sources ("-" for ASM)
+    assert!(
+        output.contains("-"),
+        "Expected sources '-' for ASM in members output, got: {output}"
     );
 
     // Test: omdb db multicast members --group-name
@@ -284,7 +298,7 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
         "/v1/instances/{}/multicast-groups/sled-test-group?project={PROJECT_NAME}",
         started_instance.identity.id
     );
-    put_created::<_, MulticastGroupMember>(
+    put_upsert::<_, MulticastGroupMember>(
         client,
         &sled_join_url,
         &InstanceMulticastGroupJoin { source_ips: None },
@@ -320,6 +334,54 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
     assert!(
         output_joined.contains(&started_instance.identity.id.to_string()),
         "Expected started instance in joined state, got: {output_joined}"
+    );
+    // state column shows "Joined"
+    assert!(
+        output_joined.contains("Joined"),
+        "Expected 'Joined' state in members output, got: {output_joined}"
+    );
+    // sled_id column shows the sled UUID
+    assert!(
+        output_joined.contains(&sled_id),
+        "Expected sled_id in members output, got: {output_joined}"
+    );
+
+    // Verify info for started instance shows sled serial (not "-")
+    let output_info = run_omdb(
+        &db_url,
+        &["db", "multicast", "info", "--name", "sled-test-group"],
+    );
+    // member instance name
+    assert!(
+        output_info.contains("started-instance"),
+        "Expected 'started-instance' in info members, got: {output_info}"
+    );
+    // underlay group should be present for active group
+    assert!(
+        output_info.contains("UNDERLAY GROUP"),
+        "Expected 'UNDERLAY GROUP' section in info output, got: {output_info}"
+    );
+
+    // Verify groups output shows started instance with sled serial (not "-")
+    let output_groups = run_omdb(&db_url, &["db", "multicast", "groups"]);
+    // sled-test-group should show "started-instance@<serial>" not "started-instance@-"
+    assert!(
+        output_groups.contains("started-instance@"),
+        "Expected 'started-instance@' in groups members column, got: {output_groups}"
+    );
+    // The sled serial should appear (not just "-")
+    // Note: test sled serial is typically "serial0" or similar
+    assert!(
+        !output_groups.contains("started-instance@-"),
+        "Started instance should have sled serial, not '-', got: {output_groups}"
+    );
+
+    // Verify underlay_ip column shows an IP for active groups
+    // Active groups with joined members should have an underlay group assigned
+    // The underlay IP is in the ff04::/64 range (admin-scoped IPv6 multicast)
+    assert!(
+        output_groups.contains("ff04:"),
+        "Expected underlay_ip (ff04:*) for active group in groups output, got: {output_groups}"
     );
 
     // Verify started instance is not in "Left" state
@@ -374,21 +436,56 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
         &db_url,
         &["db", "multicast", "info", "--name", "test-mcast-group"],
     );
+    // section header
     assert!(
         output.contains("MULTICAST GROUP"),
-        "Expected group header in info output, got: {output}"
+        "Expected 'MULTICAST GROUP' header in info output, got: {output}"
     );
+    // id
+    assert!(
+        output.contains(&group.identity.id.to_string()),
+        "Expected group id in info output, got: {output}"
+    );
+    // name
     assert!(
         output.contains("test-mcast-group"),
         "Expected group name in info output, got: {output}"
     );
+    // state
+    assert!(
+        output.contains("Active"),
+        "Expected state 'Active' in info output, got: {output}"
+    );
+    // multicast ip
+    assert!(
+        output.contains(&group.multicast_ip.to_string()),
+        "Expected multicast ip in info output, got: {output}"
+    );
+    // vni (field exists but VNI is internal, not exposed in the external API)
+    assert!(
+        output.contains("vni:"),
+        "Expected vni field in info output, got: {output}"
+    );
+    // ip pool
     assert!(
         output.contains("test-mcast-pool"),
         "Expected pool name in info output, got: {output}"
     );
+    // members section
     assert!(
         output.contains("MEMBERS"),
-        "Expected members section in info output, got: {output}"
+        "Expected 'MEMBERS' section in info output, got: {output}"
+    );
+    // member instance name
+    assert!(
+        output.contains("test-instance"),
+        "Expected instance name in info members, got: {output}"
+    );
+    // member sled ("-" when not started)
+    // Note: info shows sled serial, not sled_id UUID
+    assert!(
+        output.contains("-"),
+        "Expected sled '-' for non-started instance in info members, got: {output}"
     );
 
     // Test: omdb db multicast info --ip
@@ -432,7 +529,7 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
         "/v1/instances/{}/multicast-groups/ssm-group?project={PROJECT_NAME}",
         ssm_instance.identity.id
     );
-    put_created::<_, MulticastGroupMember>(
+    put_upsert::<_, MulticastGroupMember>(
         client,
         &ssm_join_url,
         &InstanceMulticastGroupJoin {
