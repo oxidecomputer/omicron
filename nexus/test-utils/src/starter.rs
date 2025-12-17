@@ -444,9 +444,14 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_mgd(&mut self, switch_location: SwitchLocation) {
         let log = &self.logctx.log;
         debug!(log, "Starting mgd for {switch_location}");
+        let mgs = self.gateway.get(&switch_location).unwrap();
+        let mgs_addr =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
         // Set up an instance of mgd
-        let mgd = dev::maghemite::MgdInstance::start(0).await.unwrap();
+        let mgd = dev::maghemite::MgdInstance::start(0, Some(mgs_addr))
+            .await
+            .unwrap();
         let port = mgd.port;
         self.mgd.insert(switch_location, mgd);
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);

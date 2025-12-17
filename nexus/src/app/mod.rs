@@ -31,7 +31,6 @@ use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::fm;
-use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
@@ -1123,25 +1122,11 @@ impl Nexus {
         lldpd_clients(resolver, rack_id, &self.log).await
     }
 
-    pub(crate) async fn mg_clients(
+    pub(crate) async fn mgd_clients(
         &self,
     ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
         let resolver = self.resolver();
-        let mappings =
-            switch_zone_address_mappings(resolver, &self.log).await?;
-        let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> =
-            vec![];
-        for (location, addr) in &mappings {
-            let port = MGD_PORT;
-            let socketaddr =
-                std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
-            let client = mg_admin_client::Client::new(
-                format!("http://{}", socketaddr).as_str(),
-                self.log.clone(),
-            );
-            clients.push((*location, client));
-        }
-        Ok(clients.into_iter().collect::<HashMap<_, _>>())
+        mgd_clients(resolver, &self.log).await
     }
 
     pub(crate) fn demo_sagas(
@@ -1259,6 +1244,74 @@ pub(crate) async fn dpd_clients(
             1 => SwitchLocation::Switch1,
             _ => {
                 warn!(log, "unexpected value for switch slot: {switch_slot}");
+                continue;
+            }
+        };
+
+        mappings.insert(location, client);
+    }
+
+    Ok(mappings)
+}
+
+/// Returns a mapping of clients for the Maghemite daemons of reachable switch zones.
+/// If we are unable to communicate with the switch zone and determine the mapping
+/// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
+pub(crate) async fn mgd_clients(
+    resolver: &internal_dns_resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
+    let mgd_socketaddrs = match resolver
+        .lookup_all_socket_v6(ServiceName::Mgd)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!(log, "failed to resolve addresses for Maghemite services"; "error" => %e);
+            return Err(e.to_string());
+        }
+    };
+
+    let clients: Vec<(SocketAddrV6, mg_admin_client::Client)> = mgd_socketaddrs
+        .iter()
+        .map(|socket_addr| {
+            let client = mg_admin_client::Client::new(
+                &format!("http://{socket_addr}"),
+                log.new(o!(
+                    "component" => "MgdClient"
+                )),
+            );
+
+            (*socket_addr, client)
+        })
+        .collect();
+
+    let mut mappings: HashMap<SwitchLocation, mg_admin_client::Client> =
+        HashMap::new();
+
+    for (addr, client) in clients {
+        let switch_slot = match client.switch_identifiers().await {
+            Ok(response) => response.slot,
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to determine switch slot for maghemite";
+                    "error" => %e,
+                    "addr" => %addr,
+                );
+                continue;
+            }
+        };
+
+        let location = match switch_slot {
+            Some(0) => SwitchLocation::Switch0,
+            Some(1) => SwitchLocation::Switch1,
+            Some(v) => {
+                warn!(log, "unexpected value for switch slot: {v}");
+                continue;
+            }
+            None => {
+                warn!(log, "maghemite has not learned switch slot from MGS");
                 continue;
             }
         };

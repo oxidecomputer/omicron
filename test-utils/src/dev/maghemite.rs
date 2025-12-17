@@ -4,6 +4,7 @@
 
 //! Tools for managing Maghemite during development
 
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -35,10 +36,13 @@ pub struct MgdInstance {
 }
 
 impl MgdInstance {
-    pub async fn start(mut port: u16) -> Result<Self, anyhow::Error> {
+    pub async fn start(
+        mut port: u16,
+        mgs_address: Option<SocketAddr>,
+    ) -> Result<Self, anyhow::Error> {
         let temp_dir = TempDir::new()?;
 
-        let args = vec![
+        let mut args = vec![
             "run".to_string(),
             "--admin-addr".into(),
             "::1".into(),
@@ -52,6 +56,11 @@ impl MgdInstance {
             "--sled-uuid".into(),
             uuid::Uuid::new_v4().to_string(),
         ];
+
+        if let Some(socket_addr) = mgs_address {
+            args.push("--mgs-addr".to_string());
+            args.push(socket_addr.to_string());
+        }
 
         let child = tokio::process::Command::new("mgd")
             .args(&args)
