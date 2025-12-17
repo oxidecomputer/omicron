@@ -11,6 +11,7 @@ use crate::blueprint_editor::ExternalNetworkingError;
 use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
+use crate::measurements::PendingMeasurements;
 use crate::mgs_updates::PendingHostPhase2Changes;
 use crate::planner::NoopConvertInfo;
 use crate::planner::NoopConvertSledIneligibleReason;
@@ -28,6 +29,8 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintMeasurementSetDesiredContents;
+use nexus_types::deployment::BlueprintMeasurementsDesiredContents;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSource;
@@ -362,6 +365,9 @@ pub(crate) enum Operation {
         slot_a_updated: bool,
         slot_b_updated: bool,
     },
+    SledNoopMeasurementsUpdated {
+        sled_id: SledUuid,
+    },
 }
 
 impl fmt::Display for Operation {
@@ -466,6 +472,13 @@ impl fmt::Display for Operation {
                     f,
                     "updated nexus generation from \
                      {current_generation} to {new_generation}"
+                )
+            }
+            Self::SledNoopMeasurementsUpdated { sled_id } => {
+                write!(
+                    f,
+                    "sled {sled_id}: performed all noop \
+                     measurements updates"
                 )
             }
         }
@@ -790,6 +803,18 @@ impl<'a> BlueprintBuilder<'a> {
             ))
         })?;
         Ok(editor.host_phase_2())
+    }
+
+    pub fn current_sled_measurements(
+        &self,
+        sled_id: SledUuid,
+    ) -> Result<BlueprintMeasurementsDesiredContents, Error> {
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to get host phase 2 for unknown sled {sled_id}"
+            ))
+        })?;
+        Ok(editor.measurements())
     }
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
@@ -1981,6 +2006,16 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
+    pub(crate) fn apply_pending_measurement_updates(
+        &mut self,
+        changes: PendingMeasurements,
+    ) -> Result<(), Error> {
+        for (sled_id, measurement) in changes.into_iter() {
+            self.sled_merge_new_measurements(sled_id, measurement)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn apply_pending_host_phase_2_changes(
         &mut self,
         changes: PendingHostPhase2Changes,
@@ -2003,6 +2038,36 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
         editor
             .set_host_phase_2(host_phase_2)
+            .map_err(|err| Error::SledEditError { sled_id, err })
+    }
+
+    pub fn sled_merge_new_measurements(
+        &mut self,
+        sled_id: SledUuid,
+        measurements: BlueprintMeasurementSetDesiredContents,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to change measurements on unknown sled {sled_id}"
+            ))
+        })?;
+        editor
+            .merge_new_measurements(measurements)
+            .map_err(|err| Error::SledEditError { sled_id, err })
+    }
+
+    pub fn sled_replace_measurements(
+        &mut self,
+        sled_id: SledUuid,
+        measurements: BlueprintMeasurementsDesiredContents,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to change measurements on unknown sled {sled_id}"
+            ))
+        })?;
+        editor
+            .replace_measurements(measurements)
             .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
@@ -2238,6 +2303,8 @@ pub(crate) enum EnsureMupdateOverrideAction {
         prev_mgs_update: Option<Box<PendingMgsUpdate>>,
         /// The previous host phase 2 contents.
         prev_host_phase_2: BlueprintHostPhase2DesiredSlots,
+        /// The previous measurements
+        prev_measurements: BlueprintMeasurementsDesiredContents,
     },
     /// The inventory did not have an override but the blueprint did, and other
     /// conditions were met, so the blueprint's override was cleared.
@@ -2269,6 +2336,8 @@ pub(crate) enum EnsureMupdateOverrideAction {
         prev_mgs_update: Option<Box<PendingMgsUpdate>>,
         /// The previous host phase 2 contents.
         prev_host_phase_2: BlueprintHostPhase2DesiredSlots,
+        /// The previous measurement contents.
+        prev_measurements: BlueprintMeasurementsDesiredContents,
     },
 }
 
@@ -2290,11 +2359,12 @@ impl EnsureMupdateOverrideAction {
                 zones,
                 prev_mgs_update,
                 prev_host_phase_2,
+                prev_measurements,
             } => {
                 let zones_desc = zones_desc(zones);
                 let host_phase_2_desc =
                     host_phase_2_to_current_contents_desc(prev_host_phase_2);
-
+                let measurements_desc = measurements_desc(prev_measurements);
                 info!(
                     log,
                     "blueprint mupdate override updated to match inventory";
@@ -2302,6 +2372,7 @@ impl EnsureMupdateOverrideAction {
                     "prev_bp_override" => ?prev_bp_override,
                     "zones" => zones_desc,
                     "host_phase_2" => host_phase_2_desc,
+                    "measurements" => measurements_desc,
                 );
                 if let Some(prev_mgs_update) = prev_mgs_update {
                     info!(
@@ -2345,9 +2416,11 @@ impl EnsureMupdateOverrideAction {
                 bp_override,
                 prev_mgs_update,
                 prev_host_phase_2,
+                prev_measurements,
             } => {
                 let host_phase_2_desc =
                     host_phase_2_to_current_contents_desc(prev_host_phase_2);
+                let measurements_desc = measurements_desc(prev_measurements);
                 error!(
                     log,
                     "error getting mupdate override info for sled, \
@@ -2356,6 +2429,7 @@ impl EnsureMupdateOverrideAction {
                     "message" => %message,
                     "bp_override" => ?bp_override,
                     "prev_host_phase_2" => %host_phase_2_desc,
+                    "prev_measurements" => %measurements_desc,
                 );
                 if let Some(prev_mgs_update) = prev_mgs_update {
                     info!(
@@ -2375,6 +2449,22 @@ impl EnsureMupdateOverrideAction {
             }
         }
     }
+}
+
+/// Return a description of the measurement set
+fn measurements_desc(
+    measurements: &BlueprintMeasurementsDesiredContents,
+) -> String {
+    let mut measurements_desc = String::new();
+    if measurements.measurements.is_empty() {
+        measurements_desc.push_str("(none)");
+    } else {
+        measurements_desc.push('\n');
+        for m in &measurements.measurements {
+            swriteln!(measurements_desc, "  - {}", m);
+        }
+    }
+    measurements_desc
 }
 
 fn zones_desc(zones: &IdOrdMap<EnsureMupdateOverrideUpdatedZone>) -> String {
@@ -2531,7 +2621,10 @@ pub mod test {
 
     /// Checks various conditions that should be true for all blueprints
     #[track_caller]
-    fn verify_blueprint(blueprint: &Blueprint, planning_input: &PlanningInput) {
+    pub(crate) fn verify_blueprint(
+        blueprint: &Blueprint,
+        planning_input: &PlanningInput,
+    ) {
         let blippy_report = Blippy::new(blueprint, planning_input)
             .into_report(BlippyReportSortKey::Kind);
         if !blippy_report.notes().is_empty() {

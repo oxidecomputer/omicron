@@ -171,22 +171,27 @@ WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 0, num_eligible: 6, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement may be eligible for noop image source conversion, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, set: current, new_image_source: artifact: version 1.0.0
 INFO performed noop zone image source checks on sled, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, num_total: 6, num_already_artifact: 0, num_eligible: 5, num_ineligible: 1
 WARN zone manifest inventory indicated install dataset artifact is invalid, not using artifact (this is abnormal), sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, zone_id: e8fe709c-725f-4bb2-b714-ffcda13a9e54, kind: internal_ntp, file_name: ntp.tar.gz, message: reconfigurator-sim: simulated error validating zone image
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement may be eligible for noop image source conversion, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, set: current, new_image_source: artifact: version 1.0.0
 INFO performed noop zone image source checks on sled, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, num_total: 2, num_already_artifact: 0, num_eligible: 0, num_ineligible: 2
 INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: b910534b-2a53-4335-a3d9-5311d2f3186a, kind: internal_ntp, file_name: ntp.tar.gz, expected_hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095
 INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4, kind: crucible, file_name: crucible.tar.gz, expected_hash: 866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, set: current, expected_hash: a1a34c0ca4776c27d67a2a50b231acc96ccbc2645f5e8dd8c2bc27f0eab49855
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (ffffffff-ffff-ffff-ffff-ffffffffffff)
 INFO skipped noop image source check on sled, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, reason: sled not found in inventory
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 blueprint source: planner with report:
 planning report:
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+* noop converting current measurements to Artifact on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting 5/6 install-dataset zones to artifact store on sled aff6c093-197d-42c5-ad80-9f10ba051a34
+* noop converting current measurements to Artifact on sled aff6c093-197d-42c5-ad80-9f10ba051a34
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -211,6 +216,13 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
+
+    measurements:
+    ----------------------------------------------------------------------------------------
+    hash                                                               version         prune
+    ----------------------------------------------------------------------------------------
++   8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0   false
+
 
     host phase 2 contents:
     ------------------------
@@ -310,6 +322,13 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
   sled aff6c093-197d-42c5-ad80-9f10ba051a34 (active, config generation 2 -> 3):
+
+    measurements:
+    ----------------------------------------------------------------------------------------
+    hash                                                               version         prune
+    ----------------------------------------------------------------------------------------
++   8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0   false
+
 
     host phase 2 contents:
     ------------------------
@@ -421,23 +440,28 @@ WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, set: current
 INFO performed noop zone image source checks on sled, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, num_total: 6, num_already_artifact: 5, num_eligible: 0, num_ineligible: 1
 WARN zone manifest inventory indicated install dataset artifact is invalid, not using artifact (this is abnormal), sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, zone_id: e8fe709c-725f-4bb2-b714-ffcda13a9e54, kind: internal_ntp, file_name: ntp.tar.gz, message: reconfigurator-sim: simulated error validating zone image
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, set: current
 INFO performed noop zone image source checks on sled, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, num_total: 2, num_already_artifact: 0, num_eligible: 0, num_ineligible: 2
 INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: b910534b-2a53-4335-a3d9-5311d2f3186a, kind: internal_ntp, file_name: ntp.tar.gz, expected_hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095
 INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4, kind: crucible, file_name: crucible.tar.gz, expected_hash: 866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, set: current, expected_hash: a1a34c0ca4776c27d67a2a50b231acc96ccbc2645f5e8dd8c2bc27f0eab49855
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (ffffffff-ffff-ffff-ffff-ffffffffffff)
 INFO performed noop zone image source checks on sled, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, num_total: 2, num_already_artifact: 0, num_eligible: 2, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement may be eligible for noop image source conversion, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, set: current, new_image_source: artifact: version 1.0.0
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 blueprint source: planner with report:
 planning report:
 * noop converting 2/2 install-dataset zones to artifact store on sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e
+* noop converting current measurements to Artifact on sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -461,6 +485,13 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
  MODIFIED SLEDS:
 
   sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e (active, config generation 2 -> 3):
+
+    measurements:
+    ----------------------------------------------------------------------------------------
+    hash                                                               version         prune
+    ----------------------------------------------------------------------------------------
++   8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0   false
+
 
     host phase 2 contents:
     ------------------------

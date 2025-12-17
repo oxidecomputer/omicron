@@ -81,7 +81,7 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
 , host_phase_2: 
   - host phase 2 slot A: current contents (unchanged)
   - host phase 2 slot B: current contents (unchanged)
-
+, measurements: (none)
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 1, new_generation: 2
 INFO skipping noop image source check for all sleds, reason: no target release is currently set

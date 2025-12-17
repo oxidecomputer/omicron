@@ -44,9 +44,22 @@ impl SimTufRepoDescription {
     }
 
     /// Generates a simulated [`ManifestBootInventory`] or an error.
-    pub fn to_boot_inventory(&self) -> Result<ManifestBootInventory, String> {
+    pub fn to_zone_boot_inventory(
+        &self,
+    ) -> Result<ManifestBootInventory, String> {
         match &self.source {
-            Ok(source) => Ok(source.to_boot_inventory()),
+            Ok(source) => Ok(source.to_zone_boot_inventory()),
+            Err(error) => {
+                Err(format!("reconfigurator-sim simulated error: {error}"))
+            }
+        }
+    }
+
+    pub fn to_measurement_boot_inventory(
+        &self,
+    ) -> Result<ManifestBootInventory, String> {
+        match &self.source {
+            Ok(source) => Ok(source.to_measurement_boot_inventory()),
             Err(error) => {
                 Err(format!("reconfigurator-sim simulated error: {error}"))
             }
@@ -59,7 +72,8 @@ impl SimTufRepoDescription {
 #[derive(Clone, Debug)]
 pub struct SimTufRepoSource {
     description: TufRepoDescription,
-    manifest_source: OmicronInstallManifestSource,
+    zone_manifest_source: OmicronInstallManifestSource,
+    measurement_manifest_source: OmicronInstallManifestSource,
     message: String,
     known_artifact_id_names: BTreeSet<String>,
     error_artifact_id_names: BTreeSet<String>,
@@ -71,7 +85,8 @@ impl SimTufRepoSource {
     /// The message should be of the form "from repo at ..." or "to target release".
     pub fn new(
         description: TufRepoDescription,
-        manifest_source: OmicronInstallManifestSource,
+        zone_manifest_source: OmicronInstallManifestSource,
+        measurement_manifest_source: OmicronInstallManifestSource,
         message: String,
     ) -> anyhow::Result<Self> {
         let mut unknown = BTreeSet::new();
@@ -106,7 +121,8 @@ impl SimTufRepoSource {
         }
         Ok(Self {
             description,
-            manifest_source,
+            zone_manifest_source,
+            measurement_manifest_source,
             message,
             known_artifact_id_names: known,
             error_artifact_id_names: BTreeSet::new(),
@@ -142,7 +158,40 @@ impl SimTufRepoSource {
     }
 
     /// Generates a simulated [`ManifestBootInventory`].
-    pub fn to_boot_inventory(&self) -> ManifestBootInventory {
+    pub fn to_measurement_boot_inventory(&self) -> ManifestBootInventory {
+        let artifacts = self
+            .description
+            .artifacts
+            .iter()
+            .filter_map(|artifact| {
+                if artifact.id.kind.to_known()
+                    != Some(KnownArtifactKind::MeasurementCorpus)
+                {
+                    return None;
+                }
+
+                let file_name = format!("{}", artifact.id.name);
+                let path =
+                    Utf8Path::new("/fake/path/install").join(&artifact.id.name);
+                let status = Ok(());
+                Some(ZoneArtifactInventory {
+                    file_name,
+                    path,
+                    expected_size: artifact.size,
+                    expected_hash: artifact.hash,
+                    status,
+                })
+            })
+            .collect();
+
+        ManifestBootInventory {
+            source: self.measurement_manifest_source,
+            artifacts,
+        }
+    }
+
+    /// Generates a simulated [`ManifestBootInventory`].
+    pub fn to_zone_boot_inventory(&self) -> ManifestBootInventory {
         let artifacts = self
             .description
             .artifacts
@@ -178,7 +227,8 @@ impl SimTufRepoSource {
                 })
             })
             .collect();
-        ManifestBootInventory { source: self.manifest_source, artifacts }
+
+        ManifestBootInventory { source: self.zone_manifest_source, artifacts }
     }
 
     /// Returns a message including the system version and the number of zone

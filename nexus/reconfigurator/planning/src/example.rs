@@ -29,6 +29,8 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintMeasurementsDesiredContents;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::ExpectedVersion;
@@ -722,6 +724,25 @@ impl ExampleSystemBuilder {
                                 },
                         },
                     )
+                    .expect("sled is present in blueprint");
+
+                let measurement_artifact = artifacts_by_kind
+                    .get(&ArtifactKind::MEASUREMENT_CORPUS)
+                    .unwrap();
+
+                let mut measurement_contents =
+                    BlueprintMeasurementsDesiredContents::default_contents();
+                measurement_contents.append_measurement(
+                    BlueprintSingleMeasurement {
+                        version: BlueprintArtifactVersion::Available {
+                            version: measurement_artifact.id.version.clone(),
+                        },
+                        hash: measurement_artifact.hash,
+                        prune: false,
+                    },
+                );
+                builder
+                    .sled_replace_measurements(sled_id, measurement_contents)
                     .expect("sled is present in blueprint");
             };
         }

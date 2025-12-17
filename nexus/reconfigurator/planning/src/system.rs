@@ -682,6 +682,17 @@ impl SystemDescription {
         Ok(self)
     }
 
+    /// Set the measurement manifest for a sled from a provided `TufRepoDescription`.
+    pub fn sled_set_measurement_manifest(
+        &mut self,
+        sled_id: SledUuid,
+        boot_inventory: Result<ManifestBootInventory, String>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.set_measurement_manifest(boot_inventory);
+        Ok(self)
+    }
+
     pub fn sled_sp_active_version(
         &self,
         sled_id: SledUuid,
@@ -1471,7 +1482,6 @@ impl Sled {
                         sled_config,
                     ),
                 ),
-                // XXX: return something more reasonable here?
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
             }
         };
@@ -1746,6 +1756,16 @@ impl Sled {
         self.inventory_sled_agent
             .zone_image_resolver
             .zone_manifest
+            .boot_inventory = boot_inventory;
+    }
+
+    fn set_measurement_manifest(
+        &mut self,
+        boot_inventory: Result<ManifestBootInventory, String>,
+    ) {
+        self.inventory_sled_agent
+            .zone_image_resolver
+            .measurement_manifest
             .boot_inventory = boot_inventory;
     }
 

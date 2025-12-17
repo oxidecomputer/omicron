@@ -7004,6 +7004,9 @@
           "host_phase_2_slot_b_eligible": {
             "type": "boolean"
           },
+          "measurement_eligible": {
+            "type": "boolean"
+          },
           "num_dataset": {
             "type": "integer",
             "format": "uint",
@@ -7018,12 +7021,45 @@
         "required": [
           "host_phase_2_slot_a_eligible",
           "host_phase_2_slot_b_eligible",
+          "measurement_eligible",
           "num_dataset",
           "num_eligible"
         ]
       },
       "PlanningNoopImageSourceSkipSledHostPhase2Reason": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PlanningNoopImageSourceSkipSledMeasurementsReason": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "both_slots_already_artifact"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -7191,6 +7227,12 @@
               "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledHostPhase2Reason"
             }
           },
+          "skipped_sled_measurements": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledMeasurementsReason"
+            }
+          },
           "skipped_sled_zones": {
             "type": "object",
             "additionalProperties": {
@@ -7210,6 +7252,13 @@
             },
             "uniqueItems": true
           },
+          "sled_measurements_already_artifact": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledUuid"
+            },
+            "uniqueItems": true
+          },
           "sled_zones_all_already_artifact": {
             "type": "array",
             "items": {
@@ -7222,9 +7271,11 @@
           "converted",
           "no_target_release",
           "skipped_sled_host_phase_2",
+          "skipped_sled_measurements",
           "skipped_sled_zones",
           "skipped_zones",
           "sled_host_phase_2_both_already_artifact",
+          "sled_measurements_already_artifact",
           "sled_zones_all_already_artifact"
         ]
       },

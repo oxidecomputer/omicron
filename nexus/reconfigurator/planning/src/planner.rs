@@ -17,11 +17,13 @@ use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::ExternalNetworkingAllocator;
 use crate::blueprint_editor::SledEditError;
+use crate::measurements::plan_measurement_updates;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::MgsUpdatePlanner;
 use crate::mgs_updates::PlannedMgsUpdates;
 use crate::mgs_updates::UpdateableBoard;
 use crate::planner::image_source::NoopConvertHostPhase2Contents;
+use crate::planner::image_source::NoopConvertMeasurementContents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use iddqd::IdOrdMap;
@@ -47,10 +49,11 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::{
     NexusGenerationBumpWaitingOn, PlanningAddStepReport,
     PlanningCockroachdbSettingsStepReport, PlanningDecommissionStepReport,
-    PlanningExpungeStepReport, PlanningMgsUpdatesStepReport,
-    PlanningNexusGenerationBumpReport, PlanningNoopImageSourceStepReport,
-    PlanningReport, PlanningZoneUpdatesStepReport, ZoneAddWaitingOn,
-    ZoneUpdatesWaitingOn, ZoneWaitingToExpunge,
+    PlanningExpungeStepReport, PlanningMeasurementUpdatesStepReport,
+    PlanningMgsUpdatesStepReport, PlanningNexusGenerationBumpReport,
+    PlanningNoopImageSourceStepReport, PlanningReport,
+    PlanningZoneUpdatesStepReport, ZoneAddWaitingOn, ZoneUpdatesWaitingOn,
+    ZoneWaitingToExpunge,
 };
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
@@ -270,6 +273,14 @@ impl<'a> Planner<'a> {
         } else {
             PlanningMgsUpdatesStepReport::new()
         };
+
+        // Once we've updated MGS we need to update the measurement set
+        // XXX lolol soo many caes here I don't think this is complete
+        if !mgs_updates.is_empty() || !add_update_blocked_reasons.is_empty() {
+            PlanningMeasurementUpdatesStepReport::new();
+        } else {
+            self.do_plan_measurements()?;
+        }
 
         // Likewise for zone additions, unless overridden by the config, or
         // unless a target release has never been set (i.e. we're effectively in
@@ -689,6 +700,36 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
+    fn do_plan_measurements(
+        &mut self,
+        // report: &mut PlanningMeasurementsStepReport,
+    ) -> Result<PlanningMeasurementUpdatesStepReport, Error> {
+        // The measurements are a property of the sled agent which
+        // we look up via sled_id
+        let included_sled_ids: BTreeSet<_> = self
+            .input
+            .all_sleds(SledFilter::InService)
+            .map(|(s, _)| s)
+            .collect();
+
+        let current_artifacts = self.input.tuf_repo().description();
+
+        // XXX check against current set??
+        // XXX impossible updates
+
+        let measurement_updates = plan_measurement_updates(
+            &self.log,
+            &included_sled_ids,
+            &current_artifacts,
+        );
+        self.blueprint
+            .apply_pending_measurement_updates(measurement_updates)?;
+
+        // XXX useful data
+        //repot.dummy = 0xf;
+        Ok(PlanningMeasurementUpdatesStepReport::new())
+    }
+
     fn do_plan_noop_image_source(
         &mut self,
         noop_info: NoopConvertInfo,
@@ -722,7 +763,15 @@ impl<'a> Planner<'a> {
                     false
                 };
 
-            if skipped_zones && skipped_host_phase_2 {
+            let skipped_measurements =
+                if eligible.measurements.both_already_artifact() {
+                    report.sled_measurements_already_artifact(sled.sled_id);
+                    true
+                } else {
+                    false
+                };
+
+            if skipped_zones && skipped_host_phase_2 && skipped_measurements {
                 // Nothing to do, continue to the next sled.
                 continue;
             }
@@ -730,13 +779,35 @@ impl<'a> Planner<'a> {
             if zone_counts.num_eligible > 0
                 || eligible.host_phase_2.slot_a.is_eligible()
                 || eligible.host_phase_2.slot_b.is_eligible()
+                || eligible.measurements.measurements.is_eligible()
             {
+                // XXX FIXME
                 report.converted(
                     sled.sled_id,
                     zone_counts.num_eligible,
                     zone_counts.num_install_dataset(),
                     eligible.host_phase_2.slot_a.is_eligible(),
                     eligible.host_phase_2.slot_b.is_eligible(),
+                    eligible.measurements.measurements.is_eligible(),
+                );
+            }
+
+            match &eligible.measurements.measurements {
+                NoopConvertMeasurementContents::Eligible(contents) => {
+                    self.blueprint.sled_replace_measurements(
+                        sled.sled_id,
+                        contents.into(),
+                    )?;
+                }
+                NoopConvertMeasurementContents::AlreadyArtifact { .. }
+                | NoopConvertMeasurementContents::Ineligible(_) => {}
+            }
+
+            if eligible.measurements.measurements.is_eligible() {
+                self.blueprint.record_operation(
+                    Operation::SledNoopMeasurementsUpdated {
+                        sled_id: sled.sled_id,
+                    },
                 );
             }
 
