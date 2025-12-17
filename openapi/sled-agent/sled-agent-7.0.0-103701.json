@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "11.0.0"
+    "version": "7.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -355,84 +355,6 @@
         }
       }
     },
-    "/local-storage/{zpool_id}/{dataset_id}": {
-      "post": {
-        "summary": "Create a local storage dataset",
-        "operationId": "local_storage_dataset_ensure",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/DatasetUuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "zpool_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ExternalZpoolUuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LocalStorageDatasetEnsureRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "summary": "Delete a local storage dataset",
-        "operationId": "local_storage_dataset_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/DatasetUuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "zpool_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ExternalZpoolUuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/network-bootstore-config": {
       "get": {
         "summary": "This API endpoint is only reading the local sled agent's view of the",
@@ -547,6 +469,29 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SledIdentifiers"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sled-role": {
+      "get": {
+        "operationId": "sled_role_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledRole"
                 }
               }
             }
@@ -2370,6 +2315,7 @@
         ]
       },
       "ArtifactConfig": {
+        "description": "Artifact configuration.\n\nThis type is used in both GET (response) and PUT (request) operations.",
         "type": "object",
         "properties": {
           "artifacts": {
@@ -2390,6 +2336,7 @@
         ]
       },
       "ArtifactCopyFromDepotBody": {
+        "description": "Request body for copying artifacts from a depot.",
         "type": "object",
         "properties": {
           "depot_base_url": {
@@ -2401,9 +2348,11 @@
         ]
       },
       "ArtifactCopyFromDepotResponse": {
+        "description": "Response for copying artifacts from a depot.",
         "type": "object"
       },
       "ArtifactListResponse": {
+        "description": "Response for listing artifacts.",
         "type": "object",
         "properties": {
           "generation": {
@@ -2424,6 +2373,7 @@
         ]
       },
       "ArtifactPutResponse": {
+        "description": "Response for putting an artifact.",
         "type": "object",
         "properties": {
           "datasets": {
@@ -3051,6 +3001,7 @@
         "additionalProperties": false
       },
       "BootstoreStatus": {
+        "description": "Status of the local bootstore node.",
         "type": "object",
         "properties": {
           "accepted_connections": {
@@ -4051,34 +4002,6 @@
         "type": "string",
         "format": "uuid"
       },
-      "DelegatedZvol": {
-        "description": "Delegate a ZFS volume to a zone",
-        "oneOf": [
-          {
-            "description": "Delegate a slice of the local storage dataset present on this pool into the zone.",
-            "type": "object",
-            "properties": {
-              "dataset_id": {
-                "$ref": "#/components/schemas/DatasetUuid"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "local_storage"
-                ]
-              },
-              "zpool_id": {
-                "$ref": "#/components/schemas/ExternalZpoolUuid"
-              }
-            },
-            "required": [
-              "dataset_id",
-              "type",
-              "zpool_id"
-            ]
-          }
-        ]
-      },
       "DhcpConfig": {
         "description": "DHCP configuration for a port\n\nNot present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we use `InstanceRuntimeState::hostname` for this value.",
         "type": "object",
@@ -4494,7 +4417,7 @@
         ]
       },
       "EarlyNetworkConfig": {
-        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`crate::rack_init::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
+        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from `RackInitializeRequest` necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
         "type": "object",
         "properties": {
           "body": {
@@ -4561,6 +4484,7 @@
         ]
       },
       "EstablishedConnection": {
+        "description": "An established connection to a bootstore peer.",
         "type": "object",
         "properties": {
           "addr": {
@@ -4612,80 +4536,6 @@
           "last_port"
         ]
       },
-      "ExternalIpConfig": {
-        "description": "A single- or dual-stack external IP configuration.",
-        "oneOf": [
-          {
-            "description": "Single-stack IPv4 external IP configuration.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "v4"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/ExternalIpv4Config"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "Single-stack IPv6 external IP configuration.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "v6"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/ExternalIpv6Config"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "Both IPv4 and IPv6 external IP configuration.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "dual_stack"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "v4": {
-                    "$ref": "#/components/schemas/ExternalIpv4Config"
-                  },
-                  "v6": {
-                    "$ref": "#/components/schemas/ExternalIpv6Config"
-                  }
-                },
-                "required": [
-                  "v4",
-                  "v6"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          }
-        ]
-      },
       "ExternalIpGatewayMap": {
         "description": "Per-NIC mappings from external IP addresses to the Internet Gateways which can choose them as a source.",
         "type": "object",
@@ -4708,79 +4558,6 @@
         "required": [
           "mappings"
         ]
-      },
-      "ExternalIpv4Config": {
-        "description": "External IP address configuration.\n\nThis encapsulates all the external addresses of a single IP version, including source NAT, Ephemeral, and Floating IPs. Note that not all of these need to be specified, but this type can only be constructed if _at least one_ of them is.",
-        "type": "object",
-        "properties": {
-          "ephemeral_ip": {
-            "nullable": true,
-            "description": "An Ephemeral address for in- and outbound connectivity.",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "floating_ips": {
-            "description": "Additional Floating IPs for in- and outbound connectivity.",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ipv4"
-            }
-          },
-          "source_nat": {
-            "nullable": true,
-            "description": "Source NAT configuration, for outbound-only connectivity.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SourceNatConfigV4"
-              }
-            ]
-          }
-        },
-        "required": [
-          "floating_ips"
-        ]
-      },
-      "ExternalIpv6Config": {
-        "description": "External IP address configuration.\n\nThis encapsulates all the external addresses of a single IP version, including source NAT, Ephemeral, and Floating IPs. Note that not all of these need to be specified, but this type can only be constructed if _at least one_ of them is.",
-        "type": "object",
-        "properties": {
-          "ephemeral_ip": {
-            "nullable": true,
-            "description": "An Ephemeral address for in- and outbound connectivity.",
-            "type": "string",
-            "format": "ipv6"
-          },
-          "floating_ips": {
-            "description": "Additional Floating IPs for in- and outbound connectivity.",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ipv6"
-            }
-          },
-          "source_nat": {
-            "nullable": true,
-            "description": "Source NAT configuration, for outbound-only connectivity.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SourceNatConfigV6"
-              }
-            ]
-          }
-        },
-        "required": [
-          "floating_ips"
-        ]
-      },
-      "ExternalZpoolUuid": {
-        "x-rust-type": {
-          "crate": "omicron-uuid-kinds",
-          "path": "omicron_uuid_kinds::ExternalZpoolUuid",
-          "version": "*"
-        },
-        "type": "string",
-        "format": "uuid"
       },
       "FileStorageBackend": {
         "description": "A storage backend backed by a file in the host system's file system.",
@@ -5260,7 +5037,7 @@
         ]
       },
       "InstanceMulticastMembership": {
-        "description": "Represents a multicast group membership for an instance.",
+        "description": "Represents a multicast group membership for an instance.\n\nIntroduced in v7.",
         "type": "object",
         "properties": {
           "group_ip": {
@@ -5281,30 +5058,29 @@
         ]
       },
       "InstanceSledLocalConfig": {
-        "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional.",
+        "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional.\n\nAdded in v7: `multicast_groups` field.",
         "type": "object",
         "properties": {
-          "delegated_zvols": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DelegatedZvol"
-            }
-          },
           "dhcp_config": {
             "$ref": "#/components/schemas/DhcpConfig"
           },
-          "external_ips": {
+          "ephemeral_ip": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ExternalIpConfig"
-              }
-            ]
+            "description": "Zero or more external IP addresses (either floating or ephemeral), provided to an instance to allow inbound connectivity.",
+            "type": "string",
+            "format": "ip"
           },
           "firewall_rules": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
+            }
+          },
+          "floating_ips": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
             }
           },
           "hostname": {
@@ -5321,15 +5097,19 @@
             "items": {
               "$ref": "#/components/schemas/NetworkInterface"
             }
+          },
+          "source_nat": {
+            "$ref": "#/components/schemas/SourceNatConfig"
           }
         },
         "required": [
-          "delegated_zvols",
           "dhcp_config",
           "firewall_rules",
+          "floating_ips",
           "hostname",
           "multicast_groups",
-          "nics"
+          "nics",
+          "source_nat"
         ]
       },
       "InstanceSpecV0": {
@@ -5766,32 +5546,6 @@
           "status"
         ]
       },
-      "LocalStorageDatasetEnsureRequest": {
-        "description": "Dataset and Volume details for a Local Storage dataset ensure request",
-        "type": "object",
-        "properties": {
-          "dataset_size": {
-            "description": "Size of the parent dataset",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          },
-          "volume_size": {
-            "description": "Size of the zvol",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          }
-        },
-        "required": [
-          "dataset_size",
-          "volume_size"
-        ]
-      },
       "M2Slot": {
         "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
         "type": "string",
@@ -6057,8 +5811,9 @@
             "type": "string",
             "format": "uuid"
           },
-          "ip_config": {
-            "$ref": "#/components/schemas/PrivateIpConfig"
+          "ip": {
+            "type": "string",
+            "format": "ip"
           },
           "kind": {
             "$ref": "#/components/schemas/NetworkInterfaceKind"
@@ -6077,18 +5832,29 @@
             "format": "uint8",
             "minimum": 0
           },
+          "subnet": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "transit_ips": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
           "vni": {
             "$ref": "#/components/schemas/Vni"
           }
         },
         "required": [
           "id",
-          "ip_config",
+          "ip",
           "kind",
           "mac",
           "name",
           "primary",
           "slot",
+          "subnet",
           "vni"
         ]
       },
@@ -6473,7 +6239,7 @@
                 "description": "The SNAT configuration for outbound connections.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/SourceNatConfigGeneric"
+                    "$ref": "#/components/schemas/SourceNatConfig"
                   }
                 ]
               },
@@ -7104,152 +6870,6 @@
         },
         "minItems": 2,
         "maxItems": 2
-      },
-      "PrivateIpConfig": {
-        "description": "VPC-private IP address configuration for a network interface.",
-        "oneOf": [
-          {
-            "description": "The interface has only an IPv4 configuration.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "v4"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/PrivateIpv4Config"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "The interface has only an IPv6 configuration.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "v6"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/PrivateIpv6Config"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "The interface is dual-stack.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "dual_stack"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "v4": {
-                    "description": "The interface's IPv4 configuration.",
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/PrivateIpv4Config"
-                      }
-                    ]
-                  },
-                  "v6": {
-                    "description": "The interface's IPv6 configuration.",
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/PrivateIpv6Config"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "v4",
-                  "v6"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          }
-        ]
-      },
-      "PrivateIpv4Config": {
-        "description": "VPC-private IPv4 configuration for a network interface.",
-        "type": "object",
-        "properties": {
-          "ip": {
-            "description": "VPC-private IP address.",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "subnet": {
-            "description": "The IP subnet.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv4Net"
-              }
-            ]
-          },
-          "transit_ips": {
-            "description": "Additional networks on which the interface can send / receive traffic.",
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Ipv4Net"
-            }
-          }
-        },
-        "required": [
-          "ip",
-          "subnet"
-        ]
-      },
-      "PrivateIpv6Config": {
-        "description": "VPC-private IPv6 configuration for a network interface.",
-        "type": "object",
-        "properties": {
-          "ip": {
-            "description": "VPC-private IP address.",
-            "type": "string",
-            "format": "ipv6"
-          },
-          "subnet": {
-            "description": "The IP subnet.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv6Net"
-              }
-            ]
-          },
-          "transit_ips": {
-            "description": "Additional networks on which the interface can send / receive traffic.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Ipv6Net"
-            }
-          }
-        },
-        "required": [
-          "ip",
-          "subnet",
-          "transit_ips"
-        ]
       },
       "ProbeCreate": {
         "description": "Parameters used to create a probe.",
@@ -8041,7 +7661,7 @@
         ],
         "additionalProperties": false
       },
-      "SourceNatConfigGeneric": {
+      "SourceNatConfig": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
         "properties": {
@@ -8055,62 +7675,6 @@
             "description": "The external address provided to the instance or service.",
             "type": "string",
             "format": "ip"
-          },
-          "last_port": {
-            "description": "The last port used for source NAT, also inclusive.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "first_port",
-          "ip",
-          "last_port"
-        ]
-      },
-      "SourceNatConfigV4": {
-        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
-        "type": "object",
-        "properties": {
-          "first_port": {
-            "description": "The first port used for source NAT, inclusive.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "ip": {
-            "description": "The external address provided to the instance or service.",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "last_port": {
-            "description": "The last port used for source NAT, also inclusive.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "first_port",
-          "ip",
-          "last_port"
-        ]
-      },
-      "SourceNatConfigV6": {
-        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
-        "type": "object",
-        "properties": {
-          "first_port": {
-            "description": "The first port used for source NAT, inclusive.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "ip": {
-            "description": "The external address provided to the instance or service.",
-            "type": "string",
-            "format": "ipv6"
           },
           "last_port": {
             "description": "The last port used for source NAT, also inclusive.",
@@ -8221,7 +7785,7 @@
         "minimum": 0
       },
       "SupportBundleMetadata": {
-        "description": "Metadata about a support bundle",
+        "description": "Metadata about a support bundle.",
         "type": "object",
         "properties": {
           "state": {
@@ -8237,6 +7801,7 @@
         ]
       },
       "SupportBundleState": {
+        "description": "State of a support bundle.",
         "type": "string",
         "enum": [
           "complete",
@@ -8442,6 +8007,7 @@
         ]
       },
       "VmmIssueDiskSnapshotRequestBody": {
+        "description": "Request body for VMM disk snapshot requests.",
         "type": "object",
         "properties": {
           "snapshot_id": {
@@ -8454,6 +8020,7 @@
         ]
       },
       "VmmIssueDiskSnapshotRequestResponse": {
+        "description": "Response for VMM disk snapshot requests.",
         "type": "object",
         "properties": {
           "snapshot_id": {
@@ -8530,7 +8097,7 @@
         ]
       },
       "VmmSpec": {
-        "description": "Specifies the virtual hardware configuration of a new Propolis VMM in the form of a Propolis instance specification.\n\nSled-agent expects that when an instance spec is provided alongside an `InstanceSledLocalConfig` to initialize a new instance, the NIC IDs in that config's network interface list will match the IDs of the virtio network backends in the instance spec.",
+        "description": "Specifies the virtual hardware configuration of a new Propolis VMM in the form of a Propolis instance specification.",
         "allOf": [
           {
             "$ref": "#/components/schemas/InstanceSpecV0"

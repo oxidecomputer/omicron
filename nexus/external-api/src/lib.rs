@@ -36,6 +36,7 @@ use openapiv3::OpenAPI;
 /// Copies of data types that changed between versions
 mod v2025112000;
 mod v2025120300;
+mod v2025121500;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -65,6 +66,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2025121500, GROUP_MEMBER_COUNT),
     (2025121200, BGP_PEER_COLLISION_STATE),
     (2025120300, LOCAL_STORAGE),
     (2025112000, INITIAL),
@@ -2435,60 +2437,12 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
 
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/bgp-status",
-        tags = ["system/networking"],
-        versions = ..VERSION_BGP_PEER_COLLISION_STATE,
-    }]
-    async fn v2025120300_networking_bgp_status(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<v2025120300::BgpPeerStatus>>, HttpError>
-    {
-        let result = Self::networking_bgp_status(rqctx).await?.0;
-        Ok(HttpResponseOk(
-            result
-                .into_iter()
-                .map(|x| v2025120300::BgpPeerStatus {
-                    addr: x.addr,
-                    local_asn: x.local_asn,
-                    remote_asn: x.remote_asn,
-                    state: match x.state {
-                        BgpPeerState::Idle => v2025120300::BgpPeerState::Idle,
-                        BgpPeerState::Connect => {
-                            v2025120300::BgpPeerState::Connect
-                        }
-                        BgpPeerState::Active => {
-                            v2025120300::BgpPeerState::Active
-                        }
-                        BgpPeerState::OpenSent => {
-                            v2025120300::BgpPeerState::OpenSent
-                        }
-                        BgpPeerState::OpenConfirm => {
-                            v2025120300::BgpPeerState::OpenConfirm
-                        }
-                        BgpPeerState::ConnectionCollision
-                        | BgpPeerState::SessionSetup => {
-                            v2025120300::BgpPeerState::SessionSetup
-                        }
-                        BgpPeerState::Established => {
-                            v2025120300::BgpPeerState::Established
-                        }
-                    },
-                    state_duration_millis: x.state_duration_millis,
-                    switch: x.switch,
-                })
-                .collect(),
-        ))
-    }
-
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP peer status
     #[endpoint {
         method = GET,
         path = "/v1/system/networking/bgp-status",
         tags = ["system/networking"],
-        versions = VERSION_BGP_PEER_COLLISION_STATE..,
     }]
     async fn networking_bgp_status(
         rqctx: RequestContext<Self::Context>,
@@ -3831,9 +3785,32 @@ pub trait NexusExternalApi {
 
     /// List groups
     #[endpoint {
+        operation_id = "group_list",
         method = GET,
         path = "/v1/groups",
         tags = ["silos"],
+        versions = ..VERSION_GROUP_MEMBER_COUNT,
+    }]
+    async fn v2025120300_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025121500::Group>>, HttpError>
+    {
+        match Self::group_list(rqctx, query_params).await {
+            Ok(HttpResponseOk(page)) => Ok(HttpResponseOk(ResultsPage {
+                items: page.items.into_iter().map(Into::into).collect(),
+                next_page: page.next_page,
+            })),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// List groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/groups",
+        tags = ["silos"],
+        versions = VERSION_GROUP_MEMBER_COUNT..,
     }]
     async fn group_list(
         rqctx: RequestContext<Self::Context>,
@@ -3842,9 +3819,28 @@ pub trait NexusExternalApi {
 
     /// Fetch group
     #[endpoint {
+        operation_id = "group_view",
         method = GET,
         path = "/v1/groups/{group_id}",
         tags = ["silos"],
+        versions = ..VERSION_GROUP_MEMBER_COUNT,
+    }]
+    async fn v2025120300_group_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::GroupPath>,
+    ) -> Result<HttpResponseOk<v2025121500::Group>, HttpError> {
+        match Self::group_view(rqctx, path_params).await {
+            Ok(HttpResponseOk(group)) => Ok(HttpResponseOk(group.into())),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fetch group
+    #[endpoint {
+        method = GET,
+        path = "/v1/groups/{group_id}",
+        tags = ["silos"],
+        versions = VERSION_GROUP_MEMBER_COUNT..,
     }]
     async fn group_view(
         rqctx: RequestContext<Self::Context>,

@@ -19710,7 +19710,7 @@
         }
       },
       "Group": {
-        "description": "View of a Group",
+        "description": "View of a Group (without member_count field)",
         "type": "object",
         "properties": {
           "display_name": {

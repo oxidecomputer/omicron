@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2025112000.0.0"
+    "version": "2025121500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -16325,6 +16325,13 @@
             ]
           },
           {
+            "description": "There is an ongoing Connection Collision that hasn't yet been resolved. Two connections are maintained until one connection receives an Open or is able to progress into Established.",
+            "type": "string",
+            "enum": [
+              "connection_collision"
+            ]
+          },
+          {
             "description": "Synchronizing with peer.",
             "type": "string",
             "enum": [
@@ -18408,6 +18415,48 @@
           "time_modified"
         ]
       },
+      "DiskBackend": {
+        "description": "The source of a `Disk`'s blocks",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "local"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "disk_source": {
+                "description": "The initial source for this disk",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/DiskSource"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "distributed"
+                ]
+              }
+            },
+            "required": [
+              "disk_source",
+              "type"
+            ]
+          }
+        ]
+      },
       "DiskCreate": {
         "description": "Create-time parameters for a `Disk`",
         "type": "object",
@@ -18415,11 +18464,11 @@
           "description": {
             "type": "string"
           },
-          "disk_source": {
-            "description": "The initial source for this disk",
+          "disk_backend": {
+            "description": "The source for this `Disk`'s blocks",
             "allOf": [
               {
-                "$ref": "#/components/schemas/DiskSource"
+                "$ref": "#/components/schemas/DiskBackend"
               }
             ]
           },
@@ -18437,7 +18486,7 @@
         },
         "required": [
           "description",
-          "disk_source",
+          "disk_backend",
           "name",
           "size"
         ]
@@ -18480,7 +18529,7 @@
         ]
       },
       "DiskSource": {
-        "description": "Different sources for a disk",
+        "description": "Different sources for a Distributed Disk",
         "oneOf": [
           {
             "description": "Create a blank disk",
@@ -18770,7 +18819,8 @@
       "DiskType": {
         "type": "string",
         "enum": [
-          "crucible"
+          "distributed",
+          "local"
         ]
       },
       "Distributiondouble": {
@@ -19671,6 +19721,11 @@
             "type": "string",
             "format": "uuid"
           },
+          "member_count": {
+            "description": "Number of members in this group",
+            "type": "integer",
+            "format": "int64"
+          },
           "silo_id": {
             "description": "Uuid of the silo to which this group belongs",
             "type": "string",
@@ -19680,6 +19735,7 @@
         "required": [
           "display_name",
           "id",
+          "member_count",
           "silo_id"
         ]
       },
@@ -21188,11 +21244,11 @@
               "description": {
                 "type": "string"
               },
-              "disk_source": {
-                "description": "The initial source for this disk",
+              "disk_backend": {
+                "description": "The source for this `Disk`'s blocks",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/DiskSource"
+                    "$ref": "#/components/schemas/DiskBackend"
                   }
                 ]
               },
@@ -21216,7 +21272,7 @@
             },
             "required": [
               "description",
-              "disk_source",
+              "disk_backend",
               "name",
               "size",
               "type"

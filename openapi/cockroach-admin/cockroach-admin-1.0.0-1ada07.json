@@ -207,7 +207,7 @@
             "description": "The ID of this Omicron zone.\n\nThis is included to ensure correctness even if a socket address on a sled is reused for a different zone; if our caller is trying to determine the node ID for a particular Omicron CockroachDB zone, they'll contact us by socket address. We include our zone ID in the response for their confirmation that we are the zone they intended to contact.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+                "$ref": "#/components/schemas/OmicronZoneUuid"
               }
             ]
           }
@@ -443,7 +443,12 @@
           "value_bytes"
         ]
       },
-      "TypedUuidForOmicronZoneKind": {
+      "OmicronZoneUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::OmicronZoneUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       }

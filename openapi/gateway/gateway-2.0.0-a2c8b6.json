@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "paths": {
     "/ignition": {
@@ -1280,7 +1280,7 @@
             "description": "The restart ID of the reporter at which all other query parameters are valid.\n\nIf this value does not match the reporter's restart ID, the reporter's response will include the current generation, and will start at the earliest known ENA, rather than the provided `start_at` ENA.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForEreporterRestartKind"
+              "$ref": "#/components/schemas/EreporterRestartUuid"
             }
           },
           {
@@ -1921,6 +1921,15 @@
         ],
         "additionalProperties": true
       },
+      "EreporterRestartUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::EreporterRestartUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "Ereports": {
         "description": "A tranche of ereports received from a reporter.",
         "type": "object",
@@ -1941,7 +1950,7 @@
             "description": "The reporter's current restart ID.\n\nIf this is not equal to the current known restart ID, then the reporter has restarted.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForEreporterRestartKind"
+                "$ref": "#/components/schemas/EreporterRestartUuid"
               }
             ]
           }
@@ -2114,7 +2123,7 @@
             "format": "hex string (32 bytes)"
           },
           "update_id": {
-            "$ref": "#/components/schemas/TypedUuidForMupdateKind"
+            "$ref": "#/components/schemas/MupdateUuid"
           }
         },
         "required": [
@@ -2386,6 +2395,15 @@
             ]
           }
         ]
+      },
+      "MupdateUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MupdateUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "PacketCount": {
         "type": "object",
@@ -3361,7 +3379,7 @@
         ]
       },
       "SpIgnition": {
-        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?",
+        "description": "State of an ignition target.",
         "oneOf": [
           {
             "type": "object",
@@ -3387,15 +3405,19 @@
                 "type": "boolean"
               },
               "flt_a2": {
+                "description": "Fault from the A2 power domain",
                 "type": "boolean"
               },
               "flt_a3": {
+                "description": "Fault from the A3 power domain",
                 "type": "boolean"
               },
               "flt_rot": {
+                "description": "Fault from the RoT",
                 "type": "boolean"
               },
               "flt_sp": {
+                "description": "Fault from the SP",
                 "type": "boolean"
               },
               "id": {
@@ -3441,7 +3463,6 @@
         ]
       },
       "SpIgnitionSystemType": {
-        "description": "TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?",
         "oneOf": [
           {
             "type": "object",
@@ -3502,6 +3523,20 @@
             },
             "required": [
               "id",
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "cosmo"
+                ]
+              }
+            },
+            "required": [
               "system_type"
             ]
           }
@@ -3937,14 +3972,6 @@
           "task_index",
           "timestamp"
         ]
-      },
-      "TypedUuidForEreporterRestartKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForMupdateKind": {
-        "type": "string",
-        "format": "uuid"
       },
       "UpdateAbortBody": {
         "type": "object",
