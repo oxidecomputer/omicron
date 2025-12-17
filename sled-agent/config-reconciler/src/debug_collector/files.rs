@@ -88,7 +88,11 @@ impl<'a> ArchivePlanner<'a> {
             "zone_root" => %zone_root,
         );
 
-        let source = Source::for_zone(zone_name, zone_root, &self.debug_dir);
+        let source = Source {
+            input_prefix: zone_root.to_owned(),
+            output_prefix: self.debug_dir.join(zone_name),
+        };
+
         let rules =
             ALL_RULES.iter().filter(|r| match (&r.rule_scope, &self.what) {
                 (RuleScope::ZoneAlways, _) => true,
@@ -109,7 +113,11 @@ impl<'a> ArchivePlanner<'a> {
             "cores_dir" => %cores_dir,
         );
 
-        let source = Source::for_cores_directory(cores_dir, &self.debug_dir);
+        let source = Source {
+            input_prefix: cores_dir.to_owned(),
+            output_prefix: self.debug_dir.to_owned(),
+        };
+
         let rules = ALL_RULES.iter().filter(|r| match r.rule_scope {
             RuleScope::CoresDirectory => true,
             RuleScope::ZoneMutable | RuleScope::ZoneAlways => false,
@@ -181,35 +189,13 @@ struct Source {
     output_prefix: Utf8PathBuf,
 }
 
-impl Source {
-    fn for_zone(
-        zone_name: &str,
-        zone_root: &Utf8Path,
-        output_directory: &Utf8Path,
-    ) -> Source {
-        Source {
-            input_prefix: zone_root.to_owned(),
-            output_prefix: output_directory.join(zone_name),
-        }
-    }
-
-    fn for_cores_directory(
-        cores_dir: &Utf8Path,
-        output_directory: &Utf8Path,
-    ) -> Source {
-        Source {
-            input_prefix: cores_dir.to_owned(),
-            output_prefix: output_directory.to_owned(),
-        }
-    }
-}
-
 struct Rule {
     label: &'static str,
     rule_scope: RuleScope,
     directory: Utf8PathBuf,
     glob_pattern: glob::Pattern, // XXX-dap consider regex?
     delete_original: bool,
+    // XXX-dap these are all static -- maybe use &'static dyn NamingRule?
     naming: Box<dyn NamingRule + Send + Sync>,
 }
 
@@ -298,7 +284,7 @@ static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             directory: VAR_SVC_LOG.parse().unwrap(),
             glob_pattern: "*.log".parse().unwrap(),
             delete_original: false,
-            naming: Box::new(NameRotatedLogFile), // XXX-dap
+            naming: Box::new(NameLiveLogFile),
         },
         Rule {
             label: "live syslog files",
@@ -306,7 +292,7 @@ static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             directory: VAR_ADM.parse().unwrap(),
             glob_pattern: "messages".parse().unwrap(),
             delete_original: false,
-            naming: Box::new(NameRotatedLogFile), // XXX-dap
+            naming: Box::new(NameLiveLogFile),
         },
         Rule {
             label: "rotated SMF log files",
@@ -340,6 +326,7 @@ static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
     rv
 });
 
+const MAX_COLLIDING_FILENAMES: u16 = 30;
 struct NameRotatedLogFile;
 impl NamingRule for NameRotatedLogFile {
     fn archived_file_name(
@@ -357,8 +344,9 @@ impl NamingRule for NameRotatedLogFile {
 
         let mtime_as_seconds =
             source_file_mtime.unwrap_or_else(|| Utc::now()).timestamp();
-        for i in 0..30 {
-            let rv = format!("{filename_base}.{}", mtime_as_seconds + i);
+        for i in 0..MAX_COLLIDING_FILENAMES {
+            let rv =
+                format!("{filename_base}.{}", mtime_as_seconds + i64::from(i));
             let dest = output_directory.join(&rv);
             if !lister.file_exists(&dest)? {
                 // unwrap(): we started with a valid `Filename` and did not add
@@ -368,23 +356,28 @@ impl NamingRule for NameRotatedLogFile {
         }
 
         // XXX-dap better message
-        Err(anyhow!("too many files with the same mtime"))
+        Err(anyhow!("too many files with colliding names"))
     }
 }
 
-// XXX-dap
-// struct NameLiveLogFile;
-// impl NamingRule for NameLiveLogFile {
-//     fn archived_file_name(
-//         &self,
-//         source_file_name: &Filename,
-//         source_file_mtime: &std::fs::Metadata,
-//         lister: &dyn FileLister,
-//         output_directory: &Utf8Path,
-//     ) -> Filename {
-//         todo!() // XXX-dap
-//     }
-// }
+struct NameLiveLogFile;
+impl NamingRule for NameLiveLogFile {
+    fn archived_file_name(
+        &self,
+        source_file_name: &Filename,
+        source_file_mtime: Option<DateTime<Utc>>,
+        lister: &dyn FileLister,
+        output_directory: &Utf8Path,
+    ) -> Result<Filename, anyhow::Error> {
+        // XXX-dap should work better
+        NameRotatedLogFile.archived_file_name(
+            source_file_name,
+            source_file_mtime,
+            lister,
+            output_directory,
+        )
+    }
+}
 
 struct NameIdentity;
 impl NamingRule for NameIdentity {
@@ -544,15 +537,14 @@ impl ArchivePlan<'_> {
                         entry.and_then(|(group, input_path, mtime)| {
                             let output_directory =
                                 group.output_directory(debug_dir);
-                            Ok(ArchiveStep::ArchiveFile {
+                            Ok(ArchiveStep::ArchiveFile(ArchiveFile {
                                 input_path,
                                 mtime,
                                 output_directory,
-                                lister,
                                 namer: &*group.rule.naming,
                                 delete_original: group.rule.delete_original,
                                 rule: group.rule.label,
-                            })
+                            }))
                         })
                     }),
             )
@@ -594,42 +586,26 @@ impl ArchivePlan<'_> {
                         })
                         .with_context(|| format!("mkdir {output_directory:?}"))
                 }
-                Ok(ArchiveStep::ArchiveFile {
-                    input_path,
-                    delete_original,
-                    mtime,
-                    output_directory,
-                    namer,
-                    lister,
-                    rule: _,
-                }) => {
-                    match namer.archived_file_name(
-                        // XXX-dap
-                        &input_path
-                            .file_name()
-                            .unwrap()
-                            .to_owned()
-                            .try_into()
-                            .unwrap(),
-                        mtime,
-                        lister,
-                        &output_directory,
-                    ) {
+                Ok(ArchiveStep::ArchiveFile(archive_file)) => {
+                    match archive_file.choose_filename(lister) {
                         Err(error) => Err(error),
                         Ok(output_filename) => {
-                            let output_path =
-                                output_directory.join(output_filename.as_ref());
+                            let input_path = &archive_file.input_path;
+                            let output_path = archive_file
+                                .output_directory
+                                .join(output_filename.as_ref());
                             debug!(
                                 log,
                                 "archive file";
                                 "input_path" => %input_path,
                                 "output_path" => %output_path,
-                                "delete_original" => delete_original,
+                                "delete_original" =>
+                                    archive_file.delete_original,
                             );
                             archive_one(
                                 &input_path,
                                 &output_path,
-                                delete_original,
+                                archive_file.delete_original,
                             )
                             .await
                             .with_context(|| {
@@ -657,35 +633,67 @@ impl ArchivePlan<'_> {
 }
 
 enum ArchiveStep<'a> {
-    Mkdir {
-        output_directory: Utf8PathBuf,
-    },
-    ArchiveFile {
-        input_path: Utf8PathBuf,
-        mtime: Option<DateTime<Utc>>,
-        output_directory: Utf8PathBuf,
-        lister: &'a (dyn FileLister + Send + Sync),
-        namer: &'a (dyn NamingRule + Send + Sync),
-        delete_original: bool,
-        rule: &'static str,
-    },
+    Mkdir { output_directory: Utf8PathBuf },
+    ArchiveFile(ArchiveFile<'a>),
+}
+
+#[derive(Clone)]
+struct ArchiveFile<'a> {
+    input_path: Utf8PathBuf,
+    mtime: Option<DateTime<Utc>>,
+    output_directory: Utf8PathBuf,
+    namer: &'a (dyn NamingRule + Send + Sync),
+    delete_original: bool,
+    rule: &'static str,
+}
+
+impl ArchiveFile<'_> {
+    fn choose_filename(
+        &self,
+        lister: &dyn FileLister,
+    ) -> Result<Filename, anyhow::Error> {
+        let file_name: Filename = self
+            .input_path
+            .file_name()
+            .ok_or_else(|| {
+                // This should be impossible, but it's easy enough to handle
+                // gracefully.
+                anyhow!(
+                    "file for archival has no filename: {:?}",
+                    &self.input_path
+                )
+            })?
+            .to_owned()
+            .try_into()
+            .context("file_name() returned a non-Filename")?;
+        self.namer.archived_file_name(
+            &file_name,
+            self.mtime,
+            lister,
+            &self.output_directory,
+        )
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::Filename;
     use crate::debug_collector::files::ALL_RULES;
+    use crate::debug_collector::files::ArchiveFile;
     use crate::debug_collector::files::ArchivePlan;
     use crate::debug_collector::files::ArchivePlanner;
     use crate::debug_collector::files::ArchiveStep;
     use crate::debug_collector::files::ArchiveWhat;
     use crate::debug_collector::files::FileLister;
+    use crate::debug_collector::files::MAX_COLLIDING_FILENAMES;
+    use crate::debug_collector::files::NameRotatedLogFile;
     use anyhow::Context;
     use anyhow::anyhow;
     use anyhow::bail;
     use camino::Utf8Path;
     use camino::Utf8PathBuf;
     use chrono::DateTime;
+    use chrono::Timelike;
     use chrono::Utc;
     use iddqd::IdOrdItem;
     use iddqd::IdOrdMap;
@@ -885,14 +893,30 @@ mod test {
     }
 
     struct TestLister<'a> {
-        files: &'a IdOrdMap<TestFile>,
+        files: BTreeSet<&'a Utf8Path>,
         last_listed: Mutex<Option<Utf8PathBuf>>,
         injected_error: Option<&'a Utf8Path>,
     }
 
     impl<'a> TestLister<'a> {
-        fn new(files: &'a IdOrdMap<TestFile>) -> Self {
-            Self { files, last_listed: Mutex::new(None), injected_error: None }
+        fn new_for_test_data(files: &'a IdOrdMap<TestFile>) -> Self {
+            Self::new(files.iter().map(|test_file| test_file.path.as_path()))
+        }
+
+        fn empty() -> Self {
+            Self::new::<_, &'a str>(std::iter::empty())
+        }
+
+        fn new<I, P>(files: I) -> Self
+        where
+            I: IntoIterator<Item = &'a P>,
+            P: AsRef<Utf8Path> + ?Sized + 'a,
+        {
+            Self {
+                files: files.into_iter().map(|p| p.as_ref()).collect(),
+                last_listed: Mutex::new(None),
+                injected_error: None,
+            }
         }
 
         fn inject_error(&mut self, fail_path: &'a Utf8Path) {
@@ -920,14 +944,11 @@ mod test {
             // Create a directory listing from the files in our test data.
             self.files
                 .iter()
-                .filter_map(|test_file| {
-                    let directory = test_file
-                        .path
-                        .parent()
-                        .expect("test file has a parent");
+                .filter_map(|file_path| {
+                    let directory =
+                        file_path.parent().expect("test file has a parent");
                     (directory == path).then(|| {
-                        let filename = test_file
-                            .path
+                        let filename = file_path
                             .file_name()
                             .expect("test file has a filename");
                         Ok(Filename::try_from(filename.to_owned())
@@ -951,7 +972,7 @@ mod test {
         }
 
         fn file_exists(&self, path: &Utf8Path) -> Result<bool, anyhow::Error> {
-            Ok(self.files.contains_key(path))
+            Ok(self.files.contains(path))
         }
     }
 
@@ -1031,7 +1052,7 @@ mod test {
 
         // Run a simulated archive.
         let fake_output_dir = Utf8Path::new("/fake-output-directory");
-        let lister = TestLister::new(&files);
+        let lister = TestLister::new_for_test_data(&files);
         let plan = test_archive(
             log,
             &files,
@@ -1069,13 +1090,13 @@ mod test {
                     directories_created.insert(output_directory);
                 }
 
-                ArchiveStep::ArchiveFile {
+                ArchiveStep::ArchiveFile(ArchiveFile {
                     input_path,
                     delete_original,
                     output_directory,
                     rule,
                     ..
-                } => {
+                }) => {
                     println!("archiving: {input_path}");
 
                     // Check that we have not already archived this file.
@@ -1179,7 +1200,7 @@ mod test {
 
         // Run a simulated archive.
         let fake_output_dir = Utf8Path::new("/fake-output-directory");
-        let lister = TestLister::new(&files);
+        let lister = TestLister::new_for_test_data(&files);
         let plan = test_archive(
             log,
             &files,
@@ -1214,13 +1235,11 @@ mod test {
         // here.  That's tested in `test_archive_basic` for all files.
         for step in plan.to_steps() {
             let step = step.expect("no errors with test lister");
-            let ArchiveStep::ArchiveFile {
-                input_path, delete_original, ..
-            } = step
-            else {
+            let ArchiveStep::ArchiveFile(archive_file) = step else {
                 continue;
             };
 
+            let input_path = archive_file.input_path;
             let test_file = files.get(input_path.as_path()).expect(
                 "unexpectedly archived file that was not in the test data",
             );
@@ -1241,7 +1260,7 @@ mod test {
             // related to the file being immutable, we may as well check it
             // again here.
             assert!(
-                delete_original,
+                archive_file.delete_original,
                 "expected to delete the original when archiving immutable files"
             );
         }
@@ -1271,7 +1290,7 @@ mod test {
 
         // Begin a simulated archive.
         let fake_output_dir = Utf8Path::new("/fake-output-directory");
-        let lister = TestLister::new(&files);
+        let lister = TestLister::new_for_test_data(&files);
         let plan = test_archive(
             log,
             &files,
@@ -1290,7 +1309,7 @@ mod test {
         // doesn't happen.
         for step in plan.to_steps() {
             let step = step.expect("test lister does not produce errors");
-            let ArchiveStep::ArchiveFile { input_path, .. } = &step else {
+            let ArchiveStep::ArchiveFile(archive_file) = &step else {
                 continue;
             };
 
@@ -1299,7 +1318,7 @@ mod test {
                 .as_ref()
                 .expect("listed a directory before archiving any files");
             assert!(
-                input_path.starts_with(last),
+                archive_file.input_path.starts_with(last),
                 "archived file is not in the most-recently-listed directory",
             );
         }
@@ -1339,7 +1358,7 @@ mod test {
         // Begin a simulated archive.  Configure the lister to inject an error
         // for the directory that we chose.
         let fake_output_dir = Utf8Path::new("/fake-output-directory");
-        let mut lister = TestLister::new(&files);
+        let mut lister = TestLister::new_for_test_data(&files);
         lister.inject_error(fail_dir);
         let plan = test_archive(
             log,
@@ -1369,17 +1388,17 @@ mod test {
                 Ok(step) => step,
             };
 
-            let ArchiveStep::ArchiveFile { input_path, .. } = &step else {
+            let ArchiveStep::ArchiveFile(archive_file) = &step else {
                 continue;
             };
 
             assert!(
-                !input_path.starts_with(fail_dir),
+                !archive_file.input_path.starts_with(fail_dir),
                 "archived file in the directory where we injected an error"
             );
 
             let _ = unarchived_files
-                .remove(input_path.as_path())
+                .remove(archive_file.input_path.as_path())
                 .expect("archived file was in list of test files");
         }
 
@@ -1445,7 +1464,7 @@ mod test {
         // Begin a simulated archive.  Configure the lister to inject an error
         // on the path that we selected above.
         let fake_output_dir = Utf8Path::new("/fake-output-directory");
-        let mut lister = TestLister::new(&files);
+        let mut lister = TestLister::new_for_test_data(&files);
         lister.inject_error(fail_file);
         let plan = test_archive(
             log,
@@ -1477,7 +1496,9 @@ mod test {
                 Ok(step) => step,
             };
 
-            let ArchiveStep::ArchiveFile { input_path, .. } = &step else {
+            let ArchiveStep::ArchiveFile(ArchiveFile { input_path, .. }) =
+                &step
+            else {
                 continue;
             };
 
@@ -1503,5 +1524,123 @@ mod test {
         assert!(unarchived_files.contains_key(fail_file.as_path()));
 
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_naming_logs() {
+        // template used for other tests
+        let template = ArchiveFile {
+            input_path: Utf8Path::new("/nonexistent/one/two.log.0").to_owned(),
+            mtime: Some("2025-12-12T16:51:00-07:00".parse().unwrap()),
+            output_directory: Utf8Path::new("/nonexistent/out").to_owned(),
+            namer: &NameRotatedLogFile,
+            delete_original: true,
+            rule: "dummy rule",
+        };
+
+        let empty_lister = TestLister::empty();
+
+        // ordinary case of a rotated log file name: output filename generated
+        // based on input and mtime
+        let input = ArchiveFile {
+            input_path: Utf8Path::new("/nonexistent/one/two.log.0").to_owned(),
+            ..template.clone()
+        };
+        let filename = input.choose_filename(&empty_lister).unwrap();
+        assert_eq!(filename.as_ref(), "two.log.1765583460");
+
+        // ordinary case with a live log file name
+        let input = ArchiveFile {
+            input_path: Utf8Path::new("/nonexistent/one/two.log").to_owned(),
+            ..template.clone()
+        };
+        let filename = input.choose_filename(&empty_lister).unwrap();
+        assert_eq!(filename.as_ref(), "two.1765583460");
+
+        // case: rotated log file, no mtime available
+        // (this may never happen in practice)
+        //
+        // The current mtime should be used instead.
+        let input = ArchiveFile {
+            input_path: Utf8Path::new("/nonexistent/one/two.log.0").to_owned(),
+            mtime: None,
+            ..template.clone()
+        };
+        let before = Utc::now().with_nanosecond(0).unwrap();
+        let filename = input.choose_filename(&empty_lister).unwrap();
+        let after = Utc::now();
+        assert!(before <= after);
+        // The resulting filename should be "two.log.MTIME".
+        let (prefix, mtime) =
+            filename.as_ref().rsplit_once(".").expect("unexpected filename");
+        assert_eq!(prefix, "two.log");
+        let parsed: DateTime<Utc> = DateTime::from_timestamp(
+            mtime.parse().expect("expected Unix timestamp in filename"),
+            0,
+        )
+        .unwrap();
+        println!("dap: {before} {parsed} {after}"); // XXX-dap
+        assert!(before <= parsed);
+        assert!(parsed <= after);
+
+        // case: live log file, no mtime available
+        // (this may never happen in practice)
+        //
+        // The current mtime should be used instead.
+        let input = ArchiveFile {
+            input_path: Utf8Path::new("/nonexistent/one/two.log").to_owned(),
+            mtime: None,
+            ..template.clone()
+        };
+        let before = Utc::now().with_nanosecond(0).unwrap();
+        let filename = input.choose_filename(&empty_lister).unwrap();
+        let after = Utc::now();
+        assert!(before <= after);
+        // The resulting filename should be "two.MTIME".
+        let (prefix, mtime) =
+            filename.as_ref().rsplit_once(".").expect("unexpected filename");
+        assert_eq!(prefix, "two");
+        let parsed: DateTime<Utc> = DateTime::from_timestamp(
+            mtime.parse().expect("expected Unix timestamp in filename"),
+            0,
+        )
+        .unwrap();
+        assert!(before <= parsed);
+        assert!(parsed <= after);
+
+        // case: the normal output filename already exists
+        // expected behavior: the "mtime" in the filename is incremented
+        let input = ArchiveFile {
+            input_path: Utf8Path::new("/nonexistent/one/two.log.0").to_owned(),
+            ..template.clone()
+        };
+        let lister = TestLister::new(["/nonexistent/out/two.log.1765583460"]);
+        let filename = input.choose_filename(&lister).unwrap();
+        assert_eq!(filename.as_ref(), "two.log.1765583461");
+
+        // case: several closely-named output filenames also exist
+        let lister = TestLister::new([
+            "/nonexistent/out/two.log.1765583460",
+            "/nonexistent/out/two.log.1765583461",
+            "/nonexistent/out/two.log.1765583462",
+            "/nonexistent/out/two.log.1765583464",
+        ]);
+        let filename = input.choose_filename(&lister).unwrap();
+        assert_eq!(filename.as_ref(), "two.log.1765583463");
+
+        // case: too many closely-named output files also exist
+        let colliding_filenames: Vec<_> = (0..=MAX_COLLIDING_FILENAMES)
+            .map(|i| {
+                format!(
+                    "/nonexistent/out/two.log.{}",
+                    1765583460u64 + u64::from(i)
+                )
+            })
+            .collect();
+        let lister = TestLister::new(colliding_filenames.iter());
+        let error = input.choose_filename(&lister).unwrap_err();
+        assert!(
+            error.to_string().contains("too many files with colliding names")
+        );
     }
 }
