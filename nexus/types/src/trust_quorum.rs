@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use iddqd::{IdHashItem, id_upcast};
 use omicron_uuid_kinds::RackUuid;
 use sled_agent_types::sled::BaseboardId;
 use trust_quorum_protocol::{
@@ -54,4 +55,14 @@ pub struct TrustQuorumConfig {
     pub coordinator: BaseboardId,
     pub encrypted_rack_secrets: Option<EncryptedRackSecrets>,
     pub members: BTreeMap<BaseboardId, TrustQuorumMemberData>,
+}
+
+impl IdHashItem for TrustQuorumConfig {
+    type Key<'a> = RackUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.rack_id
+    }
+
+    id_upcast!();
 }

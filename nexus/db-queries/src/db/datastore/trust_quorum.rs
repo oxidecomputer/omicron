@@ -90,6 +90,42 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Return a `RackUuid` for each trust quorum along with its latest epoch.
+    ///
+    /// For now, since we do not have multirack, and we aren't sure how big
+    /// those clusters are going to be we return all values and don't bother
+    /// paginating. The current `SQL_BATCH_SIZE` is also 1000, and it's unlikely
+    /// that there will ever be more than 1000 racks in a single fleet, sharing
+    /// a single CRDB cluster.
+    pub async fn tq_get_all_rack_id_and_latest_epoch(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<(RackUuid, Epoch)> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+
+        let values: Vec<(DbTypedUuid<RackKind>, i64)> =
+            dsl::trust_quorum_configuration
+                .select((dsl::rack_id, dsl::epoch))
+                .order_by((dsl::rack_id, dsl::epoch.desc()))
+                .distinct_on(dsl::rack_id)
+                .load_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+        let mut output = Vec::with_capacity(values.len());
+
+        for (rack_id, epoch) in values {
+            output.push((rack_id.into(), i64_to_epoch(epoch)?));
+        }
+
+        Ok(output)
+    }
+
     /// Get the latest trust quorum configuration from the database
     pub async fn tq_get_latest_config(
         &self,
