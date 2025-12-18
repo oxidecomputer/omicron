@@ -5,7 +5,6 @@
 //! Module for converting older formats of the sled configuration files.
 
 use camino::Utf8PathBuf;
-use omicron_common::api::external;
 use omicron_common::ledger::Ledger;
 use omicron_common::ledger::Ledgerable;
 use serde::Deserialize;
@@ -51,11 +50,11 @@ impl VersionConversionChain for v11::inventory::OmicronSledConfig {
 
 impl VersionConversionChain for v10::inventory::OmicronSledConfig {
     const DESCRIPTION: &str = "v10::inventory::OmicronSledConfig";
-    type Previous = OmicronSledConfigLocal;
+    type Previous = v4::inventory::OmicronSledConfig;
 }
 
-impl VersionConversionChain for OmicronSledConfigLocal {
-    const DESCRIPTION: &str = "OmicronSledConfigLocal";
+impl VersionConversionChain for v4::inventory::OmicronSledConfig {
+    const DESCRIPTION: &str = "v4::inventory::OmicronSledConfig";
     type Previous = VersionConversionChainTerminal;
 }
 
@@ -206,28 +205,6 @@ async fn write_converted_ledger(
     config_ledger.into_inner()
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(transparent)]
-struct OmicronSledConfigLocal(v4::inventory::OmicronSledConfig);
-
-impl Ledgerable for OmicronSledConfigLocal {
-    fn is_newer_than(&self, other: &Self) -> bool {
-        self.0.generation > other.0.generation
-    }
-
-    fn generation_bump(&mut self) {
-        self.0.generation = self.0.generation.next()
-    }
-}
-
-impl TryFrom<OmicronSledConfigLocal> for v10::inventory::OmicronSledConfig {
-    type Error = external::Error;
-
-    fn try_from(value: OmicronSledConfigLocal) -> Result<Self, Self::Error> {
-        Self::try_from(value.0)
-    }
-}
-
 // Terminal type for the [`VersionConversionChain`] above. This type is
 // uninhabitable (equivalent to the `Never` / `!` type), and therefore its trait
 // implementations can all safely panic (since no instance of it can exist at
@@ -252,7 +229,9 @@ impl Ledgerable for VersionConversionChainTerminal {
     }
 }
 
-impl TryFrom<VersionConversionChainTerminal> for OmicronSledConfigLocal {
+impl TryFrom<VersionConversionChainTerminal>
+    for v4::inventory::OmicronSledConfig
+{
     type Error = std::io::Error;
 
     fn try_from(
