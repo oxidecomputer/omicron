@@ -5,8 +5,8 @@
 use assert_matches::assert_matches;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
-use clickhouse_admin_types::KeeperId;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::KeeperId;
 use expectorate::assert_contents;
 use iddqd::IdOrdMap;
 use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;

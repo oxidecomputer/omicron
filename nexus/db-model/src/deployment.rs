@@ -15,7 +15,8 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
-use clickhouse_admin_types::{KeeperId, ServerId};
+use clickhouse_admin_types::keeper::KeeperId;
+use clickhouse_admin_types::server::ServerId;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     blueprint, bp_clickhouse_cluster_config,

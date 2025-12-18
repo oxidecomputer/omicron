@@ -7,6 +7,7 @@
 #: output_rules = [
 #:	"%/work/*",
 #:	"%/work/oxidecomputer/omicron/target/nextest/ci/junit.xml",
+#:	"%/work/oxidecomputer/omicron/target/live-tests-archive.tgz",
 #:	"%/var/tmp/omicron_tmp/**/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",
@@ -29,5 +30,10 @@
 #: series = "build-info-helios"
 #: name = "crate-build-timings.json"
 #: from_output = "/work/crate-build-timings.json"
+#:
+#: [[publish]]
+#: series = "live-tests"
+#: name = "live-tests-archive.tgz"
+#: from_output = "/work/oxidecomputer/omicron/target/live-tests-archive.tgz"
 
 exec .github/buildomat/build-and-test.sh illumos

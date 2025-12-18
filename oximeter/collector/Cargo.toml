@@ -23,6 +23,7 @@ omicron-common.workspace = true
 oxide-tokio-rt.workspace = true
 oximeter.workspace = true
 oximeter-api.workspace = true
+oximeter-types.workspace = true
 oximeter-client.workspace = true
 oximeter-db.workspace = true
 qorb.workspace = true
