@@ -67,6 +67,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 /// Helper type with both an authz IP Pool and the actual DB record.
@@ -113,6 +114,27 @@ const POOL_HAS_IPS_ERROR: &str =
 const LAST_POOL_ERROR: &str = "Cannot delete the last IP Pool reserved for \
     Oxide internal usage. Create and reserve at least one more IP Pool \
     before deleting this one.";
+
+/// Check if pool selection has an IP version conflict.
+///
+/// When `ip_version` is not specified and multiple pools exist with different
+/// IP versions, returns an error asking the caller to specify which version.
+fn check_ip_version_conflict(
+    pools: &[IpPool],
+    ip_version: Option<IpVersion>,
+    pool_type: IpPoolType,
+) -> Result<(), Error> {
+    if ip_version.is_none()
+        && pools.iter().map(|p| p.ip_version).collect::<HashSet<_>>().len() > 1
+    {
+        return Err(Error::invalid_request(format!(
+            "Multiple default {pool_type} IP pools exist with different \
+             IP versions. Please specify ip_version (v4 or v6) or \
+             provide an explicit pool."
+        )));
+    }
+    Ok(())
+}
 
 impl DataStore {
     /// List IP Pools by their reservation type, IP version, and pool type.
@@ -316,20 +338,7 @@ impl DataStore {
                 )
             })?;
 
-        // If `ip_version` was not specified and we have multiple pools of
-        // different IP versions, return an error asking the caller to specify
-        // which version.
-        if ip_version.is_none() && pools.len() > 1 {
-            let has_v4 = pools.iter().any(|p| p.ip_version == IpVersion::V4);
-            let has_v6 = pools.iter().any(|p| p.ip_version == IpVersion::V6);
-            if has_v4 && has_v6 {
-                return Err(Error::invalid_request(format!(
-                    "Multiple default {pool_type} IP pools exist with different \
-                     IP versions. Please specify ip_version (v4 or v6) or \
-                     provide an explicit pool."
-                )));
-            }
-        }
+        check_ip_version_conflict(&pools, ip_version, pool_type)?;
 
         match pools.into_iter().next() {
             None => Err(Error::ObjectNotFound {
@@ -406,20 +415,7 @@ impl DataStore {
                 )
             })?;
 
-        // If `ip_version` was not specified and we have multiple pools of
-        // different IP versions, return an error asking the caller to specify
-        // which version.
-        if ip_version.is_none() && pools.len() > 1 {
-            let has_v4 = pools.iter().any(|p| p.ip_version == IpVersion::V4);
-            let has_v6 = pools.iter().any(|p| p.ip_version == IpVersion::V6);
-            if has_v4 && has_v6 {
-                return Err(Error::invalid_request(format!(
-                    "Multiple default {pool_type} IP pools exist with different \
-                     IP versions. Please specify ip_version (v4 or v6) or \
-                     provide an explicit pool."
-                )));
-            }
-        }
+        check_ip_version_conflict(&pools, ip_version, pool_type)?;
 
         match pools.into_iter().next() {
             None => Err(Error::ObjectNotFound {

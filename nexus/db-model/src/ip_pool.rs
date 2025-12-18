@@ -91,6 +91,7 @@ impl_enum_type!(
         serde::Deserialize,
         Eq,
         FromSqlRow,
+        Hash,
         schemars::JsonSchema,
         PartialEq,
         serde::Serialize,
