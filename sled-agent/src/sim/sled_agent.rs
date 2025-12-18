@@ -62,8 +62,8 @@ use sled_agent_types::instance::{
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
     HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
-    ZoneImageResolverInventory,
+    InventoryZpool, OmicronMeasurements, OmicronSledConfig, OmicronZonesConfig,
+    SledRole, ZoneImageResolverInventory,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 
@@ -814,6 +814,7 @@ impl SledAgent {
             zones: zones_config.zones.into_iter().collect(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: OmicronMeasurements::measurements_defaults(),
         };
 
         Ok(Inventory {

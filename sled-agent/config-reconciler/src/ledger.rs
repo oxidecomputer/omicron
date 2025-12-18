@@ -707,6 +707,7 @@ mod tests {
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::OmicronMeasurements;
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
@@ -923,6 +924,7 @@ mod tests {
             zones: IdOrdMap::default(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: OmicronMeasurements::measurements_defaults(),
         }
     }
 
@@ -1125,6 +1127,7 @@ mod tests {
             .collect(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: OmicronMeasurements::measurements_defaults(),
         };
 
         // The ledger task should reject this config due to a missing artifact.

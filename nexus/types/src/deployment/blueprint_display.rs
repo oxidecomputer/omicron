@@ -352,6 +352,18 @@ impl fmt::Display for BpTable {
 }
 
 /// The [`BpTable`] schema for desired host phase 2 contents
+pub struct BpMeasurementsTableSchema {}
+impl BpTableSchema for BpMeasurementsTableSchema {
+    fn table_name(&self) -> &'static str {
+        "measurements"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &["hash", "version", "prune"]
+    }
+}
+
+/// The [`BpTable`] schema for desired host phase 2 contents
 pub struct BpHostPhase2TableSchema {}
 impl BpTableSchema for BpHostPhase2TableSchema {
     fn table_name(&self) -> &'static str {

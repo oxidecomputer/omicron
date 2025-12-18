@@ -731,6 +731,8 @@ mod test {
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::OmicronMeasurementSetDesiredContents;
+    use sled_agent_types::inventory::OmicronMeasurements;
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
@@ -753,6 +755,7 @@ mod test {
             zones,
             remove_mupdate_override,
             host_phase_2,
+            measurements,
         } = config;
 
         swriteln!(s, "        generation: {generation}");
@@ -790,6 +793,17 @@ mod test {
                 zone.id,
                 zone.zone_type.kind().report_str(),
             );
+        }
+        swriteln!(s, "        measurements:");
+        match &measurements.measurements {
+            OmicronMeasurementSetDesiredContents::InstallDataset => {
+                swriteln!(s, "            install dataset");
+            }
+            OmicronMeasurementSetDesiredContents::Artifacts { hashes } => {
+                for h in hashes {
+                    swriteln!(s, "            artifact: {h}");
+                }
+            }
         }
     }
 
@@ -1004,6 +1018,7 @@ mod test {
                 },
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                measurements: OmicronMeasurements::measurements_defaults(),
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

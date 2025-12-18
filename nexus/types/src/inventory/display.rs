@@ -735,6 +735,7 @@ fn display_sleds(
                 zones,
                 boot_partitions,
                 remove_mupdate_override,
+                measurements,
             } = last_reconciliation;
 
             display_boot_partition_contents(boot_partitions, &mut indented)?;
@@ -853,6 +854,16 @@ fn display_sleds(
                             writeln!(indent3, "{err}")?;
                         }
                     }
+                }
+            }
+
+            writeln!(indented, "reference measurements:")?;
+            let mut indent2 = IndentWriter::new("    ", &mut indented);
+            if measurements.is_empty() {
+                writeln!(indent2, "(measurement set is empty)")?;
+            } else {
+                for m in measurements {
+                    writeln!(indent2, "{}", m.display())?;
                 }
             }
         }
@@ -1099,6 +1110,7 @@ fn display_sled_config(
         zones,
         remove_mupdate_override,
         host_phase_2,
+        measurements,
     } = config;
 
     writeln!(f, "\n{label} SLED CONFIG")?;
@@ -1220,6 +1232,8 @@ fn display_sled_config(
         writeln!(indented, "ZONES: {}", zones.len())?;
         writeln!(indented, "{table}")?;
     }
+
+    writeln!(indented, "{}", measurements.display())?;
 
     Ok(())
 }

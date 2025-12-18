@@ -235,6 +235,7 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::BlueprintMeasurementsDesiredContents;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
         StepOutcome, StepStatus,
@@ -292,6 +293,7 @@ mod test {
                         remove_mupdate_override: None,
                         host_phase_2:
                             BlueprintHostPhase2DesiredSlots::current_contents(),
+                        measurements: BlueprintMeasurementsDesiredContents::default_contents(),
                     },
                 )
             })

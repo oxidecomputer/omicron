@@ -2132,6 +2132,21 @@
           "slot_b"
         ]
       },
+      "BlueprintMeasurementsDesiredContents": {
+        "type": "object",
+        "properties": {
+          "measurements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlueprintSingleMeasurement"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "measurements"
+        ]
+      },
       "BlueprintMetadata": {
         "description": "Describe high-level metadata about a blueprint",
         "type": "object",
@@ -2327,6 +2342,26 @@
           }
         ]
       },
+      "BlueprintSingleMeasurement": {
+        "type": "object",
+        "properties": {
+          "hash": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "prune": {
+            "type": "boolean"
+          },
+          "version": {
+            "$ref": "#/components/schemas/BlueprintArtifactVersion"
+          }
+        },
+        "required": [
+          "hash",
+          "prune",
+          "version"
+        ]
+      },
       "BlueprintSledConfig": {
         "description": "Information about the configuration of a sled as recorded in a blueprint.\n\nPart of [`Blueprint`].",
         "type": "object",
@@ -2369,6 +2404,9 @@
           },
           "host_phase_2": {
             "$ref": "#/components/schemas/BlueprintHostPhase2DesiredSlots"
+          },
+          "measurements": {
+            "$ref": "#/components/schemas/BlueprintMeasurementsDesiredContents"
           },
           "remove_mupdate_override": {
             "nullable": true,
@@ -2415,6 +2453,7 @@
           "datasets",
           "disks",
           "host_phase_2",
+          "measurements",
           "sled_agent_generation",
           "state",
           "subnet",

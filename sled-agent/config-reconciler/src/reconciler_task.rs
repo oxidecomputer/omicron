@@ -236,6 +236,8 @@ impl LatestReconciliationResult {
             zones: self.zones_inventory.clone(),
             boot_partitions: self.boot_partitions.clone(),
             remove_mupdate_override: self.remove_mupdate_override.clone(),
+            // This will be filled in later
+            measurements: IdOrdMap::new(),
         }
     }
 

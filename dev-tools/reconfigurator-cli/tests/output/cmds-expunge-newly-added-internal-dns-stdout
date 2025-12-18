@@ -22,6 +22,12 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
     B      current contents 
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -139,6 +145,12 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
     B      current contents 
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -251,6 +263,12 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
 
 
     physical disks:

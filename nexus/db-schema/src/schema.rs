@@ -1686,6 +1686,11 @@ table! {
         zone_manifest_mupdate_id -> Nullable<Uuid>,
         zone_manifest_boot_disk_error -> Nullable<Text>,
 
+        measurement_manifest_boot_disk_path -> Text,
+        measurement_manifest_source -> Nullable<crate::enums::InvZoneManifestSourceEnum>,
+        measurement_manifest_mupdate_id -> Nullable<Uuid>,
+        measurement_manifest_boot_disk_error -> Nullable<Text>,
+
         mupdate_override_boot_disk_path -> Text,
         mupdate_override_id -> Nullable<Uuid>,
         mupdate_override_boot_disk_error -> Nullable<Text>,
@@ -1752,6 +1757,19 @@ table! {
 }
 
 table! {
+    inv_last_reconciliation_measurements
+        (inv_collection_id, sled_id, file_name)
+    {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        file_name -> Text,
+        path -> Text,
+        error_message -> Nullable<Text>
+    }
+}
+
+table! {
     inv_last_reconciliation_orphaned_dataset
         (inv_collection_id, sled_id, pool_id, kind, zone_name)
     {
@@ -1779,6 +1797,18 @@ table! {
 }
 
 table! {
+    inv_zone_manifest_measurement (inv_collection_id, sled_id, zone_file_name) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        zone_file_name -> Text,
+        path -> Text,
+        expected_size -> Int8,
+        expected_sha256 -> Text,
+        error -> Nullable<Text>,
+    }
+}
+
+table! {
     inv_zone_manifest_zone (inv_collection_id, sled_id, zone_file_name) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
@@ -1792,6 +1822,17 @@ table! {
 
 table! {
     inv_zone_manifest_non_boot (inv_collection_id, sled_id, non_boot_zpool_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        non_boot_zpool_id -> Uuid,
+        path -> Text,
+        is_valid -> Bool,
+        message -> Text,
+    }
+}
+
+table! {
+    inv_measurement_manifest_non_boot (inv_collection_id, sled_id, non_boot_zpool_id) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
         non_boot_zpool_id -> Uuid,
@@ -1877,6 +1918,7 @@ table! {
         remove_mupdate_override -> Nullable<Uuid>,
         host_phase_2_desired_slot_a -> Nullable<Text>,
         host_phase_2_desired_slot_b -> Nullable<Text>,
+        measurements -> Nullable<Array<Text>>,
     }
 }
 
@@ -2096,6 +2138,19 @@ table! {
         compression -> Text,
     }
 }
+
+table! {
+    bp_single_measurements (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+
+        image_artifact_sha256 -> Nullable<Text>,
+        prune -> Bool,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(bp_single_measurements, tuf_artifact);
 
 table! {
     bp_omicron_zone (blueprint_id, id) {
@@ -2489,6 +2544,7 @@ allow_tables_to_appear_in_same_query!(
     affinity_group_instance_membership,
     bp_omicron_zone,
     bp_target,
+    bp_single_measurements,
     rendezvous_debug_dataset,
     crucible_dataset,
     disk,

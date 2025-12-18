@@ -43,6 +43,7 @@ use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
+use sled_agent_types::inventory::OmicronMeasurements;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
@@ -1301,6 +1302,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     zones: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: OmicronMeasurements::measurements_defaults(),
                 };
 
                 // The only sled-agent fields that matter for the purposes of
@@ -1350,6 +1352,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                     datasets: BTreeMap::new(),
                                     orphaned_datasets: IdOrdMap::new(),
                                     zones: BTreeMap::new(),
+                                    measurements: IdOrdMap::new(),
                                     boot_partitions,
                                     remove_mupdate_override: None,
                                 },

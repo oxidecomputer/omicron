@@ -110,8 +110,9 @@ use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
 use sled_agent_types::inventory::{
-    ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
+    ConfigReconcilerInventoryResult, HostPhase2DesiredSlots,
+    OmicronMeasurements, OmicronSledConfig, OmicronZoneConfig, OmicronZoneType,
+    OmicronZonesConfig,
 };
 use sled_agent_types::rack_init::{
     BootstrapAddressDiscovery, RackInitializeRequest as Config,
@@ -600,6 +601,7 @@ impl ServiceInner {
                     zones: zones_config.zones.into_iter().collect(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: OmicronMeasurements::measurements_defaults(),
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;

@@ -6,17 +6,19 @@
 
 use super::blueprint_display::{
     BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
-    BpGeneration, BpHostPhase2TableSchema, BpOmicronZonesTableSchema,
-    BpPendingMgsUpdates, BpPhysicalDisksTableSchema, BpTable, BpTableColumn,
-    BpTableData, BpTableRow, KvList, KvPair, constants::*,
-    linear_table_modified, linear_table_unchanged,
+    BpGeneration, BpHostPhase2TableSchema, BpMeasurementsTableSchema,
+    BpOmicronZonesTableSchema, BpPendingMgsUpdates, BpPhysicalDisksTableSchema,
+    BpTable, BpTableColumn, BpTableData, BpTableRow, KvList, KvPair,
+    constants::*, linear_table_modified, linear_table_unchanged,
 };
 use super::{
     BlueprintDatasetConfigDiff, BlueprintDatasetDisposition, BlueprintDiff,
     BlueprintHostPhase2DesiredSlots, BlueprintHostPhase2DesiredSlotsDiff,
-    BlueprintHostPhase2TableData, BlueprintMetadata,
-    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskConfigDiff,
-    BlueprintZoneConfigDiff, BlueprintZoneImageSource, ClickhouseClusterConfig,
+    BlueprintHostPhase2TableData, BlueprintMeasurementsDesiredContents,
+    BlueprintMeasurementsDesiredContentsDiff, BlueprintMeasurementsTableData,
+    BlueprintMetadata, BlueprintPhysicalDiskConfig,
+    BlueprintPhysicalDiskConfigDiff, BlueprintZoneConfigDiff,
+    BlueprintZoneImageSource, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade, PendingMgsUpdatesDiff, unwrap_or_none,
     zone_sort_key,
 };
@@ -219,6 +221,30 @@ impl<'a> BlueprintDiffSummary<'a> {
             .sleds
             .modified_values_diff()
             .fold(0, |acc, c| acc + c.datasets.modified().count())
+    }
+
+    pub fn total_measurements_added(&self) -> usize {
+        self.diff
+            .sleds
+            .added
+            .values()
+            .fold(0, |acc, c| acc + c.measurements.measurements.len())
+            + self
+                .diff
+                .sleds
+                .modified_values_diff()
+                .fold(0, |acc, c| acc + c.measurements.measurements.added.len())
+    }
+
+    pub fn total_measurements_removed(&self) -> usize {
+        self.diff
+            .sleds
+            .removed
+            .values()
+            .fold(0, |acc, c| acc + c.measurements.measurements.len())
+            + self.diff.sleds.modified_values_diff().fold(0, |acc, c| {
+                acc + c.measurements.measurements.removed.len()
+            })
     }
 
     /// Iterate over all added zones on a sled
@@ -1584,6 +1610,65 @@ impl ClickhouseClusterConfigDiffTables {
     }
 }
 
+/// Differences in measurements
+#[derive(Debug)]
+pub struct BpDiffMeasurements<'a> {
+    pub added: BTreeMap<SledUuid, &'a BlueprintMeasurementsDesiredContents>,
+    pub common:
+        BTreeMap<SledUuid, BlueprintMeasurementsDesiredContentsDiff<'a>>,
+    pub removed: BTreeMap<SledUuid, &'a BlueprintMeasurementsDesiredContents>,
+}
+
+impl<'a> BpDiffMeasurements<'a> {
+    /// Convert from our diff summary to our display compatibility layer
+    pub fn from_diff_summary(summary: &BlueprintDiffSummary<'a>) -> Self {
+        let sleds = &summary.diff.sleds;
+        Self {
+            added: sleds
+                .added
+                .iter()
+                .map(|(sled_id, config)| (**sled_id, &config.measurements))
+                .collect(),
+            common: sleds
+                .common
+                .iter()
+                .map(|(sled_id, config)| {
+                    (**sled_id, config.diff_pair().measurements)
+                })
+                .collect(),
+            removed: sleds
+                .removed
+                .iter()
+                .map(|(sled_id, config)| (**sled_id, &config.measurements))
+                .collect(),
+        }
+    }
+
+    pub fn to_bp_sled_subtable(&self, sled_id: &SledUuid) -> Option<BpTable> {
+        let mut rows = vec![];
+        if let Some(diff) = self.common.get(sled_id) {
+            rows.extend(BlueprintMeasurementsTableData::diff_rows(diff));
+        }
+        if let Some(desired) = self.removed.get(sled_id) {
+            rows.extend(
+                BlueprintMeasurementsTableData::new(desired)
+                    .rows(BpDiffState::Removed),
+            );
+        }
+        if let Some(desired) = self.added.get(sled_id) {
+            rows.extend(
+                BlueprintMeasurementsTableData::new(desired)
+                    .rows(BpDiffState::Added),
+            );
+        }
+        if rows.is_empty() {
+            None
+        } else {
+            Some(BpTable::new(BpMeasurementsTableSchema {}, None, rows))
+        }
+    }
+}
+
 /// Differences in host phase 2 contents
 #[derive(Debug)]
 pub struct BpDiffHostPhase2<'a> {
@@ -1753,6 +1838,7 @@ pub struct BlueprintDiffDisplay<'diff, 'b> {
     disks: BpDiffPhysicalDisks<'diff>,
     datasets: BpDiffDatasets,
     host_phase_2: BpDiffHostPhase2<'diff>,
+    measurements: BpDiffMeasurements<'diff>,
     pending_mgs_updates: BpDiffPendingMgsUpdates<'diff, 'b>,
 }
 
@@ -1765,6 +1851,7 @@ impl<'diff, 'b> BlueprintDiffDisplay<'diff, 'b> {
         let disks = BpDiffPhysicalDisks::from_diff_summary(summary);
         let datasets = BpDiffDatasets::from_diff_summary(summary);
         let host_phase_2 = BpDiffHostPhase2::from_diff_summary(summary);
+        let measurements = BpDiffMeasurements::from_diff_summary(summary);
         let pending_mgs_updates =
             BpDiffPendingMgsUpdates::from_diff_summary(summary);
         Self {
@@ -1775,6 +1862,7 @@ impl<'diff, 'b> BlueprintDiffDisplay<'diff, 'b> {
             disks,
             datasets,
             host_phase_2,
+            measurements,
             pending_mgs_updates,
         }
     }
@@ -1918,6 +2006,11 @@ impl<'diff, 'b> BlueprintDiffDisplay<'diff, 'b> {
         f: &mut fmt::Formatter<'_>,
         sled_id: &SledUuid,
     ) -> fmt::Result {
+        // Write the measurements if needed
+        if let Some(table) = self.measurements.to_bp_sled_subtable(sled_id) {
+            writeln!(f, "{table}\n")?;
+        }
+
         // Write the host phase 2 table if needed
         if let Some(table) = self.host_phase_2.to_bp_sled_subtable(sled_id) {
             writeln!(f, "{table}\n")?;

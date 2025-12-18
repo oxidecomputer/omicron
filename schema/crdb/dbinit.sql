@@ -3914,6 +3914,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     --
     -- The path to the boot disk image file.
     zone_manifest_boot_disk_path TEXT NOT NULL,
+
     -- The source of the zone manifest on the boot disk: from installinator or
     -- sled-agent (synthetic). NULL means there is an error reading the zone manifest.
     zone_manifest_source omicron.public.inv_zone_manifest_source,
@@ -3942,6 +3943,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- The sled's CPU family. This is also duplicated with the `sled` table,
     -- similar to `usable_hardware_threads` and friends above.
     cpu_family omicron.public.sled_cpu_family NOT NULL,
+
+    -- The path to the boot disk image file.
+    measurement_manifest_boot_disk_path TEXT NOT NULL,
+    -- The source of the zone manifest on the boot disk: from installinator or
+    -- sled-agent (synthetic). NULL means there is an error reading the zone manifest.
+    measurement_manifest_source omicron.public.inv_zone_manifest_source,
+    -- The mupdate ID that created the zone manifest if this is from installinator. If
+    -- this is NULL, then either the zone manifest is synthetic or there was an
+    -- error reading the zone manifest.
+    measurement_manifest_mupdate_id UUID,
+    -- Message describing the status of the zone manifest on the boot disk. If
+    -- this is NULL, then the zone manifest was successfully read, and the
+    -- inv_zone_manifest_zone table has entries corresponding to the zone
+    -- manifest.
+    measurement_manifest_boot_disk_error TEXT,
+
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
@@ -4227,9 +4244,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- NULL is translated to `HostPhase2DesiredContents::CurrentContents`
     host_phase_2_desired_slot_a STRING(64),
     host_phase_2_desired_slot_b STRING(64),
+    
+    -- measurement contents
+    measurements STRING(64)[],
 
     PRIMARY KEY (inv_collection_id, id)
 );
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_measurements (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    file_name TEXT,
+    path TEXT,
+    error_message TEXT,
+    PRIMARY KEY (inv_collection_id, sled_id, file_name)
+);
+
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_disk_result (
     -- where this observation came from
@@ -4323,6 +4353,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_zone_result (
     PRIMARY KEY (inv_collection_id, sled_id, zone_id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_measurement (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    zone_file_name TEXT NOT NULL,
+    path TEXT NOT NULL,
+    expected_size INT8 NOT NULL,
+    expected_sha256 STRING(64) NOT NULL,
+    error TEXT ,
+    PRIMARY KEY (inv_collection_id, sled_id, zone_file_name)
+);
+
+
 -- A table describing a single zone within a zone manifest collected by inventory.
 CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_zone (
     -- where this observation came from
@@ -4355,6 +4397,32 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_zone (
 -- A table describing status for a single zone manifest on a non-boot disk
 -- collected by inventory.
 CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_non_boot (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique ID for this non-boot disk
+    non_boot_zpool_id UUID NOT NULL,
+
+    -- The full path to the zone manifest.
+    path TEXT NOT NULL,
+
+    -- Whether the non-boot disk is in a valid state.
+    is_valid BOOLEAN NOT NULL,
+
+    -- A message attached to this disk.
+    message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, non_boot_zpool_id)
+);
+
+-- A table describing status for a single measurement manifest on a non-boot disk
+-- collected by inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_measurement_manifest_non_boot (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
@@ -4796,6 +4864,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     subnet INET NOT NULL,
 
     PRIMARY KEY (blueprint_id, sled_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.bp_single_measurements (
+    blueprint_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+
+    image_artifact_sha256 STRING(64),
+    prune BOOLEAN,
+    PRIMARY KEY (blueprint_id, id)
 );
 
 -- description of omicron physical disks specified in a blueprint.
@@ -7458,7 +7536,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '213.0.0', NULL)
+    (TRUE, NOW(), NOW(), '214.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
