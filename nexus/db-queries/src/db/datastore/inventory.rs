@@ -3738,9 +3738,9 @@ impl DataStore {
             // TODO-performance This ought to be paginated like the other
             // queries in this method, but
             //
-            // (a) this table's primary key is 5 columns, and we don't have
+            // (a) this table's primary key is 3 columns, and we don't have
             //     `paginated` support that wide
-            // (b) we expect a very small number of orphaned datasets, generally
+            // (b) we expect a very small number of reconciled measurements
             //
             // so we just do the lazy thing and load all the rows at once.
             let rows = dsl::inv_last_reconciliation_measurements
