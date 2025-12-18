@@ -141,11 +141,24 @@ fn slot_to_pci_bdf(
 ) -> Result<PciPath, Error> {
     // Use the mappings Propolis used when it was responsible for converting
     // slot numbers to device numbers: NICs get device numbers 8 through 15,
-    // disks get 16 through 23, and the cloud-init disk is device 24.
+    // disks get 16 through 23, and the cloud-init disk is device 24:
+    //
+    // 0               1
+    // 0123456789ABCDEF0123456789ABCDEF
+    //         NNNNNNNNDDDDDDDDC DDDD
+    //                           ^^^^
+    //
+    // The additional disks at the end (marked with ^) were added to support up
+    // to 12 disks.  Adding to the end of the range won't break existing
+    // instances: if disks were added to the beginning of the range, then guests
+    // (like Linux) would number the devices in a different order.
     let device = match kind {
-        PciDeviceKind::Disk if logical_slot < 8 => logical_slot + 0x10,
         PciDeviceKind::Nic if logical_slot < 8 => logical_slot + 0x8,
+        PciDeviceKind::Disk if logical_slot < 8 => logical_slot + 0x10,
         PciDeviceKind::CloudInitDisk if logical_slot == 0 => 0x18,
+        PciDeviceKind::Disk if logical_slot >= 8 && logical_slot < 12 => {
+            (logical_slot - 8) + 0x1A
+        }
         _ => {
             return Err(Error::invalid_value(
                 format!("{kind} with slot {logical_slot}"),

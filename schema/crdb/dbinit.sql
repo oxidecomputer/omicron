@@ -1506,7 +1506,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk (
      */
     attach_instance_id UUID,
     state_generation INT NOT NULL,
-    slot INT2 CHECK (slot >= 0 AND slot < 8),
+    slot INT2 CHECK (slot >= 0 AND slot < 12),
     time_state_updated TIMESTAMPTZ NOT NULL,
 
     /* Disk configuration */
@@ -7458,7 +7458,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '213.0.0', NULL)
+    (TRUE, NOW(), NOW(), '214.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
