@@ -13,6 +13,7 @@ use serde::Serialize;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types_versions::v4;
 use sled_agent_types_versions::v10;
+use sled_agent_types_versions::v11;
 use slog::Logger;
 use slog::info;
 use slog::warn;
@@ -22,14 +23,12 @@ use std::error::Error as StdError;
 /// Trait describing an ordered sequence of `OmicronSledConfig` versions, each
 /// of which can be converted from its previous version.
 ///
-/// When adding a new [`OmicronSledConfig`] version, do the following:
-///
-/// 1. Implement [`VersionConversionChain`] for your new version. Its associated
-///    `Previous` type should point to the prior version (what was the current
-///    version before your change).
-/// 2. Update the [`CurrentMinusOneSledConfigVersion`] type alias; this points
-///    to the first version that [`try_convert_old_ledgered_config_versions`]
-///    will attempt to read.
+/// When adding a new [`OmicronSledConfig`] version, implement
+/// [`VersionConversionChain`] for your new version. Use its fully-versioned
+/// name (e.g., `vN::inventory::OmicronSledConfig`), not the
+/// [`OmicronSledConfig`] alias from `latest`. The `Previous` associated type
+/// should point to the prior version (what was the current version before your
+/// change).
 trait VersionConversionChain: Ledgerable {
     /// A description of the version. This shows up in logs.
     const DESCRIPTION: &str;
@@ -45,22 +44,23 @@ trait VersionConversionChain: Ledgerable {
     type Previous: VersionConversionChain + TryInto<Self, Error: StdError>;
 }
 
-type CurrentMinusOneSledConfigVersion = v10::inventory::OmicronSledConfig;
+impl VersionConversionChain for v11::inventory::OmicronSledConfig {
+    const DESCRIPTION: &str = "v11::inventory::OmicronSledConfig";
+    type Previous = v10::inventory::OmicronSledConfig;
+}
 
 impl VersionConversionChain for v10::inventory::OmicronSledConfig {
     const DESCRIPTION: &str = "v10::inventory::OmicronSledConfig";
-
     type Previous = OmicronSledConfigLocal;
 }
 
 impl VersionConversionChain for OmicronSledConfigLocal {
     const DESCRIPTION: &str = "OmicronSledConfigLocal";
-
     type Previous = VersionConversionChainTerminal;
 }
 
-/// Convert from an earlier version of the sled configuration to the current, if
-/// possible.
+/// Read the ledgered [`OmicronSledConfig`], converting from older versions if
+/// needed.
 ///
 /// # Panics
 ///
@@ -74,31 +74,38 @@ impl VersionConversionChain for OmicronSledConfigLocal {
 /// we have no way to proceed. Returning `None` is not correct, since that would
 /// incorrectly indicate that we have no config at all. We _must_ panic and rely
 /// on support correcting this (believed-to-be-impossible) situation.
-pub(super) async fn try_convert_old_ledgered_config_versions(
+pub(super) async fn read_ledgered_sled_config(
     log: &Logger,
-    datasets: Vec<Utf8PathBuf>,
+    paths: Vec<Utf8PathBuf>,
 ) -> Option<OmicronSledConfig> {
+    // Attempt to read the ledger as the current version; if this succeeds,
+    // we're done.
+    if let Some(config) = Ledger::new(log, paths.clone()).await {
+        info!(log, "Ledger of sled config exists");
+        return Some(config.into_inner());
+    }
+
     // Try to read the config as the previous version; if we have an older
     // version on disk, this will recurse until we get to it, but then convert
-    // it up throw `CurrentMinusOneSledConfigVersion` before returning.
-    let prev_version = try_convert_old_ledgered_config_versions_chain::<
-        CurrentMinusOneSledConfigVersion,
-    >(log, datasets.clone())
+    // it up through our previous version before returning.
+    let prev_version = try_ledgered_config_versions_chain::<
+        <OmicronSledConfig as VersionConversionChain>::Previous,
+    >(log, paths.clone())
     .await?;
 
     let current_version = prev_version.try_into().unwrap_or_else(|e| {
         panic!(
             "failed to convert {} to the current version: {}",
-            CurrentMinusOneSledConfigVersion::DESCRIPTION,
+            <OmicronSledConfig as VersionConversionChain>::DESCRIPTION,
             InlineErrorChain::new(&e)
         );
     });
 
-    Some(write_converted_ledger(log, datasets, current_version).await)
+    Some(write_converted_ledger(log, paths, current_version).await)
 }
 
 /// Reading old ledgers from disk in the face of multiple version changes is
-/// tricky. Imagine we have this sequence in the versioning change:
+/// tricky. Imagine we have this sequence in the versioning chain:
 ///
 /// * v4 (the oldest supported version)
 /// * v10
@@ -129,9 +136,9 @@ pub(super) async fn try_convert_old_ledgered_config_versions(
 /// (since we forbid updates from skipping releases). For extra paranoia, we can
 /// keep versions covering the oldest deployed rack around.
 #[async_recursion::async_recursion]
-async fn try_convert_old_ledgered_config_versions_chain<T>(
+async fn try_ledgered_config_versions_chain<T>(
     log: &Logger,
-    datasets: Vec<Utf8PathBuf>,
+    paths: Vec<Utf8PathBuf>,
 ) -> Option<T>
 where
     T: VersionConversionChain,
@@ -140,28 +147,31 @@ where
         return None;
     }
 
-    if let Some(config) = Ledger::<T>::new(log, datasets.clone()).await {
+    if let Some(config) = Ledger::<T>::new(log, paths.clone()).await {
+        info!(
+            log,
+            "successfully read ledgered config as version {}",
+            T::DESCRIPTION
+        );
         return Some(config.into_inner());
     }
 
-    let old_config = try_convert_old_ledgered_config_versions_chain::<
-        T::Previous,
-    >(log, datasets)
-    .await?;
-
-    info!(
-        log,
-        "Successfully read ledgered config as old version {}; \
-         will now convert to latest version",
-        T::DESCRIPTION,
-    );
+    let old_config =
+        try_ledgered_config_versions_chain::<T::Previous>(log, paths).await?;
 
     match old_config.try_into() {
-        Ok(config) => Some(config),
+        Ok(config) => {
+            info!(
+                log,
+                "converted config read from ledger to version {}",
+                T::DESCRIPTION
+            );
+            Some(config)
+        }
         Err(err) => {
             panic!(
                 "failed to convert legered config \
-                 of version {} to version {}: {}",
+                 from version {} to version {}: {}",
                 T::Previous::DESCRIPTION,
                 T::DESCRIPTION,
                 InlineErrorChain::new(&err),

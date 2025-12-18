@@ -29,7 +29,7 @@ use tufaceous_artifact::ArtifactHash;
 
 use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
-use crate::ledger::legacy_configs::try_convert_old_ledgered_config_versions;
+use legacy_configs::read_ledgered_sled_config;
 
 mod legacy_configs;
 
@@ -638,29 +638,16 @@ async fn load_sled_config(
         log, "Attempting to load sled config from ledger";
         "paths" => ?paths,
     );
-    if let Some(config) = Ledger::new(log, paths.clone()).await {
-        info!(log, "Ledger of sled config exists");
-        return CurrentSledConfig::Ledgered(Box::new(config.into_inner()));
+    match read_ledgered_sled_config(log, paths).await {
+        Some(config) => CurrentSledConfig::Ledgered(Box::new(config)),
+        None => {
+            // We have no ledger; we must be waiting for RSS (if we're
+            // pre-rack-setup) or for Nexus to send us a config (if we're a sled
+            // being added to an existing rack).
+            info!(log, "No sled config ledger exists");
+            CurrentSledConfig::WaitingForInitialConfig
+        }
     }
-
-    // If we can't successfully read a ledgered config, see if we can convert
-    // from one of the previous versions of the format.
-    if let Some(config) =
-        try_convert_old_ledgered_config_versions(log, paths).await
-    {
-        info!(
-            log,
-            "Ledger of sled config exists, but it was formatted as a previous \
-             version. It has been rewritten to the current version",
-        );
-        return CurrentSledConfig::Ledgered(Box::new(config));
-    }
-
-    // We have no ledger; we must be waiting for RSS (if we're pre-rack-setup)
-    // or for Nexus to send us a config (if we're a sled being added to an
-    // existing rack).
-    info!(log, "No sled config ledger exists");
-    CurrentSledConfig::WaitingForInitialConfig
 }
 
 // `LedgerTask` should not exit in production, but may exit during tests
