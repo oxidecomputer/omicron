@@ -8,7 +8,8 @@
 //! the bifurcated design from [RFD 488](https://rfd.shared.oxide.computer/rfd/488):
 //!
 //! - External groups: External-facing, allocated from IP pools
-//! - Underlay groups: System-generated admin-scoped IPv6 multicast groups
+//! - Underlay groups: System-generated admin-local (scoped) IPv6 multicast
+//!   groups within [`UNDERLAY_MULTICAST_SUBNET`] (ff04::/64)
 //!
 //! ## Typed UUID Usage
 //!
@@ -18,7 +19,24 @@
 //!   - Type safety at API boundaries
 //!   - Clear documentation of expected ID types
 //!   - Preventing UUID type confusion
+//!
+//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
+
+use crate::db::model::UnderlayMulticastGroup;
 
 pub mod groups;
 pub mod members;
 pub mod ops;
+
+pub use groups::ExternalMulticastGroupWithSources;
+
+/// Result of attempting to ensure an underlay multicast group exists.
+#[derive(Debug)]
+pub enum EnsureUnderlayResult {
+    /// Successfully created a new underlay group.
+    Created(UnderlayMulticastGroup),
+    /// Group already exists for this external group (idempotent).
+    Existing(UnderlayMulticastGroup),
+    /// Underlay IP collision with different external group - retry with next salt.
+    Collision,
+}

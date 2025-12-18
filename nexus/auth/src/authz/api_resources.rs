@@ -12,7 +12,7 @@
 //! accept these `authz` types.
 //!
 //! The `authz` types can be passed to
-//! [`crate::context::OpContext::authorize()`] to do an authorization check --
+//! [`OpContext::authorize()`] to do an authorization check --
 //! is the caller allowed to perform some action on the resource?  This is the
 //! primary way of doing authz checks in Nexus.
 //!
@@ -153,7 +153,7 @@ where
 /// Fleets.
 ///
 /// This object is used for authorization checks on a Fleet by passing it as the
-/// `resource` argument to [`crate::context::OpContext::authorize()`].  You
+/// `resource` argument to [`OpContext::authorize()`].  You
 /// don't construct a `Fleet` yourself -- use the global [`FLEET`].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Fleet;
@@ -475,18 +475,16 @@ impl AuthorizedResource for IpPoolList {
 /// collection.
 ///
 /// **Authorization Model:**
-/// - Multicast groups are fleet-wide resources (similar to IP pools).
-/// - Any authenticated user within a silo in the fleet can create, list, read,
-///   and modify groups. This includes project collaborators, silo collaborators,
-///   and silo admins.
-/// - Cross-silo multicast communication is enabled by fleet-wide access.
+/// - Multicast groups are fleet-scoped resources.
+/// - Groups are created when the first instance joins and deleted when the last
+///   member leaves (implicit lifecycle).
+/// - **List**: Any authenticated user in the fleet (for discovery).
 ///
 /// The fleet-level collection endpoint (`/v1/multicast-groups`) allows:
-/// - Any authenticated user within the fleet's silos to create and list groups.
-/// - Instances from different projects and silos can join the same multicast groups.
+/// - Fleet-wide listing for all authenticated users (discovery).
+/// - Instances from different projects and silos can join the same groups.
 ///
-/// See `omicron.polar` for the detailed policy rules that grant fleet-wide
-/// access to authenticated silo users for multicast group operations.
+/// See `omicron.polar` for the detailed policy rules.
 #[derive(Clone, Copy, Debug)]
 pub struct MulticastGroupList;
 
@@ -1393,35 +1391,21 @@ authz_resource! {
 
 // MulticastGroup Authorization
 //
-// MulticastGroups are **fleet-scoped resources** (parent = "Fleet"), similar to
-// IP pools, to enable efficient cross-project and cross-silo multicast
-// communication.
+// MulticastGroups are **fleet-scoped resources** with an implicit lifecycle:
+// created when the first instance joins and deleted when the last member leaves.
 //
 // Authorization rules:
-// - Creating/modifying groups: Any authenticated user within a silo in the fleet.
-//   This includes project collaborators, silo collaborators, and silo admins.
-// - Listing groups: Any authenticated user within a silo in the fleet
-// - Viewing individual groups: Any authenticated user within a silo in the fleet
-// - Attaching instances to groups: only requires Instance::Modify permission
-//   (users can attach their own instances to any fleet-scoped group)
+// - List/Read: Any authenticated user in their fleet
+// - Attach/detach: Instance::Modify permission on the instance being attached
 //
-// Fleet::Admin role can also perform all operations via the parent Fleet relation.
-//
-// See omicron.polar for the special `has_permission` rules that grant create/modify/
-// list/read access to authenticated silo users (including project collaborators),
-// enabling cross-project and cross-silo multicast communication without requiring
-// Fleet::Admin or Fleet::Viewer roles.
-//
-// Member management: `MulticastGroup` member attachments/detachments (instances
-// joining/leaving groups) use the existing `MulticastGroup` and `Instance`
-// authz resources rather than creating a separate `MulticastGroupMember` authz
-// resource.
+// See omicron.polar for the custom authorization rules.
+
 authz_resource! {
     name = "MulticastGroup",
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = FleetChild,
+    polar_snippet = Custom,
 }
 
 // Customer network integration resources nested below "Fleet"

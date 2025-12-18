@@ -7118,9 +7118,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     ip_pool_range_id UUID NOT NULL,
     multicast_ip INET NOT NULL,
 
-    /* Source-Specific Multicast (SSM) support */
-    source_ips INET[] DEFAULT ARRAY[]::INET[],
-
     /* Multicast VLAN (MVLAN) for egress to upstream networks */
     /* Tags packets leaving the rack to traverse VLAN-segmented upstream networks */
     /* Internal rack traffic uses VNI-based underlay forwarding */
@@ -7140,8 +7137,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
     version_removed INT8,
 
+    /* Salt for underlay IP collision avoidance (XORed into mapping) */
+    /* Note: Column added via migration, must be at end for schema compatibility */
+    underlay_salt INT2,
+
     /* Constraints */
-    -- External groups: IPv4 multicast or non-admin-scoped IPv6
+    -- External groups: IPv4 multicast or non-admin-local IPv6
     CONSTRAINT external_multicast_ip_valid CHECK (
         (family(multicast_ip) = 4 AND multicast_ip << '224.0.0.0/4') OR
         (family(multicast_ip) = 6 AND multicast_ip << 'ff00::/8' AND
@@ -7176,7 +7177,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
 );
 
 /*
- * Underlay multicast groups (admin-scoped IPv6 for VPC internal forwarding)
+ * Underlay multicast groups (admin-local IPv6 for VPC internal forwarding)
  */
 CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     /* Identity */
@@ -7185,7 +7186,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    /* Admin-scoped IPv6 multicast address (NAT target) */
+    /* Admin-local IPv6 multicast address (NAT target) */
     multicast_ip INET NOT NULL,
 
     /* DPD tag to couple external/underlay state for this group */
@@ -7226,7 +7227,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
 
     /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
-    version_removed INT8
+    version_removed INT8,
+
+    /* Denormalized multicast IP from the group (for API convenience) */
+    /* Note: Column added via migration, must be at end for schema compatibility */
+    multicast_ip INET NOT NULL,
+
+    /* Source IPs for this member's multicast subscription */
+    /* Each member can subscribe to different sources */
+    /* Empty array means any source is allowed (ASM) */
+    /* Non-empty array enables source filtering (IGMPv3/MLDv2) */
+    /* The group's source_ips in API views is the union of all active members */
+    source_ips INET[] DEFAULT ARRAY[]::INET[]
 );
 
 /* External Multicast Group Indexes */
@@ -7272,23 +7284,26 @@ CREATE INDEX IF NOT EXISTS external_multicast_by_underlay ON omicron.public.mult
     underlay_group_id
 ) WHERE time_deleted IS NULL AND underlay_group_id IS NOT NULL;
 
--- State-based filtering for RPW reconciler
--- Supports: SELECT ... WHERE state = ? AND time_deleted IS NULL
-CREATE INDEX IF NOT EXISTS multicast_group_by_state ON omicron.public.multicast_group (
-    state
-) WHERE time_deleted IS NULL;
-
--- RPW reconciler composite queries (state + pool filtering)
--- Supports: SELECT ... WHERE state = ? AND ip_pool_id = ? AND time_deleted IS NULL
-CREATE INDEX IF NOT EXISTS multicast_group_reconciler_query ON omicron.public.multicast_group (
-    state,
-    ip_pool_id
-) WHERE time_deleted IS NULL;
-
 -- Fleet-wide unique name constraint (groups are fleet-scoped like IP pools)
 -- Supports: SELECT ... WHERE name = ? AND time_deleted IS NULL
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_multicast_group_by_name ON omicron.public.multicast_group (
     name
+) WHERE time_deleted IS NULL;
+
+-- RPW cleanup of soft-deleted groups
+-- Supports: SELECT ... WHERE state = 'deleting' (includes rows with time_deleted set)
+-- Without WHERE clause to allow queries on Deleting state regardless of time_deleted
+CREATE INDEX IF NOT EXISTS multicast_group_cleanup ON omicron.public.multicast_group (
+    state,
+    id
+);
+
+-- RPW queries for active groups (Creating, Active states)
+-- Supports: SELECT ... WHERE state = ? AND time_deleted IS NULL ORDER BY id
+-- Optimizes the common case of querying non-deleted groups by state with pagination
+CREATE INDEX IF NOT EXISTS multicast_group_active ON omicron.public.multicast_group (
+    state,
+    id
 ) WHERE time_deleted IS NULL;
 
 /* Underlay Multicast Group Indexes */
@@ -7313,7 +7328,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS underlay_multicast_group_version_removed ON om
     time_deleted
 );
 
--- Admin-scoped IPv6 address uniqueness
+-- Admin-local IPv6 address uniqueness
 -- Supports: SELECT ... WHERE multicast_ip = ? AND time_deleted IS NULL
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_underlay_multicast_by_ip ON omicron.public.underlay_multicast_group (
     multicast_ip
@@ -7458,7 +7473,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '213.0.0', NULL)
+    (TRUE, NOW(), NOW(), '214.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
