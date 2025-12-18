@@ -22,12 +22,10 @@ use std::error::Error as StdError;
 /// Trait describing an ordered sequence of `OmicronSledConfig` versions, each
 /// of which can be converted from its previous version.
 ///
-/// When adding a new [`OmicronSledConfig`] version, implement
-/// [`VersionConversionChain`] for your new version. Use its fully-versioned
-/// name (e.g., `vN::inventory::OmicronSledConfig`), not the
-/// [`OmicronSledConfig`] alias from `latest`. The `Previous` associated type
-/// should point to the prior version (what was the current version before your
-/// change).
+/// When adding a new [`OmicronSledConfig`] version, add your new version to the
+/// `version_conversion_chain!()` invocation below. Use the fully-versioned name
+/// (e.g., `vN::inventory::OmicronSledConfig`), not the [`OmicronSledConfig`]
+/// alias from `latest`.
 ///
 /// Also update the unit tests at the bottom of this file to cover your new
 /// version as well.
@@ -37,8 +35,8 @@ trait VersionConversionChain: Ledgerable {
 
     /// Special terminal state; this must be `false` for all implementors except
     /// [`VersionConversionChainTerminal`].
-    /// [`try_convert_old_ledgered_config_versions_chain()] uses this to know
-    /// when to stop recursing.
+    // `try_ledgered_config_versions_chain() uses this to know when to stop
+    // recursing.
     const IS_TERMINAL: bool = false;
 
     /// The previous [`OmicronSledConfig`] version, which must be convertible
@@ -46,20 +44,31 @@ trait VersionConversionChain: Ledgerable {
     type Previous: VersionConversionChain + TryInto<Self, Error: StdError>;
 }
 
-impl VersionConversionChain for v11::inventory::OmicronSledConfig {
-    const DESCRIPTION: &str = "v11::inventory::OmicronSledConfig";
-    type Previous = v10::inventory::OmicronSledConfig;
+macro_rules! version_conversion_chain {
+    // base case
+    ($current:path, $previous:path) => {
+        impl VersionConversionChain for $current {
+            const DESCRIPTION: &str = stringify!($current);
+            type Previous = $previous;
+        }
+    };
+
+    // recursive case
+    ($current:path, $previous:path, $($rest:path),+ $(,)?) => {
+        version_conversion_chain!($current, $previous);
+        version_conversion_chain!($previous, $($rest),+);
+    };
 }
 
-impl VersionConversionChain for v10::inventory::OmicronSledConfig {
-    const DESCRIPTION: &str = "v10::inventory::OmicronSledConfig";
-    type Previous = v4::inventory::OmicronSledConfig;
-}
-
-impl VersionConversionChain for v4::inventory::OmicronSledConfig {
-    const DESCRIPTION: &str = "v4::inventory::OmicronSledConfig";
-    type Previous = VersionConversionChainTerminal;
-}
+// This list is ordered from newest to oldest; this is the order in which we'll
+// attempt to parse the ledgered config. Add new versions to the top of the
+// list.
+version_conversion_chain!(
+    v11::inventory::OmicronSledConfig,
+    v10::inventory::OmicronSledConfig,
+    v4::inventory::OmicronSledConfig,
+    VersionConversionChainTerminal,
+);
 
 /// Read the ledgered [`OmicronSledConfig`], converting from older versions if
 /// needed.
