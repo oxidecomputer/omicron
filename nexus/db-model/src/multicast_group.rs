@@ -13,7 +13,7 @@
 //! Customer-facing groups allocated from IP pools:
 //! - Use IPv4/IPv6 addresses from customer IP pools
 //! - Exposed via customer APIs for application multicast traffic
-//! - Support Source-Specific Multicast (SSM) with configurable source IPs
+//! - Support source filtering via per-member source IPs (IGMPv3/MLDv2)
 //! - Follow the Resource trait pattern for user-facing identity management
 //! - **Fleet-scoped** (not project-scoped) to enable cross-project multicast
 //! - All use `DEFAULT_MULTICAST_VNI` (77) for consistent fleet-scoped behavior
@@ -45,8 +45,9 @@
 //!
 //! ## Underlay Multicast Groups
 //!
-//! System-generated admin-scoped IPv6 multicast groups for internal forwarding:
+//! System-generated admin-local IPv6 multicast groups for internal forwarding:
 //! - Use IPv6 admin-local multicast scope (ff04::/16) per [RFC 7346]
+//!   with addresses allocated within [`UNDERLAY_MULTICAST_SUBNET`] (ff04::/64)
 //! - Paired 1:1 with external groups for NAT-based forwarding
 //! - Handle rack-internal multicast traffic between switches
 //! - Use individual field pattern for system resources
@@ -74,6 +75,8 @@
 //!
 //! The RPW ensures eventual consistency between database state and dataplane
 //! configuration (applied via DPD to switches).
+//!
+//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
 
 use std::net::IpAddr;
 
@@ -89,12 +92,11 @@ use nexus_db_schema::schema::{
     multicast_group, multicast_group_member, underlay_multicast_group,
 };
 use nexus_types::external_api::views;
-use nexus_types::identity::Resource as IdentityResource;
 use omicron_common::api::external::{self, IdentityMetadata};
 use omicron_uuid_kinds::SledKind;
 
 use crate::typed_uuid::DbTypedUuid;
-use crate::{Generation, Name, Vni, impl_enum_type};
+use crate::{Generation, Name, SqlU8, Vni, impl_enum_type};
 
 impl_enum_type!(
     MulticastGroupStateEnum:
@@ -176,22 +178,27 @@ pub struct ExternalMulticastGroup {
     pub vni: Vni,
     /// Primary multicast IP address (overlay/external).
     pub multicast_ip: IpNetwork,
-    /// Source IP addresses for Source-Specific Multicast (SSM).
-    /// Empty array means any source is allowed.
-    pub source_ips: Vec<IpNetwork>,
     /// Associated underlay group for NAT.
     /// Initially None in ["Creating"](MulticastGroupState::Creating) state,
     /// populated by reconciler when group becomes ["Active"](MulticastGroupState::Active).
     pub underlay_group_id: Option<Uuid>,
+    /// Salt used for XOR-fold collision avoidance when computing underlay IP.
+    ///
+    /// The underlay IP is computed deterministically from the external multicast
+    /// IP using XOR-folding. In the rare case of a collision (computed underlay
+    /// IP already in use), this salt is incremented and the mapping is retried.
+    /// The salt must be stored to enable deterministic reconstruction of the
+    /// underlay IP from the external IP.
+    ///
+    /// - `None` or `0`: Default, no salt applied
+    /// - `1..255`: Salt value used for collision avoidance
+    pub underlay_salt: Option<SqlU8>,
     /// DPD-client tag used to couple external (overlay) and underlay entries
     /// for this multicast group.
     ///
-    /// System-generated from the group's unique name at creation
-    /// and updated on rename to maintain pairing consistency. Since group names
-    /// have a unique constraint (among non-deleted groups), tags are unique per
-    /// active group, ensuring tag-based DPD-client operations (like cleanup)
-    /// affect only the intended group. Not used for authorization; intended for
-    /// Dendrite management.
+    /// Format: `{uuid}:{multicast_ip}`. Computed during INSERT to ensure
+    /// uniqueness across the group's lifecycle and prevent tag collision
+    /// when group names are reused after deletion.
     pub tag: Option<String>,
     /// Current state of the multicast group (RPW pattern).
     /// See [MulticastGroupState] for possible values.
@@ -200,18 +207,6 @@ pub struct ExternalMulticastGroup {
     pub version_added: Generation,
     /// Version when this group was removed.
     pub version_removed: Option<Generation>,
-}
-
-impl ExternalMulticastGroup {
-    /// DPD tag for switch configuration.
-    ///
-    /// Uses the group's UUID to ensure uniqueness across the group's lifecycle.
-    /// This prevents tag collision when a group name is reused after deletion
-    /// (important given implicit create/delete semantics). Both external and
-    /// underlay groups use the same tag for pairing.
-    pub fn dpd_tag(&self) -> String {
-        self.id().to_string()
-    }
 }
 
 /// Values used to create a [MulticastGroupMember] in the database.
@@ -232,6 +227,8 @@ pub struct MulticastGroupMemberValues {
     pub parent_id: Uuid,
     pub sled_id: Option<DbTypedUuid<SledKind>>,
     pub state: MulticastGroupMemberState,
+    /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
+    pub source_ips: Vec<IpNetwork>,
     // version_added and version_removed are omitted - database assigns these
     // via DEFAULT nextval()
 }
@@ -269,6 +266,8 @@ pub struct MulticastGroupMember {
     /// Current state of the multicast group member (RPW pattern).
     /// See [MulticastGroupMemberState] for possible values.
     pub state: MulticastGroupMemberState,
+    /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
+    pub source_ips: Vec<IpNetwork>,
     /// Version when this member was added.
     pub version_added: Generation,
     /// Version when this member was removed.
@@ -276,22 +275,6 @@ pub struct MulticastGroupMember {
 }
 
 // Conversions to external API views
-
-impl From<ExternalMulticastGroup> for views::MulticastGroup {
-    fn from(group: ExternalMulticastGroup) -> Self {
-        views::MulticastGroup {
-            identity: group.identity(),
-            multicast_ip: group.multicast_ip.ip(),
-            source_ips: group
-                .source_ips
-                .into_iter()
-                .map(|ip| ip.ip())
-                .collect(),
-            ip_pool_id: group.ip_pool_id,
-            state: group.state.to_string(),
-        }
-    }
-}
 
 impl TryFrom<MulticastGroupMember> for views::MulticastGroupMember {
     type Error = external::Error;
@@ -312,6 +295,11 @@ impl TryFrom<MulticastGroupMember> for views::MulticastGroupMember {
             multicast_group_id: member.external_group_id,
             multicast_ip: member.multicast_ip.ip(),
             instance_id: member.parent_id,
+            source_ips: member
+                .source_ips
+                .into_iter()
+                .map(|ip| ip.ip())
+                .collect(),
             state: member.state.to_string(),
         })
     }
@@ -319,7 +307,7 @@ impl TryFrom<MulticastGroupMember> for views::MulticastGroupMember {
 
 /// An incomplete external multicast group, used to store state required for
 /// issuing the database query that selects an available multicast IP and stores
-/// the resulting record.
+/// the resulting record. Tag is computed in SQL as `{uuid}:{multicast_ip}`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IncompleteExternalMulticastGroup {
     pub id: Uuid,
@@ -327,12 +315,9 @@ pub struct IncompleteExternalMulticastGroup {
     pub description: String,
     pub time_created: DateTime<Utc>,
     pub ip_pool_id: Uuid,
-    pub source_ips: Vec<IpNetwork>,
-    // Optional address requesting that a specific multicast IP address be
-    // allocated or provided
+    /// Optional address requesting a specific multicast IP be allocated.
     pub explicit_address: Option<IpNetwork>,
     pub vni: Vni,
-    pub tag: Option<String>,
 }
 
 /// Parameters for creating an incomplete external multicast group.
@@ -343,9 +328,7 @@ pub struct IncompleteExternalMulticastGroupParams {
     pub description: String,
     pub ip_pool_id: Uuid,
     pub explicit_address: Option<IpAddr>,
-    pub source_ips: Vec<IpNetwork>,
     pub vni: Vni,
-    pub tag: Option<String>,
 }
 
 impl IncompleteExternalMulticastGroup {
@@ -357,10 +340,8 @@ impl IncompleteExternalMulticastGroup {
             description: params.description,
             time_created: Utc::now(),
             ip_pool_id: params.ip_pool_id,
-            source_ips: params.source_ips,
             explicit_address: params.explicit_address.map(|ip| ip.into()),
             vni: params.vni,
-            tag: params.tag,
         }
     }
 }
@@ -375,6 +356,7 @@ impl MulticastGroupMember {
         multicast_ip: IpNetwork,
         parent_id: Uuid,
         sled_id: Option<DbTypedUuid<SledKind>>,
+        source_ips: Vec<IpNetwork>,
     ) -> Self {
         Self {
             id,
@@ -386,6 +368,7 @@ impl MulticastGroupMember {
             parent_id,
             sled_id,
             state: MulticastGroupMemberState::Joining,
+            source_ips,
             // Placeholder - will be overwritten by database sequence on insert
             version_added: Generation::new(),
             version_removed: None,
@@ -395,7 +378,7 @@ impl MulticastGroupMember {
 
 /// Database representation of an underlay multicast group.
 ///
-/// Underlay groups are system-generated admin-scoped IPv6 multicast addresses
+/// Underlay groups are system-generated admin-local IPv6 multicast addresses
 /// used as a NAT target for internal multicast traffic. Underlay groups are
 /// VNI-agnostic; the VNI is an overlay identifier carried by [ExternalMulticastGroup].
 ///
@@ -422,7 +405,7 @@ pub struct UnderlayMulticastGroup {
     pub time_modified: DateTime<Utc>,
     /// Timestamp for deletion of this underlay multicast group, if applicable.
     pub time_deleted: Option<DateTime<Utc>>,
-    /// Admin-scoped IPv6 multicast address (NAT target).
+    /// Admin-local IPv6 multicast address (NAT target).
     pub multicast_ip: IpNetwork,
     /// Dendrite tag used to couple external/underlay state for this group.
     ///

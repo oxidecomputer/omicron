@@ -94,6 +94,7 @@ use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
+use super::tasks::blueprint_load::LoadedTargetBlueprint;
 use super::tasks::blueprint_planner;
 use super::tasks::blueprint_rendezvous;
 use super::tasks::crdb_node_id_collector;
@@ -146,8 +147,6 @@ use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::fm;
 use nexus_types::inventory::Collection;
@@ -1179,8 +1178,7 @@ pub struct BackgroundTasksData {
     /// Channel for TUF repository artifacts to be replicated out to sleds
     pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
     /// Channel for exposing the latest loaded blueprint
-    pub blueprint_load_tx:
-        watch::Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    pub blueprint_load_tx: watch::Sender<Option<LoadedTargetBlueprint>>,
     /// `reqwest::Client` for webhook delivery requests.
     ///
     /// This is shared with the external API as it's also used when sending

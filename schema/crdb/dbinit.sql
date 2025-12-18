@@ -6848,6 +6848,74 @@ CREATE UNIQUE INDEX IF NOT EXISTS
     lookup_sitrep_version_by_id
 ON omicron.public.fm_sitrep_history (sitrep_id);
 
+
+CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
+    'power_shelf'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
+    -- Case UUID
+    id UUID NOT NULL,
+    -- UUID of the sitrep in which the case had this state.
+    sitrep_id UUID NOT NULL,
+
+    de omicron.public.diagnosis_engine NOT NULL,
+
+    -- UUID of the sitrep in which the case was created.
+    created_sitrep_id UUID NOT NULL,
+
+    -- UUID of the sitrep in which the case was closed. If this is not NULL,
+    -- then the case has been closed.
+    closed_sitrep_id UUID,
+
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_cases_for_sitrep
+ON omicron.public.fm_case (sitrep_id);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
+    -- ID of this association. When an ereport is assigned to a case, that
+    -- association is assigned a UUID. These are used primarily to aid in
+    -- paginating queries to this table, which would otherwise require a
+    -- three-column pagination utility in order to paginate by (case_id,
+    -- restart_id, ena).
+    id UUID NOT NULL,
+    --  The ereport's identity.
+    restart_id UUID NOT NULL,
+    ena INT8 NOT NULL,
+
+    -- UUID of the case the ereport is assigned to.
+    case_id UUID NOT NULL,
+
+    -- UUID of the sitrep in which this assignment exists.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the sitrep in which the ereport was initially assigned to this
+    -- case.
+    assigned_sitrep_id UUID NOT NULL,
+
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+-- The same ereport may not be assigned to the same case multiple times.
+CREATE UNIQUE INDEX IF NOT EXISTS
+    lookup_ereport_assignments_by_ereport
+ON omicron.public.fm_ereport_in_case (
+    sitrep_id,
+    case_id,
+    restart_id,
+    ena
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_ereports_assigned_to_fm_case
+ON omicron.public.fm_ereport_in_case (sitrep_id, case_id);
+
 /*
  * List of datasets available to be sliced up and passed to VMMs for instance
  * local storage.
@@ -7056,9 +7124,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     ip_pool_range_id UUID NOT NULL,
     multicast_ip INET NOT NULL,
 
-    /* Source-Specific Multicast (SSM) support */
-    source_ips INET[] DEFAULT ARRAY[]::INET[],
-
     /* Associated underlay group for NAT */
     /* We fill this as part of the RPW */
     underlay_group_id UUID,
@@ -7073,8 +7138,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
     version_removed INT8,
 
+    /* Salt for underlay IP collision avoidance (XORed into mapping) */
+    /* Note: Column added via migration, must be at end for schema compatibility */
+    underlay_salt INT2,
+
     /* Constraints */
-    -- External groups: IPv4 multicast or non-admin-scoped IPv6
+    -- External groups: IPv4 multicast or non-admin-local IPv6
     CONSTRAINT external_multicast_ip_valid CHECK (
         (family(multicast_ip) = 4 AND multicast_ip << '224.0.0.0/4') OR
         (family(multicast_ip) = 6 AND multicast_ip << 'ff00::/8' AND
@@ -7104,7 +7173,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
 );
 
 /*
- * Underlay multicast groups (admin-scoped IPv6 for VPC internal forwarding)
+ * Underlay multicast groups (admin-local IPv6 for VPC internal forwarding)
  */
 CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     /* Identity */
@@ -7113,7 +7182,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    /* Admin-scoped IPv6 multicast address (NAT target) */
+    /* Admin-local IPv6 multicast address (NAT target) */
     multicast_ip INET NOT NULL,
 
     /* DPD tag to couple external/underlay state for this group */
@@ -7158,7 +7227,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
 
     /* Denormalized multicast IP from the group (for API convenience) */
     /* Note: Column added via migration, must be at end for schema compatibility */
-    multicast_ip INET NOT NULL
+    multicast_ip INET NOT NULL,
+
+    /* Source IPs for this member's multicast subscription */
+    /* Each member can subscribe to different sources */
+    /* Empty array means any source is allowed (ASM) */
+    /* Non-empty array enables source filtering (IGMPv3/MLDv2) */
+    /* The group's source_ips in API views is the union of all active members */
+    source_ips INET[] DEFAULT ARRAY[]::INET[]
 );
 
 /* External Multicast Group Indexes */
@@ -7248,7 +7324,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS underlay_multicast_group_version_removed ON om
     time_deleted
 );
 
--- Admin-scoped IPv6 address uniqueness
+-- Admin-local IPv6 address uniqueness
 -- Supports: SELECT ... WHERE multicast_ip = ? AND time_deleted IS NULL
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_underlay_multicast_by_ip ON omicron.public.underlay_multicast_group (
     multicast_ip
@@ -7393,7 +7469,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '215.0.0', NULL)
+    (TRUE, NOW(), NOW(), '216.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

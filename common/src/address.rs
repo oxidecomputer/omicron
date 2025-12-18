@@ -62,6 +62,20 @@ pub const IPV6_SSM_SUBNET: Ipv6Net =
 /// [RFC 3376]: https://www.rfc-editor.org/rfc/rfc3376
 pub const MAX_SSM_SOURCE_IPS: usize = 64;
 
+/// Check if an IP is in the SSM (Source-Specific Multicast) range.
+///
+/// SSM ranges per [RFC 4607 §3]:
+/// - IPv4: 232.0.0.0/8
+/// - IPv6: ff3x::/32 (all SSM scopes)
+///
+/// [RFC 4607 §3]: https://www.rfc-editor.org/rfc/rfc4607#section-3
+pub fn is_ssm_address(ip: std::net::IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(addr) => IPV4_SSM_SUBNET.contains(addr),
+        IpAddr::V6(addr) => IPV6_SSM_SUBNET.contains(addr),
+    }
+}
+
 /// IPv4 multicast address range (224.0.0.0/4).
 ///
 /// See [RFC 5771] for IPv4 multicast address assignments.
@@ -93,11 +107,56 @@ pub const IPV6_MULTICAST_RANGE: Ipv6Net =
     Ipv6Net::new_unchecked(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0), 8);
 
 /// IPv6 multicast prefix (ff00::/8) mask/value for scope checking.
+///
+/// See [RFC 4291 §2.7] for multicast address format.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
 pub const IPV6_MULTICAST_PREFIX: u16 = 0xff00;
 
-/// Admin-scoped IPv6 multicast prefix (ff04::/16) as u16 for address
+/// Admin-local IPv6 multicast prefix (ff04::/16) as u16 for address
 /// construction and normalization of underlay multicast addresses.
+///
+/// See [RFC 4291 §2.7] and [RFC 7346] for IPv6 multicast address format
+/// and scope definitions.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+/// [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
 pub const IPV6_ADMIN_SCOPED_MULTICAST_PREFIX: u16 = 0xff04;
+
+/// Fixed underlay admin-local IPv6 multicast subnet (ff04::/64) used for
+/// internal multicast group allocation and external→underlay mapping.
+///
+/// Admin-local scope (4) is defined in [RFC 7346] as "the smallest scope that
+/// must be administratively configured."
+///
+/// Static for consistency across racks. The XOR-fold algorithm maps external
+/// multicast IPs into this /64 with an 8-bit salt, guaranteeing 256 unique
+/// addresses per external IP for collision retries. IP pool validation rejects
+/// ranges overlapping this prefix.
+///
+/// External pools may use other admin-local prefixes (e.g., `ff04:0:0:1::/64`)
+/// outside this range or other administratively configured scopes
+/// (e.g., site-local `ff05::/16`).
+///
+/// [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
+// TODO: Expose this subnet via rack API (e.g., in `Rack` view or a dedicated
+// networking info endpoint) so operators can see reserved address ranges.
+pub const UNDERLAY_MULTICAST_SUBNET: Ipv6Net = Ipv6Net::new_unchecked(
+    Ipv6Addr::new(IPV6_ADMIN_SCOPED_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0),
+    64,
+);
+
+/// Last address in the underlay multicast subnet (ff04::ffff:ffff:ffff:ffff).
+pub const UNDERLAY_MULTICAST_SUBNET_LAST: Ipv6Addr = Ipv6Addr::new(
+    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+    0,
+    0,
+    0,
+    0xffff,
+    0xffff,
+    0xffff,
+    0xffff,
+);
 
 /// IPv6 interface-local multicast subnet (ff01::/16).
 ///

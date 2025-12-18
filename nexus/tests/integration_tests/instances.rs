@@ -1137,7 +1137,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         Some(nexus_address),
         Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
-        nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
+        sled_agent_types::inventory::SledCpuFamily::AmdTurin,
     );
     let new_sled_id = config.id;
 
@@ -1326,7 +1326,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
         Some(nexus_address),
         Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
-        nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
+        sled_agent_types::inventory::SledCpuFamily::AmdTurin,
     );
     let turin_sled_id = config.id;
 
@@ -1403,7 +1403,7 @@ async fn test_instance_migration_unknown_sled_type(
         Some(nexus_address),
         Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
-        nexus_sled_agent_shared::inventory::SledCpuFamily::Unknown,
+        sled_agent_types::inventory::SledCpuFamily::Unknown,
     );
     let new_sled_id = config.id;
 
@@ -3095,7 +3095,7 @@ async fn test_instance_create_delete_network_interface(
     );
 
     // Parameters for the interfaces to create/attach
-    let if_params = vec![
+    let if_params = [
         params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if0".parse().unwrap(),
@@ -3340,7 +3340,7 @@ async fn test_instance_update_network_interfaces(
     );
 
     // Parameters for each interface to try to modify.
-    let if_params = vec![
+    let if_params = [
         params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if0".parse().unwrap(),
@@ -6750,7 +6750,7 @@ async fn test_can_start_instance_with_cpu_platform(
         Some(nexus_address),
         Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
-        nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
+        sled_agent_types::inventory::SledCpuFamily::AmdTurin,
     );
     let new_sled_id = config.id;
 
@@ -8479,7 +8479,7 @@ async fn instance_wait_for_simulated_transition(
 /// Simulates state transitions for the incarnation of the instance on the
 /// supplied sled (which may not be the sled ID currently stored in the
 /// instance's CRDB record).
-async fn vmm_simulate_on_sled(
+pub async fn vmm_simulate_on_sled(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
     sled_id: SledUuid,

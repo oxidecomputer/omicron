@@ -2,6 +2,7 @@
 
 set -o pipefail
 set -o errexit
+set -o xtrace
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
@@ -87,16 +88,12 @@ function do_update_packages {
 
     # All modifications should happen after this point
 
-    set -o xtrace
-
     # Update package manifest with the new commit and SHAs
     for IDX in "${!PACKAGES[@]}"; do
         echo "UPDATING: [${PACKAGES[$IDX]}]"
         sed $IN_PLACE -e "s/${PACKAGE_COMMITS[$IDX]}/$TARGET_COMMIT/g" "$PKG_MANIFEST"
         sed $IN_PLACE -e "s/${PACKAGE_SHAS[$IDX]}/${TARGET_SHAS[$IDX]}/g" "$PKG_MANIFEST"
     done
-
-    set +o xtrace
 
     echo "OK: Update complete"
 }
@@ -132,15 +129,11 @@ function do_update_crates {
 
     # All modifications should happen after this point
 
-    set -o xtrace
-
     # Update Cargo.toml with the new commit
     for IDX in "${!CRATES[@]}"; do
         echo "UPDATING: [${CRATES[$IDX]}]"
         sed $IN_PLACE -e "s/${CARGO_COMMITS[$IDX]}/$TARGET_COMMIT/g" "$CARGO_TOML"
     done
-
-    set +o xtrace
 
     echo "OK: Update complete"
 }

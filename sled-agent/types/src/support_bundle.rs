@@ -4,6 +4,8 @@
 
 //! Types related to support bundles.
 
+pub use sled_agent_types_versions::latest::support_bundle::*;
+
 // The final name of the bundle, as it is stored within the dedicated
 // datasets.
 //
@@ -13,9 +15,9 @@
 //                              |               | This is a per-bundle nested dataset
 //                              | This is a Debug dataset
 //
-// NOTE: The "DumpSetupWorker" has been explicitly configured to ignore these files, so they are
-// not removed. If the files used here change in the future, DumpSetupWorker should also be
-// updated.
+// NOTE: The DebugCollector has been explicitly configured to ignore these
+// files, so they are not removed. If the files used here change in the future,
+// DebugCollector should also be updated.
 pub const BUNDLE_FILE_NAME: &str = "bundle.zip";
 pub const BUNDLE_TMP_FILE_NAME: &str = "bundle.zip.tmp";
 

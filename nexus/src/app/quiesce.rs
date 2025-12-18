@@ -4,6 +4,7 @@
 
 //! Manage Nexus quiesce state
 
+use crate::app::background::LoadedTargetBlueprint;
 use anyhow::{Context, anyhow, bail};
 use assert_matches::assert_matches;
 use chrono::Utc;
@@ -11,8 +12,6 @@ use nexus_db_model::DbMetadataNexusState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::internal_api::views::QuiesceState;
@@ -56,8 +55,7 @@ pub struct NexusQuiesceHandle {
     my_nexus_id: OmicronZoneUuid,
     sagas: SagaQuiesceHandle,
     quiesce_opctx: Arc<OpContext>,
-    latest_blueprint:
-        watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    latest_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
     state: watch::Sender<QuiesceState>,
 }
 
@@ -65,9 +63,7 @@ impl NexusQuiesceHandle {
     pub fn new(
         datastore: Arc<DataStore>,
         my_nexus_id: OmicronZoneUuid,
-        latest_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
-        >,
+        latest_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
         quiesce_opctx: OpContext,
     ) -> NexusQuiesceHandle {
         let saga_quiesce_log =
@@ -336,12 +332,12 @@ async fn check_all_sagas_drained(
         .await
         // This should be impossible
         .context("latest_blueprint rx channel closed")?
-        .as_deref()
+        .as_ref()
         // unwrap(): wait_for() returns a value for which the closure
         // returns true, and we checked that this is `Some`
         .unwrap()
         // extract just the blueprint part
-        .1
+        .blueprint
         // As usual, we clone to avoid locking the watch channel for the
         // lifetime of this value.
         .clone();
@@ -508,6 +504,7 @@ async fn check_all_sagas_drained(
 
 #[cfg(test)]
 mod test {
+    use crate::app::background::LoadedTargetBlueprint;
     use crate::app::quiesce::NexusQuiesceHandle;
     use crate::app::sagas::test_helpers::test_opctx;
     use assert_matches::assert_matches;
@@ -881,8 +878,10 @@ mod test {
             time_made_target: Utc::now(),
         };
         let blueprint_id = blueprint.id;
-        let (_, blueprint_rx) =
-            watch::channel(Some(Arc::new((bp_target, blueprint))));
+        let (_, blueprint_rx) = watch::channel(Some(LoadedTargetBlueprint {
+            target: bp_target,
+            blueprint: Arc::new(blueprint),
+        }));
 
         // Insert active records for the Nexus instances.
         let conn =

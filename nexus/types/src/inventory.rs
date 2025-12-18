@@ -22,21 +22,10 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::InventoryDataset;
-use nexus_sled_agent_shared::inventory::InventoryDisk;
-use nexus_sled_agent_shared::inventory::InventoryZpool;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::SledCpuFamily;
-use nexus_sled_agent_shared::inventory::SledRole;
-use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
-pub use omicron_common::api::internal::shared::SourceNatConfig;
+pub use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_common::disk::M2Slot;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
@@ -47,6 +36,17 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
+use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types_versions::latest::inventory::InventoryDataset;
+use sled_agent_types_versions::latest::inventory::InventoryDisk;
+use sled_agent_types_versions::latest::inventory::InventoryZpool;
+use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
+use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
+use sled_agent_types_versions::latest::inventory::SledCpuFamily;
+use sled_agent_types_versions::latest::inventory::SledRole;
+use sled_agent_types_versions::latest::inventory::ZoneImageResolverInventory;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
@@ -279,7 +279,7 @@ impl Collection {
         self.clickhouse_keeper_cluster_membership
             .iter()
             .max_by_key(|membership| membership.leader_committed_log_index)
-            .map(|membership| (membership.clone()))
+            .map(|membership| membership.clone())
     }
 
     /// Return a type which can be used to display a collection in a

@@ -317,10 +317,14 @@ impl From<InstanceCreate> for params::InstanceCreate {
             user_data: old.user_data,
             network_interfaces: old.network_interfaces,
             external_ips: old.external_ips,
+            // Convert NameOrId to MulticastGroupJoinSpec (with no source_ips)
             multicast_groups: old
                 .multicast_groups
                 .into_iter()
-                .map(Into::into)
+                .map(|group| params::MulticastGroupJoinSpec {
+                    group: group.into(),
+                    source_ips: None,
+                })
                 .collect(),
             disks: old.disks.into_iter().map(Into::into).collect(),
             boot_disk: old.boot_disk.map(Into::into),

@@ -42,7 +42,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
-use sled_agent_api::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
@@ -2230,14 +2230,14 @@ impl Pantry {
             }
         };
 
-        if (offset % region_block_size) != 0 {
+        if !offset.is_multiple_of(region_block_size) {
             return Err(HttpError::for_bad_request(
                 None,
                 "offset not multiple of block size!".to_string(),
             ));
         }
 
-        if (data.len() as u64 % region_block_size) != 0 {
+        if !(data.len() as u64).is_multiple_of(region_block_size) {
             return Err(HttpError::for_bad_request(
                 None,
                 "data length not multiple of block size!".to_string(),

@@ -1163,6 +1163,7 @@ pub struct FloatingIpAttach {
 // in the path of endpoints handling instance operations.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "params", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum InstanceNetworkInterfaceAttachment {
     /// Create one or more `InstanceNetworkInterface`s for the `Instance`.
     ///
@@ -1173,16 +1174,11 @@ pub enum InstanceNetworkInterfaceAttachment {
     /// The default networking configuration for an instance is to create a
     /// single primary interface with an automatically-assigned IP address. The
     /// IP will be pulled from the Project's default VPC / VPC Subnet.
+    #[default]
     Default,
 
     /// No network interfaces at all will be created for the instance.
     None,
-}
-
-impl Default for InstanceNetworkInterfaceAttachment {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 /// Describe the instance's disks at creation time
@@ -1291,10 +1287,14 @@ pub struct InstanceCreate {
     ///
     /// The instance will be automatically added as a member of the specified
     /// multicast groups during creation, enabling it to send and receive
-    /// multicast traffic for those groups. Groups can be specified by name,
-    /// ID, or multicast IP address.
+    /// multicast traffic for those groups.
+    ///
+    /// Each entry specifies the group (by name, UUID, or IP address) and
+    /// optional source IPs for source-filtered multicast. SSM addresses
+    /// (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6) require at least one
+    /// source IP.
     #[serde(default)]
-    pub multicast_groups: Vec<MulticastGroupIdentifier>,
+    pub multicast_groups: Vec<MulticastGroupJoinSpec>,
 
     /// A list of disks to be attached to the instance.
     ///
@@ -1416,12 +1416,16 @@ pub struct InstanceUpdate {
     /// When specified, this replaces the instance's current multicast group
     /// membership with the new set of groups. The instance will leave any
     /// groups not listed here and join any new groups that are specified.
-    /// Groups can be specified by name, ID, or multicast IP address.
+    ///
+    /// Each entry specifies the group (by name, UUID, or IP address) and
+    /// optional source IPs for source-filtered multicast. SSM addresses
+    /// (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6) require at least one
+    /// source IP.
     ///
     /// If not provided (None), the instance's multicast group membership
     /// will not be changed.
     #[serde(default)]
-    pub multicast_groups: Option<Vec<MulticastGroupIdentifier>>,
+    pub multicast_groups: Option<Vec<MulticastGroupJoinSpec>>,
 }
 
 #[inline]
@@ -2833,16 +2837,12 @@ pub struct AuditLog {
 pub struct MulticastGroupMemberAdd {
     /// Name or ID of the instance to add to the multicast group
     pub instance: NameOrId,
-    /// Optional Source IP addresses for Source-Specific Multicast (SSM).
+    /// Optional source IP addresses for source-filtered multicast.
     ///
-    /// If the group already exists:
-    /// - If `source_ips` is specified, validates they match the group's sources
-    ///   (no implicit update is performed).
+    /// - **ASM**: Sources optional. If omitted, receives from any source.
+    /// - **SSM (232.0.0.0/8, ff3x::/32)**: At least one source required.
     ///
-    /// If the group doesn't exist (implicit creation):
-    /// - If `source_ips` is specified and non-empty, attempts to create an SSM
-    ///   group using these sources.
-    /// - If omitted or empty, creates an ASM group.
+    /// Each member stores its own sources; the group's `source_ips` shows the union.
     #[serde(default, deserialize_with = "validate_source_ips_param")]
     pub source_ips: Option<Vec<IpAddr>>,
 }
@@ -2975,14 +2975,31 @@ pub struct InstanceMulticastGroupPath {
 /// auto-discovered from all linked multicast pools.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
 pub struct InstanceMulticastGroupJoin {
-    /// Optional Source IP addresses for Source-Specific Multicast (SSM).
+    /// Optional source IP addresses for source-filtered multicast.
     ///
-    /// If the group already exists:
-    /// - Validates sources match the group's existing configuration
+    /// - **ASM**: Sources optional. If omitted, receives from any source.
+    /// - **SSM (232.0.0.0/8, ff3x::/32)**: At least one source required.
     ///
-    /// If the group doesn't exist (implicit creation):
-    /// - Non-empty list creates an SSM group with these sources
-    /// - Empty or omitted creates an ASM group
+    /// Each member stores its own sources; the group's `source_ips` shows the union.
+    #[serde(default, deserialize_with = "validate_source_ips_param")]
+    pub source_ips: Option<Vec<IpAddr>>,
+}
+
+/// Specification for joining a multicast group with optional source filtering.
+///
+/// Used in `InstanceCreate` and `InstanceUpdate` to specify multicast group
+/// membership along with per-member source IP configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MulticastGroupJoinSpec {
+    /// The multicast group to join, specified by name, UUID, or IP address.
+    pub group: MulticastGroupIdentifier,
+
+    /// Optional source IP addresses for source-filtered multicast.
+    ///
+    /// - **ASM**: Sources optional. If omitted, receives from any source.
+    /// - **SSM (232.0.0.0/8, ff3x::/32)**: At least one source required.
+    ///
+    /// Each member stores its own sources; the group's `source_ips` shows the union.
     #[serde(default, deserialize_with = "validate_source_ips_param")]
     pub source_ips: Option<Vec<IpAddr>>,
 }

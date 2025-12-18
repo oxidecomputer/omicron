@@ -25,7 +25,8 @@ use omicron_common::address::{
     IPV6_INTERFACE_LOCAL_MULTICAST_LAST, IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET,
     IPV6_LINK_LOCAL_MULTICAST_LAST, IPV6_LINK_LOCAL_MULTICAST_SUBNET,
     IPV6_RESERVED_SCOPE_MULTICAST_LAST, IPV6_RESERVED_SCOPE_MULTICAST_SUBNET,
-    IPV6_SSM_SUBNET, Ipv4Range, Ipv6Range,
+    IPV6_SSM_SUBNET, Ipv4Range, Ipv6Range, UNDERLAY_MULTICAST_SUBNET,
+    UNDERLAY_MULTICAST_SUBNET_LAST,
 };
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -60,17 +61,19 @@ fn not_found_from_lookup(pool_lookup: &lookup::IpPool<'_>) -> Error {
 
 /// Validate multicast-specific constraints for IP ranges.
 ///
-/// Enforces restrictions on multicast address ranges to prevent allocation
-/// of reserved or special-use addresses that would be rejected by Dendrite:
+/// Rejects reserved or special-use addresses that Dendrite would reject:
 ///
-/// - IPv4: Rejects link-local (224.0.0.0/24) and prevents ASM/SSM
-///   boundary spanning
-/// - IPv6: Rejects reserved-scope (ff00::/16), interface-local (ff01::/16),
-///   link-local (ff02::/16), and prevents ASM/SSM boundary spanning
+/// - IPv4: link-local (224.0.0.0/24), ASM/SSM boundary spanning
+/// - IPv6: reserved-scope (ff00::/16), interface-local (ff01::/16),
+///   link-local (ff02::/16), underlay (ff04::/64), ASM/SSM boundary spanning
 ///
-/// This validation ensures operators receive immediate feedback when
-/// configuring IP pools, preventing users from encountering errors later
-/// when allocating addresses for multicast groups.
+/// The underlay prefix (ff04::/64) is reserved for internal external→underlay
+/// mapping via `UNDERLAY_MULTICAST_SUBNET`. This prefix is static for
+/// consistency across racks. External pools may use other admin-local
+/// prefixes (e.g., `ff04:0:0:1::/64`) or other scopes (e.g., `ff05::/16`).
+///
+/// Validates early so operators get immediate feedback rather than errors
+/// when allocating addresses later.
 fn validate_multicast_range(range: &shared::IpRange) -> Result<(), Error> {
     // These restrictions match the validation performed by Dendrite DPD
     // management (see dendrite/dpd/src/mcast/validate.rs).
@@ -145,6 +148,18 @@ fn validate_multicast_range(range: &shared::IpRange) -> Result<(), Error> {
                     return Err(Error::invalid_request(
                         "Cannot add IPv6 link-local multicast range \
                          (ff02::/16) to IP pool",
+                    ));
+                }
+
+                // underlay multicast (ff04::/64, reserved for internal use)
+                let underlay = Ipv6Range {
+                    first: UNDERLAY_MULTICAST_SUBNET.addr(),
+                    last: UNDERLAY_MULTICAST_SUBNET_LAST,
+                };
+                if v6_range.overlaps(&underlay) {
+                    return Err(Error::invalid_request(
+                        "Cannot add IPv6 underlay multicast range \
+                         (ff04::/64) to IP pool - reserved for internal use",
                     ));
                 }
             }
@@ -702,5 +717,146 @@ impl super::Nexus {
             .await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::external_api::shared::IpRange;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    // IPv6 underlay validation tests
+
+    #[test]
+    fn test_validate_multicast_rejects_underlay_ipv6_range() {
+        // ff04::/64 is reserved for underlay multicast
+        let underlay_range = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xff04, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xff04, 0, 0, 0, 0, 0, 0, 0xff),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&underlay_range);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("underlay"),
+            "Error should mention underlay: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_multicast_rejects_full_underlay_subnet() {
+        // The entire ff04::/64 should be rejected
+        let full_underlay = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xff04, 0, 0, 0, 0, 0, 0, 0),
+                Ipv6Addr::new(0xff04, 0, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&full_underlay);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_multicast_allows_other_admin_scoped_subnets() {
+        // ff04:0:0:1::/64 is within ff04::/16 but not in the underlay /64
+        let other_admin_subnet = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xff04, 0, 0, 1, 0, 0, 0, 1),
+                Ipv6Addr::new(0xff04, 0, 0, 1, 0, 0, 0, 0xff),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&other_admin_subnet);
+        assert!(
+            result.is_ok(),
+            "ff04:0:0:1::/64 should be allowed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_multicast_rejects_range_overlapping_underlay() {
+        // Range that spans from outside underlay into it
+        let overlapping = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xff04, 0, 0, 0, 0, 0, 0, 0x100),
+                Ipv6Addr::new(0xff04, 0, 0, 1, 0, 0, 0, 0x100),
+            )
+            .unwrap(),
+        );
+        // This starts inside ff04::/64 and extends beyond it
+        let result = validate_multicast_range(&overlapping);
+        assert!(
+            result.is_err(),
+            "Range overlapping underlay should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_multicast_allows_site_local_ipv6() {
+        // ff05::/16 (site-local scope) should be allowed
+        let site_local = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 0xff),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&site_local);
+        assert!(
+            result.is_ok(),
+            "Site-local ff05:: should be allowed: {result:?}"
+        );
+    }
+
+    // IPv4 validation tests
+
+    #[test]
+    fn test_validate_multicast_rejects_link_local_ipv4() {
+        // 224.0.0.0/24 is reserved (link-local)
+        let link_local = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 0, 0, 1),
+                Ipv4Addr::new(224, 0, 0, 10),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&link_local);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("link-local"));
+    }
+
+    #[test]
+    fn test_validate_multicast_allows_valid_ipv4_asm() {
+        // 224.1.0.0/24 is valid ASM
+        let valid_asm = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 1, 0, 1),
+                Ipv4Addr::new(224, 1, 0, 255),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&valid_asm);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_multicast_rejects_asm_ssm_spanning_range() {
+        // Range spanning from ASM (224.x-231.x) to SSM (232.x)
+        // SSM subnet is 232.0.0.0/8
+        let spanning = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(231, 255, 255, 1),
+                Ipv4Addr::new(232, 0, 0, 10),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&spanning);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("ASM and SSM"));
     }
 }

@@ -18,8 +18,25 @@
 //! - Forwarding decisions happen at the underlay layer
 //! - Security relies on underlay group membership validation
 //!
+//! The underlay IPv6 addresses live within the fixed admin-local prefix
+//! [`UNDERLAY_MULTICAST_SUBNET`] (ff04::/64).
+//!
 //! This enables cross-project and cross-silo multicast while maintaining
 //! security through API authorization and underlay membership control.
+//!
+//! ## Source Filtering (IGMPv3/MLDv2)
+//!
+//! Source IPs are stored **per-member** in the control plane, allowing each
+//! receiver to subscribe to different sources within a group. DPD enforces
+//! source filtering at the **group level** using the union of all member
+//! sources.
+//!
+//! - **SSM addresses** (232/8, ff3x::/32): Sources are **required** per-member.
+//!   Each member must specify at least one source IP.
+//! - **ASM addresses**: Sources are **optional** per-member. Empty sources
+//!   means receive from any source; non-empty enables source filtering.
+//!
+//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -42,6 +59,7 @@ use internal_dns_resolver::Resolver;
 
 use nexus_db_model::{ExternalMulticastGroup, UnderlayMulticastGroup};
 use nexus_types::identity::Resource;
+use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{Error, SwitchLocation};
 
 use crate::app::dpd_clients;
@@ -337,10 +355,15 @@ impl MulticastDataplaneClient {
     }
 
     /// Apply multicast group configuration across switches (via DPD).
+    ///
+    /// The `sources` parameter is the union of source IPs from all members.
+    /// Source IPs are stored per-member in the database, but DPD stores them
+    /// per-group. Pass empty slice for ASM (any-source multicast).
     pub(crate) async fn create_groups(
         &self,
         external_group: &ExternalMulticastGroup,
         underlay_group: &UnderlayMulticastGroup,
+        sources: &[IpNetwork],
     ) -> MulticastDataplaneResult<(
         MulticastGroupUnderlayResponse,
         MulticastGroupExternalResponse,
@@ -355,12 +378,15 @@ impl MulticastDataplaneClient {
             "vni" => ?external_group.vni,
             "switch_count" => self.switch_count(),
             "multicast_scope" => if external_group.multicast_ip.ip().is_ipv4() { "IPv4_External" } else { "IPv6_External" },
-            "source_mode" => if external_group.source_ips.is_empty() { "ASM" } else { "SSM" },
+            "address_mode" => if is_ssm_address(external_group.multicast_ip.ip()) { "SSM" } else { "ASM" },
+            "has_sources" => !sources.is_empty(),
             "dpd_operation" => "create_groups"
         );
 
         let dpd_clients = &self.dpd_clients;
-        let tag = external_group.dpd_tag();
+        let tag = external_group.tag.as_ref().ok_or_else(|| {
+            Error::internal_error("multicast group missing tag")
+        })?;
 
         let underlay_ip_admin =
             underlay_group.multicast_ip.ip().into_admin_scoped()?;
@@ -379,13 +405,21 @@ impl MulticastDataplaneClient {
             vni: Vni::from(u32::from(external_group.vni.0)),
         };
 
-        let sources_dpd = external_group
-            .source_ips
-            .iter()
-            .map(|ip| IpSrc::Exact(ip.ip()))
-            .collect::<Vec<_>>();
-
         let external_group_ip = external_group.multicast_ip.ip();
+
+        // TODO: ASM source filtering will be accepted in dendrite in a follow-up
+        // PR stacked on this one. For now, we only send sources to DPD for SSM
+        // groups. ASM groups get `None`, meaning "any source allowed".
+        let sources_dpd = if is_ssm_address(external_group_ip) {
+            Some(
+                sources
+                    .iter()
+                    .map(|ip| IpSrc::Exact(ip.ip()))
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
 
         let create_operations =
             dpd_clients.into_iter().map(|(switch_location, client)| {
@@ -416,7 +450,7 @@ impl MulticastDataplaneClient {
                             nat_target: Some(nat_target),
                         },
                         tag: Some(tag.clone()),
-                        sources: Some(sources),
+                        sources,
                     };
 
                     let external_response = self
@@ -517,11 +551,20 @@ impl MulticastDataplaneClient {
         let new_name_str = params.new_name.to_string();
         let external_group_ip = params.external_group.multicast_ip.ip();
 
-        let sources_dpd = params
-            .new_sources
-            .iter()
-            .map(|ip| IpSrc::Exact(ip.ip()))
-            .collect::<Vec<_>>();
+        // TODO: ASM source filtering will be accepted in dendrite in a follow-up
+        // PR stacked on this one. For now, we only send sources to DPD for SSM
+        // groups. ASM groups get `None`, meaning "any source allowed".
+        let sources_dpd = if is_ssm_address(external_group_ip) {
+            Some(
+                params
+                    .new_sources
+                    .iter()
+                    .map(|ip| IpSrc::Exact(ip.ip()))
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
 
         let update_operations =
             dpd_clients.into_iter().map(|(switch_location, client)| {
@@ -601,14 +644,14 @@ impl MulticastDataplaneClient {
                         external_forwarding: external_forwarding.clone(),
                         internal_forwarding: internal_forwarding.clone(),
                         tag: Some(new_name.clone()),
-                        sources: Some(sources.clone()),
+                        sources: sources.clone(),
                     };
                     let create_entry = MulticastGroupCreateExternalEntry {
                         group_ip: external_group_ip,
                         external_forwarding,
                         internal_forwarding,
                         tag: Some(new_name.clone()),
-                        sources: Some(sources),
+                        sources,
                     };
 
                     let external_response = self

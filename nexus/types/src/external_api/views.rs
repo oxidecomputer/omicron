@@ -552,8 +552,12 @@ pub struct MulticastGroup {
     pub identity: IdentityMetadata,
     /// The multicast IP address held by this resource.
     pub multicast_ip: IpAddr,
-    /// Source IP addresses for Source-Specific Multicast (SSM).
-    /// Empty array means any source is allowed.
+    /// Union of all member source IP addresses (computed, read-only).
+    ///
+    /// This field shows the combined source IPs across all group members.
+    /// Individual members may subscribe to different sources; this union
+    /// reflects all sources that any member is subscribed to.
+    /// Empty array means no members have source filtering enabled.
     pub source_ips: Vec<IpAddr>,
     /// The ID of the IP pool this resource belongs to.
     pub ip_pool_id: Uuid,
@@ -574,6 +578,12 @@ pub struct MulticastGroupMember {
     pub multicast_ip: IpAddr,
     /// The ID of the instance that is a member of this group.
     pub instance_id: Uuid,
+    /// Source IP addresses for this member's multicast subscription.
+    ///
+    /// - **ASM**: Sources are optional. Empty array means any source is allowed.
+    ///   Non-empty array enables source filtering (IGMPv3/MLDv2).
+    /// - **SSM**: Sources are required for SSM addresses (232/8, ff3x::/32).
+    pub source_ips: Vec<IpAddr>,
     /// Current state of the multicast group membership.
     pub state: String,
 }

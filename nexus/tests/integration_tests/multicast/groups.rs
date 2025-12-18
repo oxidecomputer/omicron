@@ -11,11 +11,14 @@
 //! - IP pool range validation and allocation
 //! - Member operations: add, remove, list, lookup by IP
 //! - Instance deletion cleanup (removes multicast memberships)
-//! - Source IP validation for SSM groups
 //! - Automatic pool selection and default pool behavior
 //! - Pool exhaustion handling
 //! - Pool deletion protection (cannot delete pool with active groups)
 //! - DPD(-client) integration: verifies groups are programmed on switches
+//! - SSM pool and group tests:
+//!   - SSM groups require sources (232/8 for IPv4, ff3x::/32 for IPv6)
+//!   - ASM groups have optional source filtering
+//!   - Multiple SSM groups can share the same pool
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -24,22 +27,24 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
 use nexus_test_utils::dpd_client;
-use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::http_testing::{
+    AuthnMode, Collection, NexusRequest, RequestBuilder,
+};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_instance, create_project, object_create,
     object_create_error, object_delete, object_delete_error, object_get,
-    object_get_error,
+    object_get_error, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
-    InstanceMulticastGroupJoin, IpPoolCreate, MulticastGroupMemberAdd,
+    InstanceMulticastGroupJoin, IpPoolCreate,
 };
 use nexus_types::external_api::shared::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_types::external_api::views::{
     IpPool, IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
 };
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, InstanceState, NameOrId,
+    IdentityMetadataCreateParams, InstanceState,
 };
 use omicron_uuid_kinds::InstanceUuid;
 
@@ -152,16 +157,14 @@ async fn test_multicast_group_member_operations(
     .await;
 
     let instance = create_instance(client, project_name, instance_name).await;
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
+
+    // Use instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
     let added_member: MulticastGroupMember =
-        object_create(client, &member_add_url, &member_params).await;
+        put_upsert(client, &join_url, &join_params).await;
 
     assert_eq!(
         added_member.instance_id.to_string(),
@@ -230,7 +233,7 @@ async fn test_multicast_group_member_operations(
         })
         .expect(&expect_msg);
 
-    // Directly get the underlay IPv6 group by finding the admin-scoped address
+    // Directly get the underlay IPv6 group by finding the admin-local address
     // First find the underlay group IP from the list to get the exact IPv6 address
     let underlay_ip = dpd_groups
         .items
@@ -241,7 +244,7 @@ async fn test_multicast_group_member_operations(
                     group_ip,
                     ..
                 } => {
-                    // Check if it starts with ff04 (admin-scoped multicast)
+                    // Check if it starts with ff04 (admin-local multicast)
                     if group_ip.0.segments()[0] == 0xff04 {
                         Some(group_ip.clone())
                     } else {
@@ -279,10 +282,9 @@ async fn test_multicast_group_member_operations(
         );
     }
 
-    // Test removing instance from multicast group using path-based DELETE
+    // Test removing instance from multicast group using instance-centric DELETE
     let member_remove_url = format!(
-        "{}/{instance_name}?project={project_name}",
-        mcast_group_members_url(group_name)
+        "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
 
     NexusRequest::new(
@@ -353,21 +355,8 @@ async fn test_instance_multicast_endpoints(
     );
     let join_params = InstanceMulticastGroupJoin { source_ips: None };
     // Use PUT method and expect 201 Created (implicitly creating group1)
-    let member1: MulticastGroupMember = NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            http::Method::PUT,
-            &instance_join_group1_url,
-        )
-        .body(Some(&join_params))
-        .expect_status(Some(StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let member1: MulticastGroupMember =
+        put_upsert(client, &instance_join_group1_url, &join_params).await;
     assert_eq!(member1.instance_id, instance.identity.id);
 
     // Wait for group1 to become active after implicitly create
@@ -404,17 +393,13 @@ async fn test_instance_multicast_endpoints(
     );
     assert_eq!(instance_memberships.items[0].state, "Joined");
 
-    // Join group2 using group-centric endpoint (implicitly creates group2, test both directions)
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group2_name)
+    // Join group2 using instance-centric endpoint (implicitly creates group2)
+    let join_group2_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{group2_name}?project={project_name}"
     );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
+    let join_params2 = InstanceMulticastGroupJoin { source_ips: None };
     let member2: MulticastGroupMember =
-        object_create(client, &member_add_url, &member_params).await;
+        put_upsert(client, &join_group2_url, &join_params2).await;
     assert_eq!(member2.instance_id, instance.identity.id);
 
     // Wait for group2 to become active after implicitly create
@@ -502,10 +487,9 @@ async fn test_instance_multicast_endpoints(
         list_multicast_group_members(&client, group2_name).await;
     assert_eq!(group2_members.len(), 1, "Group2 should still have 1 member");
 
-    // Leave group2 using group-centric endpoint
+    // Leave group2 using instance-centric endpoint
     let member_remove_url = format!(
-        "{}/{instance_name}?project={project_name}",
-        mcast_group_members_url(group2_name)
+        "/v1/instances/{instance_name}/multicast-groups/{group2_name}?project={project_name}"
     );
 
     NexusRequest::new(
@@ -563,51 +547,22 @@ async fn test_multicast_group_member_errors(
     let instance_name = "test-instance";
     create_instance(client, project_name, instance_name).await;
 
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Use instance-centric API to join group (implicitly creates group)
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Wait for group to become active before testing error cases
     wait_for_group_active(&client, group_name).await;
 
-    // Test adding nonexistent instance to group
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
+    // Test joining with nonexistent instance - should fail with NOT_FOUND
+    let bad_join_url = format!(
+        "/v1/instances/{nonexistent_instance}/multicast-groups/{group_name}?project={project_name}"
     );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(nonexistent_instance.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create_error(
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    object_put_error(
         client,
-        &member_add_url,
-        &member_params,
-        StatusCode::NOT_FOUND,
-    )
-    .await;
-
-    // Test adding member to nonexistent group
-    let nonexistent_group = "nonexistent-group";
-    let member_add_bad_group_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(nonexistent_group)
-    );
-    object_create_error(
-        client,
-        &member_add_bad_group_url,
-        &member_params,
+        &bad_join_url,
+        &join_params,
         StatusCode::NOT_FOUND,
     )
     .await;
@@ -641,20 +596,9 @@ async fn test_lookup_multicast_group_by_ip(
     let instance_name = "lookup-test-instance";
     create_instance(client, project_name, instance_name).await;
 
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Use instance-centric API to join group (implicit group creation)
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Wait for group to become active
     wait_for_group_active(&client, group_name).await;
@@ -704,21 +648,10 @@ async fn test_instance_deletion_removes_multicast_memberships(
 
     // Implicitly create multicast group by adding instance as first member
     let instance = create_instance(client, project_name, instance_name).await;
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
 
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Use instance-centric API to join group (implicit group creation)
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Wait for group to become active after implicitly create
     wait_for_group_active(&client, group_name).await;
@@ -755,13 +688,8 @@ async fn test_instance_deletion_removes_multicast_memberships(
     // Implicit model: group is implicitly deleted when last member (instance) is removed
     wait_for_group_deleted(client, group_name).await;
 
-    // DPD Validation: Ensure dataplane group is also cleaned up (implicit model)
-    let dpd_client = dpd_client(cptestctx);
-    let dpd_result = dpd_client.multicast_group_get(&multicast_ip).await;
-    assert!(
-        dpd_result.is_err(),
-        "Multicast group should be deleted from dataplane after last member removed (implicit model)"
-    );
+    // Wait for reconciler to clean up DPD state (activates reconciler repeatedly until DPD confirms deletion)
+    wait_for_group_deleted_from_dpd(cptestctx, multicast_ip).await;
 }
 
 /// Test that the multicast_ip field is correctly populated in MulticastGroupMember API responses.
@@ -791,19 +719,15 @@ async fn test_member_response_includes_multicast_ip(
     // Create instance for implicit group creation
     create_instance(client, project_name, instance_name).await;
 
-    // Implicitly create group via member-add
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
+    // Implicitly create group via instance-centric API
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
 
     // Add member and verify multicast_ip field is present in response
     let added_member: MulticastGroupMember =
-        object_create(client, &member_add_url, &member_params).await;
+        put_upsert(client, &join_url, &join_params).await;
 
     // Wait for group to become active
     wait_for_group_active(client, group_name).await;
@@ -841,8 +765,7 @@ async fn test_member_response_includes_multicast_ip(
 
     // Case: Remove and re-add member (reactivation) - verify field preserved
     let member_remove_url = format!(
-        "{}/{instance_name}?project={project_name}",
-        mcast_group_members_url(group_name)
+        "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::DELETE, &member_remove_url)
@@ -857,7 +780,7 @@ async fn test_member_response_includes_multicast_ip(
 
     // Re-create group by adding member again
     let readded_member: MulticastGroupMember =
-        object_create(client, &member_add_url, &member_params).await;
+        put_upsert(client, &join_url, &join_params).await;
 
     wait_for_group_active(client, group_name).await;
 
@@ -932,24 +855,11 @@ async fn test_cannot_delete_multicast_pool_with_groups(
         "IP Pool cannot be deleted while it contains IP ranges"
     );
 
-    // Create instance and implicitly create group via member-add (implicit pattern)
+    // Create instance and implicitly create group via instance-centric API
     create_instance(client, project_name, instance_name).await;
 
-    let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project={}",
-        group_name, project_name
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Wait for group to become active
     wait_for_group_active(client, group_name).await;
@@ -1017,17 +927,23 @@ fn assert_groups_eq(left: &MulticastGroup, right: &MulticastGroup) {
 ///
 /// Source IPs enable Source-Specific Multicast (SSM) where traffic is filtered
 /// by both destination (multicast IP) and source addresses.
+///
+/// Also verifies that the group view's `source_ips` field contains the
+/// union of all member source IPs.
 #[nexus_test]
 async fn test_source_ip_validation_on_join(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let project_name = "source-ip-validation-project";
-    let group_name = "source-ip-test-group";
     let instance_name = "source-ip-test-instance";
+    let instance2_name = "source-ip-test-instance-2";
+    let instance3_name = "source-ip-test-instance-3";
+
+    // SSM IP address (232.x.x.x range)
+    let ssm_ip = "232.1.0.100";
 
     // Create project and IP pools in parallel
-    // SSM groups require an SSM pool (232.x.x.x range for IPv4)
     let (_, _, _) = ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
@@ -1042,61 +958,124 @@ async fn test_source_ip_validation_on_join(
 
     // Create instances
     create_instance(client, project_name, instance_name).await;
-    let instance2_name = "source-ip-test-instance-2";
     create_instance(client, project_name, instance2_name).await;
-    let instance3_name = "source-ip-test-instance-3";
     create_instance(client, project_name, instance3_name).await;
 
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
+    let source1 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+    let source2 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let source3 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3));
+
+    // First instance joins with source1 - creates SSM group
+    let join_url1 = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{ssm_ip}?project={project_name}"
     );
-    let valid_source = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+    let join_body1 =
+        InstanceMulticastGroupJoin { source_ips: Some(vec![source1]) };
+    put_upsert::<_, MulticastGroupMember>(client, &join_url1, &join_body1)
+        .await;
 
-    // Case: Valid unicast source IP - creates SSM group
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: Some(vec![valid_source]),
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
-
+    // Verify group source_ips shows source1
     let group: MulticastGroup =
-        object_get(client, &mcast_group_url(group_name)).await;
-    assert_eq!(group.source_ips, vec![valid_source]);
+        object_get(client, &format!("/v1/multicast-groups/{ssm_ip}")).await;
+    assert_eq!(group.source_ips, vec![source1], "Group should show source1");
 
-    // Case: Second instance joining with same source IPs - should succeed
-    let member_params2 = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance2_name.parse().unwrap()),
-        source_ips: Some(vec![valid_source]),
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params2,
-    )
-    .await;
+    // Second instance joins with source1 and source2
+    let join_url2 = format!(
+        "/v1/instances/{instance2_name}/multicast-groups/{ssm_ip}?project={project_name}"
+    );
+    let join_body2 =
+        InstanceMulticastGroupJoin { source_ips: Some(vec![source1, source2]) };
+    put_upsert::<_, MulticastGroupMember>(client, &join_url2, &join_body2)
+        .await;
 
-    // Case: Third instance joining with different source IPs - should fail
-    let different_source = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 99));
-    let member_params3 = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance3_name.parse().unwrap()),
-        source_ips: Some(vec![different_source]),
+    // Verify group source_ips is union of member sources (sorted for comparison)
+    let group: MulticastGroup =
+        object_get(client, &format!("/v1/multicast-groups/{ssm_ip}")).await;
+    let mut actual_sources = group.source_ips.clone();
+    actual_sources.sort();
+    let mut expected_sources = vec![source1, source2];
+    expected_sources.sort();
+    assert_eq!(
+        actual_sources, expected_sources,
+        "Group source_ips should be union of all member sources"
+    );
+
+    // Third instance joins with source3 - union should now include all three
+    let join_url3 = format!(
+        "/v1/instances/{instance3_name}/multicast-groups/{ssm_ip}?project={project_name}"
+    );
+    let join_body3 =
+        InstanceMulticastGroupJoin { source_ips: Some(vec![source3]) };
+    put_upsert::<_, MulticastGroupMember>(client, &join_url3, &join_body3)
+        .await;
+
+    // Verify group source_ips is union of all three members' sources
+    let group: MulticastGroup =
+        object_get(client, &format!("/v1/multicast-groups/{ssm_ip}")).await;
+    let mut actual_sources = group.source_ips.clone();
+    actual_sources.sort();
+    let mut expected_sources = vec![source1, source2, source3];
+    expected_sources.sort();
+    assert_eq!(
+        actual_sources, expected_sources,
+        "Group source_ips should be union of all member sources"
+    );
+
+    // Verify list endpoint also returns groups with source_ips as union
+    let groups: Collection<MulticastGroup> =
+        NexusRequest::iter_collection_authn(
+            client,
+            "/v1/multicast-groups",
+            "",
+            None,
+        )
+        .await
+        .expect("Should list multicast groups");
+
+    let listed_group = groups
+        .all_items
+        .iter()
+        .find(|g| g.multicast_ip.to_string() == ssm_ip)
+        .expect("SSM group should appear in list");
+    let mut listed_sources = listed_group.source_ips.clone();
+    listed_sources.sort();
+    assert_eq!(
+        listed_sources, expected_sources,
+        "List endpoint should also return source_ips as union"
+    );
+
+    // Wait for reconciler to sync all member sources to DPD
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+    // Verify DPD external group contains the union of sources
+    let multicast_ip: IpAddr = ssm_ip.parse().unwrap();
+    let dpd_response = dpd_client(cptestctx)
+        .multicast_group_get(&multicast_ip)
+        .await
+        .expect("DPD should have external group")
+        .into_inner();
+
+    let dpd_sources = match dpd_response {
+        dpd_types::MulticastGroupResponse::External { sources, .. } => sources,
+        dpd_types::MulticastGroupResponse::Underlay { .. } => {
+            panic!("Expected External group from DPD, got Underlay");
+        }
     };
-    let error = object_create_error(
-        client,
-        &member_add_url,
-        &member_params3,
-        StatusCode::BAD_REQUEST,
-    )
-    .await;
-    assert!(
-        error.message.contains("source"),
-        "Error should mention source IPs mismatch: {}",
-        error.message
+
+    // Convert DPD sources (IpSrc) to IpAddr for comparison
+    let mut dpd_source_ips: Vec<IpAddr> = dpd_sources
+        .iter()
+        .flatten()
+        .filter_map(|src| match src {
+            dpd_types::IpSrc::Exact(ip) => Some(*ip),
+            dpd_types::IpSrc::Subnet(_) => None, // SSM uses exact sources
+        })
+        .collect();
+    dpd_source_ips.sort();
+
+    assert_eq!(
+        dpd_source_ips, expected_sources,
+        "DPD external group sources should be union of all member sources"
     );
 
     // Cleanup
@@ -1107,7 +1086,65 @@ async fn test_source_ip_validation_on_join(
         &[instance_name, instance2_name, instance3_name],
     )
     .await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(client, ssm_ip).await;
+}
+
+/// Test that source IP address family must match multicast group address family.
+///
+/// IPv4 multicast groups can only have IPv4 source IPs, and vice versa.
+#[nexus_test]
+async fn test_source_ip_address_family_validation(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "addr-family-validation-project";
+    let instance_name = "addr-family-test-instance";
+
+    // IPv4 SSM address
+    let ipv4_ssm_ip = "232.5.0.100";
+
+    // Create project and pools
+    ops::join3(
+        create_project(&client, project_name),
+        create_default_ip_pool(&client),
+        create_multicast_ip_pool_with_range(
+            &client,
+            "addr-family-mcast-pool",
+            (232, 5, 0, 1),
+            (232, 5, 0, 255),
+        ),
+    )
+    .await;
+
+    create_instance(client, project_name, instance_name).await;
+
+    // Try to join IPv4 group with IPv6 source - should fail
+    let ipv6_source: IpAddr = "2001:db8::1".parse().unwrap();
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{ipv4_ssm_ip}?project={project_name}"
+    );
+    let join_body =
+        InstanceMulticastGroupJoin { source_ips: Some(vec![ipv6_source]) };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &join_url)
+            .body(Some(&join_body))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Request should complete")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .expect("Should parse error body");
+
+    assert!(
+        error.message.contains("does not match multicast group address family"),
+        "Error should mention address family mismatch: {}",
+        error.message
+    );
+
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
 }
 
 /// Test default pool behavior when no pool is specified on member join.
@@ -1133,41 +1170,21 @@ async fn test_default_pool_on_implicit_creation(
     .await;
     create_instance(client, project_name, instance_name).await;
 
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
-    );
-
     // Case: Joining when no multicast pool exists - should fail with 400 (no pool available)
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create_error(
-        client,
-        &member_add_url,
-        &member_params,
-        StatusCode::BAD_REQUEST,
-    )
-    .await;
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
+    );
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    object_put_error(client, &join_url, &join_params, StatusCode::BAD_REQUEST)
+        .await;
 
     // Create a default multicast pool
     let mcast_pool =
         create_multicast_ip_pool(&client, "default-mcast-pool").await;
 
     // Case: Joining when multicast pool exists - should succeed (pool auto-discovered)
-    let member_add_url2 = format!(
-        "/v1/multicast-groups/{group_name2}/members?project={project_name}"
-    );
-    let member_params2 = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url2,
-        &member_params2,
-    )
-    .await;
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name2)
+        .await;
 
     // Verify group was allocated from default pool
     let group: MulticastGroup =
@@ -1212,34 +1229,27 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
     // Case: Create 3 groups - should succeed (uses all IPs in range)
     for i in 0..3 {
         let group_name = format!("range-group-{i}");
-        let member_add_url = format!(
-            "/v1/multicast-groups/{group_name}/members?project={project_name}"
-        );
-        let member_params = MulticastGroupMemberAdd {
-            instance: NameOrId::Name(instance_names[i].parse().unwrap()),
-            source_ips: None,
-        };
-        object_create::<_, MulticastGroupMember>(
-            client,
-            &member_add_url,
-            &member_params,
+        let instance_name = instance_names[i];
+        multicast_group_attach(
+            cptestctx,
+            project_name,
+            instance_name,
+            &group_name,
         )
         .await;
     }
 
     // Case: Try to create 4th group - should fail (range exhausted)
     let group_name4 = "range-group-3";
-    let member_add_url4 = format!(
-        "/v1/multicast-groups/{group_name4}/members?project={project_name}"
+    let instance_name4 = instance_names[3];
+    let join_url4 = format!(
+        "/v1/instances/{instance_name4}/multicast-groups/{group_name4}?project={project_name}"
     );
-    let member_params4 = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_names[3].parse().unwrap()),
-        source_ips: None,
-    };
-    let error = object_create_error(
+    let join_params4 = InstanceMulticastGroupJoin { source_ips: None };
+    let error = object_put_error(
         client,
-        &member_add_url4,
-        &member_params4,
+        &join_url4,
+        &join_params4,
         StatusCode::INSUFFICIENT_STORAGE, // or appropriate error code
     )
     .await;
@@ -1258,17 +1268,11 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
 
     // Case: Create new group - should succeed (IP reclaimed)
     let group_name_new = "range-group-new";
-    let member_add_url_new = format!(
-        "/v1/multicast-groups/{group_name_new}/members?project={project_name}"
-    );
-    let member_params_new = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_names[3].parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url_new,
-        &member_params_new,
+    multicast_group_attach(
+        cptestctx,
+        project_name,
+        instance_name4,
+        group_name_new,
     )
     .await;
 
@@ -1311,19 +1315,8 @@ async fn test_automatic_pool_selection(cptestctx: &ControlPlaneTestContext) {
 
     // Case: Join group - pool is auto-discovered
     let group_name = "auto-pool-group";
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     let group_view: MulticastGroup =
         object_get(client, &mcast_group_url(group_name)).await;
@@ -1365,17 +1358,11 @@ async fn test_pool_exhaustion(cptestctx: &ControlPlaneTestContext) {
     let instance_name = "pool-exhaust-instance";
     create_instance(client, project_name, instance_name).await;
     let group_exhaust = "exhaust-empty-pool";
-    let member_add_exhaust = format!(
-        "/v1/multicast-groups/{group_exhaust}/members?project={project_name}"
-    );
-    let member_params_exhaust = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_exhaust,
-        &member_params_exhaust,
+    multicast_group_attach(
+        cptestctx,
+        project_name,
+        instance_name,
+        group_exhaust,
     )
     .await;
 
@@ -1383,17 +1370,14 @@ async fn test_pool_exhaustion(cptestctx: &ControlPlaneTestContext) {
     let instance2_name = "pool-exhaust-instance-2";
     create_instance(client, project_name, instance2_name).await;
     let group_fail = "fail-empty-pool";
-    let member_add_fail = format!(
-        "/v1/multicast-groups/{group_fail}/members?project={project_name}"
+    let join_url_fail = format!(
+        "/v1/instances/{instance2_name}/multicast-groups/{group_fail}?project={project_name}"
     );
-    let member_params_fail = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance2_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create_error(
+    let join_params_fail = InstanceMulticastGroupJoin { source_ips: None };
+    object_put_error(
         client,
-        &member_add_fail,
-        &member_params_fail,
+        &join_url_fail,
+        &join_params_fail,
         StatusCode::INSUFFICIENT_STORAGE,
     )
     .await;
@@ -1449,20 +1433,15 @@ async fn test_multiple_ssm_groups_same_pool(
 
     // Create all 3 SSM groups from the same pool
     for (i, (group_name, source_ip)) in group_configs.iter().enumerate() {
-        let member_add_url = format!(
-            "/v1/multicast-groups/{}/members?project={}",
-            group_name, project_name
+        let instance_name = instance_names[i];
+        let join_url = format!(
+            "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
         );
-        let member_params = MulticastGroupMemberAdd {
-            instance: NameOrId::Name(instance_names[i].parse().unwrap()),
+        let join_params = InstanceMulticastGroupJoin {
             source_ips: Some(vec![source_ip.parse().unwrap()]),
         };
-        object_create::<_, MulticastGroupMember>(
-            client,
-            &member_add_url,
-            &member_params,
-        )
-        .await;
+        put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_params)
+            .await;
 
         // Wait for group to become active
         wait_for_group_active(client, group_name).await;
@@ -1537,29 +1516,29 @@ async fn test_multiple_ssm_groups_same_pool(
         );
     }
 
-    // Test that instances cannot join groups with different source IPs
+    // Test that instances can join groups with different source IPs (sources are per-member)
     let instance4_name = "ssm-inst-4";
     create_instance(client, project_name, instance4_name).await;
 
-    let member_add_url_wrong_source = format!(
-        "/v1/multicast-groups/ssm-group-1/members?project={}",
-        project_name
+    let different_source: IpAddr = "10.99.99.99".parse().unwrap();
+    let join_url_diff_source = format!(
+        "/v1/instances/{instance4_name}/multicast-groups/ssm-group-1?project={project_name}"
     );
-    let member_params_wrong_source = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance4_name.parse().unwrap()),
-        source_ips: Some(vec!["10.99.99.99".parse().unwrap()]), // Different from group's 10.1.1.1
-    };
-    let error = object_create_error(
+    let join_params_diff_source =
+        InstanceMulticastGroupJoin { source_ips: Some(vec![different_source]) };
+    put_upsert::<_, MulticastGroupMember>(
         client,
-        &member_add_url_wrong_source,
-        &member_params_wrong_source,
-        StatusCode::BAD_REQUEST,
+        &join_url_diff_source,
+        &join_params_diff_source,
     )
     .await;
+
+    // Verify group source_ips now includes both the original and new source
+    let group: MulticastGroup =
+        object_get(client, "/v1/multicast-groups/ssm-group-1").await;
     assert!(
-        error.message.contains("source"),
-        "Should reject instance joining SSM group with different source IPs: {}",
-        error.message
+        group.source_ips.contains(&different_source),
+        "Group source_ips should include new member's source"
     );
 
     let all_instances: Vec<_> = instance_names

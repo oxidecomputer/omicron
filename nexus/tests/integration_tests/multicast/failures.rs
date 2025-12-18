@@ -12,27 +12,38 @@
 //! - State consistency: Reconciler validates DB state matches DPD state
 //! - DPD failures during state transitions: "Creating", "Active", "Deleting" states
 //! - Implicit creation/deletion with DPD failures
-//! - Concurrent operation races: Implicit creation, deletion with member add
+//! - Concurrent operation races: Implicit creation, deletion with instance join
 //! - Drift correction: Reconciler syncs DPD when state is lost
 //! - Member lifecycle: "Joining"→"Left" on instance stop, "Left" waits for "Active"
+//!
+//! ## RPW vs Saga Responsibilities
+//!
+//! These tests focus on **RPW (Reliable Persistent Workflow)** behavior:
+//! - Background reconciliation of database state to dataplane (DPD)
+//! - Drift detection and correction when DPD state doesn't match DB
+//! - Eventual consistency guarantees across failures
+//!
+//! **Sagas** (tested indirectly via API operations) handle:
+//! - User API requests (instance create/start/stop/delete)
+//! - Database state transitions (creating members, setting `sled_id`)
+//! - Immediate validation (SSM source requirements, address family)
 
 use http::{Method, StatusCode};
 
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_instance, create_instance_with,
-    create_project, object_create, object_create_error, object_get,
-    objects_list_page_authz,
+    create_project, object_get, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
-    ExternalIpCreate, InstanceDiskAttachment,
-    InstanceNetworkInterfaceAttachment, MulticastGroupIdentifier,
-    MulticastGroupMemberAdd,
+    ExternalIpCreate, InstanceDiskAttachment, InstanceMulticastGroupJoin,
+    InstanceNetworkInterfaceAttachment, MulticastGroupJoinSpec,
 };
 use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
-use omicron_common::api::external::{InstanceState, NameOrId, SwitchLocation};
-use omicron_uuid_kinds::InstanceUuid;
+use omicron_common::api::external::{InstanceState, SwitchLocation};
+use omicron_uuid_kinds::{InstanceUuid, MulticastGroupUuid};
 
 use super::*;
 use crate::integration_tests::instances::{
@@ -49,7 +60,7 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
     let instance_name = "dpd-failure-instance";
 
     // Setup: project, pools - parallelize creation
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -62,20 +73,9 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
     // Stop DPD before implicit creation to test failure recovery
     cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
 
-    // Add member to group
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}",
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Verify group was implicitly created and is in "Creating" state since DPD is unavailable
     // The reconciler can't progress the group to Active without DPD communication
@@ -102,6 +102,53 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
         "Member should be in Joining or Left state when DPD is unavailable, got: {}",
         members[0].state
     );
+
+    // Start instance so it has a valid VMM state for recovery
+    let instance: Instance = object_get(
+        client,
+        &format!("/v1/instances/{instance_name}?project={project_name}"),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    let start_url =
+        format!("/v1/instances/{instance_name}/start?project={project_name}");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &start_url)
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should start instance");
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Restart DPD and verify member recovers to Joined
+    cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+    // Group should become Active and member should recover to Joined
+    wait_for_group_active(client, group_name).await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
+    )
+    .await;
+
+    let recovered_members =
+        list_multicast_group_members(client, group_name).await;
+    assert_eq!(
+        recovered_members[0].state, "Joined",
+        "Member should recover to Joined after DPD restart"
+    );
+
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+    wait_for_group_deleted(client, group_name).await;
 }
 
 #[nexus_test]
@@ -143,17 +190,11 @@ async fn test_multicast_reconciler_state_consistency_validation(
     // Since DPD is down, groups will remain in "Creating" state
     for (instance_name, &group_name) in instance_names.iter().zip(&group_names)
     {
-        let member_add_url = format!(
-            "/v1/multicast-groups/{group_name}/members?project={project_name}",
-        );
-        let member_params = MulticastGroupMemberAdd {
-            instance: NameOrId::Name(instance_name.parse().unwrap()),
-            source_ips: None,
-        };
-        object_create::<_, MulticastGroupMember>(
-            client,
-            &member_add_url,
-            &member_params,
+        multicast_group_attach(
+            cptestctx,
+            project_name,
+            instance_name,
+            group_name,
         )
         .await;
     }
@@ -231,20 +272,9 @@ async fn test_dpd_failure_during_creating_state(
     // Stop DPD before implicit creation
     cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
 
-    // Add member to group
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Wait for reconciler to process - tests DPD communication handling during "Creating" state
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
@@ -299,20 +329,9 @@ async fn test_dpd_failure_during_active_state(
 
     let instance = create_instance(client, project_name, instance_name).await;
 
-    // Add member to group
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Wait for group to become "Active" and member to reach "Joined" state
     wait_for_group_active(client, group_name).await;
@@ -387,20 +406,9 @@ async fn test_dpd_failure_during_deleting_state(
     // Create instance first
     create_instance(client, project_name, instance_name).await;
 
-    // Add member to group
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Wait for group to reach "Active" state before testing deletion
     wait_for_group_active(client, group_name).await;
@@ -493,20 +501,9 @@ async fn test_multicast_group_members_during_dpd_failure(
     // Stop DPD to test member operations during failure
     cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
 
-    // Add member to group
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Get the implicitly created group for later verification
     let group_get_url = mcast_group_url(group_name);
@@ -602,20 +599,9 @@ async fn test_implicit_creation_with_dpd_failure(
     // Stop DPD before implicit creation
     cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
 
-    // Add the instance as a member to a non-existent group (triggers implicit creation)
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add the instance to a non-existent group (triggers implicit creation)
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Verify the implicitly created group exists and is in "Creating" state
     let group_url = mcast_group_url(group_name);
@@ -682,20 +668,9 @@ async fn test_implicit_deletion_with_dpd_failure(
     // Create instance first
     create_instance(client, project_name, instance_name).await;
 
-    // Add member to group
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Wait for group to become Active
     wait_for_group_active(client, group_name).await;
@@ -736,6 +711,13 @@ async fn test_implicit_deletion_with_dpd_failure(
             group.state
         );
         assert_eq!(group.identity.id, created_group.identity.id);
+
+        // Restart DPD and verify cleanup completes
+        cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+        wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+        // Both group and orphaned members should be cleaned up
+        wait_for_group_deleted(client, group_name).await;
     }
     // Note: If group is gone, implicit deletion succeeded despite DPD being down
     // (possibly via database-only cleanup)
@@ -776,7 +758,7 @@ async fn test_concurrent_implicit_creation_race(
             false, // start=false: Don't start instances to avoid timing issues
             Default::default(),
             None,
-            Vec::<MulticastGroupIdentifier>::new(),
+            Vec::<MulticastGroupJoinSpec>::new(),
         )
     });
     let instances = ops::join_all(create_instance_futures).await;
@@ -787,29 +769,16 @@ async fn test_concurrent_implicit_creation_race(
 
     // Try to add all instances to the non-existent group concurrently
     // This will race to implicitly create the group
+    // Add all instances to the group concurrently
     let add_member_futures = instance_names.iter().map(|instance_name| {
-        let member_add_url = format!(
-            "/v1/multicast-groups/{group_name}/members?project={project_name}"
-        );
-        let member_params = MulticastGroupMemberAdd {
-            instance: NameOrId::Name(instance_name.parse().unwrap()),
-            source_ips: None,
-        };
-        async move {
-            object_create::<_, MulticastGroupMember>(
-                client,
-                &member_add_url,
-                &member_params,
-            )
-            .await
-        }
+        multicast_group_attach(
+            cptestctx,
+            project_name,
+            instance_name,
+            group_name,
+        )
     });
-
-    // Execute all member additions concurrently
-    let members = ops::join_all(add_member_futures).await;
-
-    // All member additions should have succeeded
-    assert_eq!(members.len(), 3, "All 3 member additions should succeed");
+    ops::join_all(add_member_futures).await;
 
     // Verify the group exists and has all members
     let group_url = mcast_group_url(group_name);
@@ -840,14 +809,14 @@ async fn test_concurrent_implicit_creation_race(
     wait_for_group_deleted(client, group_name).await;
 }
 
-/// Test implicit deletion race with member add.
+/// Test implicit deletion race with instance join.
 ///
 /// When the last member is leaving (triggering implicit deletion) while another
 /// instance is trying to join, the system should handle this gracefully.
 /// Either the group survives with the new member, or implicit deletion completes
 /// and the new member triggers a fresh implicit creation.
 #[nexus_test]
-async fn test_implicit_deletion_race_with_member_add(
+async fn test_implicit_deletion_race_with_instance_join(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -870,18 +839,12 @@ async fn test_implicit_deletion_race_with_member_add(
         .map(|name| create_instance(client, project_name, name));
     let instances = ops::join_all(create_instance_futures).await;
 
-    // Add first member
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}",
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name("leaving-instance".parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
+    // Add first member via instance-centric API
+    multicast_group_attach(
+        cptestctx,
+        project_name,
+        "leaving-instance",
+        group_name,
     )
     .await;
 
@@ -900,34 +863,31 @@ async fn test_implicit_deletion_race_with_member_add(
     let join_futures = ["joining-instance-1", "joining-instance-2"]
         .iter()
         .map(|instance_name| {
-            let member_add_url = format!(
-                "/v1/multicast-groups/{group_name}/members?project={project_name}"
+            let join_url = format!(
+                "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
             );
-            let member_params = MulticastGroupMemberAdd {
-                instance: NameOrId::Name(instance_name.parse().unwrap()),
-                source_ips: None,
-            };
+            let join_params = InstanceMulticastGroupJoin { source_ips: None };
             async move {
                 // This might fail if group is deleted, or succeed if it beats the delete
-                let result = nexus_test_utils::http_testing::NexusRequest::new(
+                let res = nexus_test_utils::http_testing::NexusRequest::new(
                     nexus_test_utils::http_testing::RequestBuilder::new(
                         client,
-                        http::Method::POST,
-                        &member_add_url,
+                        http::Method::PUT,
+                        &join_url,
                     )
-                    .body(Some(&member_params)),
+                    .body(Some(&join_params)),
                 )
                 .authn_as(nexus_test_utils::http_testing::AuthnMode::PrivilegedUser)
                 .execute()
                 .await;
 
-                match result {
+                match res {
                     Ok(response)
                         if response.status == http::StatusCode::CREATED =>
                     {
                         Some(
                             response
-                                .parsed_body::<MulticastGroupMember>()
+                                .parsed_body::<nexus_types::external_api::views::MulticastGroupMember>()
                                 .unwrap(),
                         )
                     }
@@ -1018,18 +978,11 @@ async fn test_multicast_join_deleted_instance(
     create_instance(client, project_name, remaining_instance).await;
 
     // Create group with the remaining instance (so the group stays alive)
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(remaining_instance.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
+    multicast_group_attach(
+        cptestctx,
+        project_name,
+        remaining_instance,
+        group_name,
     )
     .await;
 
@@ -1041,17 +994,20 @@ async fn test_multicast_join_deleted_instance(
         .await;
 
     // Now try to add the deleted instance to the group - should fail with NOT_FOUND
-    let member_params_deleted = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_to_delete.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create_error(
-        client,
-        &member_add_url,
-        &member_params_deleted,
-        http::StatusCode::NOT_FOUND,
+    // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
+    let join_url = format!(
+        "/v1/instances/{instance_to_delete}/multicast-groups/{group_name}?project={project_name}"
+    );
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &join_url)
+            .body(Some(&join_params))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
     )
-    .await;
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Request should complete (with 404)");
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[remaining_instance])
@@ -1085,19 +1041,9 @@ async fn test_drift_correction_missing_group_in_dpd(
     create_instance(client, project_name, instance_name).await;
 
     // Create group by adding member
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Join group using instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
     wait_for_group_active(client, group_name).await;
@@ -1124,7 +1070,7 @@ async fn test_drift_correction_missing_group_in_dpd(
     let dpd_client = nexus_test_utils::dpd_client(cptestctx);
     assert!(
         dpd_client.multicast_group_get(&multicast_ip).await.is_err(),
-        "Group should NOT exist in DPD after restart (this is the drift)"
+        "Group should not exist in DPD after restart (this is the drift)"
     );
 
     // Activate reconciler - should detect missing group and re-program DPD
@@ -1186,19 +1132,8 @@ async fn test_member_joining_to_left_on_instance_stop(
     cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
 
     // Add instance to group - member will be stuck in "Joining" since DPD is down
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
     // Run reconciler - member should stay in "Joining" since DPD is unavailable
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
@@ -1291,19 +1226,13 @@ async fn test_left_member_waits_for_group_active(
     cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
 
     // Add stopped instance to group - member will be in "Left" state
-    let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
+    // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-        source_ips: None,
-    };
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_params)
+        .await;
 
     // Verify group is stuck in "Creating" (DPD is down)
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
@@ -1355,5 +1284,183 @@ async fn test_left_member_waits_for_group_active(
     assert_eq!(
         group_after.state, "Creating",
         "Group should still be Creating without DPD"
+    );
+}
+
+/// Test underlay IP collision detection and salt-based retry mechanism.
+///
+/// This test verifies that when two external groups would map to the same
+/// underlay IP, the reconciler detects the collision and retries with an
+/// incremented salt value.
+///
+/// Test setup:
+/// 1. Create group A with external IP 224.5.5.5 (via instance join)
+/// 2. Pre-occupy B's target underlay IP (ff04::e001:0203) using A's tag
+/// 3. Create group B with external IP 224.1.2.3 (maps to ff04::e001:0203 with salt=0)
+/// 4. When reconciler processes B, it hits collision and retries with salt=1
+#[nexus_test]
+async fn test_multicast_group_underlay_collision_retry(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let log = &cptestctx.logctx.log;
+    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+
+    let project_name = "collision-test-project";
+    let instance_a_name = "collision-instance-a";
+    let instance_b_name = "collision-instance-b";
+    // Use IP addresses as group identifiers for explicit IP allocation
+    let group_a_ip = "224.5.5.5";
+    let group_b_ip = "224.1.2.3"; // Known mapping: → ff04::e001:0203 with salt=0
+
+    // Setup: project, pools
+    ops::join3(
+        create_project(&client, project_name),
+        create_default_ip_pool(&client),
+        create_multicast_ip_pool_with_range(
+            &client,
+            "mcast-pool",
+            (224, 1, 0, 0),
+            (224, 5, 255, 255),
+        ),
+    )
+    .await;
+
+    // Create two instances for membership
+    ops::join2(
+        create_instance(client, project_name, instance_a_name),
+        create_instance(client, project_name, instance_b_name),
+    )
+    .await;
+
+    // Stop DPD to control when groups transition to "Active"
+    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+
+    // Create group A by joining instance to IP address (implicit group creation)
+    multicast_group_attach(
+        cptestctx,
+        project_name,
+        instance_a_name,
+        group_a_ip,
+    )
+    .await;
+
+    // Fetch group A (created by attach) from API using IP address as identifier
+    let group_a = get_multicast_group(client, group_a_ip).await;
+    let group_a_model = datastore
+        .multicast_group_fetch(
+            &opctx,
+            MulticastGroupUuid::from_untyped_uuid(group_a.identity.id),
+        )
+        .await
+        .expect("Should fetch group A");
+
+    // Pre-occupy B's target underlay IP by creating an underlay group with A's tag
+    // B's target: ff04::e001:0203 (known mapping for 224.1.2.3 with salt=0)
+    let collision_ip: ipnetwork::IpNetwork = "ff04::e001:0203".parse().unwrap();
+    let res = datastore
+        .ensure_underlay_multicast_group(
+            &opctx,
+            group_a_model.clone(),
+            collision_ip,
+        )
+        .await
+        .expect("Should create collision underlay");
+
+    // Verify the underlay was created (for group A, but with B's target IP)
+    assert!(
+        matches!(
+            res,
+            nexus_db_queries::db::datastore::multicast::EnsureUnderlayResult::Created(_)
+        ),
+        "Should have created underlay group with collision IP"
+    );
+
+    // Create group B by joining instance to IP address (implicit group creation)
+    multicast_group_attach(
+        cptestctx,
+        project_name,
+        instance_b_name,
+        group_b_ip,
+    )
+    .await;
+
+    // Fetch group B (created by attach) from API using IP address as identifier
+    let group_b = get_multicast_group(client, group_b_ip).await;
+
+    // Restart DPD and run reconciler, triggering collision detection
+    cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+    // Fetch group B after reconciliation
+    let group_b_after = datastore
+        .multicast_group_fetch(
+            &opctx,
+            MulticastGroupUuid::from_untyped_uuid(group_b.identity.id),
+        )
+        .await
+        .expect("Should fetch group B after reconciliation");
+
+    // Verify B got a salt value > 0 (collision was detected and retried)
+    assert!(
+        group_b_after.underlay_salt.is_some(),
+        "Group B should have a salt value after collision retry"
+    );
+    let salt_value = group_b_after.underlay_salt.unwrap();
+    assert!(
+        *salt_value > 0,
+        "Salt should be > 0 after collision (got {})",
+        *salt_value
+    );
+
+    // Verify B got an underlay group (different from the collision IP)
+    assert!(
+        group_b_after.underlay_group_id.is_some(),
+        "Group B should have an underlay group after collision retry"
+    );
+
+    // Fetch A's underlay group and verify it has the collision IP
+    let group_a_after = datastore
+        .multicast_group_fetch(
+            &opctx,
+            MulticastGroupUuid::from_untyped_uuid(group_a.identity.id),
+        )
+        .await
+        .expect("Should fetch group A after reconciliation");
+    let underlay_a = datastore
+        .underlay_multicast_group_fetch(
+            &opctx,
+            group_a_after.underlay_group_id.unwrap(),
+        )
+        .await
+        .expect("Should fetch A's underlay group");
+
+    assert_eq!(
+        underlay_a.multicast_ip.ip().to_string(),
+        "ff04::e001:203",
+        "A's underlay IP should be the collision IP we set"
+    );
+
+    // Fetch B's underlay group and verify it has a different IP than the collision IP
+    let underlay_b = datastore
+        .underlay_multicast_group_fetch(
+            &opctx,
+            group_b_after.underlay_group_id.unwrap(),
+        )
+        .await
+        .expect("Should fetch B's underlay group");
+
+    assert_ne!(
+        underlay_b.multicast_ip.ip().to_string(),
+        "ff04::e001:203",
+        "B's underlay IP should differ from collision IP due to salt"
+    );
+
+    // Verify A and B have different underlay IPs
+    assert_ne!(
+        underlay_a.multicast_ip, underlay_b.multicast_ip,
+        "A and B should have different underlay IPs"
     );
 }
