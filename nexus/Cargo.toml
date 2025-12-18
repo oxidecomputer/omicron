@@ -132,8 +132,10 @@ nexus-reconfigurator-preparation.workspace = true
 nexus-reconfigurator-rendezvous.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-omdb.workspace = true
 omicron-passwords.workspace = true
 oxide-tokio-rt.workspace = true
+sigpipe.workspace = true
 oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
@@ -198,4 +200,8 @@ harness = false
 #
 [[bin]]
 name = "nexus"
+doc = false
+
+[[bin]]
+name = "omdb-dup"
 doc = false

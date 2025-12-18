@@ -15,12 +15,6 @@ experimental = ["setup-scripts"]
 filter = 'rdeps(nexus-test-utils) - package(omicron-dev) - package(omicron-live-tests)'
 setup = 'crdb-seed'
 
-[[profile.default.scripts]]
-# Build omdb for usage within Nexus integration tests.
-# This was initially added for the support bundle integration tests.
-filter = 'rdeps(nexus-test-utils) - package(omicron-dev) - package(omicron-live-tests)'
-setup = 'omdb-build'
-
 [profile.ci]
 fail-fast = false
 
@@ -31,10 +25,6 @@ path = "junit.xml"
 # Use the test profile for this executable since that's how almost all
 # invocations of nextest happen.
 command = 'cargo run -p crdb-seed --profile test'
-
-[scripts.setup.omdb-build]
-# Build omdb binary for usage by integration tests
-command = 'cargo build --bin omdb'
 
 [[profile.default.scripts]]
 filter = 'package(omicron-clickhouse-admin)'

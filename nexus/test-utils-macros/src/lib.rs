@@ -130,6 +130,21 @@ pub fn nexus_test(attrs: TokenStream, input: TokenStream) -> TokenStream {
                 #func_ident_string,
             )
             .with_extra_sled_agents(#extra_sled_agents)
+            .customize_nexus_config(&|config| {
+                // Set omdb binary path from CARGO_BIN_EXE_omdb-dup if available.
+                // This env var is set by cargo test/nextest for binaries in the
+                // same package - but it's only accessible to integration tests
+                // and benchmarks.
+                //
+                // We use option_env!() here (which expands in test code) to
+                // avoid compile errors during cargo check when the binary
+                // doesn't exist. If the env var isn't set, we leave the path
+                // unchanged (it uses a default).
+                if let Some(omdb_path) = option_env!("CARGO_BIN_EXE_omdb-dup") {
+                    config.pkg.omdb.bin_path =
+                        ::camino::Utf8PathBuf::from(omdb_path);
+                }
+            })
             .start::<#which_nexus>()
             .await;
             #func_ident(&ctx).await;
