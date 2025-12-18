@@ -139,7 +139,7 @@ async fn get_instance_disks(
     client: &ClientTestContext,
     name: &str,
 ) -> Vec<Disk> {
-    let url = format!("/v1/instances/{name}/disks?project={}", PROJECT_NAME);
+    let url = format!("/v1/instances/{name}/disks?project={PROJECT_NAME}");
 
     NexusRequest::iter_collection_authn(client, &url, "", None)
         .await
