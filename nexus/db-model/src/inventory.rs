@@ -2393,6 +2393,7 @@ impl From<OmicronMeasurements> for DbOmicronMeasurements {
     fn from(value: OmicronMeasurements) -> Self {
         let remap = |desired| match desired {
             OmicronMeasurementSetDesiredContents::InstallDataset => None,
+            // Hashes should always be non-empty
             OmicronMeasurementSetDesiredContents::Artifacts { hashes } => {
                 Some(hashes.into_iter().map(|x| ArtifactHash(x)).collect())
             }
