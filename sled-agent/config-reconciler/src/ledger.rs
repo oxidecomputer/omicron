@@ -6,7 +6,6 @@
 
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
-use legacy_configs::convert_legacy_ledgers;
 use omicron_common::api::external::Generation;
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
@@ -30,7 +29,7 @@ use tufaceous_artifact::ArtifactHash;
 
 use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
-use crate::ledger::legacy_configs::try_convert_v4_sled_config;
+use crate::ledger::legacy_configs::try_convert_old_ledgered_config_versions;
 
 mod legacy_configs;
 
@@ -644,28 +643,22 @@ async fn load_sled_config(
         return CurrentSledConfig::Ledgered(Box::new(config.into_inner()));
     }
 
-    // If we have no ledgered config, see if we can convert from the previous
-    // version of the format.
-    if let Some(config) = try_convert_v4_sled_config(log, paths).await {
+    // If we can't successfully read a ledgered config, see if we can convert
+    // from one of the previous versions of the format.
+    if let Some(config) =
+        try_convert_old_ledgered_config_versions(log, paths).await
+    {
         info!(
             log,
-            "Ledger of sled config exists, but it was formatted as \
-            version 6, with single-stack NICs. It has been rewritten \
-            to the current version",
+            "Ledger of sled config exists, but it was formatted as a previous \
+             version. It has been rewritten to the current version",
         );
         return CurrentSledConfig::Ledgered(Box::new(config));
     }
 
-    // If we have no ledgered config, see if we can convert from the even
-    // more-previous triple of legacy ledgers.
-    if let Some(config) = convert_legacy_ledgers(&config_datasets, log).await {
-        info!(log, "Converted legacy triple of ledgers into new sled config");
-        return CurrentSledConfig::Ledgered(Box::new(config));
-    }
-
-    // We have no ledger and didn't find legacy ledgers to convert; we must be
-    // waiting for RSS (if we're pre-rack-setup) or for Nexus to send us a
-    // config (if we're a sled being added to an existing rack).
+    // We have no ledger; we must be waiting for RSS (if we're pre-rack-setup)
+    // or for Nexus to send us a config (if we're a sled being added to an
+    // existing rack).
     info!(log, "No sled config ledger exists");
     CurrentSledConfig::WaitingForInitialConfig
 }

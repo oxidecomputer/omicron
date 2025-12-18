@@ -12,7 +12,6 @@ use indent_write::fmt::IndentWriter;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
-use omicron_common::ledger::Ledgerable;
 use omicron_common::update::{ArtifactId, OmicronInstallManifestSource};
 use omicron_uuid_kinds::MupdateUuid;
 use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
@@ -866,18 +865,5 @@ impl Default for OmicronSledConfig {
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
         }
-    }
-}
-
-impl Ledgerable for OmicronSledConfig {
-    fn is_newer_than(&self, other: &Self) -> bool {
-        self.generation > other.generation
-    }
-
-    fn generation_bump(&mut self) {
-        // DO NOTHING!
-        //
-        // Generation bumps must only ever come from nexus and will be encoded
-        // in the struct itself
     }
 }

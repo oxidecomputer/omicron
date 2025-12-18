@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use omicron_common::ledger::Ledgerable;
 use omicron_common::{
     api::{
         external::{self, ByteCount, Generation},
@@ -112,6 +113,23 @@ pub struct OmicronSledConfig {
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
+}
+
+// NOTE: Most trait impls live in the `impls` module of this crate, but we
+// ledger sled configs on disk, so have to be able to read them from the ledger
+// even for old versions. Therefore, we implement `Ledgerable` on this type
+// directly.
+impl Ledgerable for OmicronSledConfig {
+    fn is_newer_than(&self, other: &Self) -> bool {
+        self.generation > other.generation
+    }
+
+    fn generation_bump(&mut self) {
+        // DO NOTHING!
+        //
+        // Generation bumps must only ever come from nexus and will be encoded
+        // in the struct itself
+    }
 }
 
 /// Describes the set of Omicron-managed zones running on a sled
