@@ -29,9 +29,9 @@ use tufaceous_artifact::ArtifactHash;
 
 use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
-use legacy_configs::read_ledgered_sled_config;
+use ledgered_sled_config_versioning::read_ledgered_sled_config;
 
-mod legacy_configs;
+mod ledgered_sled_config_versioning;
 
 const CONFIG_LEDGER_FILENAME: &str = "omicron-sled-config.json";
 
@@ -663,12 +663,12 @@ enum LedgerTaskExit {
 
 #[cfg(test)]
 mod tests {
-    use super::legacy_configs::tests::LEGACY_DATASETS_PATH;
-    use super::legacy_configs::tests::LEGACY_DISKS_PATH;
-    use super::legacy_configs::tests::LEGACY_ZONES_PATH;
+    use super::ledgered_sled_config_versioning::tests::LEGACY_DATASETS_PATH;
+    use super::ledgered_sled_config_versioning::tests::LEGACY_DISKS_PATH;
+    use super::ledgered_sled_config_versioning::tests::LEGACY_ZONES_PATH;
     use super::*;
     use crate::internal_disks::InternalDiskDetails;
-    use crate::ledger::legacy_configs::tests::test_data_merged_config;
+    use crate::ledger::ledgered_sled_config_versioning::tests::test_data_merged_config;
     use anyhow::anyhow;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
