@@ -101,22 +101,30 @@ impl SvcsInMaintenanceResult {
                         let mut current_svc = SvcInMaintenance::new();
                         if let Some(fmri) = svc.next() {
                             current_svc.fmri = fmri.to_string()
-                        }
-
-                        if let Some(zone) = svc.next() {
-                            current_svc.zone = zone.to_string()
                         } else {
-                            // We only need to collect an error here. If the
-                            // previous svc.next() was `None`, this one will be
-                            // `None` as well.
                             errors.push(format!(
                                 "Unexpected output line: {line}"
                             ));
                             error!(
                                 log,
-                                "unable to parse; output line missing data: \
-                                {line}",
+                                "unable to parse; output line missing FMRI:";
+                                "line" => line,
                             );
+                            continue;
+                        }
+
+                        if let Some(zone) = svc.next() {
+                            current_svc.zone = zone.to_string()
+                        } else {
+                            errors.push(format!(
+                                "Unexpected output line: {line}"
+                            ));
+                            error!(
+                                log,
+                                "unable to parse; output line missing zone:";
+                                "line" => line,
+                            );
+                            continue;
                         }
 
                         // We add a service even if we were only partially able to
@@ -175,14 +183,13 @@ pub enum SvcState {
 impl From<String> for SvcState {
     fn from(value: String) -> Self {
         match value.as_str() {
-            "Uninitialized" | "uninitialized" => SvcState::Uninitialized,
-            "Offline" | "offline" => SvcState::Offline,
-            "Online" | "online" => SvcState::Online,
-            "Degraded" | "degraded" => SvcState::Degraded,
-            "Maintenance" | "maintenance" => SvcState::Maintenance,
-            "Disabled" | "disabled" => SvcState::Disabled,
-            "Legacy Run" | "legacy run" | "Legacy run" | "legacy_run"
-            | "legacy-run" => SvcState::LegacyRun,
+            "uninitialized" => SvcState::Uninitialized,
+            "offline" => SvcState::Offline,
+            "online" => SvcState::Online,
+            "degraded" => SvcState::Degraded,
+            "maintenance" => SvcState::Maintenance,
+            "disabled" => SvcState::Disabled,
+            "legacy_run" => SvcState::LegacyRun,
             _ => SvcState::Unknown,
         }
     }
@@ -207,8 +214,7 @@ impl Display for SvcInMaintenance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let SvcInMaintenance { fmri, zone } = self;
 
-        write!(f, "FMRI: {}", fmri)?;
-        write!(f, "zone: {}", zone)
+        writeln!(f, "FMRI: {} zone: {}", fmri, zone)
     }
 }
 
@@ -296,16 +302,7 @@ online         svc:/milestone/sysconfig:default                   global
         let log = log();
         let result = SvcsInMaintenanceResult::parse(&log, output.as_bytes());
 
-        // We want to make sure we have an entry even if we're missing the zone
-        assert_eq!(result.services.len(), 1);
-
-        assert_eq!(
-            result.services[0],
-            SvcInMaintenance {
-                fmri: "svc:/site/fake-service:default".to_string(),
-                zone: "".to_string(),
-            }
-        );
+        assert_eq!(result.services.len(), 0);
 
         assert_eq!(
             result.errors,
@@ -324,13 +321,8 @@ online         svc:/milestone/sysconfig:default                   global
         let log = log();
         let result = SvcsInMaintenanceResult::parse(&log, output.as_bytes());
 
-        // We want to make sure we have an entry even if we're missing all information
-        assert_eq!(result.services.len(), 1);
+        assert_eq!(result.services.len(), 0);
 
-        assert_eq!(
-            result.services[0],
-            SvcInMaintenance { fmri: "".to_string(), zone: "".to_string() }
-        );
         assert_eq!(
             result.errors,
             vec!["Unexpected output line: maintenance".to_string(),]
@@ -368,20 +360,12 @@ maintenance
         let result = SvcsInMaintenanceResult::parse(&log, output.as_bytes());
 
         // We want to make sure we only have three services in maintenance
-        assert_eq!(result.services.len(), 3);
+        assert_eq!(result.services.len(), 1);
         assert_eq!(
             result.services[0],
             SvcInMaintenance {
                 fmri: "svc:/site/fake-service:default".to_string(),
                 zone: "global".to_string(),
-            }
-        );
-
-        assert_eq!(
-            result.services[1],
-            SvcInMaintenance {
-                fmri: "svc:/system/omicron/baseline:default".to_string(),
-                zone: "".to_string(),
             }
         );
 

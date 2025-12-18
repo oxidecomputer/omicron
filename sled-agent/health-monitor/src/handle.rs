@@ -21,6 +21,8 @@ pub struct HealthMonitorHandle {
 }
 
 impl HealthMonitorHandle {
+    /// Returns a `HealthMonitorHandle` that doesn't monitor health and always
+    /// reports no problems
     pub fn stub() -> Self {
         let (_tx, smf_services_in_maintenance_rx) =
             watch::channel(Ok(SvcsInMaintenanceResult::new()));

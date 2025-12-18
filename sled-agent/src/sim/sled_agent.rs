@@ -168,9 +168,6 @@ impl SledAgent {
                 .await
                 .start(&log, &config.dropshot);
 
-        // TODO[omicron#9517]: This will always report a healthy state for all
-        // services for now. Eventually, we'll want to have the ability to
-        // "turn on" the real health monitor on simulated systems
         let health_monitor = HealthMonitorHandle::stub();
 
         Arc::new(SledAgent {
