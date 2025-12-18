@@ -25,7 +25,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -49,7 +48,7 @@ impl DataStore {
         let authz_token = authz::DeviceAccessToken::new(
             authz::FLEET,
             db_token.id(),
-            LookupType::ById(db_token.id().into_untyped_uuid()),
+            LookupType::by_id(db_token.id()),
         );
 
         // This check might seem superfluous, but (for now at least) only the

@@ -519,7 +519,7 @@ mod test {
                     volume_id: volume_id.into(),
                     destination_volume_id: VolumeUuid::new_v4().into(),
 
-                    gen: Generation::new(),
+                    generation: Generation::new(),
                     state: SnapshotState::Creating,
                     block_size: BlockSize::AdvancedFormat,
 
@@ -679,7 +679,7 @@ mod test {
                             block_size: 512,
                             blocks_per_extent: 1,
                             extent_count: 1,
-                            gen: 1,
+                            generation: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec!["[::1]:12345".parse().unwrap()],

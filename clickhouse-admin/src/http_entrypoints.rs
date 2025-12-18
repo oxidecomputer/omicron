@@ -54,7 +54,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match ctx.generation() {
+        let generation = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
@@ -64,7 +64,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
                 ));
             }
         };
-        Ok(HttpResponseOk(gen))
+        Ok(HttpResponseOk(generation))
     }
 
     async fn distributed_ddl_queue(
@@ -120,7 +120,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match ctx.generation() {
+        let generation = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
@@ -130,7 +130,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
                 ));
             }
         };
-        Ok(HttpResponseOk(gen))
+        Ok(HttpResponseOk(generation))
     }
 
     async fn lgif(

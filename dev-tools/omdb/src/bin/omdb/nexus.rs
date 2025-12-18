@@ -31,32 +31,36 @@ use futures::TryStreamExt;
 use http::StatusCode;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
-use nexus_client::types::ActivationReason;
-use nexus_client::types::BackgroundTask;
-use nexus_client::types::BackgroundTasksActivateRequest;
-use nexus_client::types::CurrentStatus;
-use nexus_client::types::LastResult;
-use nexus_client::types::PhysicalDiskPath;
-use nexus_client::types::SagaState;
-use nexus_client::types::SledSelector;
-use nexus_client::types::UninitializedSledId;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_inventory::now_db_precision;
+use nexus_lockstep_client::types::ActivationReason;
+use nexus_lockstep_client::types::BackgroundTask;
+use nexus_lockstep_client::types::BackgroundTasksActivateRequest;
+use nexus_lockstep_client::types::CurrentStatus;
+use nexus_lockstep_client::types::LastResult;
+use nexus_lockstep_client::types::PhysicalDiskPath;
+use nexus_lockstep_client::types::SagaState;
+use nexus_lockstep_client::types::SledSelector;
+use nexus_lockstep_client::types::UninitializedSledId;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::OximeterReadPolicy;
+use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
+use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionReplacementStatus;
@@ -64,12 +68,16 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SitrepGcStatus;
+use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
+use nexus_types::internal_api::background::TufRepoPrunerStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -88,13 +96,16 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs::OpenOptions;
+use std::os::unix::fs::PermissionsExt;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use support_bundle_viewer::LocalFileAccess;
 use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
 use tabled::settings::Padding;
 use tabled::settings::object::Columns;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::OnceCell;
 use update_engine::EventBuffer;
 use update_engine::ExecutionStatus;
@@ -113,7 +124,7 @@ use uuid::Uuid;
 /// Arguments to the "omdb nexus" subcommand
 #[derive(Debug, Args)]
 pub struct NexusArgs {
-    /// URL of the Nexus internal API
+    /// URL of the Nexus internal lockstep API
     #[clap(
         long,
         env = "OMDB_NEXUS_URL",
@@ -136,6 +147,8 @@ enum NexusCommands {
     Blueprints(BlueprintsArgs),
     /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
+    /// fetch an omdb binary associated with an active Nexus
+    FetchOmdb(FetchOmdbArgs),
     /// print information about pending MGS updates
     MgsUpdates,
     /// interact with oximeter read policy
@@ -152,7 +165,7 @@ enum NexusCommands {
     #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
     /// show running artifact versions
-    UpdateStatus,
+    UpdateStatus(UpdateStatusArgs),
 }
 
 #[derive(Debug, Args)]
@@ -268,7 +281,7 @@ impl BlueprintIdOrCurrentTarget {
 
     async fn resolve_to_id_via_nexus(
         &self,
-        client: &nexus_client::Client,
+        client: &nexus_lockstep_client::Client,
     ) -> anyhow::Result<BlueprintUuid> {
         match self {
             Self::CurrentTarget => {
@@ -284,7 +297,7 @@ impl BlueprintIdOrCurrentTarget {
 
     async fn resolve_to_blueprint(
         &self,
-        client: &nexus_client::Client,
+        client: &nexus_lockstep_client::Client,
     ) -> anyhow::Result<Blueprint> {
         let id = self.resolve_to_id_via_nexus(client).await?;
         let response = client
@@ -411,6 +424,12 @@ enum ClickhousePolicyMode {
     ClusterOnly,
     // Run both single-node and clustered clickhouse deployments
     Both,
+}
+
+#[derive(Debug, Args)]
+struct FetchOmdbArgs {
+    /// output path to write the fetched omdb
+    output: Utf8PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -600,6 +619,13 @@ struct SupportBundleInspectArgs {
     path: Option<Utf8PathBuf>,
 }
 
+#[derive(Debug, Args)]
+struct UpdateStatusArgs {
+    /// Show full details of all updateable components.
+    #[arg(long)]
+    details: bool,
+}
+
 impl NexusArgs {
     /// Run a `omdb nexus` subcommand.
     pub(crate) async fn run_cmd(
@@ -614,13 +640,14 @@ impl NexusArgs {
                     "note: Nexus URL not specified.  Will pick one from DNS."
                 );
                 let addr = omdb
-                    .dns_lookup_one(log.clone(), ServiceName::Nexus)
+                    .dns_lookup_one(log.clone(), ServiceName::NexusLockstep)
                     .await?;
                 format!("http://{}", addr)
             }
         };
         eprintln!("note: using Nexus URL {}", &nexus_url);
-        let client = nexus_client::Client::new(&nexus_url, log.clone());
+        let client =
+            nexus_lockstep_client::Client::new(&nexus_url, log.clone());
 
         match &self.command {
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
@@ -728,6 +755,10 @@ impl NexusArgs {
                 }
             },
 
+            NexusCommands::FetchOmdb(args) => {
+                cmd_nexus_fetch_omdb(&client, args).await
+            }
+
             NexusCommands::MgsUpdates => cmd_nexus_mgs_updates(&client).await,
 
             NexusCommands::OximeterReadPolicy(OximeterReadPolicyArgs {
@@ -828,8 +859,8 @@ impl NexusArgs {
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::Inspect(args),
             }) => cmd_nexus_support_bundles_inspect(&client, args).await,
-            NexusCommands::UpdateStatus => {
-                cmd_nexus_update_status(&client).await
+            NexusCommands::UpdateStatus(args) => {
+                cmd_nexus_update_status(&client, args).await
             }
         }
     }
@@ -837,7 +868,7 @@ impl NexusArgs {
 
 /// Runs `omdb nexus background-tasks doc`
 async fn cmd_nexus_background_tasks_doc(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
@@ -863,7 +894,7 @@ async fn cmd_nexus_background_tasks_doc(
 
 /// Runs `omdb nexus background-tasks list`
 async fn cmd_nexus_background_tasks_list(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
@@ -881,7 +912,7 @@ async fn cmd_nexus_background_tasks_list(
 
 /// Runs `omdb nexus background-tasks show`
 async fn cmd_nexus_background_tasks_show(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BackgroundTasksShowArgs,
 ) -> Result<(), anyhow::Error> {
     let response =
@@ -966,7 +997,7 @@ async fn cmd_nexus_background_tasks_show(
 
 /// Runs `omdb nexus background-tasks print-report`
 async fn cmd_nexus_background_tasks_print_report(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BackgroundTasksPrintReportArgs,
     color: ColorChoice,
 ) -> Result<(), anyhow::Error> {
@@ -1009,7 +1040,7 @@ async fn cmd_nexus_background_tasks_print_report(
 
 /// Runs `omdb nexus background-tasks activate`
 async fn cmd_nexus_background_tasks_activate(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BackgroundTasksActivateArgs,
     // This isn't quite "destructive" in the sense that of it being potentially
     // dangerous, but it does modify the system rather than being a read-only
@@ -1156,11 +1187,17 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "inventory_collection" => {
             print_task_inventory_collection(details);
         }
+        "inventory_loader" => {
+            print_task_inventory_load(details);
+        }
         "lookup_region_port" => {
             print_task_lookup_region_port(details);
         }
         "phantom_disks" => {
             print_task_phantom_disks(details);
+        }
+        "probe_distributor" => {
+            print_task_probe_distributor(details);
         }
         "read_only_region_replacement_start" => {
             print_task_read_only_region_replacement_start(details);
@@ -1198,11 +1235,20 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "tuf_artifact_replication" => {
             print_task_tuf_artifact_replication(details);
         }
+        "tuf_repo_pruner" => {
+            print_task_tuf_repo_pruner(details);
+        }
         "alert_dispatcher" => {
             print_task_alert_dispatcher(details);
         }
         "webhook_deliverator" => {
             print_task_webhook_deliverator(details);
+        }
+        "fm_sitrep_loader" => {
+            print_task_fm_sitrep_loader(details);
+        }
+        "fm_sitrep_gc" => {
+            print_task_fm_sitrep_gc(details);
         }
         _ => {
             println!(
@@ -1291,22 +1337,62 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
         BlueprintPlannerStatus::Disabled => {
             println!("    blueprint planning explicitly disabled by config!");
         }
+        BlueprintPlannerStatus::LimitReached { limit, report } => {
+            println!(
+                "    blueprint auto-planning disabled because \
+                 current blueprint count >= limit ({limit}); planning report \
+                 contains what would have been stored had the limit not been \
+                 reached",
+            );
+            println!("{report}");
+        }
         BlueprintPlannerStatus::Error(error) => {
             println!("    task did not complete successfully: {error}");
         }
-        BlueprintPlannerStatus::Unchanged { parent_blueprint_id } => {
+        BlueprintPlannerStatus::Unchanged {
+            parent_blueprint_id,
+            report,
+            blueprint_count,
+            limit,
+        } => {
             println!("    plan unchanged from parent {parent_blueprint_id}");
+            println!(
+                "    note: {}/{} blueprints in database",
+                blueprint_count, limit
+            );
+            println!("{report}");
         }
-        BlueprintPlannerStatus::Planned { parent_blueprint_id, error } => {
+        BlueprintPlannerStatus::Planned {
+            parent_blueprint_id,
+            error,
+            report,
+            blueprint_count,
+            limit,
+        } => {
             println!(
                 "    planned new blueprint from parent {parent_blueprint_id}, \
                      but could not make it the target: {error}"
             );
+            println!(
+                "    note: {}/{} blueprints in database",
+                blueprint_count, limit
+            );
+            println!("{report}");
         }
-        BlueprintPlannerStatus::Targeted { blueprint_id, report, .. } => {
+        BlueprintPlannerStatus::Targeted {
+            parent_blueprint_id: _,
+            blueprint_id,
+            report,
+            blueprint_count,
+            limit,
+        } => {
             println!(
                 "    planned new blueprint {blueprint_id}, \
                      and made it the current target"
+            );
+            println!(
+                "    note: {}/{} blueprints in database",
+                blueprint_count, limit,
             );
             println!("{report}");
         }
@@ -1407,6 +1493,26 @@ fn print_task_blueprint_loader(details: &serde_json::Value) {
     }
 }
 
+fn print_datasets_rendezvous_stats(
+    stats: &DatasetsRendezvousStats,
+    dataset_name: &'static str,
+) {
+    let DatasetsRendezvousStats {
+        num_inserted,
+        num_already_exist,
+        num_not_in_inventory,
+        num_tombstoned,
+        num_already_tombstoned,
+    } = stats;
+
+    println!("    {dataset_name} rendezvous counts:");
+    println!("        num_inserted:           {num_inserted}");
+    println!("        num_already_exist:      {num_already_exist}");
+    println!("        num_not_in_inventory:   {num_not_in_inventory}");
+    println!("        num_tombstoned:         {num_tombstoned}");
+    println!("        num_already_tombstoned: {num_already_tombstoned}");
+}
+
 fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
     match serde_json::from_value::<BlueprintRendezvousStatus>(details.clone()) {
         Err(error) => eprintln!(
@@ -1419,27 +1525,13 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
                 "    inventory collection: {}",
                 status.inventory_collection_id
             );
-            println!("    debug_dataset rendezvous counts:");
-            println!(
-                "        num_inserted:           {}",
-                status.stats.debug_dataset.num_inserted
+
+            print_datasets_rendezvous_stats(
+                &status.stats.debug_dataset,
+                "debug_dataset",
             );
-            println!(
-                "        num_already_exist:      {}",
-                status.stats.debug_dataset.num_already_exist
-            );
-            println!(
-                "        num_not_in_inventory:   {}",
-                status.stats.debug_dataset.num_not_in_inventory
-            );
-            println!(
-                "        num_tombstoned:         {}",
-                status.stats.debug_dataset.num_tombstoned
-            );
-            println!(
-                "        num_already_tombstoned: {}",
-                status.stats.debug_dataset.num_already_tombstoned
-            );
+
+            // crucible datasets have a different number of rendezvous stats
             println!("    crucible_dataset rendezvous counts:");
             println!(
                 "        num_inserted:         {}",
@@ -1452,6 +1544,11 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
             println!(
                 "        num_not_in_inventory: {}",
                 status.stats.crucible_dataset.num_not_in_inventory
+            );
+
+            print_datasets_rendezvous_stats(
+                &status.stats.local_storage_dataset,
+                "local_storage_dataset",
             );
         }
     }
@@ -1960,6 +2057,37 @@ fn print_task_inventory_collection(details: &serde_json::Value) {
     };
 }
 
+fn print_task_inventory_load(details: &serde_json::Value) {
+    match serde_json::from_value::<InventoryLoadStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => match status {
+            InventoryLoadStatus::Error(error) => {
+                println!("    task did not complete successfully: {error}");
+            }
+            InventoryLoadStatus::NoCollections => {
+                println!("    no collections available to load");
+            }
+            InventoryLoadStatus::Loaded {
+                collection_id,
+                time_started,
+                time_loaded,
+            } => {
+                println!(
+                    "    loaded latest inventory collection as of {}:",
+                    humantime::format_rfc3339_millis(time_loaded.into())
+                );
+                println!(
+                    "        collection {collection_id}, taken at {}",
+                    humantime::format_rfc3339_millis(time_started.into()),
+                );
+            }
+        },
+    };
+}
+
 fn print_task_lookup_region_port(details: &serde_json::Value) {
     match serde_json::from_value::<LookupRegionPortStatus>(details.clone()) {
         Ok(LookupRegionPortStatus { found_port_ok, errors }) => {
@@ -2005,6 +2133,32 @@ fn print_task_phantom_disks(details: &serde_json::Value) {
                 "    number of phantom disk delete errors: {}",
                 success.phantom_disk_deleted_err
             );
+        }
+    };
+}
+
+fn print_task_probe_distributor(details: &serde_json::Value) {
+    match serde_json::from_value::<ProbeDistributorStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(ProbeDistributorStatus { probes_by_sled, errors }) => {
+            let n_total_probes: usize = probes_by_sled.values().sum();
+            println!("    succesfully-pushed probes: {} total", n_total_probes);
+            for (sled_id, count) in probes_by_sled {
+                if count == 0 {
+                    continue;
+                }
+                println!("      sled_id={} n_probes={}", sled_id, count);
+            }
+            println!("    errors while pushing probes: {} total", errors.len());
+            for err in errors {
+                println!(
+                    "      sled_id={} sled_ip={} error={}",
+                    err.sled_id, err.sled_ip, err.error,
+                );
+            }
         }
     };
 }
@@ -2457,44 +2611,74 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
 
             if let Some(SupportBundleCollectionReport {
                 bundle,
-                listed_in_service_sleds,
-                listed_sps,
                 activated_in_db_ok,
-                sp_ereports,
-                host_ereports,
+                mut steps,
+                ereports,
             }) = collection_report
             {
                 println!("    Support Bundle Collection Report:");
                 println!("      Bundle ID: {bundle}");
-                println!(
-                    "      Bundle was able to list in-service sleds: {listed_in_service_sleds}"
-                );
-                println!(
-                    "      Bundle was able to list service processors: {listed_sps}"
-                );
+
+                #[derive(Tabled)]
+                #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                struct StepRow {
+                    step_name: String,
+                    start_time: DateTime<Utc>,
+                    duration: String,
+                    status: SupportBundleCollectionStepStatus,
+                }
+
+                steps.sort_unstable_by_key(|s| s.start);
+                let rows: Vec<StepRow> = steps
+                    .into_iter()
+                    .map(|step| {
+                        let duration = (step.end - step.start)
+                            .to_std()
+                            .unwrap_or(Duration::from_millis(0));
+                        StepRow {
+                            step_name: step.name,
+                            start_time: step.start,
+                            duration: format!("{:.3}s", duration.as_secs_f64()),
+                            status: step.status,
+                        }
+                    })
+                    .collect();
+
+                if !rows.is_empty() {
+                    println!("\n{}", tabled::Table::new(rows));
+                }
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
-                print_ereport_status("SP", &sp_ereports);
-                print_ereport_status("Host OS", &host_ereports);
-            }
-        }
-    }
-
-    fn print_ereport_status(which: &str, status: &SupportBundleEreportStatus) {
-        match status {
-            SupportBundleEreportStatus::NotRequested => {
-                println!("      {which} ereport collection was not requested");
-            }
-            SupportBundleEreportStatus::Failed { error, n_collected } => {
-                println!("      {which} ereport collection failed:");
-                println!(
-                    "        ereports collected successfully: {n_collected}"
-                );
-                println!("        error: {error}");
-            }
-            SupportBundleEreportStatus::Collected { n_collected } => {
-                println!("      {which} ereports collected: {n_collected}");
+                match ereports {
+                    None => {
+                        println!("      ereport collection was not requested");
+                    }
+                    Some(SupportBundleEreportStatus {
+                        errors,
+                        n_collected,
+                        n_found,
+                    }) if !errors.is_empty() => {
+                        println!("      ereport collection failed:");
+                        println!(
+                            "        total matching ereports found: {n_found}"
+                        );
+                        println!(
+                            "        ereports collected successfully: {n_collected}"
+                        );
+                        println!("        errors:");
+                        for error in errors {
+                            println!("          {error}");
+                        }
+                    }
+                    Some(SupportBundleEreportStatus {
+                        n_collected, ..
+                    }) => {
+                        // If ereport collection succeeded, n_found should be
+                        // equal to n_collected.
+                        println!("      ereports collected: {n_collected}");
+                    }
+                }
             }
         }
     }
@@ -2562,6 +2746,19 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
             println!("    lifetime:");
             print_counters(status.lifetime_counters);
             println!("    local repos: {}", status.local_repos);
+        }
+    }
+}
+
+fn print_task_tuf_repo_pruner(details: &serde_json::Value) {
+    match serde_json::from_value::<TufRepoPrunerStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {}: {:?}",
+            InlineErrorChain::new(&error),
+            details
+        ),
+        Ok(status) => {
+            print!("{}", status);
         }
     }
 }
@@ -2852,6 +3049,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
 }
 
 fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
+    use ereporter_status_fields::*;
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
@@ -2867,15 +3065,8 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
             Ok(status) => status,
         };
 
-    const NEW_EREPORTS: &str = "new ereports ingested:";
-    const HTTP_REQUESTS: &str = "HTTP requests sent:";
-    const ERRORS: &str = "errors:";
-    const WIDTH: usize =
-        const_max_len(&[NEW_EREPORTS, HTTP_REQUESTS, ERRORS]) + 1;
-    const NUM_WIDTH: usize = 3;
-
     if !errors.is_empty() {
-        println!("{ERRICON} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        println!("    errors listing reporters:");
         for error in errors {
             println!("      - {error}");
         }
@@ -2894,6 +3085,7 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
                  some SP statuses were recorded!"
             )
         }
+
         println!("\n    service processors:");
         for SpEreporterStatus { sp_type, slot, status } in &sps {
             println!(
@@ -2951,21 +3143,7 @@ fn print_ereporter_status_totals<'status>(
         }
     }
 
-    const EREPORTS_RECEIVED: &str = "total ereports received:";
-    const NEW_EREPORTS: &str = "  new ereports ingested:";
-    const HTTP_REQUESTS: &str = "total HTTP requests sent:";
-    const ERRORS: &str = "  total collection errors:";
-    const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports:";
-    const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors:";
-    const WIDTH: usize = const_max_len(&[
-        EREPORTS_RECEIVED,
-        NEW_EREPORTS,
-        HTTP_REQUESTS,
-        ERRORS,
-        REPORTERS_WITH_EREPORTS,
-    ]) + 1;
-    const NUM_WIDTH: usize = 4;
-
+    use ereporter_status_fields::*;
     println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
     println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
     println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
@@ -2977,6 +3155,91 @@ fn print_ereporter_status_totals<'status>(
     println!(
         "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
          {reporters_with_errors:>NUM_WIDTH$}"
+    );
+}
+
+mod ereporter_status_fields {
+    pub const TOTAL_NEW_EREPORTS: &str = "new ereports ingested:";
+    pub const TOTAL_HTTP_REQUESTS: &str = "HTTP requests sent:";
+
+    pub const EREPORTS_RECEIVED: &str = "total ereports received:";
+    pub const NEW_EREPORTS: &str = "  new ereports ingested:";
+    pub const HTTP_REQUESTS: &str = "total HTTP requests sent:";
+    pub const ERRORS: &str = "  total collection errors:";
+    pub const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports:";
+    pub const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors:";
+    pub const WIDTH: usize = super::const_max_len(&[
+        TOTAL_NEW_EREPORTS,
+        TOTAL_HTTP_REQUESTS,
+        EREPORTS_RECEIVED,
+        NEW_EREPORTS,
+        HTTP_REQUESTS,
+        ERRORS,
+        REPORTERS_WITH_EREPORTS,
+        REPORTERS_WITH_ERRORS,
+    ]) + 1;
+    pub const NUM_WIDTH: usize = 4;
+}
+
+fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
+    match serde_json::from_value::<SitrepLoadStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(SitrepLoadStatus::Error(error)) => {
+            println!("    task did not complete successfully: {error}");
+        }
+        Ok(SitrepLoadStatus::NoSitrep) => {
+            println!("    no FM situation report available to load");
+        }
+        Ok(SitrepLoadStatus::Loaded { version, time_loaded }) => {
+            println!(
+                "    loaded latest FM situation report as of {}:",
+                humantime::format_rfc3339_millis(time_loaded.into())
+            );
+            let fm::SitrepVersion { id, version, time_made_current } = version;
+            println!("        sitrep {id:?} (v{version})");
+            println!(
+                "        made current at: {}",
+                humantime::format_rfc3339_millis(time_made_current.into()),
+            );
+        }
+    };
+}
+
+fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
+    let SitrepGcStatus {
+        orphaned_sitreps_found,
+        orphaned_sitreps_deleted,
+        errors,
+    } = match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    pub const ORPHANS_FOUND: &str = "orphaned sitreps found:";
+    pub const ORPHANS_DELETED: &str = "orphaned sitreps deleted:";
+    pub const ERRORS: &str = "errors:";
+    pub const WIDTH: usize =
+        const_max_len(&[ERRORS, ORPHANS_FOUND, ORPHANS_DELETED]) + 1;
+    pub const NUM_WIDTH: usize = 4;
+    if !errors.is_empty() {
+        println!("{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        for error in errors {
+            println!("      > {error}")
+        }
+    }
+
+    println!("    {ORPHANS_FOUND:<WIDTH$}{orphaned_sitreps_found:>NUM_WIDTH$}");
+    println!(
+        "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
     );
 }
 
@@ -3240,7 +3503,7 @@ fn reason_code(reason: ActivationReason) -> char {
 }
 
 async fn cmd_nexus_blueprints_list(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -3312,7 +3575,7 @@ async fn cmd_nexus_blueprints_list(
 }
 
 async fn cmd_nexus_blueprints_show(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BlueprintIdArgs,
 ) -> Result<(), anyhow::Error> {
     let blueprint = args.blueprint_id.resolve_to_blueprint(client).await?;
@@ -3321,7 +3584,7 @@ async fn cmd_nexus_blueprints_show(
 }
 
 async fn cmd_nexus_blueprints_diff(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BlueprintDiffArgs,
 ) -> Result<(), anyhow::Error> {
     let blueprint = args.blueprint1_id.resolve_to_blueprint(client).await?;
@@ -3348,7 +3611,7 @@ async fn cmd_nexus_blueprints_diff(
 }
 
 async fn cmd_nexus_blueprints_delete(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BlueprintIdArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -3363,7 +3626,7 @@ async fn cmd_nexus_blueprints_delete(
 }
 
 async fn cmd_nexus_blueprints_target_show(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let target = client
         .blueprint_target_view()
@@ -3376,7 +3639,7 @@ async fn cmd_nexus_blueprints_target_show(
 }
 
 async fn cmd_nexus_blueprints_target_set(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BlueprintTargetSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -3432,10 +3695,12 @@ async fn cmd_nexus_blueprints_target_set(
     };
 
     client
-        .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
-            target_id: args.blueprint_id,
-            enabled,
-        })
+        .blueprint_target_set(
+            &nexus_lockstep_client::types::BlueprintTargetSet {
+                target_id: args.blueprint_id,
+                enabled,
+            },
+        )
         .await
         .with_context(|| {
             format!("setting target to blueprint {}", args.blueprint_id)
@@ -3445,7 +3710,7 @@ async fn cmd_nexus_blueprints_target_set(
 }
 
 async fn cmd_nexus_blueprints_target_set_enabled(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BlueprintIdArgs,
     enabled: bool,
     _destruction_token: DestructiveOperationToken,
@@ -3455,7 +3720,7 @@ async fn cmd_nexus_blueprints_target_set_enabled(
     let description = if enabled { "enabled" } else { "disabled" };
     client
         .blueprint_target_set_enabled(
-            &nexus_client::types::BlueprintTargetSet {
+            &nexus_lockstep_client::types::BlueprintTargetSet {
                 target_id: blueprint_id,
                 enabled,
             },
@@ -3469,7 +3734,7 @@ async fn cmd_nexus_blueprints_target_set_enabled(
 }
 
 async fn cmd_nexus_blueprints_regenerate(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let blueprint =
@@ -3479,7 +3744,7 @@ async fn cmd_nexus_blueprints_regenerate(
 }
 
 async fn cmd_nexus_blueprints_import(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     _destruction_token: DestructiveOperationToken,
     args: &BlueprintImportArgs,
 ) -> Result<(), anyhow::Error> {
@@ -3497,7 +3762,7 @@ async fn cmd_nexus_blueprints_import(
 }
 
 async fn cmd_nexus_clickhouse_policy_get(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let res = client.clickhouse_policy_get().await;
 
@@ -3540,8 +3805,48 @@ async fn cmd_nexus_clickhouse_policy_get(
     Ok(())
 }
 
+async fn cmd_nexus_fetch_omdb(
+    client: &nexus_lockstep_client::Client,
+    args: &FetchOmdbArgs,
+) -> Result<(), anyhow::Error> {
+    // Create the output file.
+    let out = tokio::fs::File::create_new(&args.output)
+        .await
+        .with_context(|| format!("could not create `{}`", args.output))?;
+
+    // Stream the binary from Nexus.
+    let mut out = tokio::io::BufWriter::new(out);
+    let body = client.fetch_omdb().await?;
+    let mut stream = body.into_inner().into_inner();
+    while let Some(maybe_chunk) = stream.next().await {
+        let chunk = maybe_chunk.context("failed reading chunk from Nexus")?;
+        tokio::io::copy(&mut std::io::Cursor::new(chunk), &mut out)
+            .await
+            .with_context(|| format!("failed writing to `{}`", args.output))?;
+    }
+    out.flush().await.with_context(|| {
+        format!("failed flushing data written to `{}`", args.output)
+    })?;
+
+    // Make it executable.
+    let out = out.into_inner();
+    let mut perms = out
+        .metadata()
+        .await
+        .with_context(|| {
+            format!("failed to read metadata of new file `{}`", args.output)
+        })?
+        .permissions();
+    perms.set_mode(0o0700);
+    out.set_permissions(perms).await.with_context(|| {
+        format!("failed to change permissions of new file `{}`", args.output)
+    })?;
+
+    Ok(())
+}
+
 async fn cmd_nexus_mgs_updates(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response = client
         .mgs_updates()
@@ -3553,7 +3858,7 @@ async fn cmd_nexus_mgs_updates(
 }
 
 async fn cmd_nexus_clickhouse_policy_set(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &ClickhousePolicySetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -3603,7 +3908,7 @@ async fn cmd_nexus_clickhouse_policy_set(
 }
 
 async fn cmd_nexus_oximeter_read_policy_get(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let res = client.oximeter_read_policy_get().await;
 
@@ -3637,7 +3942,7 @@ async fn cmd_nexus_oximeter_read_policy_get(
 }
 
 async fn cmd_nexus_oximeter_read_policy_set(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &OximeterReadPolicySetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -3681,7 +3986,7 @@ async fn cmd_nexus_oximeter_read_policy_set(
 
 /// Runs `omdb nexus sagas list`
 async fn cmd_nexus_sagas_list(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     // We don't want users to confuse this with a general way to list all sagas.
     // Such a command would read database state and it would go under "omdb db".
@@ -3726,7 +4031,7 @@ async fn cmd_nexus_sagas_list(
 
 /// Runs `omdb nexus sagas demo-create`
 async fn cmd_nexus_sagas_demo_create(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let demo_saga =
@@ -3741,7 +4046,7 @@ async fn cmd_nexus_sagas_demo_create(
 
 /// Runs `omdb nexus sagas demo-complete`
 async fn cmd_nexus_sagas_demo_complete(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &DemoSagaIdArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -3766,7 +4071,7 @@ async fn cmd_nexus_sagas_demo_complete(
 
 /// Runs `omdb nexus sleds list-uninitialized`
 async fn cmd_nexus_sleds_list_uninitialized(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response = client
         .sled_list_uninitialized()
@@ -3808,7 +4113,7 @@ async fn cmd_nexus_sleds_list_uninitialized(
 
 /// Runs `omdb nexus sleds add`
 async fn cmd_nexus_sled_add(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SledAddArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -3827,7 +4132,7 @@ async fn cmd_nexus_sled_add(
 
 /// Runs `omdb nexus sleds expunge`
 async fn cmd_nexus_sled_expunge(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SledExpungeArgs,
     omdb: &Omdb,
     log: &slog::Logger,
@@ -3849,7 +4154,7 @@ async fn cmd_nexus_sled_expunge(
 // `omdb nexus sleds expunge`, but borrowing a datastore
 async fn cmd_nexus_sled_expunge_with_datastore(
     datastore: &Arc<DataStore>,
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SledExpungeArgs,
     log: &slog::Logger,
     _destruction_token: DestructiveOperationToken,
@@ -3938,7 +4243,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
 
 /// Runs `omdb nexus sleds expunge-disk`
 async fn cmd_nexus_sled_expunge_disk(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &DiskExpungeArgs,
     omdb: &Omdb,
     log: &slog::Logger,
@@ -3959,7 +4264,7 @@ async fn cmd_nexus_sled_expunge_disk(
 
 async fn cmd_nexus_sled_expunge_disk_with_datastore(
     datastore: &Arc<DataStore>,
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &DiskExpungeArgs,
     log: &slog::Logger,
     _destruction_token: DestructiveOperationToken,
@@ -4072,7 +4377,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 
 /// Runs `omdb nexus support-bundles list`
 async fn cmd_nexus_support_bundles_list(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let support_bundle_stream = client.support_bundle_list_stream(None, None);
 
@@ -4111,13 +4416,15 @@ async fn cmd_nexus_support_bundles_list(
 
 /// Runs `omdb nexus support-bundles create`
 async fn cmd_nexus_support_bundles_create(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let support_bundle_id = client
-        .support_bundle_create(&nexus_client::types::SupportBundleCreate {
-            user_comment: None,
-        })
+        .support_bundle_create(
+            &nexus_lockstep_client::types::SupportBundleCreate {
+                user_comment: None,
+            },
+        )
         .await
         .context("creating support bundle")?
         .into_inner()
@@ -4128,7 +4435,7 @@ async fn cmd_nexus_support_bundles_create(
 
 /// Runs `omdb nexus support-bundles delete`
 async fn cmd_nexus_support_bundles_delete(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SupportBundleDeleteArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -4158,10 +4465,12 @@ async fn write_stream_to_sink(
 //
 // "range" is in bytes, and is inclusive on both sides.
 async fn support_bundle_download_range(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     id: SupportBundleUuid,
     range: (u64, u64),
-) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>> {
+) -> anyhow::Result<
+    impl futures::Stream<Item = anyhow::Result<bytes::Bytes>> + use<>,
+> {
     let range = format!("bytes={}-{}", range.0, range.1);
     Ok(client
         .support_bundle_download(id.as_untyped_uuid(), Some(&range))
@@ -4177,7 +4486,7 @@ async fn support_bundle_download_range(
 // Starts the download at "start" bytes (inclusive) and continues up to "end"
 // bytes (exclusive).
 fn support_bundle_download_ranges(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     id: SupportBundleUuid,
     start: u64,
     end: u64,
@@ -4206,7 +4515,7 @@ fn support_bundle_download_ranges(
 
 /// Runs `omdb nexus support-bundles download`
 async fn cmd_nexus_support_bundles_download(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SupportBundleDownloadArgs,
 ) -> Result<(), anyhow::Error> {
     let total_length = client
@@ -4225,13 +4534,18 @@ async fn cmd_nexus_support_bundles_download(
     let stream =
         support_bundle_download_ranges(client, args.id, start, total_length);
 
+    let mut open_opts = OpenOptions::new();
+    open_opts.create(true);
+
     let sink: Box<dyn std::io::Write> = match &args.output {
         Some(path) => Box::new(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .truncate(!args.resume)
-                .open(path)?,
+            if args.resume {
+                open_opts.append(true)
+            } else {
+                open_opts.write(true).truncate(true)
+            }
+            .open(path)
+            .with_context(|| format!("failed to create {path}"))?,
         ),
         None => Box::new(std::io::stdout()),
     };
@@ -4244,7 +4558,7 @@ async fn cmd_nexus_support_bundles_download(
 
 /// Runs `omdb nexus support-bundles get-index`
 async fn cmd_nexus_support_bundles_get_index(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SupportBundleIndexArgs,
 ) -> Result<(), anyhow::Error> {
     let stream = client
@@ -4264,7 +4578,7 @@ async fn cmd_nexus_support_bundles_get_index(
 
 /// Runs `omdb nexus support-bundles get-file`
 async fn cmd_nexus_support_bundles_get_file(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SupportBundleFileArgs,
 ) -> Result<(), anyhow::Error> {
     let stream = client
@@ -4296,7 +4610,7 @@ async fn cmd_nexus_support_bundles_get_file(
 
 /// Runs `omdb nexus support-bundles inspect`
 async fn cmd_nexus_support_bundles_inspect(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SupportBundleInspectArgs,
 ) -> Result<(), anyhow::Error> {
     let accessor: Box<dyn SupportBundleAccessor> = match (args.id, &args.path) {

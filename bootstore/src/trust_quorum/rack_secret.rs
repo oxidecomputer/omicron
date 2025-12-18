@@ -90,7 +90,6 @@ impl RackSecret {
     }
 
     /// Combine a set of shares and return a RackSecret
-    #[allow(unused)]
     pub fn combine_shares(
         shares: &[Vec<u8>],
     ) -> Result<RackSecret, vsss_rs::Error> {

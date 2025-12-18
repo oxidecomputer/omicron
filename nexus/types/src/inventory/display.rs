@@ -12,20 +12,20 @@ use std::{
 
 use chrono::SecondsFormat;
 use clap::Subcommand;
-use gateway_client::types::SpType;
+use gateway_types::component::SpType;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use itertools::Itertools;
-use nexus_sled_agent_shared::inventory::{
+use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::{
+    DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
+};
+use sled_agent_types_versions::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
     ConfigReconcilerInventoryStatus, HostPhase2DesiredContents,
     OmicronSledConfig, OmicronZoneImageSource, OrphanedDataset,
     RemoveMupdateOverrideBootSuccessInventory,
-};
-use omicron_common::disk::M2Slot;
-use omicron_uuid_kinds::{
-    DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
 use std::collections::HashMap;
 use strum::IntoEnumIterator;
@@ -56,7 +56,7 @@ impl<'a> CollectionDisplay<'a> {
         Self {
             collection,
             // Display all items by default.
-            include_sps: CollectionDisplayIncludeSps::None,
+            include_sps: CollectionDisplayIncludeSps::All,
             include_sleds: true,
             include_orphaned_datasets: true,
             include_clickhouse_keeper_membership: true,
@@ -871,7 +871,7 @@ fn display_sleds(
                     indented,
                     "running for {running_for:?} (since {started_at})"
                 )?;
-                if Some(config) == ledgered_sled_config.as_ref() {
+                if Some(&**config) == ledgered_sled_config.as_ref() {
                     writeln!(
                         indented,
                         "reconciling currently-ledgered config"

@@ -50,8 +50,8 @@ impl KeeperServerContext {
 
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
-        let gen = read_generation_from_file(config_path)?;
-        let (generation_tx, generation_rx) = watch::channel(gen);
+        let generation = read_generation_from_file(config_path)?;
+        let (generation_tx, generation_rx) = watch::channel(generation);
 
         // We only want to handle one in flight request at a time. Reconfigurator execution will retry
         // again later anyway. We use flume bounded channels with a size of 0 to act as a rendezvous channel.
@@ -137,8 +137,8 @@ impl ServerContext {
 
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
-        let gen = read_generation_from_file(config_path)?;
-        let (generation_tx, generation_rx) = watch::channel(gen);
+        let generation = read_generation_from_file(config_path)?;
+        let (generation_tx, generation_rx) = watch::channel(generation);
 
         // We only want to handle one in flight request at a time. Reconfigurator execution will retry
         // again later anyway. We use flume bounded channels with a size of 0 to act as a rendezvous channel.
@@ -499,9 +499,9 @@ fn read_generation_from_file(path: Utf8PathBuf) -> Result<Option<Generation>> {
         )
     })?;
 
-    let gen = Generation::try_from(gen_u64)?;
+    let generation = Generation::try_from(gen_u64)?;
 
-    Ok(Some(gen))
+    Ok(Some(generation))
 }
 
 #[cfg(test)]

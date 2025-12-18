@@ -3,7 +3,7 @@ name = "api_identity"
 description = "macro used for Oxide control plane resources with an identity"
 version = "0.1.0"
 authors = ["David Pacheco <dap@oxidecomputer.com>"]
-edition = "2021"
+edition.workspace = true
 repository = "https://github.com/oxidecomputer/omicron/"
 license = "MPL-2.0"
 

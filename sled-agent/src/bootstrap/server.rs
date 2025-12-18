@@ -215,11 +215,12 @@ impl Server {
             updates: config.updates.clone(),
             sled_reset_tx,
             sprockets: config.sprockets.clone(),
+            trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
         };
         let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
 
-        // Start the currently-misnamed sprockets server, which listens for raw
-        // TCP connections (which should ultimately be secured via sprockets).
+        // Create a channel for proxying sled-initialization requests that land
+        // in the sprockets server to our bootstrap agent `Inner` task.
         let (sled_init_tx, sled_init_rx) = mpsc::channel(1);
 
         // We don't bother to wrap this bind in a
@@ -454,6 +455,12 @@ fn start_dropshot_server(
         dropshot_log,
     )
     .config(dropshot_config)
+    .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+        dropshot::ClientSpecifiesVersionInHeader::new(
+            omicron_common::api::VERSION_HEADER,
+            bootstrap_agent_api::latest_version(),
+        ),
+    )))
     .start()
     .map_err(|error| {
         StartError::InitBootstrapDropshotServer(error.to_string())

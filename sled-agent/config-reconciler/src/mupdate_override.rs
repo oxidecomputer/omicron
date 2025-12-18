@@ -7,11 +7,11 @@
 use crate::InternalDisks;
 use crate::host_phase_2::HostPhase2PreparedContents;
 use camino::Utf8PathBuf;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::zone_images::ZoneImageFileSource;
+use sled_agent_types::inventory::HostPhase2DesiredContents;
+use sled_agent_types::inventory::OmicronZoneConfig;
+use sled_agent_types::inventory::OmicronZoneImageSource;
+use sled_agent_types::inventory::ZoneKind;
 use sled_agent_types::zone_images::OmicronZoneFileSource;
 use sled_agent_types::zone_images::OmicronZoneImageLocation;
 use sled_agent_types::zone_images::PreparedOmicronZone;
@@ -307,7 +307,7 @@ where
                 Ok(hash)
             }
             Err(error) => {
-                error!(
+                warn!(
                     log,
                     "zone {} not found in the boot disk zone manifest, \
                      not returning it as a source",
@@ -321,7 +321,7 @@ where
     } else {
         // The boot disk is not available, so we cannot add the
         // install dataset path from it.
-        error!(
+        warn!(
             log,
             "boot disk install dataset not available, \
              not returning it as a source";

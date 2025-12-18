@@ -343,7 +343,7 @@ E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
 #
 pfexec mkdir -p /usr/oxide
 pfexec curl -sSfL -o /usr/oxide/oxide \
-	http://catacomb.eng.oxide.computer:12346/oxide-v0.1.1
+	http://catacomb.eng.oxide.computer:12346/oxide-v2025112000
 pfexec chmod +x /usr/oxide/oxide
 
 curl -sSfL -o debian-11-genericcloud-amd64.raw \
@@ -444,6 +444,13 @@ do
 	retry=$((retry + 1))
 	ACTUAL_ZPOOL_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list -i | wc -l)
 done
+
+# Confirm we can use `omdb` in the switch zone to fetch the `omdb` that's
+# shipped in the Nexus zone, and that we can use that fetched `omdb`
+# successfully.
+pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb nexus fetch-omdb /tmp/fetched-omdb
+pfexec zlogin oxz_switch /tmp/fetched-omdb db inventory collections list
+echo "Confirmed switch zone omdb can fetch a usable omdb from Nexus"
 
 # The bootstrap command creates a disk, so before that: adjust the control plane
 # storage buffer to 0 as the virtual hardware only creates 20G pools

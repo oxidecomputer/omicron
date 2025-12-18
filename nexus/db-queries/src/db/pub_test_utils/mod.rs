@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 pub mod crdb;
 pub mod helpers;
+pub mod multicast;
 
 enum Populate {
     Nothing,

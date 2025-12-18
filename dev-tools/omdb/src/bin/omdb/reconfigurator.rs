@@ -65,6 +65,10 @@ enum ReconfiguratorCommands {
 
 #[derive(Debug, Args, Clone)]
 struct ExportArgs {
+    /// maximum number of blueprints to save
+    #[clap(long, default_value_t = 1000)]
+    nmax_blueprints: usize,
+
     /// where to save the output
     output_file: Utf8PathBuf,
 }
@@ -147,13 +151,22 @@ async fn cmd_reconfigurator_export(
 ) -> anyhow::Result<UnstableReconfiguratorState> {
     // See Nexus::blueprint_planning_context().
     eprint!("assembling reconfigurator state ... ");
+    let limit = export_args.nmax_blueprints;
     let state = nexus_reconfigurator_preparation::reconfigurator_state_load(
-        opctx, datastore,
+        opctx, datastore, limit,
     )
     .await?;
     eprintln!("done");
 
+    if state.blueprints.len() >= limit {
+        eprintln!(
+            "warning: reached limit of {limit} while fetching blueprints"
+        );
+        eprintln!("warning: saving only the most recent {limit}");
+    }
+
     let output_path = &export_args.output_file;
+    eprint!("saving to {} ... ", output_path);
     let file = std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -161,7 +174,7 @@ async fn cmd_reconfigurator_export(
         .with_context(|| format!("open {:?}", output_path))?;
     serde_json::to_writer_pretty(&file, &state)
         .with_context(|| format!("write {:?}", output_path))?;
-    eprintln!("wrote {}", output_path);
+    eprintln!("done");
     Ok(state)
 }
 
@@ -189,17 +202,10 @@ async fn cmd_reconfigurator_archive(
     //    successfully archived some blueprints before hitting this error. We
     //    attempt to notice this and log a message for the operator in this
     //    case.
-    let target_blueprint_id = saved_state
-        .target_blueprint
-        .context(
-            "system has no current target blueprint: \
-             cannot remove non-target blueprints",
-        )?
-        .target_id;
-
+    let target_blueprint_id = saved_state.target_blueprint.target_id;
     let mut ndeleted = 0;
 
-    eprintln!("removing non-target blueprints ...");
+    eprintln!("removing saved, non-target blueprints ...");
     for blueprint in &saved_state.blueprints {
         if blueprint.id == target_blueprint_id {
             continue;
@@ -243,6 +249,15 @@ async fn cmd_reconfigurator_archive(
     } else {
         let plural = if ndeleted == 1 { "" } else { "s" };
         eprintln!("done ({ndeleted} blueprint{plural} deleted)",);
+    }
+
+    if saved_state.blueprints.len() >= archive_args.nmax_blueprints {
+        eprintln!(
+            "warning: Only tried deleting the most recent {} blueprints\n\
+             warning: because that's all that was fetched and saved.\n\
+             warning: You may want to run this tool again to archive more.",
+            saved_state.blueprints.len(),
+        );
     }
 
     Ok(())
@@ -406,6 +421,7 @@ async fn cmd_reconfigurator_config_history(
         version: String,
         planner_enabled: String,
         add_zones_with_mupdate_override: String,
+        tuf_repo_pruner_enabled: String,
         time_modified: String,
     }
 
@@ -419,6 +435,7 @@ async fn cmd_reconfigurator_config_history(
                         planner_enabled,
                         planner_config:
                             PlannerConfig { add_zones_with_mupdate_override },
+                        tuf_repo_pruner_enabled,
                     },
                 time_modified,
             } = s;
@@ -427,6 +444,7 @@ async fn cmd_reconfigurator_config_history(
                 planner_enabled: planner_enabled.to_string(),
                 add_zones_with_mupdate_override:
                     add_zones_with_mupdate_override.to_string(),
+                tuf_repo_pruner_enabled: tuf_repo_pruner_enabled.to_string(),
                 time_modified: time_modified.to_string(),
             }
         })

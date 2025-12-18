@@ -11,7 +11,7 @@ use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Name;
-use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface as NetworkInterfaceV1;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
@@ -156,6 +156,7 @@ pub enum FleetRole {
 pub enum SiloRole {
     Admin,
     Collaborator,
+    LimitedCollaborator,
     Viewer,
 }
 
@@ -175,6 +176,7 @@ pub enum SiloRole {
 pub enum ProjectRole {
     Admin,
     Collaborator,
+    LimitedCollaborator,
     Viewer,
 }
 
@@ -208,6 +210,11 @@ pub enum SiloIdentityMode {
     // NOTE: authentication for these users is not supported yet at all.  It
     // will eventually be password-based.
     LocalOnly,
+
+    /// Users are authenticated with SAML using an external authentication
+    /// provider. Users and groups are managed with SCIM API calls, likely from
+    /// the same authentication provider.
+    SamlScim,
 }
 
 impl SiloIdentityMode {
@@ -215,6 +222,7 @@ impl SiloIdentityMode {
         match self {
             SiloIdentityMode::LocalOnly => AuthenticationMode::Local,
             SiloIdentityMode::SamlJit => AuthenticationMode::Saml,
+            SiloIdentityMode::SamlScim => AuthenticationMode::Saml,
         }
     }
 
@@ -222,6 +230,7 @@ impl SiloIdentityMode {
         match self {
             SiloIdentityMode::LocalOnly => UserProvisionType::ApiOnly,
             SiloIdentityMode::SamlJit => UserProvisionType::Jit,
+            SiloIdentityMode::SamlScim => UserProvisionType::Scim,
         }
     }
 }
@@ -249,6 +258,9 @@ pub enum UserProvisionType {
     /// Users and groups are created or updated during authentication using
     /// information provided by the authentication provider
     Jit,
+
+    /// Users and groups are managed by SCIM
+    Scim,
 }
 
 /// The service intended to use this certificate.
@@ -429,12 +441,12 @@ impl SwitchLinkState {
 
 impl JsonSchema for SwitchLinkState {
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         let obj = schemars::schema::Schema::Object(
             schemars::schema::SchemaObject::default(),
         );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        r#gen.definitions_mut().insert(Self::schema_name(), obj.clone());
         obj
     }
 
@@ -509,7 +521,7 @@ impl JsonSchema for AlertSubscription {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -686,7 +698,12 @@ pub struct ProbeInfo {
     #[schemars(with = "Uuid")]
     pub sled: SledUuid,
     pub external_ips: Vec<ProbeExternalIp>,
-    pub interface: NetworkInterface,
+    // NOTE: This type currently appears in both the external and internal APIs.
+    // It's not used in the internal API anymore, and we've not yet expanded the
+    // external API to support dual-stack NICs. When we do, this whole type
+    // needs a new version in the external API, and the internal API needs to
+    // continue to refer to this original version.
+    pub interface: NetworkInterfaceV1,
 }
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
@@ -731,4 +748,18 @@ impl RelayState {
         )
         .context("json from relay state string")
     }
+}
+
+/// Type of IP pool.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+#[derive(Default)]
+pub enum IpPoolType {
+    /// Unicast IP pool for standard IP allocations.
+    #[default]
+    Unicast,
+    /// Multicast IP pool for multicast group allocations.
+    ///
+    /// All ranges in a multicast pool must be either ASM or SSM (not mixed).
+    Multicast,
 }

@@ -17,7 +17,6 @@ use diesel::Selectable;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::external_ip;
 use nexus_db_schema::schema::floating_ip;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
@@ -26,7 +25,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::ProbeExternalIp;
 use nexus_types::external_api::shared::ProbeExternalIpKind;
 use nexus_types::external_api::views;
-use nexus_types::inventory::SourceNatConfig;
+use nexus_types::inventory::SourceNatConfigGeneric;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::shared::SourceNatConfigError;
@@ -37,6 +36,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceExternalIpBody;
+use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::convert::TryFrom;
 use std::net::IpAddr;
@@ -170,7 +170,7 @@ impl TryFrom<&'_ ExternalIp> for OmicronZoneExternalIp {
         match row.kind {
             IpKind::SNat => Ok(Self::Snat(OmicronZoneExternalSnatIp {
                 id: ExternalIpUuid::from_untyped_uuid(row.id),
-                snat_cfg: SourceNatConfig::new(
+                snat_cfg: SourceNatConfigGeneric::new(
                     row.ip.ip(),
                     row.first_port.0,
                     row.last_port.0,
@@ -231,7 +231,7 @@ pub struct FloatingIp {
 }
 
 impl TryFrom<ExternalIp>
-    for omicron_common::api::internal::shared::SourceNatConfig
+    for omicron_common::api::internal::shared::SourceNatConfigGeneric
 {
     type Error = SourceNatConfigError;
 
@@ -373,7 +373,7 @@ impl IncompleteExternalIp {
             pool_id,
             project_id: Some(project_id),
             explicit_ip: Some(explicit_ip.into()),
-            explicit_port_range: None,
+            explicit_port_range: Some((0, u16::MAX.into())),
             state: kind.initial_state(),
         }
     }
@@ -398,7 +398,7 @@ impl IncompleteExternalIp {
 
                 (
                     IpKind::Floating,
-                    None,
+                    Some((0, u16::MAX.into())),
                     Some(name),
                     Some(zone_kind.report_str().to_string()),
                     state,

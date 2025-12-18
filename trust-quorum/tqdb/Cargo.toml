@@ -1,7 +1,7 @@
 [package]
 name = "tqdb"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -20,7 +20,7 @@ reconfigurator-cli.workspace = true
 serde_json.workspace = true
 slog.workspace = true
 tabled.workspace = true
-trust-quorum = { workspace = true, features = ["danger_partial_eq_ct_wrapper"] }
+trust-quorum-protocol = { workspace = true, features = ["danger_partial_eq_ct_wrapper"] }
 trust-quorum-test-utils.workspace = true
 
 omicron-workspace-hack.workspace = true

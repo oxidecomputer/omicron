@@ -11,20 +11,20 @@ use anyhow::Context;
 use anyhow::anyhow;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
-use gateway_client::types::SpType;
 use gateway_messages::SpComponent;
 use itertools::Itertools;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::SpType;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_types::inventory::OmicronZoneType;
+use sled_agent_types::inventory::ZoneKind;
 use slog::Logger;
 use slog::o;
 use slog::{debug, error};
@@ -159,7 +159,7 @@ impl<'a> Collector<'a> {
             // First, fetch the state of the SP.  If that fails, report the
             // error but continue.
             let result =
-                client.sp_get(sp.type_, sp.slot).await.with_context(|| {
+                client.sp_get(&sp.type_, sp.slot).await.with_context(|| {
                     format!(
                         "MGS {:?}: fetching state of SP {:?}",
                         client.baseurl(),
@@ -197,7 +197,7 @@ impl<'a> Collector<'a> {
                 {
                     let result = client
                         .sp_component_active_slot_get(
-                            sp.type_,
+                            &sp.type_,
                             sp.slot,
                             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
                         )
@@ -319,7 +319,7 @@ impl<'a> Collector<'a> {
 
                 let result = client
                     .sp_component_caboose_get(
-                        sp.type_, sp.slot, component, slot,
+                        &sp.type_, sp.slot, component, slot,
                     )
                     .await
                     .with_context(|| {
@@ -367,12 +367,12 @@ impl<'a> Collector<'a> {
 
                 let result = match which {
                     RotPageWhich::Cmpa => client
-                        .sp_rot_cmpa_get(sp.type_, sp.slot, component)
+                        .sp_rot_cmpa_get(&sp.type_, sp.slot, component)
                         .await
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaActive => client
                         .sp_rot_cfpa_get(
-                            sp.type_,
+                            &sp.type_,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Active },
@@ -381,7 +381,7 @@ impl<'a> Collector<'a> {
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaInactive => client
                         .sp_rot_cfpa_get(
-                            sp.type_,
+                            &sp.type_,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Inactive },
@@ -390,7 +390,7 @@ impl<'a> Collector<'a> {
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaScratch => client
                         .sp_rot_cfpa_get(
-                            sp.type_,
+                            &sp.type_,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Scratch },
@@ -719,14 +719,8 @@ mod test {
     use super::Collector;
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
-    use id_map::IdMap;
-    use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-    use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
-    use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-    use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-    use nexus_sled_agent_shared::inventory::OmicronZoneType;
-    use nexus_sled_agent_shared::inventory::SledCpuFamily;
+    use iddqd::IdOrdMap;
+    use iddqd::id_ord_map;
     use nexus_types::inventory::Collection;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
     use omicron_common::api::external::Generation;
@@ -735,6 +729,13 @@ mod test {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::OmicronSledConfig;
+    use sled_agent_types::inventory::OmicronZoneConfig;
+    use sled_agent_types::inventory::OmicronZoneImageSource;
+    use sled_agent_types::inventory::OmicronZoneType;
+    use sled_agent_types::inventory::SledCpuFamily;
     use slog::o;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
@@ -989,18 +990,18 @@ mod test {
         client
             .omicron_config_put(&OmicronSledConfig {
                 generation: Generation::from(3),
-                disks: IdMap::default(),
-                datasets: IdMap::default(),
-                zones: [OmicronZoneConfig {
-                    id: zone_id,
-                    zone_type: OmicronZoneType::Oximeter {
-                        address: zone_address,
-                    },
-                    filesystem_pool: Some(filesystem_pool),
-                    image_source: OmicronZoneImageSource::InstallDataset,
-                }]
-                .into_iter()
-                .collect(),
+                disks: IdOrdMap::default(),
+                datasets: IdOrdMap::default(),
+                zones: id_ord_map! {
+                    OmicronZoneConfig {
+                        id: zone_id,
+                        zone_type: OmicronZoneType::Oximeter {
+                            address: zone_address,
+                        },
+                        filesystem_pool: Some(filesystem_pool),
+                        image_source: OmicronZoneImageSource::InstallDataset,
+                    }
+                },
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots::current_contents(),
             })

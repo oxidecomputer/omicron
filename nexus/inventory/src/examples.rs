@@ -13,30 +13,14 @@ use gateway_client::types::PowerState;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
-use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 use iddqd::id_ord_map;
-use nexus_sled_agent_shared::inventory::Baseboard;
-use nexus_sled_agent_shared::inventory::BootImageHeader;
-use nexus_sled_agent_shared::inventory::BootPartitionDetails;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
-use nexus_sled_agent_shared::inventory::Inventory;
-use nexus_sled_agent_shared::inventory::InventoryDataset;
-use nexus_sled_agent_shared::inventory::InventoryDisk;
-use nexus_sled_agent_shared::inventory::InventoryZpool;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
-use nexus_sled_agent_shared::inventory::SledCpuFamily;
-use nexus_sled_agent_shared::inventory::SledRole;
-use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::SpType;
 use nexus_types::inventory::ZpoolName;
 use omicron_cockroach_metrics::MetricValue;
 use omicron_cockroach_metrics::PrometheusMetrics;
@@ -52,6 +36,23 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::inventory::Baseboard;
+use sled_agent_types::inventory::BootImageHeader;
+use sled_agent_types::inventory::BootPartitionDetails;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::Inventory;
+use sled_agent_types::inventory::InventoryDataset;
+use sled_agent_types::inventory::InventoryDisk;
+use sled_agent_types::inventory::InventoryZpool;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronZonesConfig;
+use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::SledCpuFamily;
+use sled_agent_types::inventory::SledRole;
+use sled_agent_types::inventory::ZoneImageResolverInventory;
+use sled_agent_types::zone_images::MeasurementManifestStatus;
 use sled_agent_types::zone_images::MupdateOverrideNonBootInfo;
 use sled_agent_types::zone_images::MupdateOverrideNonBootMismatch;
 use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
@@ -63,6 +64,8 @@ use sled_agent_types::zone_images::ZoneManifestNonBootMismatch;
 use sled_agent_types::zone_images::ZoneManifestNonBootResult;
 use sled_agent_types::zone_images::ZoneManifestReadError;
 use sled_agent_types::zone_images::ZoneManifestStatus;
+use sled_agent_types_versions::v4::inventory::OmicronZonesConfig as OmicronZonesConfigV4;
+use sled_agent_types_versions::v10::inventory::OmicronZonesConfig as OmicronZonesConfigV10;
 use sled_agent_zone_images_examples::BOOT_PATHS;
 use sled_agent_zone_images_examples::NON_BOOT_2_PATHS;
 use sled_agent_zone_images_examples::NON_BOOT_2_UUID;
@@ -373,12 +376,22 @@ pub fn representative() -> Representative {
     // (2) pretty-printing each one with `json --in-place --file FILENAME`
     // (3) adjusting the format slightly with
     //         `jq '{ generation: .omicron_generation, zones: .zones }'`
+    //
+    // Note that these files are in an older format of the zone configuration
+    // types. Rather than rewrite these, we're relying on existing conversion
+    // code, which we already have in order to support the sled-agent's
+    // versioned API in any case.
     let sled14_data = include_str!("../example-data/madrid-sled14.json");
     let sled16_data = include_str!("../example-data/madrid-sled16.json");
     let sled17_data = include_str!("../example-data/madrid-sled17.json");
-    let sled14: OmicronZonesConfig = serde_json::from_str(sled14_data).unwrap();
-    let sled16: OmicronZonesConfig = serde_json::from_str(sled16_data).unwrap();
-    let sled17: OmicronZonesConfig = serde_json::from_str(sled17_data).unwrap();
+    let extract_current_omicron_zones_config = |data: &str| {
+        let as_v4: OmicronZonesConfigV4 = serde_json::from_str(data).unwrap();
+        OmicronZonesConfigV10::try_from(as_v4)
+            .and_then(OmicronZonesConfig::try_from)
+    };
+    let sled14 = extract_current_omicron_zones_config(sled14_data).unwrap();
+    let sled16 = extract_current_omicron_zones_config(sled16_data).unwrap();
+    let sled17 = extract_current_omicron_zones_config(sled17_data).unwrap();
 
     // Convert these to `OmicronSledConfig`s. We'll start with empty disks and
     // datasets for now, and add to them below for sled14.
@@ -501,11 +514,14 @@ pub fn representative() -> Representative {
     let mut zpools = Vec::new();
     for disk in &disks {
         let pool_id = zpool_id_iter.next().unwrap();
-        sled14.disks.insert(OmicronPhysicalDiskConfig {
-            identity: disk.identity.clone(),
-            id: disk_id_iter.next().unwrap(),
-            pool_id,
-        });
+        sled14
+            .disks
+            .insert_unique(OmicronPhysicalDiskConfig {
+                identity: disk.identity.clone(),
+                id: disk_id_iter.next().unwrap(),
+                pool_id,
+            })
+            .unwrap();
         zpools.push(InventoryZpool {
             id: pool_id,
             total_size: ByteCount::from(4096),
@@ -524,15 +540,18 @@ pub fn representative() -> Representative {
         reservation: None,
         compression: "lz4".to_string(),
     }];
-    sled14.datasets.insert(DatasetConfig {
-        id: datasets[0].id.unwrap(),
-        name: dataset_name,
-        inner: SharedDatasetConfig {
-            compression: datasets[0].compression.parse().unwrap(),
-            quota: datasets[0].quota,
-            reservation: datasets[0].reservation,
-        },
-    });
+    sled14
+        .datasets
+        .insert_unique(DatasetConfig {
+            id: datasets[0].id.unwrap(),
+            name: dataset_name,
+            inner: SharedDatasetConfig {
+                compression: datasets[0].compression.parse().unwrap(),
+                quota: datasets[0].quota,
+                reservation: datasets[0].reservation,
+            },
+        })
+        .unwrap();
 
     builder
         .found_sled_inventory(
@@ -819,6 +838,51 @@ pub fn zone_image_resolver(
 
     // Generate a status struct first.
     let status = ResolverStatus {
+        measurement_manifest: MeasurementManifestStatus {
+            boot_disk_path: dir_path.join(&BOOT_PATHS.measurements_json),
+            boot_disk_result: boot_zm_result.clone(),
+            non_boot_disk_metadata: id_ord_map! {
+                // Non-boot disk metadata that matches.
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_PATHS.measurements_json),
+                    // XXX Technically, if the boot disk had an error, this
+                    // can't be Matches. We choose to punt on this issue because
+                    // the conversion to the inventory type squishes down
+                    // errors into a string.
+                    result: ZoneManifestNonBootResult::Matches(
+                        cx.expected_result(
+                            &dir_path.join(&NON_BOOT_PATHS.install_dataset)
+                        )
+                    ),
+                },
+                // Non-boot disk mismatch (measurements different + errors).
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_2_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_2_PATHS.measurements_json),
+                    result: ZoneManifestNonBootResult::Mismatch(
+                        ZoneManifestNonBootMismatch::ValueMismatch {
+                            non_boot_disk_result: invalid_cx.expected_result(
+                                &dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
+                            ),
+                        },
+                    ),
+                },
+                // Non-boot disk mismatch (error reading measurement manifest).
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_3_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_3_PATHS.measurements_json),
+                    result: ZoneManifestNonBootResult::ReadError(
+                        dataset_missing_error(
+                            &dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
+                        ).into(),
+                    ),
+                },
+            },
+        },
         zone_manifest: ZoneManifestStatus {
             boot_disk_path: dir_path.join(&BOOT_PATHS.zones_json),
             boot_disk_result: boot_zm_result,
@@ -899,6 +963,7 @@ pub fn zone_image_resolver(
             },
         },
         image_directory_override: None,
+        measurement_directory_override: None,
     };
 
     status.to_inventory()

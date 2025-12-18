@@ -32,6 +32,7 @@ pub struct Ereport {
     Serialize,
     Deserialize,
     JsonSchema,
+    Hash,
 )]
 #[repr(transparent)]
 #[serde(from = "u64", into = "u64")]
@@ -102,7 +103,18 @@ impl TryFrom<i64> for Ena {
 }
 
 /// Unique identifier for an ereport.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    PartialOrd,
+    Ord,
+    Hash,
+)]
 pub struct EreportId {
     pub restart_id: EreporterRestartUuid,
     pub ena: Ena,
@@ -110,7 +122,7 @@ pub struct EreportId {
 
 impl fmt::Display for EreportId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}:{:x}", self.restart_id, self.ena)
+        write!(f, "{}:{:x}", self.restart_id, self.ena.0)
     }
 }
 

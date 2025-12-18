@@ -136,7 +136,7 @@ fn log_path() -> Result<Utf8PathBuf> {
 fn stderr_env_drain(
     env_var: &str,
     use_color: bool,
-) -> impl Drain<Ok = (), Err = slog::Never> {
+) -> impl Drain<Ok = (), Err = slog::Never> + use<> {
     let mut builder = slog_term::TermDecorator::new();
     if use_color {
         builder = builder.force_color();

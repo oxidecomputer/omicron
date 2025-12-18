@@ -45,6 +45,7 @@ use clap::builder::PossibleValuesParser;
 use clap::builder::TypedValueParser;
 use db_metadata::DbMetadataArgs;
 use db_metadata::DbMetadataCommands;
+use db_metadata::cmd_db_metadata_force_mark_nexus_quiesced;
 use db_metadata::cmd_db_metadata_list_nexus;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
@@ -58,14 +59,12 @@ use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
 use internal_dns_types::names::ServiceName;
-use ipnetwork::IpNetwork;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
-use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
@@ -116,9 +115,12 @@ use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::CrucibleDisk;
 use nexus_db_queries::db::datastore::CrucibleTargets;
+use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
+use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
@@ -151,6 +153,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
+use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::ParseError;
@@ -167,6 +170,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::future::Future;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -178,7 +183,9 @@ mod blueprints;
 mod db_metadata;
 mod ereport;
 mod saga;
+mod sitrep;
 mod user_data_export;
+mod whatis;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -376,6 +383,13 @@ enum DbCommands {
     RegionSnapshotReplacement(RegionSnapshotReplacementArgs),
     /// Commands for querying and interacting with sagas
     Saga(saga::SagaArgs),
+    /// Commands for querying and interacting with fault management situation
+    /// reports.
+    Sitrep(sitrep::SitrepArgs),
+    /// Show the current history of fault management situation reports.
+    ///
+    /// This is an alias for `omdb db sitrep history`.
+    Sitreps(sitrep::SitrepHistoryArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
     /// Print information about customer instances.
@@ -406,6 +420,11 @@ enum DbCommands {
     Zpool(ZpoolArgs),
     /// Commands for querying and interacting with user data export objects
     UserDataExport(user_data_export::UserDataExportArgs),
+    /// Given a UUID, try to figure out what type of object it refers to
+    ///
+    /// More precisely, `omdb db whatis` reports tables containing a unique UUID
+    /// column with the specified value.
+    Whatis(whatis::WhatisArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1148,6 +1167,12 @@ impl DbArgs {
                     }) => {
                         cmd_db_metadata_list_nexus(&opctx, &datastore).await
                     }
+                    DbCommands::DbMetadata(DbMetadataArgs {
+                        command: DbMetadataCommands::ForceMarkNexusQuiesced(args),
+                    }) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_db_metadata_force_mark_nexus_quiesced(&opctx, &datastore, args, token).await
+                    }
                     DbCommands::CrucibleDataset(CrucibleDatasetArgs {
                         command: CrucibleDatasetCommands::List,
                     }) => {
@@ -1288,6 +1313,12 @@ impl DbArgs {
                     }
                     DbCommands::Saga(args) => {
                         args.exec(&omdb, &opctx, &datastore).await
+                    }
+                    DbCommands::Sitrep(args) => {
+                        sitrep::cmd_db_sitrep(&opctx, &datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::Sitreps(args) => {
+                        sitrep::cmd_db_sitrep_history(&opctx, &datastore, &fetch_opts, args).await
                     }
                     DbCommands::Sleds(args) => {
                         cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await
@@ -1465,6 +1496,9 @@ impl DbArgs {
                     }
                     DbCommands::UserDataExport(args) => {
                         args.exec(&omdb, &opctx, &datastore).await
+                    }
+                    DbCommands::Whatis(args) => {
+                        whatis::cmd_db_whatis(&datastore, args).await
                     }
                 }
             }
@@ -1902,7 +1936,7 @@ async fn cmd_db_disk_list(
 
     let disks = query
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-        .select(Disk::as_select())
+        .select(db::model::Disk::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .context("loading disks")?;
@@ -2088,11 +2122,10 @@ async fn cmd_db_rack_list(
     Ok(())
 }
 
-/// Run `omdb db disk info <UUID>`.
-async fn cmd_db_disk_info(
+async fn crucible_disk_info(
     opctx: &OpContext,
     datastore: &DataStore,
-    args: &DiskInfoArgs,
+    disk: CrucibleDisk,
 ) -> Result<(), anyhow::Error> {
     // The row describing the instance
     #[derive(Tabled)]
@@ -2117,20 +2150,17 @@ async fn cmd_db_disk_info(
         physical_disk: String,
     }
 
-    use nexus_db_schema::schema::disk::dsl as disk_dsl;
-
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let disk = disk_dsl::disk
-        .filter(disk_dsl::id.eq(args.uuid))
-        .limit(1)
-        .select(Disk::as_select())
-        .load_async(&*conn)
-        .await
-        .context("loading requested disk")?;
+    let disk_name = disk.name().to_string();
 
-    let Some(disk) = disk.into_iter().next() else {
-        bail!("no disk: {} found", args.uuid);
+    let volume_id = disk.volume_id().to_string();
+
+    let disk_state = disk.runtime().disk_state.to_string();
+
+    let import_address = match disk.pantry_address() {
+        Some(ref pa) => pa.clone().to_string(),
+        None => "-".to_string(),
     };
 
     // For information about where this disk is attached.
@@ -2164,7 +2194,7 @@ async fn cmd_db_disk_info(
         };
 
         let instance_name = instance.instance().name().to_string();
-        let disk_name = disk.name().to_string();
+
         if instance.vmm().is_some() {
             let propolis_id =
                 instance.instance().runtime().propolis_id.unwrap();
@@ -2176,48 +2206,35 @@ async fn cmd_db_disk_info(
                 .await
                 .context("failed to look up sled")?;
 
-            let import_address = match disk.pantry_address {
-                Some(ref pa) => pa.clone().to_string(),
-                None => "-".to_string(),
-            };
             UpstairsRow {
                 host_serial: my_sled.serial_number().to_string(),
                 disk_name,
                 instance_name,
                 propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
-                volume_id: disk.volume_id().to_string(),
-                disk_state: disk.runtime_state.disk_state.to_string(),
+                volume_id,
+                disk_state,
                 import_address,
             }
         } else {
-            let import_address = match disk.pantry_address {
-                Some(ref pa) => pa.clone().to_string(),
-                None => "-".to_string(),
-            };
             UpstairsRow {
                 host_serial: NOT_ON_SLED_MSG.to_string(),
                 disk_name,
                 instance_name,
                 propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
-                volume_id: disk.volume_id().to_string(),
-                disk_state: disk.runtime_state.disk_state.to_string(),
+                volume_id,
+                disk_state,
                 import_address,
             }
         }
     } else {
-        // If the disk is not attached to anything, just print empty
-        // fields.
-        let import_address = match disk.pantry_address {
-            Some(ref pa) => pa.clone().to_string(),
-            None => "-".to_string(),
-        };
+        // If the disk is not attached to anything, just print empty fields.
         UpstairsRow {
             host_serial: "-".to_string(),
-            disk_name: disk.name().to_string(),
+            disk_name,
             instance_name: "-".to_string(),
             propolis_zone: "-".to_string(),
-            volume_id: disk.volume_id().to_string(),
-            disk_state: disk.runtime_state.disk_state.to_string(),
+            volume_id,
+            disk_state,
             import_address,
         }
     };
@@ -2266,7 +2283,159 @@ async fn cmd_db_disk_info(
     println!("{}", table);
 
     get_and_display_vcr(disk.volume_id(), datastore).await?;
+
     Ok(())
+}
+
+async fn local_storage_disk_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    disk: LocalStorageDisk,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct GenericRow {
+        host_serial: String,
+        disk_name: String,
+        instance_name: String,
+        propolis_zone: String,
+        disk_state: String,
+    }
+
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    let disk_name = disk.name().to_string();
+    let disk_state = disk.runtime().disk_state.to_string();
+
+    let row = if let Some(instance_uuid) = disk.runtime().attach_instance_id {
+        // Get the instance this disk is attached to
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+        let instances: Vec<InstanceAndActiveVmm> = instance_dsl::instance
+            .filter(instance_dsl::id.eq(instance_uuid))
+            .left_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())),
+            )
+            .limit(1)
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .load_async(&*conn)
+            .await
+            .context("loading requested instance")?
+            .into_iter()
+            .map(|i: (Instance, Option<Vmm>)| i.into())
+            .collect();
+
+        let Some(instance) = instances.into_iter().next() else {
+            bail!("no instance: {} found", instance_uuid);
+        };
+
+        let instance_name = instance.instance().name().to_string();
+
+        if instance.vmm().is_some() {
+            let propolis_id =
+                instance.instance().runtime().propolis_id.unwrap();
+            let my_sled_id = instance.sled_id().unwrap();
+
+            let (_, my_sled) = LookupPath::new(opctx, datastore)
+                .sled_id(my_sled_id)
+                .fetch()
+                .await
+                .context("failed to look up sled")?;
+
+            GenericRow {
+                host_serial: my_sled.serial_number().to_string(),
+                disk_name,
+                instance_name,
+                propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
+                disk_state,
+            }
+        } else {
+            GenericRow {
+                host_serial: NOT_ON_SLED_MSG.to_string(),
+                disk_name,
+                instance_name,
+                propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
+                disk_state,
+            }
+        }
+    } else {
+        // If the disk is not attached to anything, just print empty fields.
+        GenericRow {
+            host_serial: "-".to_string(),
+            disk_name,
+            instance_name: "-".to_string(),
+            propolis_zone: "-".to_string(),
+            disk_state,
+        }
+    };
+
+    let table = tabled::Table::new(vec![row])
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Row {
+        disk_name: String,
+
+        time_created: DateTime<Utc>,
+        #[tabled(display_with = "display_option_blank")]
+        time_deleted: Option<DateTime<Utc>>,
+
+        dataset_id: DatasetUuid,
+        pool_id: ExternalZpoolUuid,
+        sled_id: SledUuid,
+
+        dataset_size: u64,
+    }
+
+    if let Some(allocation) = &disk.local_storage_dataset_allocation {
+        let rows = vec![Row {
+            disk_name: disk.name().to_string(),
+
+            time_created: allocation.time_created,
+            time_deleted: allocation.time_deleted,
+
+            dataset_id: allocation.local_storage_dataset_id(),
+            pool_id: allocation.pool_id(),
+            sled_id: allocation.sled_id(),
+
+            dataset_size: allocation.dataset_size.to_bytes(),
+        }];
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+
+        println!("{}", table);
+    } else {
+        println!("no allocation yet");
+    }
+
+    Ok(())
+}
+
+/// Run `omdb db disk info <UUID>`.
+async fn cmd_db_disk_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &DiskInfoArgs,
+) -> Result<(), anyhow::Error> {
+    match datastore.disk_get(opctx, args.uuid).await? {
+        Disk::Crucible(disk) => {
+            crucible_disk_info(opctx, datastore, disk).await
+        }
+        Disk::LocalStorage(disk) => {
+            local_storage_disk_info(opctx, datastore, disk).await
+        }
+    }
 }
 
 // Given a UUID, search the database for a volume with that ID
@@ -2389,7 +2558,7 @@ async fn cmd_db_disk_physical(
             .context("loading region")?;
 
         for rs in regions {
-            volume_ids.insert(rs.volume_id().into_untyped_uuid());
+            volume_ids.insert(rs.volume_id());
         }
     }
 
@@ -2397,17 +2566,14 @@ async fn cmd_db_disk_physical(
     // that is part of a dataset on a pool on our disk.  The next step is
     // to find the virtual disks associated with these volume IDs and
     // display information about those disks.
-    use nexus_db_schema::schema::disk::dsl;
-    let mut query = dsl::disk.into_boxed();
-    if !fetch_opts.include_deleted {
-        query = query.filter(dsl::time_deleted.is_null());
-    }
 
-    let disks = query
-        .filter(dsl::volume_id.eq_any(volume_ids))
-        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-        .select(Disk::as_select())
-        .load_async(&*conn)
+    let disks: Vec<CrucibleDisk> = datastore
+        .disks_get_matching_volumes(
+            &conn,
+            &volume_ids,
+            fetch_opts.include_deleted,
+            i64::from(u32::from(fetch_opts.fetch_limit)),
+        )
         .await
         .context("loading disks")?;
 
@@ -2607,7 +2773,7 @@ async fn cmd_db_physical_disks(
 // SERVICES
 
 // Snapshots
-fn format_snapshot(state: &SnapshotState) -> impl Display {
+fn format_snapshot(state: &SnapshotState) -> impl Display + use<> {
     match state {
         SnapshotState::Creating => "creating".to_string(),
         SnapshotState::Ready => "ready".to_string(),
@@ -2981,7 +3147,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
         bs: String,
         bpe: u64,
         ec: u32,
-        gen: u64,
+        generation: u64,
         read_only: bool,
     }
 
@@ -3027,7 +3193,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
             block_size,
             blocks_per_extent,
             extent_count,
-            gen,
+            generation,
             opts,
         } => {
             let row = VCRRegion {
@@ -3035,7 +3201,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
                 bs: block_size.to_string(),
                 bpe: blocks_per_extent,
                 ec: extent_count,
-                gen,
+                generation,
                 read_only: opts.read_only,
             };
             let table = tabled::Table::new(&[row])
@@ -3464,26 +3630,20 @@ async fn volume_used_by(
     fetch_opts: &DbFetchOptions,
     volumes: &[Uuid],
 ) -> Result<Vec<VolumeUsedBy>, anyhow::Error> {
-    let disks_used: Vec<Disk> = {
-        let volumes = volumes.to_vec();
+    let disks_used: Vec<CrucibleDisk> = {
+        let conn = datastore.pool_connection_for_tests().await?;
+        let volumes: HashSet<VolumeUuid> = volumes
+            .iter()
+            .map(|id| VolumeUuid::from_untyped_uuid(*id))
+            .collect();
+
         datastore
-            .pool_connection_for_tests()
-            .await?
-            .transaction_async(async move |conn| {
-                use nexus_db_schema::schema::disk::dsl;
-
-                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
-
-                paginated(
-                    dsl::disk,
-                    dsl::id,
-                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
-                )
-                .filter(dsl::volume_id.eq_any(volumes))
-                .select(Disk::as_select())
-                .load_async(&conn)
-                .await
-            })
+            .disks_get_matching_volumes(
+                &conn,
+                &volumes,
+                fetch_opts.include_deleted,
+                i64::from(u32::from(fetch_opts.fetch_limit)),
+            )
             .await?
     };
 
@@ -4473,7 +4633,7 @@ async fn cmd_db_instance_info(
         dst_propolis_id,
         migration_id,
         nexus_state,
-        r#gen,
+        generation,
         time_last_auto_restarted,
     } = instance.runtime_state;
     println!("    {STATE:>WIDTH$}: {nexus_state:?}");
@@ -4487,7 +4647,7 @@ async fn cmd_db_instance_info(
     println!("    {INTENDED_STATE:>WIDTH$}: {}", instance.intended_state);
     println!(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
-        r#gen.0
+        generation.0
     );
 
     // Reincarnation status
@@ -4624,7 +4784,7 @@ async fn cmd_db_instance_info(
     }
 
     let disks = query
-        .select(Disk::as_select())
+        .select(db::model::Disk::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .with_context(ctx)?;
@@ -4800,7 +4960,7 @@ async fn cmd_db_instance_info(
                     runtime:
                         db::model::VmmRuntimeState {
                             time_state_updated: _,
-                            r#gen,
+                            generation,
                             state,
                         },
                 } = vmm;
@@ -4808,7 +4968,7 @@ async fn cmd_db_instance_info(
                     state: VmmStateRow {
                         id,
                         state,
-                        generation: r#gen.0.into(),
+                        generation: generation.0.into(),
                     },
                     sled_id: sled_id.into(),
                     time_created,
@@ -5369,12 +5529,16 @@ async fn cmd_db_network_list_vnics(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct NicRow {
-        ip: IpNetwork,
+        #[tabled(display_with = "option_impl_display")]
+        ipv4: Option<Ipv4Addr>,
+        #[tabled(display_with = "option_impl_display")]
+        ipv6: Option<Ipv6Addr>,
         mac: MacAddr,
         slot: u8,
         primary: bool,
         kind: &'static str,
-        subnet: String,
+        ipv4_subnet: String,
+        ipv6_subnet: String,
         parent_id: Uuid,
         parent_name: String,
     }
@@ -5464,7 +5628,7 @@ async fn cmd_db_network_list_vnics(
             }
         };
 
-        let subnet = {
+        let (ipv4_subnet, ipv6_subnet) = {
             use nexus_db_schema::schema::vpc_subnet::dsl;
             let subnet = match dsl::vpc_subnet
                 .filter(dsl::id.eq(nic.subnet_id))
@@ -5481,28 +5645,36 @@ async fn cmd_db_network_list_vnics(
                     continue;
                 }
             };
-
-            if nic.ip.is_ipv4() {
+            let ipv4_subnet = if nic.ipv4.is_some() {
                 subnet.ipv4_block.to_string()
             } else {
+                String::from("-")
+            };
+            let ipv6_subnet = if nic.ipv6.is_some() {
                 subnet.ipv6_block.to_string()
-            }
+            } else {
+                String::from("-")
+            };
+            (ipv4_subnet, ipv6_subnet)
         };
 
         let row = NicRow {
-            ip: nic.ip,
+            ipv4: nic.ipv4.map(Into::into),
+            ipv6: nic.ipv6.map(Into::into),
             mac: *nic.mac,
             slot: *nic.slot,
             primary: nic.primary,
             kind,
-            subnet,
+            ipv4_subnet,
+            ipv6_subnet,
             parent_id: nic.parent_id,
             parent_name,
         };
         rows.push(row);
     }
 
-    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    // Sort by IPv4 address, and then IPv6 address.
+    rows.sort_by(|a, b| a.ipv4.cmp(&b.ipv4).then_with(|| a.ipv6.cmp(&b.ipv6)));
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .to_string();
@@ -6712,7 +6884,7 @@ fn print_name(
     }
 }
 
-fn format_record(record: &DnsRecord) -> impl Display {
+fn format_record(record: &DnsRecord) -> impl Display + use<> {
     match record {
         DnsRecord::A(addr) => format!("A    {}", addr),
         DnsRecord::Aaaa(addr) => format!("AAAA {}", addr),
@@ -7423,7 +7595,8 @@ fn prettyprint_vmm(
         propolis_ip,
         propolis_port,
         cpu_platform,
-        runtime: db::model::VmmRuntimeState { state, r#gen, time_state_updated },
+        runtime:
+            db::model::VmmRuntimeState { state, generation, time_state_updated },
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -7435,7 +7608,7 @@ fn prettyprint_vmm(
         println!("{indent}{DELETED:width$}: {deleted}");
     }
     println!("{indent}{STATE:>width$}: {state}");
-    let g = u64::from(r#gen.0);
+    let g = u64::from(generation.0);
     println!(
         "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
     );
@@ -7516,7 +7689,7 @@ async fn cmd_db_vmm_list(
     }
 
     impl<'a> From<&'a (Vmm, Option<Sled>)> for VmmRow<'a> {
-        fn from((ref vmm, ref sled): &'a (Vmm, Option<Sled>)) -> Self {
+        fn from((vmm, sled): &'a (Vmm, Option<Sled>)) -> Self {
             let &Vmm {
                 id,
                 time_created: _,
@@ -7529,7 +7702,7 @@ async fn cmd_db_vmm_list(
                 runtime:
                     db::model::VmmRuntimeState {
                         state,
-                        r#gen,
+                        generation,
                         time_state_updated: _,
                     },
             } = vmm;
@@ -7542,7 +7715,11 @@ async fn cmd_db_vmm_list(
             };
             VmmRow {
                 instance_id,
-                state: VmmStateRow { id, state, generation: r#gen.0.into() },
+                state: VmmStateRow {
+                    id,
+                    state,
+                    generation: generation.0.into(),
+                },
                 sled,
             }
         }

@@ -90,9 +90,7 @@
 //! we'll need to stop queueing them.  So why bother at all?
 
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
-use openapi_manager_types::{
-    SupportedVersion, SupportedVersions, api_versions,
-};
+use dropshot_api_manager_types::api_versions;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):

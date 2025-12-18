@@ -20,9 +20,9 @@ use gateway_client::SpComponent;
 use gateway_client::types::RotImageError;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
-use gateway_client::types::SpType;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::inventory::SpType;
 use slog::Logger;
 use slog::{debug, error};
 use slog_error_chain::InlineErrorChain;
@@ -50,7 +50,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
             // Verify that the device is the one we think it is.
             let state = mgs_clients
                 .try_all_serially(log, move |mgs_client| async move {
-                    mgs_client.sp_get(update.sp_type, update.slot_id).await
+                    mgs_client.sp_get(&update.sp_type, update.slot_id).await
                 })
                 .await?
                 .into_inner();
@@ -73,7 +73,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
                 .try_all_serially(log, move |mgs_client| async move {
                     mgs_client
                         .sp_component_caboose_get(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             &SpComponent::STAGE0.to_string(),
                             0,
@@ -121,7 +121,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
                 .try_all_serially(log, move |mgs_client| async move {
                     mgs_client
                         .sp_component_caboose_get(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             // The naming here is a bit confusing because "stage0"
                             // sometimes refers to the component (RoT bootloader)
@@ -178,7 +178,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
                 .try_all_serially(log, move |mgs_client| async move {
                     mgs_client
                         .sp_component_reset(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             &SpComponent::ROT.to_string(),
                         )
@@ -239,7 +239,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
                     let persist = true;
                     mgs_client
                         .sp_component_active_slot_set(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             &SpComponent::STAGE0.to_string(),
                             persist,
@@ -258,7 +258,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
                 .try_all_serially(log, move |mgs_client| async move {
                     mgs_client
                         .sp_component_reset(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             &SpComponent::ROT.to_string(),
                         )

@@ -396,6 +396,7 @@ mod test {
                     start: state == InstanceState::Vmm,
                     auto_restart_policy,
                     anti_affinity_groups: Vec::new(),
+                    multicast_groups: Vec::new(),
                 },
             )
             .await;
@@ -443,7 +444,7 @@ mod test {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
+                        generation: Generation::new(),
                         state: VmmState::SagaUnwound,
                     },
                 },
@@ -461,7 +462,7 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    r#gen: Generation(prev_state.r#gen.next()),
+                    generation: Generation(prev_state.generation.next()),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm_id),
                     ..prev_state
@@ -509,7 +510,7 @@ mod test {
                     time_updated: Utc::now(),
                     nexus_state: state,
                     propolis_id,
-                    r#gen: Generation(prev_state.r#gen.next()),
+                    generation: Generation(prev_state.generation.next()),
                     ..prev_state
                 },
             )

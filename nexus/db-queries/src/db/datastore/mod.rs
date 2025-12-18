@@ -71,14 +71,17 @@ mod disk;
 mod dns;
 mod ereport;
 mod external_ip;
+pub mod fm;
 mod identity_provider;
 mod image;
 pub mod instance;
 mod inventory;
 mod ip_pool;
 mod lldp;
+mod local_storage;
 mod lookup_interface;
 mod migration;
+pub mod multicast;
 mod nat_entry;
 mod network_interface;
 mod oximeter;
@@ -96,6 +99,8 @@ pub mod region_snapshot_replacement;
 mod rendezvous_debug_dataset;
 mod role;
 mod saga;
+mod scim;
+mod scim_provider_store;
 mod silo;
 mod silo_auth_settings;
 mod silo_group;
@@ -111,7 +116,7 @@ mod switch_port;
 mod target_release;
 #[cfg(test)]
 pub(crate) mod test_utils;
-mod update;
+pub mod update;
 mod user_data_export;
 mod utilization;
 mod v2p_mapping;
@@ -126,6 +131,10 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use db_metadata::DatastoreSetupAction;
 pub use db_metadata::ValidatedDatastoreSetupAction;
+pub use deployment::BlueprintLimitReachedOutput;
+pub use disk::CrucibleDisk;
+pub use disk::Disk;
+pub use disk::LocalStorageDisk;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;
@@ -142,7 +151,17 @@ pub use region::RegionAllocationFor;
 pub use region::RegionAllocationParameters;
 pub use region_snapshot_replacement::NewRegionVolumeId;
 pub use region_snapshot_replacement::OldSnapshotVolumeId;
+pub use scim_provider_store::CrdbScimProviderStore;
 pub use silo::Discoverability;
+pub use silo_group::SiloGroup;
+pub use silo_group::SiloGroupApiOnly;
+pub use silo_group::SiloGroupJit;
+pub use silo_group::SiloGroupLookup;
+pub use silo_user::SiloUser;
+pub use silo_user::SiloUserApiOnly;
+pub use silo_user::SiloUserJit;
+pub use silo_user::SiloUserLookup;
+pub use silo_user::SiloUserScim;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
 pub use support_bundle::SupportBundleExpungementReport;
@@ -577,7 +596,7 @@ mod test {
     use crate::db::model::{
         BlockSize, ConsoleSession, CrucibleDataset, ExternalIp, PhysicalDisk,
         PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState, Project, Rack,
-        Region, SiloUser, SshKey, Zpool,
+        Region, SshKey, Zpool,
     };
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
@@ -716,11 +735,12 @@ mod test {
         datastore
             .silo_user_create(
                 &authz_silo,
-                SiloUser::new(
+                SiloUserApiOnly::new(
                     authz_silo.id(),
                     silo_user_id,
                     "external_id".into(),
-                ),
+                )
+                .into(),
             )
             .await
             .unwrap();
@@ -920,22 +940,6 @@ mod test {
             )
             .await
             .unwrap();
-    }
-
-    fn create_test_disk_create_params(
-        name: &str,
-        size: ByteCount,
-    ) -> params::DiskCreate {
-        params::DiskCreate {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from(name.to_string()).unwrap(),
-                description: name.to_string(),
-            },
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
-            },
-            size,
-        }
     }
 
     #[derive(Debug)]
@@ -1144,10 +1148,10 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let params = create_test_disk_create_params(
-                &format!("disk{}", alloc_seed),
-                ByteCount::from_mebibytes_u32(1),
-            );
+            let disk_source = params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            };
+            let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
@@ -1155,8 +1159,8 @@ mod test {
                 .disk_region_allocate(
                     &opctx,
                     volume_id,
-                    &params.disk_source,
-                    params.size,
+                    &disk_source,
+                    size,
                     &RegionAllocationStrategy::Random {
                         seed: Some(alloc_seed),
                     },
@@ -1203,7 +1207,7 @@ mod test {
                 assert_eq!(ByteCount::from(4096), region.block_size());
                 let (_, extent_count) = DataStore::get_crucible_allocation(
                     &BlockSize::AdvancedFormat,
-                    params.size,
+                    size,
                 );
                 assert_eq!(extent_count, region.extent_count());
             }
@@ -1238,10 +1242,10 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let params = create_test_disk_create_params(
-                &format!("disk{}", alloc_seed),
-                ByteCount::from_mebibytes_u32(1),
-            );
+            let disk_source = params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            };
+            let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
@@ -1249,8 +1253,8 @@ mod test {
                 .disk_region_allocate(
                     &opctx,
                     volume_id,
-                    &params.disk_source,
-                    params.size,
+                    &disk_source,
+                    size,
                     &&RegionAllocationStrategy::RandomWithDistinctSleds {
                         seed: Some(alloc_seed),
                     },
@@ -1292,7 +1296,7 @@ mod test {
                 assert_eq!(ByteCount::from(4096), region.block_size());
                 let (_, extent_count) = DataStore::get_crucible_allocation(
                     &BlockSize::AdvancedFormat,
-                    params.size,
+                    size,
                 );
                 assert_eq!(extent_count, region.extent_count());
             }
@@ -1326,18 +1330,18 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let params = create_test_disk_create_params(
-                &format!("disk{}", alloc_seed),
-                ByteCount::from_mebibytes_u32(1),
-            );
+            let disk_source = params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            };
+            let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
 
             let err = datastore
                 .disk_region_allocate(
                     &opctx,
                     volume_id,
-                    &params.disk_source,
-                    params.size,
+                    &disk_source,
+                    size,
                     &&RegionAllocationStrategy::RandomWithDistinctSleds {
                         seed: Some(alloc_seed),
                     },
@@ -1372,17 +1376,17 @@ mod test {
         .await;
 
         // Allocate regions from the datasets for this volume.
-        let params = create_test_disk_create_params(
-            "disk",
-            ByteCount::from_mebibytes_u32(500),
-        );
+        let disk_source = params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
+        let size = ByteCount::from_mebibytes_u32(500);
         let volume_id = VolumeUuid::new_v4();
         let mut dataset_and_regions1 = datastore
             .disk_region_allocate(
                 &opctx,
                 volume_id,
-                &params.disk_source,
-                params.size,
+                &disk_source,
+                size,
                 &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
@@ -1394,8 +1398,8 @@ mod test {
             .disk_region_allocate(
                 &opctx,
                 volume_id,
-                &params.disk_source,
-                params.size,
+                &disk_source,
+                size,
                 &RegionAllocationStrategy::Random { seed: Some(1) },
             )
             .await
@@ -1476,17 +1480,17 @@ mod test {
             .await;
 
         // Allocate regions from the datasets for this volume.
-        let params = create_test_disk_create_params(
-            "disk1",
-            ByteCount::from_mebibytes_u32(500),
-        );
+        let disk_source = params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
+        let size = ByteCount::from_mebibytes_u32(500);
         let volume1_id = VolumeUuid::new_v4();
         let err = datastore
             .disk_region_allocate(
                 &opctx,
                 volume1_id,
-                &params.disk_source,
-                params.size,
+                &disk_source,
+                size,
                 &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
@@ -1508,8 +1512,8 @@ mod test {
             .disk_region_allocate(
                 &opctx,
                 volume1_id,
-                &params.disk_source,
-                params.size,
+                &disk_source,
+                size,
                 &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
@@ -1570,17 +1574,17 @@ mod test {
             .await;
 
         // Allocate regions from the datasets for this volume.
-        let params = create_test_disk_create_params(
-            "disk1",
-            ByteCount::from_mebibytes_u32(500),
-        );
+        let disk_source = params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
+        let size = ByteCount::from_mebibytes_u32(500);
         let volume1_id = VolumeUuid::new_v4();
         let err = datastore
             .disk_region_allocate(
                 &opctx,
                 volume1_id,
-                &params.disk_source,
-                params.size,
+                &disk_source,
+                size,
                 &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
@@ -1662,10 +1666,10 @@ mod test {
         ];
 
         let volume_id = VolumeUuid::new_v4();
-        let params = create_test_disk_create_params(
-            "disk",
-            ByteCount::from_mebibytes_u32(500),
-        );
+        let disk_source = params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
+        let size = ByteCount::from_mebibytes_u32(500);
 
         for (policy, state, expected) in policy_state_combos {
             // Update policy/state only on a single physical disk.
@@ -1688,8 +1692,8 @@ mod test {
                 .disk_region_allocate(
                     &opctx,
                     volume_id,
-                    &params.disk_source,
-                    params.size,
+                    &disk_source,
+                    size,
                     &RegionAllocationStrategy::Random { seed: Some(0) },
                 )
                 .await;
@@ -1729,8 +1733,10 @@ mod test {
         .await;
 
         let disk_size = test_zpool_size();
+        let disk_source = params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
         let alloc_size = ByteCount::try_from(disk_size.to_bytes() * 2).unwrap();
-        let params = create_test_disk_create_params("disk1", alloc_size);
         let volume1_id = VolumeUuid::new_v4();
 
         assert!(
@@ -1738,8 +1744,8 @@ mod test {
                 .disk_region_allocate(
                     &opctx,
                     volume1_id,
-                    &params.disk_source,
-                    params.size,
+                    &disk_source,
+                    alloc_size,
                     &RegionAllocationStrategy::Random { seed: Some(0) },
                 )
                 .await
@@ -1856,11 +1862,12 @@ mod test {
         datastore
             .silo_user_create(
                 &authz_silo,
-                SiloUser::new(
+                SiloUserApiOnly::new(
                     authz_silo.id(),
                     silo_user_id,
                     "external@id".into(),
-                ),
+                )
+                .into(),
             )
             .await
             .unwrap();

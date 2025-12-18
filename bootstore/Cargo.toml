@@ -2,7 +2,7 @@
 name = "bootstore"
 description = "Storage required for rack unlock"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [build-dependencies]

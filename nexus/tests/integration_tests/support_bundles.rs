@@ -10,7 +10,7 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
-use nexus_client::types::LastResult;
+use nexus_lockstep_client::types::LastResult;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -19,6 +19,7 @@ use nexus_types::external_api::shared::SupportBundleInfo;
 use nexus_types::external_api::shared::SupportBundleState;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
@@ -338,7 +339,7 @@ async fn activate_bundle_collection_background_task(
     use nexus_test_utils::background::activate_background_task;
 
     let task = activate_background_task(
-        &cptestctx.internal_client,
+        &cptestctx.lockstep_client,
         "support_bundle_collector",
     )
     .await;
@@ -486,21 +487,41 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
         output.cleanup_report,
         Some(SupportBundleCleanupReport { ..Default::default() })
     );
+
+    let report = output.collection_report.as_ref().expect("Missing report");
+    assert_eq!(report.bundle, bundle.id);
+    assert!(report.activated_in_db_ok);
     assert_eq!(
-        output.collection_report,
-        Some(SupportBundleCollectionReport {
-            bundle: bundle.id,
-            listed_in_service_sleds: true,
-            listed_sps: true,
-            activated_in_db_ok: true,
-            host_ereports: SupportBundleEreportStatus::Collected {
-                n_collected: 0
-            },
-            sp_ereports: SupportBundleEreportStatus::Collected {
-                n_collected: 0
-            }
+        report.ereports,
+        Some(SupportBundleEreportStatus {
+            n_collected: 0,
+            n_found: 0,
+            errors: Vec::new()
         })
     );
+
+    // Verify that steps were recorded with reasonable timing data
+    assert!(!report.steps.is_empty(), "Should have recorded some steps");
+    for step in &report.steps {
+        assert!(
+            step.end >= step.start,
+            "Step '{}' end time should be >= start time",
+            step.name
+        );
+    }
+
+    // Verify that we successfully spawned steps to query sleds and SPs
+    let step_names: Vec<_> =
+        report.steps.iter().map(|s| s.name.as_str()).collect();
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS),
+        "Should have attempted to list in-service sleds"
+    );
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS),
+        "Should have attempted to list service processors"
+    );
+
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
     assert_eq!(bundle.state, SupportBundleState::Active);
 
@@ -509,6 +530,8 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let archive = ZipArchive::new(Cursor::new(&contents)).unwrap();
     let mut names = archive.file_names();
     assert_eq!(names.next(), Some("bundle_id.txt"));
+    assert_eq!(names.next(), Some("meta/"));
+    assert_eq!(names.next(), Some("meta/trace.json"));
     assert_eq!(names.next(), Some("rack/"));
     assert!(names.any(|n| n == "sp_task_dumps/"));
     // There's much more data in the bundle, but validating it isn't the point
@@ -589,21 +612,40 @@ async fn test_support_bundle_range_requests(
     // Finish collection, activate the bundle.
     let output = activate_bundle_collection_background_task(&cptestctx).await;
     assert_eq!(output.collection_err, None);
+    let report = output.collection_report.as_ref().expect("Missing report");
+    assert_eq!(report.bundle, bundle.id);
+    assert!(report.activated_in_db_ok);
     assert_eq!(
-        output.collection_report,
-        Some(SupportBundleCollectionReport {
-            bundle: bundle.id,
-            listed_in_service_sleds: true,
-            listed_sps: true,
-            activated_in_db_ok: true,
-            host_ereports: SupportBundleEreportStatus::Collected {
-                n_collected: 0
-            },
-            sp_ereports: SupportBundleEreportStatus::Collected {
-                n_collected: 0
-            }
+        report.ereports,
+        Some(SupportBundleEreportStatus {
+            n_collected: 0,
+            n_found: 0,
+            errors: Vec::new()
         })
     );
+
+    // Verify that steps were recorded with reasonable timing data
+    assert!(!report.steps.is_empty(), "Should have recorded some steps");
+    for step in &report.steps {
+        assert!(
+            step.end >= step.start,
+            "Step '{}' end time should be >= start time",
+            step.name
+        );
+    }
+
+    // Verify that we successfully spawned steps to query sleds and SPs
+    let step_names: Vec<_> =
+        report.steps.iter().map(|s| s.name.as_str()).collect();
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS),
+        "Should have attempted to list in-service sleds"
+    );
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS),
+        "Should have attempted to list service processors"
+    );
+
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
     assert_eq!(bundle.state, SupportBundleState::Active);
 

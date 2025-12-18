@@ -20,6 +20,8 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ReconfiguratorConfig as DbReconfiguratorConfig;
 use nexus_db_model::SqlU32;
+use nexus_types::deployment::PlannerConfig;
+use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorConfigView;
 use omicron_common::api::external::DataPageParams;
@@ -142,22 +144,38 @@ impl DataStore {
             ));
         }
 
+        // This statement exists just to trigger compilation errors when the
+        // `ReconfiguratorConfigView` type changes so that people are prompted
+        // to fix this query.  If you get a compiler error here, you probably
+        // added or removed a field to this type, and you will need to adjust
+        // the query below accordingly.
+        let ReconfiguratorConfigView {
+            version,
+            config:
+                ReconfiguratorConfig {
+                    planner_enabled,
+                    planner_config:
+                        PlannerConfig { add_zones_with_mupdate_override },
+                    tuf_repo_pruner_enabled,
+                },
+            time_modified,
+        } = *switches;
+
         sql_query(
             r"INSERT INTO reconfigurator_config
                 (version, planner_enabled, time_modified,
-                 add_zones_with_mupdate_override)
-              SELECT $1, $2, $3, $4
+                 add_zones_with_mupdate_override, tuf_repo_pruner_enabled)
+              SELECT $1, $2, $3, $4, $5
               WHERE $1 - 1 IN (
                   SELECT COALESCE(MAX(version), 0)
                   FROM reconfigurator_config
               )",
         )
-        .bind::<sql_types::BigInt, SqlU32>(switches.version.into())
-        .bind::<sql_types::Bool, _>(switches.config.planner_enabled)
-        .bind::<sql_types::Timestamptz, _>(switches.time_modified)
-        .bind::<sql_types::Bool, _>(
-            switches.config.planner_config.add_zones_with_mupdate_override,
-        )
+        .bind::<sql_types::BigInt, SqlU32>(version.into())
+        .bind::<sql_types::Bool, _>(planner_enabled)
+        .bind::<sql_types::Timestamptz, _>(time_modified)
+        .bind::<sql_types::Bool, _>(add_zones_with_mupdate_override)
+        .bind::<sql_types::Bool, _>(tuf_repo_pruner_enabled)
         .execute_async(conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -186,12 +204,13 @@ mod tests {
                 .is_empty()
         );
 
-        // Fail to insert a swtiches with version 0
+        // Fail to insert version 0
         let mut switches = ReconfiguratorConfigParam {
             version: 0,
             config: ReconfiguratorConfig {
                 planner_enabled: false,
                 planner_config: PlannerConfig::default(),
+                tuf_repo_pruner_enabled: true,
             },
         };
 

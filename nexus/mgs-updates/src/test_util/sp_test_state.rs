@@ -9,8 +9,8 @@ use gateway_client::types::GetRotBootInfoParams;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
-use gateway_client::types::SpType;
 use gateway_messages::RotBootInfo;
+use gateway_types::component::SpType;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
@@ -80,7 +80,7 @@ impl SpTestState {
     ) -> Result<SpTestState, GatewayClientError> {
         let caboose_sp_active = mgs_client
             .sp_component_caboose_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::SP_ITSELF.const_as_str(),
                 0,
@@ -89,7 +89,7 @@ impl SpTestState {
             .into_inner();
         let caboose_sp_inactive = mgs_client
             .sp_component_caboose_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::SP_ITSELF.const_as_str(),
                 1,
@@ -98,7 +98,7 @@ impl SpTestState {
             .map(|c| c.into_inner());
         let caboose_rot_a = mgs_client
             .sp_component_caboose_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::ROT.const_as_str(),
                 0,
@@ -107,7 +107,7 @@ impl SpTestState {
             .map(|c| c.into_inner());
         let caboose_rot_b = mgs_client
             .sp_component_caboose_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::ROT.const_as_str(),
                 1,
@@ -116,7 +116,7 @@ impl SpTestState {
             .map(|c| c.into_inner());
         let caboose_stage0 = mgs_client
             .sp_component_caboose_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::STAGE0.const_as_str(),
                 0,
@@ -125,17 +125,17 @@ impl SpTestState {
             .into_inner();
         let caboose_stage0_next = mgs_client
             .sp_component_caboose_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::STAGE0.const_as_str(),
                 1,
             )
             .await
             .map(|c| c.into_inner());
-        let sp_info = mgs_client.sp_get(sp_type, sp_slot).await?.into_inner();
+        let sp_info = mgs_client.sp_get(&sp_type, sp_slot).await?.into_inner();
         let sp_boot_info = mgs_client
             .sp_rot_boot_info(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::ROT.const_as_str(),
                 &GetRotBootInfoParams {
@@ -154,7 +154,7 @@ impl SpTestState {
                 M2Slot::from_mgs_firmware_slot(
                     mgs_client
                         .sp_component_active_slot_get(
-                            sp_type,
+                            &sp_type,
                             sp_slot,
                             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
                         )

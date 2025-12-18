@@ -9,6 +9,7 @@ use self::saga::SagaExecutor;
 use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::SagaRecoveryHelpers;
+use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::populate::populate_start;
@@ -29,7 +30,7 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
-use omicron_common::address::DENDRITE_PORT;
+use nexus_types::fm;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
@@ -79,6 +80,7 @@ mod ip_pool;
 mod lldp;
 mod login;
 mod metrics;
+pub(crate) mod multicast;
 mod network_interface;
 pub(crate) mod oximeter;
 mod probe;
@@ -87,6 +89,7 @@ mod quiesce;
 mod quota;
 mod rack;
 pub(crate) mod saga;
+mod scim;
 mod session;
 mod silo;
 mod sled;
@@ -129,8 +132,9 @@ pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize =
     nexus_db_queries::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE
         as usize;
 pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
+pub(crate) const MAX_MULTICAST_GROUPS_PER_INSTANCE: usize = 32;
 
-pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
+pub const MAX_VCPU_PER_INSTANCE: u16 = 254;
 
 pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
 // This is larger than total memory (let alone reservoir) on some sleds; it is
@@ -193,6 +197,9 @@ pub struct Nexus {
     /// Internal dropshot server
     internal_server: std::sync::Mutex<Option<DropshotServer>>,
 
+    /// Lockstep dropshot server
+    lockstep_server: std::sync::Mutex<Option<DropshotServer>>,
+
     /// Status of background task to populate database
     populate_status: watch::Receiver<PopulateStatus>,
 
@@ -218,6 +225,9 @@ pub struct Nexus {
 
     /// The tunable parameters from a configuration file
     tunables: Tunables,
+
+    /// Whether multicast functionality is enabled - used by sagas and API endpoints to check if multicast operations should proceed
+    multicast_enabled: bool,
 
     /// Operational context used for Instance allocation
     opctx_alloc: OpContext,
@@ -281,6 +291,14 @@ pub struct Nexus {
     // while Nexus is running.
     #[allow(dead_code)]
     repo_depot_resolver: Box<dyn qorb::resolver::Resolver>,
+
+    /// Watch channel containing the currently-loaded fault management sitrep.
+    #[allow(dead_code)]
+    sitrep_load_rx:
+        watch::Receiver<Option<Arc<(fm::SitrepVersion, fm::Sitrep)>>>,
+
+    /// handle to pull update status data
+    update_status: UpdateStatusHandle,
 
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
@@ -348,7 +366,7 @@ impl Nexus {
         let quiesce = NexusQuiesceHandle::new(
             db_datastore.clone(),
             config.deployment.id,
-            blueprint_load_rx,
+            blueprint_load_rx.clone(),
             quiesce_opctx,
         );
 
@@ -478,6 +496,8 @@ impl Nexus {
         let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
+        let (sitrep_load_tx, sitrep_load_rx) = watch::channel(None);
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -488,12 +508,20 @@ impl Nexus {
             external_server: std::sync::Mutex::new(None),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
+            lockstep_server: std::sync::Mutex::new(None),
             producer_server: std::sync::Mutex::new(None),
             populate_status,
             reqwest_client,
             timeseries_client,
             webhook_delivery_client,
             tunables: config.pkg.tunables.clone(),
+            // Whether multicast functionality is enabled.
+            // This is used by instance-related sagas and API endpoints to check
+            // if multicast operations should proceed.
+            //
+            // NOTE: This is separate from the RPW reconciler timing config, which
+            // only controls how often the background task runs.
+            multicast_enabled: config.pkg.multicast.enabled,
             opctx_alloc: OpContext::for_background(
                 log.new(o!("component" => "InstanceAllocator")),
                 Arc::clone(&authz),
@@ -530,7 +558,9 @@ impl Nexus {
             mgs_update_status_rx,
             mgs_resolver,
             repo_depot_resolver,
+            update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
+            sitrep_load_rx,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -594,6 +624,7 @@ impl Nexus {
                     opctx: background_ctx,
                     datastore: db_datastore,
                     config: task_config.pkg.background_tasks,
+                    multicast_enabled: task_config.pkg.multicast.enabled,
                     rack_id,
                     nexus_id: task_config.deployment.id,
                     resolver,
@@ -615,6 +646,7 @@ impl Nexus {
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
                     blueprint_load_tx,
+                    sitrep_load_tx,
                 },
             );
 
@@ -643,6 +675,10 @@ impl Nexus {
 
     pub fn authz(&self) -> &Arc<authz::Authz> {
         &self.authz
+    }
+
+    pub fn multicast_enabled(&self) -> bool {
+        self.multicast_enabled
     }
 
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
@@ -705,6 +741,7 @@ impl Nexus {
         external_server: DropshotServer,
         techport_external_server: DropshotServer,
         internal_server: DropshotServer,
+        lockstep_server: DropshotServer,
         producer_server: ProducerServer,
     ) {
         // If any servers already exist, close them.
@@ -717,6 +754,7 @@ impl Nexus {
             .unwrap()
             .replace(techport_external_server);
         self.internal_server.lock().unwrap().replace(internal_server);
+        self.lockstep_server.lock().unwrap().replace(lockstep_server);
         self.producer_server.lock().unwrap().replace(producer_server);
     }
 
@@ -763,6 +801,10 @@ impl Nexus {
         if let Some(server) = internal_server {
             extend_err(&mut res, server.close().await);
         }
+        let lockstep_server = self.lockstep_server.lock().unwrap().take();
+        if let Some(server) = lockstep_server {
+            extend_err(&mut res, server.close().await);
+        }
         let producer_server = self.producer_server.lock().unwrap().take();
         if let Some(server) = producer_server {
             extend_err(
@@ -794,7 +836,7 @@ impl Nexus {
         Ok(())
     }
 
-    pub(crate) async fn get_external_server_address(
+    pub(crate) fn get_external_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.external_server
@@ -804,7 +846,7 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
-    pub(crate) async fn get_techport_server_address(
+    pub(crate) fn get_techport_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.techport_external_server
@@ -814,10 +856,20 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
-    pub(crate) async fn get_internal_server_address(
+    pub(crate) fn get_internal_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.internal_server
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|server| server.local_addr())
+    }
+
+    pub(crate) fn get_lockstep_server_address(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
+        self.lockstep_server
             .lock()
             .unwrap()
             .as_ref()
@@ -1148,16 +1200,27 @@ pub enum Unimpl {
     ProtectedLookup(Error),
 }
 
+/// Returns a mapping of clients for the Dendrite daemons of reachable switch zones.
+/// If we are unable to communicate with the switch zone and determine the mapping
+/// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn dpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
-    let mappings = switch_zone_address_mappings(resolver, log).await?;
-    let clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
-        .iter()
-        .map(|(location, addr)| {
-            let port = DENDRITE_PORT;
+    let dpd_socketaddrs = match resolver
+        .lookup_all_socket_v6(ServiceName::Dendrite)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+            return Err(e.to_string());
+        }
+    };
 
+    let clients: Vec<(SocketAddrV6, dpd_client::Client)> = dpd_socketaddrs
+        .iter()
+        .map(|socket_addr| {
             let client_state = dpd_client::ClientState {
                 tag: String::from("nexus"),
                 log: log.new(o!(
@@ -1165,20 +1228,55 @@ pub(crate) async fn dpd_clients(
                 )),
             };
 
-            let dpd_client = dpd_client::Client::new(
-                &format!("http://[{addr}]:{port}"),
+            let client = dpd_client::Client::new(
+                &format!("http://{socket_addr}"),
                 client_state,
             );
-            (*location, dpd_client)
+
+            (*socket_addr, client)
         })
         .collect();
-    Ok(clients)
+
+    let mut mappings: HashMap<SwitchLocation, dpd_client::Client> =
+        HashMap::new();
+
+    for (addr, client) in clients {
+        let switch_slot = match client.switch_identifiers().await {
+            Ok(response) => response.slot,
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to determine switch slot for dendrite";
+                    "error" => %e,
+                    "addr" => %addr,
+                );
+                continue;
+            }
+        };
+
+        let location = match switch_slot {
+            0 => SwitchLocation::Switch0,
+            1 => SwitchLocation::Switch1,
+            _ => {
+                warn!(log, "unexpected value for switch slot: {switch_slot}");
+                continue;
+            }
+        };
+
+        mappings.insert(location, client);
+    }
+
+    Ok(mappings)
 }
 
 // We currently ignore the rack_id argument here, as the shared
 // switch_zone_address_mappings function doesn't allow filtering on the rack ID.
 // Since we only have a single rack, this is OK for now.
 // TODO: https://github.com/oxidecomputer/omicron/issues/1276
+//
+/// Returns a mapping of clients for the LLDP daemons of reachable switch zones.
+/// If we are unable to communicate with the switch zone and determine the mapping
+/// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn lldpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     _rack_id: Uuid,
@@ -1200,35 +1298,29 @@ pub(crate) async fn lldpd_clients(
     Ok(clients)
 }
 
-// Look up Dendrite addresses in DNS then determine the switch location for
-// each address DNS returns.  If we fail to lookup ServiceName::Dendrite, we
-// return error, otherwise we keep looping until we can determine the switch
-// location of all addresses returned to us from the lookup.
+/// Look up Dendrite addresses in DNS then determine the switch location of
+/// any addresses we're able to resolve the SwitchLocation for. If a switch
+/// zone is down, the resolution process will fail and the entry will be
+/// missing from the result.
+///
+/// # Errors
+/// If we fail to resolve the ipv6 addresses of the Dendrite service we
+/// return an error
 async fn switch_zone_address_mappings(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
-    loop {
-        let switch_zone_addresses = match resolver
-            .lookup_all_ipv6(ServiceName::Dendrite)
-            .await
-        {
-            Ok(addrs) => addrs,
-            Err(e) => {
-                error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-                return Err(e.to_string());
-            }
-        };
-        match map_switch_zone_addrs(&log, switch_zone_addresses).await {
-            Ok(mappings) => {
-                return Ok(mappings);
-            }
-            Err(e) => {
-                warn!(log, "Failed to map switch zone addr: {e}, retrying");
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            }
+    let switch_zone_addresses = match resolver
+        .lookup_all_ipv6(ServiceName::Dendrite)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+            return Err(e.to_string());
         }
-    }
+    };
+    Ok(map_switch_zone_addrs(&log, switch_zone_addresses, resolver).await)
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`
@@ -1239,38 +1331,68 @@ async fn switch_zone_address_mappings(
 // via an API call. We probably will need to rethink how we're looking
 // up switch addresses as a whole, since how DNS is currently setup for
 // Dendrite is insufficient for what we need.
+//
+/// Query MGS in each switch zone to learn which switch slot is being managed by
+/// the services located on a given ipv6 address. This information can be used
+/// along with the well known port numbers to target a specific switch + service
+/// combination.
+///
+/// We return whatever we're able to successfully resolve. In the event of
+/// a communication timeout or other failure with MGS, the SwitchLocation -> Ipv6Addr
+/// mapping will be missing from the returned HashMap. Callers will need to inspect
+/// the contents to ensure what they expect to be there is actually there.
 async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,
-) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
+    resolver: &internal_dns_resolver::Resolver,
+) -> HashMap<SwitchLocation, Ipv6Addr> {
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
+
     for addr in switch_zone_addresses {
+        let port = match resolver
+            .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
+            .await
+        {
+            Ok(addrs) => {
+                let port_map: HashMap<Ipv6Addr, u16> = addrs
+                    .into_iter()
+                    .map(|sockaddr| (*sockaddr.ip(), sockaddr.port()))
+                    .collect();
+
+                *port_map.get(&addr).unwrap_or(&MGS_PORT)
+            }
+            Err(e) => {
+                error!(log, "failed to resolve MGS addresses"; "error" => %e);
+                MGS_PORT
+            }
+        };
+
         let mgs_client = MgsClient::new(
-            &format!("http://[{}]:{}", addr, MGS_PORT),
+            &format!("http://[{}]:{}", addr, port),
             log.new(o!("component" => "MgsClient")),
         );
 
-        info!(log, "determining switch slot managed by dendrite zone"; "zone_address" => #?addr);
+        info!(log, "determining switch slot managed by switch zone"; "zone_address" => #?addr);
         let switch_slot = match mgs_client.sp_local_switch_id().await {
             Ok(switch) => {
                 info!(
                     log,
-                    "identified switch slot for dendrite zone";
+                    "identified switch slot for switch zone";
                     "slot" => #?switch,
                     "zone_address" => #?addr
                 );
                 switch.slot
             }
             Err(e) => {
-                warn!(
+                error!(
                     log,
-                    "failed to identify switch slot for dendrite";
+                    "failed to identify switch slot for switch zone";
                     "zone_address" => #?addr,
                     "reason" => #?e
                 );
-                return Err(e.to_string());
+                continue;
             }
         };
 
@@ -1289,12 +1411,14 @@ async fn map_switch_zone_addrs(
             }
         };
     }
+
     info!(
         log,
-        "completed mapping dendrite zones to switch slots";
+        "completed mapping switch zones to switch slots";
         "mappings" => #?switch_zone_addrs
     );
-    Ok(switch_zone_addrs)
+
+    switch_zone_addrs
 }
 
 /// Begin configuring an external HTTP client, returning a

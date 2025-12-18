@@ -26,8 +26,7 @@ use diesel::expression::SelectableHelper;
 use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use id_map::{IdMap, IdMappable};
-use iddqd::IdOrdMap;
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
@@ -86,16 +85,6 @@ use nexus_db_schema::enums::{
     CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
 };
 use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
-use nexus_sled_agent_shared::inventory::BootPartitionContents;
-use nexus_sled_agent_shared::inventory::BootPartitionDetails;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
-use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
@@ -116,6 +105,16 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::BootPartitionContents;
+use sled_agent_types::inventory::BootPartitionDetails;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::ManifestNonBootInventory;
+use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::ZoneArtifactInventory;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -2329,16 +2328,18 @@ impl DataStore {
             })
     }
 
-    /// Attempt to read the latest collection.
+    /// Attempt to get the ID of the latest collection.
     ///
     /// If there aren't any collections, return `Ok(None)`.
-    pub async fn inventory_get_latest_collection(
+    pub async fn inventory_get_latest_collection_id(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<Collection>, Error> {
+    ) -> Result<Option<CollectionUuid>, Error> {
+        use nexus_db_schema::schema::inv_collection::dsl;
+
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        use nexus_db_schema::schema::inv_collection::dsl;
+
         let collection_id = dsl::inv_collection
             .select(dsl::id)
             .order_by(dsl::time_started.desc())
@@ -2347,17 +2348,23 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let Some(collection_id) = collection_id else {
+        Ok(collection_id.map(CollectionUuid::from_untyped_uuid))
+    }
+
+    /// Attempt to read the latest collection.
+    ///
+    /// If there aren't any collections, return `Ok(None)`.
+    pub async fn inventory_get_latest_collection(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<Collection>, Error> {
+        let Some(collection_id) =
+            self.inventory_get_latest_collection_id(opctx).await?
+        else {
             return Ok(None);
         };
 
-        Ok(Some(
-            self.inventory_collection_read(
-                opctx,
-                CollectionUuid::from_untyped_uuid(collection_id),
-            )
-            .await?,
-        ))
+        Ok(Some(self.inventory_collection_read(opctx, collection_id).await?))
     }
 
     /// Attempt to read the current collection
@@ -3114,7 +3121,7 @@ impl DataStore {
         let mut omicron_sled_configs = {
             use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
 
-            let mut configs = IdMap::new();
+            let mut configs = IdOrdMap::new();
 
             let mut paginator = Paginator::new(
                 batch_size,
@@ -3135,19 +3142,27 @@ impl DataStore {
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 for sled_config in batch {
-                    configs.insert(OmicronSledConfigWithId {
-                        id: sled_config.id.into(),
-                        config: OmicronSledConfig {
-                            generation: sled_config.generation.into(),
-                            remove_mupdate_override: sled_config
-                                .remove_mupdate_override
-                                .map(From::from),
-                            disks: IdMap::default(),
-                            datasets: IdMap::default(),
-                            zones: IdMap::default(),
-                            host_phase_2: sled_config.host_phase_2.into(),
-                        },
-                    });
+                    configs
+                        .insert_unique(OmicronSledConfigWithId {
+                            id: sled_config.id.into(),
+                            config: OmicronSledConfig {
+                                generation: sled_config.generation.into(),
+                                remove_mupdate_override: sled_config
+                                    .remove_mupdate_override
+                                    .map(From::from),
+                                disks: IdOrdMap::default(),
+                                datasets: IdOrdMap::default(),
+                                zones: IdOrdMap::default(),
+                                host_phase_2: sled_config.host_phase_2.into(),
+                            },
+                        })
+                        .map_err(|e| {
+                            Error::internal_error(&format!(
+                                "duplicate omicron sled config ID found, but \
+                                 database guarantees uniqueness: {}",
+                                InlineErrorChain::new(&e),
+                            ))
+                        })?;
                 }
             }
 
@@ -3240,7 +3255,7 @@ impl DataStore {
                 })
                 .transpose()?;
             let mut config_with_id = omicron_sled_configs
-                .get_mut(&z.sled_config_id.into())
+                .get_mut(&z.sled_config_id)
                 .ok_or_else(|| {
                     // This error means that we found a row in
                     // inv_omicron_sled_config_zone with no associated record in
@@ -3260,7 +3275,7 @@ impl DataStore {
                 .map_err(|e| {
                     Error::internal_error(&format!("{:#}", e.to_string()))
                 })?;
-            config_with_id.config.zones.insert(zone);
+            config_with_id.config.zones.insert_overwrite(zone);
         }
 
         bail_unless!(
@@ -3294,14 +3309,14 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id.into())
+                        .get_mut(&row.sled_config_id)
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "dataset config {:?}: unknown config ID: {:?}",
                                 row.id, row.sled_config_id
                             ))
                         })?;
-                    config_with_id.config.datasets.insert(
+                    config_with_id.config.datasets.insert_overwrite(
                         row.try_into().map_err(|e| {
                             Error::internal_error(&format!("{e:#}"))
                         })?,
@@ -3335,14 +3350,14 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id.into())
+                        .get_mut(&row.sled_config_id)
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "disk config {:?}: unknown config ID: {:?}",
                                 row.id, row.sled_config_id
                             ))
                         })?;
-                    config_with_id.config.disks.insert(row.into());
+                    config_with_id.config.disks.insert_overwrite(row.into());
                 }
             }
         }
@@ -3631,7 +3646,7 @@ impl DataStore {
 
             let mut by_sled_id: BTreeMap<
                 SledUuid,
-                IdOrdMap<ZoneManifestNonBootInventory>,
+                IdOrdMap<ManifestNonBootInventory>,
             > = BTreeMap::new();
 
             let mut paginator = Paginator::new(
@@ -3833,7 +3848,7 @@ impl DataStore {
             let ledgered_sled_config = s
                 .ledgered_sled_config
                 .map(|id| {
-                    omicron_sled_configs.get(&id.into()).as_ref()
+                    omicron_sled_configs.get(&id).as_ref()
                     .map(|c| c.config.clone())
                         .ok_or_else(|| {
                         Error::internal_error(
@@ -3855,7 +3870,7 @@ impl DataStore {
                 .remove(&sled_id)
                 .map(|reconciler| {
                     let last_reconciled_config = omicron_sled_configs
-                        .get(&reconciler.last_reconciled_config.into())
+                        .get(&reconciler.last_reconciled_config)
                         .as_ref()
                         .ok_or_else(|| {
                             Error::internal_error(
@@ -4070,6 +4085,29 @@ impl DataStore {
             internal_dns_generation_status,
         })
     }
+
+    pub async fn inventory_collections_latest(
+        &self,
+        opctx: &OpContext,
+        count: u8,
+    ) -> anyhow::Result<Vec<InvCollection>> {
+        let limit: i64 = i64::from(count);
+        let conn = self
+            .pool_connection_authorized(opctx)
+            .await
+            .context("getting connection")?;
+
+        use nexus_db_schema::schema::inv_collection::dsl;
+        let collections = dsl::inv_collection
+            .select(InvCollection::as_select())
+            .order_by(dsl::time_started.desc())
+            .limit(limit)
+            .load_async(&*conn)
+            .await
+            .context("failed to list collections")?;
+
+        Ok(collections)
+    }
 }
 
 #[derive(Debug)]
@@ -4078,12 +4116,12 @@ struct OmicronSledConfigWithId {
     config: OmicronSledConfig,
 }
 
-impl IdMappable for OmicronSledConfigWithId {
-    type Id = OmicronSledConfigUuid;
-
-    fn id(&self) -> Self::Id {
+impl IdOrdItem for OmicronSledConfigWithId {
+    type Key<'a> = OmicronSledConfigUuid;
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+    id_upcast!();
 }
 
 #[derive(Debug)]
@@ -4271,11 +4309,11 @@ impl ConfigReconcilerRows {
                 // If this config exactly matches the ledgered or
                 // most-recently-reconciled configs, we can reuse those IDs.
                 // Otherwise, accumulate a new one.
-                let reconciler_status_sled_config = if Some(config)
+                let reconciler_status_sled_config = if Some(&**config)
                     == sled_agent.ledgered_sled_config.as_ref()
                 {
                     ledgered_sled_config
-                } else if Some(config)
+                } else if Some(&**config)
                     == sled_agent
                         .last_reconciliation
                         .as_ref()
@@ -4419,26 +4457,14 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::QueryDsl;
-    use gateway_client::types::SpType;
     use nexus_db_schema::schema;
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
     use nexus_inventory::now_db_precision;
-    use nexus_sled_agent_shared::inventory::BootPartitionContents;
-    use nexus_sled_agent_shared::inventory::BootPartitionDetails;
-    use nexus_sled_agent_shared::inventory::OrphanedDataset;
-    use nexus_sled_agent_shared::inventory::{
-        BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
-        RemoveMupdateOverrideInventory,
-    };
-    use nexus_sled_agent_shared::inventory::{
-        ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-        ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
-    };
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPageWhich;
+    use nexus_types::inventory::{BaseboardId, SpType};
     use omicron_common::api::external::Error;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
@@ -4450,6 +4476,17 @@ mod test {
         ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
+    use sled_agent_types::inventory::BootPartitionContents;
+    use sled_agent_types::inventory::BootPartitionDetails;
+    use sled_agent_types::inventory::OrphanedDataset;
+    use sled_agent_types::inventory::{
+        BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
+        RemoveMupdateOverrideInventory,
+    };
+    use sled_agent_types::inventory::{
+        ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+        ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
+    };
     use std::num::NonZeroU32;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;
@@ -5225,7 +5262,7 @@ mod test {
             sa1.last_reconciliation = None;
 
             sa2.reconciler_status = ConfigReconcilerInventoryStatus::Running {
-                config: sa2.ledgered_sled_config.clone().unwrap(),
+                config: Box::new(sa2.ledgered_sled_config.clone().unwrap()),
                 started_at: now_db_precision(),
                 running_for: Duration::from_secs(1),
             };

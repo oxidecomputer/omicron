@@ -175,8 +175,8 @@ impl DataStore {
         new_assignments: &[shared::RoleAssignment<T::AllowedRoles>],
     ) -> Result<
         (
-            impl RunnableQueryNoReturn,
-            impl RunnableQuery<db::model::RoleAssignment>,
+            impl RunnableQueryNoReturn + use<T>,
+            impl RunnableQuery<db::model::RoleAssignment> + use<T>,
         ),
         Error,
     >

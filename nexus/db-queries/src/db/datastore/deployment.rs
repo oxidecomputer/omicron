@@ -9,15 +9,18 @@ use crate::context::OpContext;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+use crate::db::raw_query_builder::QueryBuilder;
+use crate::db::raw_query_builder::TypedSqlQuery;
 use anyhow::Context;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::{KeeperId, ServerId};
 use core::future::Future;
 use core::pin::Pin;
 use diesel::BoolExpressionMethods;
-use diesel::Column;
 use diesel::ExpressionMethods;
 use diesel::Insertable;
 use diesel::IntoSql;
@@ -25,19 +28,15 @@ use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
-use diesel::RunQueryDsl;
 use diesel::Table;
 use diesel::expression::SelectableHelper;
-use diesel::pg::Pg;
-use diesel::query_builder::AstPass;
-use diesel::query_builder::QueryFragment;
-use diesel::query_builder::QueryId;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use diesel::sql_types::Nullable;
 use futures::FutureExt;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
+use ipnetwork::Ipv6Network;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
@@ -211,7 +210,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(txn_error) => txn_error.into(),
+                Some(txn_error) => txn_error.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })?;
         Ok(r)
@@ -259,6 +258,7 @@ impl DataStore {
                     .slot_b
                     .artifact_hash()
                     .map(ArtifactHash),
+                subnet: Ipv6Network::from(sled.subnet).into(),
             })
             .collect::<Vec<_>>();
 
@@ -512,7 +512,10 @@ impl DataStore {
                 // Serialize and insert a debug log for the planning report
                 // created with this blueprint, if we have one.
                 if let BlueprintSource::Planner(report) = &blueprint.source {
-                    match DebugLogBlueprintPlanning::try_from(report.clone()) {
+                    match DebugLogBlueprintPlanning::new(
+                        blueprint_id,
+                        report.clone(),
+                    ) {
                         Ok(debug_log) => {
                             use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
                             let _ = diesel::insert_into(
@@ -559,6 +562,100 @@ impl DataStore {
         );
 
         Ok(())
+    }
+
+    /// Check whether the given blueprint limit has been reached.
+    ///
+    /// This (necessarily) does a full table scan on the blueprint table up to
+    /// the limit, so `limit` must be relatively small to avoid performance
+    /// issues. Experimentally, on a Gimlet, a limit of a few thousand takes
+    /// under 20ms.
+    pub async fn check_blueprint_limit_reached(
+        &self,
+        opctx: &OpContext,
+        limit: u64,
+    ) -> Result<BlueprintLimitReachedOutput, Error> {
+        // The "full" table scan below is treated as a complex operation. (This
+        // should only be called from the blueprint planner background task,
+        // for which complex operations are allowed.)
+        opctx.check_complex_operations_allowed()?;
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let limit_i64 = i64::try_from(limit).map_err(|e| {
+            Error::invalid_value(
+                "limit",
+                format!("limit cannot be converted to i64: {e}"),
+            )
+        })?;
+
+        let err = OptionalError::new();
+
+        let count = self
+            .transaction_retry_wrapper("blueprint_count")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+
+                async move {
+                    // We need this to call the COUNT(*) query below. But note
+                    // that this isn't really a "full" table scan; the number of
+                    // rows scanned is limited by the LIMIT clause.
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
+                        .await
+                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+
+                    // Rather than doing a full table scan, we use a LIMIT
+                    // clause to limit the number of rows returned.
+                    let mut count_star_sql = QueryBuilder::new();
+                    count_star_sql
+                        .sql(
+                            "SELECT COUNT(*) FROM \
+                             (SELECT 1 FROM omicron.public.blueprint \
+                              LIMIT $1)",
+                        )
+                        .bind::<diesel::sql_types::BigInt, _>(limit_i64);
+
+                    let query =
+                        count_star_sql.query::<diesel::sql_types::BigInt>();
+
+                    // query.first_async fails with `the trait bound
+                    // `TypedSqlQuery<BigInt>: diesel::Table` is not satisfied`.
+                    // So we use load_async, knowing that only one row will be
+                    // returned.
+                    let value = query
+                        .load_async::<i64>(&conn)
+                        .await
+                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+
+                    Ok(value)
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err.into_public_ignore_retries(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
+
+        // There must be exactly one row in the returned result.
+        let count = *count.get(0).ok_or_else(|| {
+            Error::internal_error("error getting blueprint count from database")
+        })?;
+
+        let count = u64::try_from(count).map_err(|_| {
+            Error::internal_error(&format!(
+                "error converting blueprint count {} into \
+                 u64 (how is it negative?)",
+                count
+            ))
+        })?;
+
+        // Note count >= limit (and not count > limit): for a limit of 5000 we
+        // want to fail if it's reached 5000.
+        if count >= limit {
+            Ok(BlueprintLimitReachedOutput::Yes)
+        } else {
+            Ok(BlueprintLimitReachedOutput::No { count })
+        }
     }
 
     /// Read a complete blueprint from the database
@@ -693,12 +790,18 @@ impl DataStore {
                 paginator = p.found_batch(&batch, &|(s, _, _)| s.sled_id);
 
                 for (s, slot_a_version, slot_b_version) in batch {
+                    let subnet = s.subnet().map_err(|e| {
+                        Error::internal_error(
+                            &InlineErrorChain::new(&*e).to_string(),
+                        )
+                    })?;
                     let config = BlueprintSledConfig {
                         state: s.sled_state.into(),
+                        subnet,
                         sled_agent_generation: *s.sled_agent_generation,
-                        disks: IdMap::new(),
-                        datasets: IdMap::new(),
-                        zones: IdMap::new(),
+                        disks: IdOrdMap::new(),
+                        datasets: IdOrdMap::new(),
+                        zones: IdOrdMap::new(),
                         remove_mupdate_override: s
                             .remove_mupdate_override
                             .map(|id| id.into()),
@@ -842,7 +945,13 @@ impl DataStore {
                                 e.to_string()
                             ))
                         })?;
-                    sled_config.zones.insert(zone);
+                    sled_config.zones.insert_unique(zone).map_err(|e| {
+                        Error::internal_error(&format!(
+                            "duplicate zone ID found, but \
+                             database guarantees uniqueness: {}",
+                            InlineErrorChain::new(&e),
+                        ))
+                    })?;
                 }
             }
         }
@@ -894,12 +1003,19 @@ impl DataStore {
                         ))
                     })?;
                     let disk_id = d.id;
-                    sled_config.disks.insert(d.try_into().map_err(|e| {
+                    let disk = d.try_into().map_err(|e| {
                         Error::internal_error(&format!(
                             "Cannot convert BpOmicronPhysicalDisk {}: {e}",
                             disk_id
                         ))
-                    })?);
+                    })?;
+                    sled_config.disks.insert_unique(disk).map_err(|e| {
+                        Error::internal_error(&format!(
+                            "duplicate disk ID found, but \
+                             database guarantees uniqueness: {}",
+                            InlineErrorChain::new(&e),
+                        ))
+                    })?;
                 }
             }
         }
@@ -946,12 +1062,21 @@ impl DataStore {
                     })?;
 
                     let dataset_id = d.id;
-                    sled_config.datasets.insert(d.try_into().map_err(|e| {
+                    let dataset = d.try_into().map_err(|e| {
                         Error::internal_error(&format!(
                             "Cannot parse dataset {}: {e}",
                             dataset_id
                         ))
-                    })?);
+                    })?;
+                    sled_config.datasets.insert_unique(dataset).map_err(
+                        |e| {
+                            Error::internal_error(&format!(
+                                "duplicate dataset ID found, but \
+                                 database guarantees uniqueness: {}",
+                                InlineErrorChain::new(&e),
+                            ))
+                        },
+                    )?;
                 }
             }
         }
@@ -1703,7 +1828,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(err) => err.into(),
+                Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })?;
 
@@ -1837,7 +1962,7 @@ impl DataStore {
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .map_err(|e| err.bail(e.into()))?;
+                .map_err(|e| err.bail(e))?;
                 self.ensure_zone_external_networking_allocated_on_connection(
                     &conn,
                     opctx,
@@ -1848,7 +1973,7 @@ impl DataStore {
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .map_err(|e| err.bail(e.into()))?;
+                .map_err(|e| err.bail(e))?;
 
                 Ok(())
             }
@@ -1856,7 +1981,7 @@ impl DataStore {
         .await
         .map_err(|e| {
             if let Some(err) = err.take() {
-                err.into()
+                err.into_public_ignore_retries()
             } else {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
@@ -1890,16 +2015,16 @@ impl DataStore {
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
 
-        let query = InsertTargetQuery {
-            target_id: target.target_id,
-            enabled: target.enabled,
-            time_made_target: target.time_made_target,
-        };
-
-        query
-            .execute_async(conn)
-            .await
-            .map_err(|e| Error::from(query.decode_error(e)))?;
+        insert_target_query(
+            target.target_id,
+            target.enabled,
+            target.time_made_target,
+        )
+        .execute_async(conn)
+        .await
+        .map_err(|e| {
+            Error::from(decode_target_insert_error(target.target_id, e))
+        })?;
 
         Ok(())
     }
@@ -1915,7 +2040,7 @@ impl DataStore {
     // could reconsider this and make `blueprint_target_set_current` accept
     // blueprints where either their own or their parent is the current
     // blueprint, although this would require some rework in the nontrivial
-    // `InsertTargetQuery` CTE.
+    // `insert_target_query` CTE.
     pub async fn blueprint_target_set_current_enabled(
         &self,
         opctx: &OpContext,
@@ -2007,7 +2132,9 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let target = Self::blueprint_current_target_only(&conn).await?;
+        let target = Self::blueprint_current_target_only(&conn)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
 
         // The blueprint for the current target cannot be deleted while it is
         // the current target, but it's possible someone else (a) made a new
@@ -2037,7 +2164,9 @@ impl DataStore {
     ) -> Result<BlueprintTarget, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::blueprint_current_target_only(&conn).await.map_err(|e| e.into())
+        Self::blueprint_current_target_only(&conn)
+            .await
+            .map_err(|e| e.into_public_ignore_retries())
     }
 
     // Helper to fetch the current blueprint target (without fetching the entire
@@ -2599,6 +2728,12 @@ async fn insert_pending_mgs_update(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlueprintLimitReachedOutput {
+    No { count: u64 },
+    Yes,
+}
+
 // Helper to process BpPendingMgsUpdateComponent rows
 fn process_update_row<T>(
     row: T,
@@ -2673,6 +2808,39 @@ impl From<InsertTargetError> for Error {
     }
 }
 
+// Uncastable sentinel used to detect we attempt to make a blueprint the target
+// when it does not exist in the blueprint table.
+const NO_SUCH_BLUEPRINT_SENTINEL: &str = "no-such-blueprint";
+
+// Uncastable sentinel used to detect we attempt to make a blueprint the target
+// when its parent_blueprint_id is not the current target.
+const PARENT_NOT_TARGET_SENTINEL: &str = "parent-not-target";
+
+// Error messages generated from the above sentinel values.
+const NO_SUCH_BLUEPRINT_ERROR_MESSAGE: &str = "could not parse \"no-such-blueprint\" as type uuid: \
+     uuid: incorrect UUID length: no-such-blueprint";
+const PARENT_NOT_TARGET_ERROR_MESSAGE: &str = "could not parse \"parent-not-target\" as type uuid: \
+     uuid: incorrect UUID length: parent-not-target";
+
+fn decode_target_insert_error(
+    target_id: BlueprintUuid,
+    err: DieselError,
+) -> InsertTargetError {
+    match err {
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
+            if info.message() == NO_SUCH_BLUEPRINT_ERROR_MESSAGE =>
+        {
+            InsertTargetError::NoSuchBlueprint(target_id)
+        }
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
+            if info.message() == PARENT_NOT_TARGET_ERROR_MESSAGE =>
+        {
+            InsertTargetError::ParentNotTarget(target_id)
+        }
+        other => InsertTargetError::Other(other),
+    }
+}
+
 /// Query to insert a new current target blueprint.
 ///
 /// The `bp_target` table's primary key is the `version` field, and we enforce
@@ -2698,10 +2866,10 @@ impl From<InsertTargetError> for Error {
 ///   -- veresion in `bp_target`).
 ///   current_target AS (
 ///     SELECT
-///       "version" AS version,
-///       "blueprint_id" AS blueprint_id
-///     FROM "bp_target"
-///     ORDER BY "version" DESC
+///       version,
+///       blueprint_id
+///     FROM bp_target
+///     ORDER BY version DESC
 ///     LIMIT 1
 ///   ),
 ///
@@ -2794,210 +2962,106 @@ impl From<InsertTargetError> for Error {
 ///     <new_target_time_made_target>
 ///     FROM new_target
 /// ```
-#[derive(Debug, Clone, Copy)]
-struct InsertTargetQuery {
+fn insert_target_query(
     target_id: BlueprintUuid,
     enabled: bool,
     time_made_target: DateTime<Utc>,
+) -> TypedSqlQuery<()> {
+    let mut builder = QueryBuilder::new();
+    let target_id = *target_id.as_untyped_uuid();
+
+    builder.sql(
+        "WITH \
+        current_target AS ( \
+          SELECT \
+            version, \
+            blueprint_id \
+          FROM bp_target \
+          ORDER BY version DESC \
+          LIMIT 1 \
+        ), \
+        check_validity AS MATERIALIZED ( \
+          SELECT \
+            CAST( \
+              IF( \
+                (SELECT id FROM blueprint WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(") IS NULL, '")
+    .sql(NO_SUCH_BLUEPRINT_SENTINEL)
+    .sql(
+        "', \
+                IF( \
+                  (SELECT parent_blueprint_id FROM blueprint, current_target \
+                   WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(
+        " \
+                   AND current_target.blueprint_id = parent_blueprint_id \
+                  ) IS NOT NULL \
+                  OR \
+                  (SELECT 1 FROM blueprint \
+                   WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(
+        " \
+                   AND parent_blueprint_id IS NULL \
+                   AND NOT EXISTS (SELECT version FROM current_target) \
+                  ) = 1, \
+                  CAST(",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(" AS text), '")
+    .sql(PARENT_NOT_TARGET_SENTINEL)
+    .sql(
+        "' \
+                ) \
+              ) AS UUID \
+            ) \
+        ), \
+        new_target AS ( \
+          SELECT 1 AS new_version FROM blueprint \
+          WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(
+        " \
+          AND parent_blueprint_id IS NULL \
+          AND NOT EXISTS (SELECT version FROM current_target) \
+          UNION \
+          SELECT current_target.version + 1 \
+          FROM current_target, blueprint \
+          WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(
+        " \
+          AND parent_blueprint_id IS NOT NULL \
+          AND parent_blueprint_id = current_target.blueprint_id \
+        ) \
+        INSERT INTO bp_target(version, blueprint_id, enabled, time_made_target) \
+        SELECT new_target.new_version, ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(", ")
+    .param()
+    .bind::<sql_types::Bool, _>(enabled)
+    .sql(", ")
+    .param()
+    .bind::<sql_types::Timestamptz, _>(time_made_target)
+    .sql(" FROM new_target");
+
+    builder.query()
 }
-
-// Uncastable sentinel used to detect we attempt to make a blueprint the target
-// when it does not exist in the blueprint table.
-const NO_SUCH_BLUEPRINT_SENTINEL: &str = "no-such-blueprint";
-
-// Uncastable sentinel used to detect we attempt to make a blueprint the target
-// when its parent_blueprint_id is not the current target.
-const PARENT_NOT_TARGET_SENTINEL: &str = "parent-not-target";
-
-// Error messages generated from the above sentinel values.
-const NO_SUCH_BLUEPRINT_ERROR_MESSAGE: &str = "could not parse \"no-such-blueprint\" as type uuid: \
-     uuid: incorrect UUID length: no-such-blueprint";
-const PARENT_NOT_TARGET_ERROR_MESSAGE: &str = "could not parse \"parent-not-target\" as type uuid: \
-     uuid: incorrect UUID length: parent-not-target";
-
-impl InsertTargetQuery {
-    fn decode_error(&self, err: DieselError) -> InsertTargetError {
-        match err {
-            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
-                if info.message() == NO_SUCH_BLUEPRINT_ERROR_MESSAGE =>
-            {
-                InsertTargetError::NoSuchBlueprint(self.target_id)
-            }
-            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
-                if info.message() == PARENT_NOT_TARGET_ERROR_MESSAGE =>
-            {
-                InsertTargetError::ParentNotTarget(self.target_id)
-            }
-            other => InsertTargetError::Other(other),
-        }
-    }
-}
-
-impl QueryId for InsertTargetQuery {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl QueryFragment<Pg> for InsertTargetQuery {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        use nexus_db_schema::schema::blueprint::dsl as bp_dsl;
-        use nexus_db_schema::schema::bp_target::dsl;
-
-        type FromClause<T> =
-            diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
-        type BpTargetFromClause =
-            FromClause<nexus_db_schema::schema::bp_target::table>;
-        type BlueprintFromClause =
-            FromClause<nexus_db_schema::schema::blueprint::table>;
-        const BP_TARGET_FROM_CLAUSE: BpTargetFromClause =
-            BpTargetFromClause::new();
-        const BLUEPRINT_FROM_CLAUSE: BlueprintFromClause =
-            BlueprintFromClause::new();
-
-        out.push_sql("WITH ");
-
-        out.push_sql("current_target AS (SELECT ");
-        out.push_identifier(dsl::version::NAME)?;
-        out.push_sql(" AS version,");
-        out.push_identifier(dsl::blueprint_id::NAME)?;
-        out.push_sql(" AS blueprint_id FROM ");
-        BP_TARGET_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" ORDER BY ");
-        out.push_identifier(dsl::version::NAME)?;
-        out.push_sql(" DESC LIMIT 1),");
-
-        out.push_sql(
-            "check_validity AS MATERIALIZED ( \
-               SELECT \
-                 CAST( \
-                   IF( \
-                     (SELECT ",
-        );
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" FROM ");
-        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(") IS NULL, ");
-        out.push_bind_param::<sql_types::Text, &'static str>(
-            &NO_SUCH_BLUEPRINT_SENTINEL,
-        )?;
-        out.push_sql(
-            ", \
-                     IF( \
-                       (SELECT ",
-        );
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(" FROM ");
-        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(", current_target WHERE ");
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND current_target.blueprint_id = ");
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(
-            "          ) IS NOT NULL \
-                       OR \
-                       (SELECT 1 FROM ",
-        );
-        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(
-            "  IS NULL \
-                        AND NOT EXISTS ( \
-                          SELECT version FROM current_target) \
-                        ) = 1, ",
-        );
-        out.push_sql("  CAST(");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql("  AS text), ");
-        out.push_bind_param::<sql_types::Text, &'static str>(
-            &PARENT_NOT_TARGET_SENTINEL,
-        )?;
-        out.push_sql(
-            "   ) \
-              ) \
-            AS UUID) \
-          ), ",
-        );
-
-        out.push_sql("new_target AS (SELECT 1 AS new_version FROM ");
-        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(
-            " IS NULL \
-            AND NOT EXISTS \
-            (SELECT version FROM current_target) \
-             UNION \
-            SELECT current_target.version + 1 FROM \
-              current_target, ",
-        );
-        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(" IS NOT NULL AND ");
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(" = current_target.blueprint_id) ");
-
-        out.push_sql("INSERT INTO ");
-        BP_TARGET_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql("(");
-        out.push_identifier(dsl::version::NAME)?;
-        out.push_sql(",");
-        out.push_identifier(dsl::blueprint_id::NAME)?;
-        out.push_sql(",");
-        out.push_identifier(dsl::enabled::NAME)?;
-        out.push_sql(",");
-        out.push_identifier(dsl::time_made_target::NAME)?;
-        out.push_sql(") SELECT new_target.new_version, ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(",");
-        out.push_bind_param::<sql_types::Bool, bool>(&self.enabled)?;
-        out.push_sql(",");
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.time_made_target,
-        )?;
-        out.push_sql(" FROM new_target");
-
-        Ok(())
-    }
-}
-
-impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 
 #[cfg(test)]
 mod tests {
@@ -3007,32 +3071,27 @@ mod tests {
     use crate::db::raw_query_builder::QueryBuilder;
     use gateway_types::rot::RotSlot;
     use nexus_db_model::IpVersion;
-    use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::planner::Planner;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-    use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::ExpectedActiveRotSlot;
-    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PlanningInput;
-    use nexus_types::deployment::PlanningInputBuilder;
     use nexus_types::deployment::SledDetails;
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
-    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::views::PhysicalDiskPolicy;
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
@@ -3041,46 +3100,30 @@ mod tests {
     use nexus_types::inventory::Collection;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::api::external::MacAddr;
-    use omicron_common::api::external::Name;
     use omicron_common::api::external::TufArtifactMeta;
     use omicron_common::api::external::TufRepoDescription;
     use omicron_common::api::external::TufRepoMeta;
-    use omicron_common::api::external::Vni;
-    use omicron_common::api::internal::shared::NetworkInterface;
-    use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::disk::M2Slot;
     use omicron_common::update::ArtifactId;
-    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
-    use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use oxnet::IpNet;
     use pretty_assertions::assert_eq;
     use rand::Rng;
     use std::collections::BTreeSet;
     use std::mem;
-    use std::net::IpAddr;
-    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
-    use std::net::SocketAddrV6;
-    use std::str::FromStr;
     use std::sync::Arc;
-    use std::sync::LazyLock;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
-
-    static EMPTY_PLANNING_INPUT: LazyLock<PlanningInput> =
-        LazyLock::new(|| PlanningInputBuilder::empty_input());
 
     #[derive(Default)]
     pub struct NetworkResourceControlFlow {
@@ -3184,10 +3227,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create an empty blueprint from it
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test");
         let authz_blueprint = authz_blueprint_from_id(blueprint1.id);
 
         // Trying to read it from the database should fail with the relevant
@@ -3332,12 +3372,18 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &planning_input,
-            &collection,
             "test",
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
+
+        // We made changes to the planning input we want to be reflected in the
+        // new blueprint; reuse the `Planner`'s method for replicating those
+        // changes.
+        Planner::update_builder_from_planning_input(
+            &mut builder,
+            &planning_input,
+        );
 
         // Ensure disks on our sled
         assert_eq!(
@@ -3680,8 +3726,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
-            &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3737,8 +3781,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint3,
-            &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3791,8 +3833,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint4,
-            &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3849,8 +3889,6 @@ mod tests {
         let blueprint6 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint5,
-            &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3914,21 +3952,13 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("no target blueprint set"));
 
-        // Create an initial empty collection
-        let collection = CollectionBuilder::new("test").build();
-
         // Create three blueprints:
         // * `blueprint1` has no parent
         // * `blueprint2` and `blueprint3` both have `blueprint1` as parent
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test1",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test1");
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test2",
             PlannerRng::from_entropy(),
         )
@@ -3937,8 +3967,6 @@ mod tests {
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test3",
             PlannerRng::from_entropy(),
         )
@@ -4038,8 +4066,6 @@ mod tests {
         let blueprint4 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint3,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test3",
             PlannerRng::from_entropy(),
         )
@@ -4073,19 +4099,11 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Create an initial empty collection
-        let collection = CollectionBuilder::new("test").build();
-
         // Create an initial blueprint and a child.
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test1",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test1");
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test2",
             PlannerRng::from_entropy(),
         )
@@ -4180,99 +4198,46 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    async fn create_blueprint_with_external_ip(
-        datastore: &DataStore,
-        opctx: &OpContext,
-    ) -> Blueprint {
-        // Create an initial blueprint and a child.
-        let sled_id = SledUuid::new_v4();
-        let mut blueprint = BlueprintBuilder::build_empty_with_sleds(
-            [sled_id].into_iter(),
-            "test1",
-        );
-
-        // To observe realistic database behavior, we need the invocation of
-        // "blueprint_ensure_external_networking_resources" to actually write something
-        // back to the database.
-        //
-        // While this is *mostly* made-up blueprint contents, the part that matters
-        // is that it's provisioning a zone (Nexus) which does have resources
-        // to be allocated.
-        let ip_range = IpRange::try_from((
-            Ipv4Addr::new(10, 0, 0, 1),
-            Ipv4Addr::new(10, 0, 0, 10),
-        ))
-        .unwrap();
-        let (service_authz_ip_pool, service_ip_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
-            .await
-            .expect("lookup service ip pool");
-        datastore
-            .ip_pool_add_range(
-                &opctx,
-                &service_authz_ip_pool,
-                &service_ip_pool,
-                &ip_range,
-            )
-            .await
-            .expect("add range to service ip pool");
-        let zone_id = OmicronZoneUuid::new_v4();
-        blueprint.sleds.get_mut(&sled_id).unwrap().zones.insert(
-            BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: zone_id,
-                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
-                zone_type: BlueprintZoneType::Nexus(
-                    blueprint_zone_type::Nexus {
-                        internal_address: SocketAddrV6::new(
-                            Ipv6Addr::LOCALHOST,
-                            0,
-                            0,
-                            0,
-                        ),
-                        external_ip: OmicronZoneExternalFloatingIp {
-                            id: ExternalIpUuid::new_v4(),
-                            ip: "10.0.0.1".parse().unwrap(),
-                        },
-                        nic: NetworkInterface {
-                            id: Uuid::new_v4(),
-                            kind: NetworkInterfaceKind::Service {
-                                id: *zone_id.as_untyped_uuid(),
-                            },
-                            name: Name::from_str("mynic").unwrap(),
-                            ip: "fd77:e9d2:9cd9:2::8".parse().unwrap(),
-                            mac: MacAddr::random_system(),
-                            subnet: IpNet::host_net(IpAddr::V6(
-                                Ipv6Addr::LOCALHOST,
-                            )),
-                            vni: Vni::random(),
-                            primary: true,
-                            slot: 1,
-                            transit_ips: vec![],
-                        },
-                        external_tls: false,
-                        external_dns_servers: vec![],
-                        nexus_generation: Generation::new(),
-                    },
-                ),
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            },
-        );
-
-        blueprint
-    }
-
     #[tokio::test]
     async fn test_ensure_external_networking_works_with_good_target() {
+        const TEST_NAME: &str =
+            "test_ensure_external_networking_works_with_good_target";
         // Setup
-        let logctx = dev::test_setup_log(
-            "test_ensure_external_networking_works_with_good_target",
-        );
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let blueprint =
-            create_blueprint_with_external_ip(&datastore, &opctx).await;
+        let (example, mut blueprint) =
+            ExampleSystemBuilder::new(&opctx.log, TEST_NAME).build();
+
+        // Insert the IP pool ranges used by our example system.
+        for pool_range in
+            example.system.external_ip_policy().clone().into_raw_ranges()
+        {
+            // This looks up the pool again for each range; we only need at most
+            // two (one V4, one V6), but our example system doesn't have many
+            // ranges so this should be fine.
+            let (service_authz_ip_pool, service_ip_pool) = datastore
+                .ip_pools_service_lookup(&opctx, pool_range.version().into())
+                .await
+                .expect("lookup service ip pool");
+            datastore
+                .ip_pool_add_range(
+                    &opctx,
+                    &service_authz_ip_pool,
+                    &service_ip_pool,
+                    &pool_range,
+                )
+                .await
+                .expect("add range to service IP pool");
+        }
+
+        // `ExampleSystemBuilder` returns a blueprint that has an empty parent.
+        // To make `blueprint` the target, we have to either insert that parent
+        // and make it the target first, or modify `blueprint` to make it look
+        // like it's the original. The latter is shorter.
+        blueprint.parent_blueprint_id = None;
+
         datastore.blueprint_insert(&opctx, &blueprint).await.unwrap();
 
         let bp_target = BlueprintTarget {
@@ -4323,8 +4288,6 @@ mod tests {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &example_system.input,
-            &example_system.collection,
             &format!("{test_name}-2"),
             PlannerRng::from_entropy(),
         )
@@ -4754,5 +4717,45 @@ mod tests {
                 problematic_tables
             );
         }
+    }
+
+    #[tokio::test]
+    async fn expectorate_insert_target_query() {
+        use crate::db::raw_query_builder::expectorate_query_contents;
+
+        let query = insert_target_query(BlueprintUuid::nil(), true, Utc::now());
+
+        expectorate_query_contents(
+            &query,
+            "tests/output/insert_target_blueprint_query.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_insert_target_query() {
+        use crate::db::explain::ExplainableAsync;
+
+        let logctx = dev::test_setup_log("explain_insert_target_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query =
+            insert_target_query(BlueprintUuid::nil(), false, Utc::now());
+
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+        eprintln!("{explanation}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }

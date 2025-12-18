@@ -711,14 +711,14 @@ mod tests {
         #[strategy(MockPeersUniverse::strategy(32))]
         universe: MockPeersUniverse,
         #[strategy((0..2000u64).prop_map(Duration::from_millis))]
-        timeout: Duration,
+        read_timeout: Duration,
         #[strategy(any::<[u8; 16]>().prop_map(MupdateUuid::from_bytes))]
         update_id: MupdateUuid,
         valid_peer_behaviors: ReportBehaviors,
     ) {
         with_test_runtime(async move {
             let logctx = test_setup_log("proptest_fetch_artifact");
-            let expected_result = universe.expected_result(timeout);
+            let expected_result = universe.expected_result(read_timeout);
             let expected_artifact = universe.artifact.clone();
 
             let attempts = universe.attempts();
@@ -754,7 +754,7 @@ mod tests {
                     "Downloading artifact",
                     async move |cx| {
                         let artifact =
-                            fetch_artifact(&cx, &log, attempts, timeout)
+                            fetch_artifact(&cx, &log, attempts, read_timeout)
                                 .await?;
                         let peer = artifact.peer;
                         StepSuccess::new(artifact)
@@ -826,7 +826,7 @@ mod tests {
         cx: &StepContext,
         log: &slog::Logger,
         attempts: impl IntoIterator<Item = Result<MockFetchBackend>>,
-        timeout: Duration,
+        read_timeout: Duration,
     ) -> Result<FetchedArtifact> {
         let mut attempts = attempts.into_iter();
         FetchedArtifact::loop_fetch_from_peers(
@@ -836,7 +836,7 @@ mod tests {
                 Some(Ok(peers)) => future::ok(FetchArtifactBackend::new(
                     &log,
                     Box::new(peers),
-                    timeout,
+                    read_timeout,
                 )),
                 Some(Err(error)) => {
                     future::err(DiscoverPeersError::Retry(error))

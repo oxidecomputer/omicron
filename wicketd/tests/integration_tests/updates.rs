@@ -17,7 +17,8 @@ use maplit::btreeset;
 use omicron_common::{
     disk::DiskIdentity,
     update::{
-        MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
+        MupdateOverrideInfo, OmicronInstallManifest,
+        OmicronInstallManifestSource,
     },
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
@@ -343,68 +344,7 @@ async fn test_installinator_fetch() {
         .current_plan()
         .expect("we just uploaded a repository, so there should be a plan");
 
-    installinator_fetch_impl(&wicketd_testctx, &temp_dir, &update_plan, true)
-        .await;
-
-    wicketd_testctx.teardown().await;
-}
-
-// See documentation for extract_nested_artifact_pair in update_plan.rs for why
-// multi_thread is required.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_installinator_fetch_no_installinator_document() {
-    // TODO-cleanup: future TUF repos will always have an installinator
-    // document, and this test can be removed.
-    let gateway = gateway_setup::test_setup(
-        "test_installinator_fetch_no_installinator_document",
-        SpPort::One,
-    )
-    .await;
-    let wicketd_testctx = WicketdTestContext::setup(gateway).await;
-    let log = wicketd_testctx.log();
-
-    let temp_dir = Utf8TempDir::new().expect("temp dir created");
-    let archive_path = temp_dir.path().join("archive.zip");
-
-    // Test ingestion of an artifact with non-semver versions. This ensures that
-    // wicketd for v14 and above can handle non-semver versions.
-    //
-    // --allow-non-semver can be removed once customer systems are updated to
-    // v14 and above.
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        "../update-common/manifests/fake-non-semver.toml",
-        "--allow-non-semver",
-        "--no-installinator-document",
-        archive_path.as_str(),
-    ])
-    .expect("args parsed correctly");
-
-    args.exec(log).await.expect("assemble command completed successfully");
-
-    // Read the archive and upload it to the server.
-    let zip_bytes =
-        fs_err::read(&archive_path).expect("archive read correctly");
-    wicketd_testctx
-        .wicketd_client
-        .put_repository(zip_bytes)
-        .await
-        .expect("bytes read and archived");
-
-    let update_plan = wicketd_testctx
-        .server
-        .artifact_store
-        .current_plan()
-        .expect("we just uploaded a repository, so there should be a plan");
-
-    installinator_fetch_impl(
-        &wicketd_testctx,
-        &temp_dir,
-        &update_plan,
-        /* has_installinator_doc */ false,
-    )
-    .await;
+    installinator_fetch_impl(&wicketd_testctx, &temp_dir, &update_plan).await;
 
     wicketd_testctx.teardown().await;
 }
@@ -413,14 +353,8 @@ async fn installinator_fetch_impl(
     wicketd_testctx: &WicketdTestContext,
     temp_dir: &Utf8TempDir,
     update_plan: &UpdatePlan,
-    // TODO-cleanup: in the future, all TUF repos will have installinator
-    // documents.
-    has_installinator_doc: bool,
 ) {
     let log = wicketd_testctx.log();
-
-    let host_phase_2_hash = update_plan.host_phase_2_hash.to_string();
-    let control_plane_hash = update_plan.control_plane_hash.to_string();
 
     // Are the host phase 2 and control plane artifacts available when looked up
     // by hash?
@@ -447,24 +381,23 @@ async fn installinator_fetch_impl(
             .contains_by_hash(&control_plane_id),
         "control plane ID found by hash"
     );
-    // Is the installinator document available, if it exists in the update plan?
-    let installinator_doc_hash = has_installinator_doc.then(|| {
-        let installinator_doc_hash = update_plan
-            .installinator_doc_hash
-            .expect("expected installinator document to be present");
-        let installinator_doc_id = ArtifactHashId {
-            kind: KnownArtifactKind::InstallinatorDocument.into(),
-            hash: installinator_doc_hash,
-        };
-        assert!(
-            wicketd_testctx
-                .server
-                .artifact_store
-                .contains_by_hash(&installinator_doc_id),
-            "installinator document ID found by hash"
-        );
-        installinator_doc_hash.to_string()
-    });
+
+    let installinator_doc_hash = update_plan
+        .installinator_doc_hash
+        .expect("expected installinator document to be present");
+    let installinator_doc_id = ArtifactHashId {
+        kind: KnownArtifactKind::InstallinatorDocument.into(),
+        hash: installinator_doc_hash,
+    };
+    assert!(
+        wicketd_testctx
+            .server
+            .artifact_store
+            .contains_by_hash(&installinator_doc_id),
+        "installinator document ID found by hash"
+    );
+
+    let installinator_doc_hash = installinator_doc_hash.to_string();
 
     // Tell the installinator to download artifacts from that location.
     let peers_list = format!(
@@ -513,14 +446,8 @@ async fn installinator_fetch_impl(
         "cxgbe1",
     ];
 
-    // Pass in the installinator document hash, or the host phase 2 and control
-    // plane hashes, based on what's available.
-    if let Some(installinator_doc_hash) = &installinator_doc_hash {
-        args.extend(["--installinator-doc", installinator_doc_hash.as_str()]);
-    } else {
-        args.extend(["--host-phase-2", host_phase_2_hash.as_str()]);
-        args.extend(["--control-plane", control_plane_hash.as_str()]);
-    }
+    // Pass in the installinator document hash
+    args.extend(["--installinator-doc", installinator_doc_hash.as_str()]);
 
     let args = installinator::InstallinatorApp::try_parse_from(args)
         .expect("installinator args parsed successfully");
@@ -592,43 +519,72 @@ async fn installinator_fetch_impl(
 
     // Ensure that the zone manifest can be parsed.
     let a_manifest_path =
-        a_path.join("install").join(OmicronZoneManifest::FILE_NAME);
+        a_path.join("install").join(OmicronInstallManifest::ZONES_FILE_NAME);
     let a_manifest_bytes = std::fs::read(a_manifest_path)
         .expect("zone manifest file successfully read");
-    let a_manifest =
-        serde_json::from_slice::<OmicronZoneManifest>(&a_manifest_bytes)
+    let a_zone_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&a_manifest_bytes)
             .expect("zone manifest file successfully deserialized");
 
     // Check that the source was correctly specified and that the mupdate ID
     // matches.
     assert_eq!(
-        a_manifest.source,
-        OmicronZoneManifestSource::Installinator { mupdate_id },
+        a_zone_manifest.source,
+        OmicronInstallManifestSource::Installinator { mupdate_id },
         "mupdate ID matches",
     );
 
     // Check that the images are present in the zone set.
     for file_name in FAKE_NON_SEMVER_ZONE_FILE_NAMES {
         assert!(
-            a_manifest.zones.contains_key(file_name),
+            a_zone_manifest.files.contains_key(file_name),
             "{file_name} is present in the zone set"
         );
     }
 
     // Ensure that the B path also had the same file written out.
     let b_manifest_path =
-        b_path.join("install").join(OmicronZoneManifest::FILE_NAME);
+        b_path.join("install").join(OmicronInstallManifest::ZONES_FILE_NAME);
     assert!(b_manifest_path.is_file(), "{b_manifest_path} was written out");
     // Ensure that the zone manifest can be parsed.
     let b_override_bytes = std::fs::read(b_manifest_path)
         .expect("zone manifest file successfully read");
-    let b_manifest =
-        serde_json::from_slice::<OmicronZoneManifest>(&b_override_bytes)
+    let b_zone_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&b_override_bytes)
             .expect("zone manifest file successfully deserialized");
 
     assert_eq!(
-        a_manifest, b_manifest,
+        a_zone_manifest, b_zone_manifest,
         "zone manifests match across A and B drives"
+    );
+
+    // Ensure that the measurement manifest can be parsed.
+    let a_manifest_path = a_path
+        .join("install")
+        .join("measurements")
+        .join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
+    let a_manifest_bytes = std::fs::read(a_manifest_path)
+        .expect("measurement manifest file successfully read");
+    let a_measurement_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&a_manifest_bytes)
+            .expect("measurement manifest file successfully deserialized");
+
+    // Ensure that the B path also had the same file written out.
+    let b_manifest_path = b_path
+        .join("install")
+        .join("measurements")
+        .join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
+    assert!(b_manifest_path.is_file(), "{b_manifest_path} was written out");
+    // Ensure that the measurement manifest can be parsed.
+    let b_override_bytes = std::fs::read(b_manifest_path)
+        .expect("zone manifest file successfully read");
+    let b_measurement_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&b_override_bytes)
+            .expect("measurement manifest file successfully deserialized");
+
+    assert_eq!(
+        a_measurement_manifest, b_measurement_manifest,
+        "measurement manifests match across A and B drives"
     );
 
     // Run sled-agent-zone-images against these paths, and ensure that the
@@ -649,7 +605,7 @@ async fn installinator_fetch_impl(
         .expect("zone manifest successful");
     assert!(result.is_valid(), "zone manifest: boot disk result is valid");
     assert_eq!(
-        result.manifest, a_manifest,
+        result.manifest, a_zone_manifest,
         "zone manifest: manifest matches a_manifest"
     );
 

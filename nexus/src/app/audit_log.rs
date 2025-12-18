@@ -64,6 +64,9 @@ impl super::Nexus {
                 silo_user_id: *silo_user_id,
                 silo_id: *silo_id,
             },
+            Some(nexus_auth::authn::Actor::Scim { silo_id }) => {
+                AuditLogActor::Scim { silo_id: *silo_id }
+            }
             None => AuditLogActor::Unauthenticated,
         };
 
@@ -121,7 +124,8 @@ impl super::Nexus {
             // practically speaking, there is currently no operation that will
             // cause this method to be called with a built-in user
             AuditLogActor::UserBuiltin { .. }
-            | AuditLogActor::SiloUser { .. } => {
+            | AuditLogActor::SiloUser { .. }
+            | AuditLogActor::Scim { .. } => {
                 opctx.authn.scheme_used().map(|s| s.to_string())
             }
             // if we tried to pull it off the opctx this would be None anyway,

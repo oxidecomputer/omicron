@@ -24,6 +24,7 @@ use uuid::Uuid;
 pub enum AuditLogActor {
     UserBuiltin { user_builtin_id: BuiltInUserUuid },
     SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
+    Scim { silo_id: Uuid },
     Unauthenticated,
 }
 
@@ -60,6 +61,7 @@ impl_enum_type!(
     UserBuiltin => b"user_builtin"
     SiloUser => b"silo_user"
     Unauthenticated => b"unauthenticated"
+    Scim => b"scim"
 );
 
 impl_enum_type!(
@@ -139,6 +141,9 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
                 Some(silo_id),
                 AuditLogActorKind::SiloUser,
             ),
+            AuditLogActor::Scim { silo_id } => {
+                (None, Some(silo_id), AuditLogActorKind::Scim)
+            }
             AuditLogActor::Unauthenticated => {
                 (None, None, AuditLogActorKind::Unauthenticated)
             }
@@ -302,6 +307,14 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                         ),
                         silo_id,
                     }
+                }
+                AuditLogActorKind::Scim => {
+                    let silo_id = entry.actor_silo_id.ok_or_else(|| {
+                        Error::internal_error(
+                            "Scim actor missing actor_silo_id",
+                        )
+                    })?;
+                    views::AuditLogEntryActor::Scim { silo_id }
                 }
                 AuditLogActorKind::Unauthenticated => {
                     views::AuditLogEntryActor::Unauthenticated

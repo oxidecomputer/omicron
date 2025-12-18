@@ -52,6 +52,11 @@ pub enum Error {
     #[error("Tried to update external IPs on non-existent port ({0}, {1:?})")]
     ExternalIpUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 
+    #[error(
+        "Tried to update multicast groups on non-existent port ({0}, {1:?})"
+    )]
+    MulticastUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
     #[error("Could not find Primary NIC")]
     NoPrimaryNic,
 

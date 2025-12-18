@@ -7,6 +7,7 @@
 
 use super::coverage::Coverage;
 use crate::db;
+use crate::db::datastore::SiloUserApiOnly;
 use authz::ApiResource;
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -112,10 +113,9 @@ impl<'a> ResourceBuilder<'a> {
                 silo_id,
                 LookupType::ById(silo_id),
             );
-            let silo_user =
-                db::model::SiloUser::new(silo_id, user_id, username);
+            let silo_user = SiloUserApiOnly::new(silo_id, user_id, username);
             datastore
-                .silo_user_create(&authz_silo, silo_user)
+                .silo_user_create(&authz_silo, silo_user.into())
                 .await
                 .expect("failed to create silo user");
 
@@ -264,6 +264,7 @@ impl_dyn_authorized_resource_for_resource!(authz::PhysicalDisk);
 impl_dyn_authorized_resource_for_resource!(authz::Project);
 impl_dyn_authorized_resource_for_resource!(authz::ProjectImage);
 impl_dyn_authorized_resource_for_resource!(authz::SamlIdentityProvider);
+impl_dyn_authorized_resource_for_resource!(authz::ScimClientBearerToken);
 impl_dyn_authorized_resource_for_resource!(authz::Service);
 impl_dyn_authorized_resource_for_resource!(authz::Silo);
 impl_dyn_authorized_resource_for_resource!(authz::SiloGroup);
@@ -282,6 +283,7 @@ impl_dyn_authorized_resource_for_resource!(authz::Alert);
 impl_dyn_authorized_resource_for_resource!(authz::AlertReceiver);
 impl_dyn_authorized_resource_for_resource!(authz::WebhookSecret);
 impl_dyn_authorized_resource_for_resource!(authz::Zpool);
+impl_dyn_authorized_resource_for_resource!(authz::MulticastGroup);
 
 impl_dyn_authorized_resource_for_global!(authz::AlertClassList);
 impl_dyn_authorized_resource_for_global!(authz::BlueprintConfig);
@@ -290,6 +292,7 @@ impl_dyn_authorized_resource_for_global!(authz::Database);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
 impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
+impl_dyn_authorized_resource_for_global!(authz::MulticastGroupList);
 impl_dyn_authorized_resource_for_global!(authz::AuditLog);
 impl_dyn_authorized_resource_for_global!(authz::Inventory);
 impl_dyn_authorized_resource_for_global!(authz::QuiesceState);
@@ -347,6 +350,23 @@ impl DynAuthorizedResource for authz::SiloUserList {
     }
 }
 
+impl DynAuthorizedResource for authz::SiloGroupList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: group list", self.silo().resource_name())
+    }
+}
+
 impl DynAuthorizedResource for authz::SiloUserSessionList {
     fn do_authorize<'a, 'b>(
         &'a self,
@@ -378,5 +398,42 @@ impl DynAuthorizedResource for authz::SiloUserTokenList {
 
     fn resource_name(&self) -> String {
         format!("{}: token list", self.silo_user().resource_name())
+    }
+}
+
+impl DynAuthorizedResource for authz::ScimClientBearerTokenList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!(
+            "{}: scim client bearer token list",
+            self.silo().resource_name()
+        )
+    }
+}
+
+impl DynAuthorizedResource for authz::VpcList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: vpc list", self.project().resource_name())
     }
 }

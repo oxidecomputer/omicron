@@ -15,18 +15,18 @@ use super::CurrentlyManagedZpools;
 use crate::dataset_serialization_task::DatasetEnsureError;
 use crate::dataset_serialization_task::DatasetEnsureResult;
 use crate::dataset_serialization_task::DatasetTaskHandle;
-use id_map::IdMap;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::OmicronZoneConfig;
+use sled_agent_types::inventory::OrphanedDataset;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::ZONE_DATASET;
 use slog::Logger;
@@ -50,7 +50,7 @@ pub(super) enum ZoneDatasetDependencyError {
 
 #[derive(Debug)]
 pub(super) struct OmicronDatasets {
-    datasets: IdMap<OmicronDataset>,
+    datasets: IdOrdMap<OmicronDataset>,
     orphaned_datasets: IdOrdMap<OrphanedDataset>,
     dataset_task: DatasetTaskHandle,
 }
@@ -76,7 +76,7 @@ impl OmicronDatasets {
 
     pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
         Self {
-            datasets: IdMap::default(),
+            datasets: IdOrdMap::default(),
             orphaned_datasets: IdOrdMap::new(),
             dataset_task,
         }
@@ -150,7 +150,7 @@ impl OmicronDatasets {
 
     pub(super) async fn remove_datasets_if_needed(
         &mut self,
-        datasets: &IdMap<DatasetConfig>,
+        datasets: &IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         log: &Logger,
     ) {
@@ -236,7 +236,7 @@ impl OmicronDatasets {
 
     pub(super) async fn ensure_datasets_if_needed(
         &mut self,
-        datasets: IdMap<DatasetConfig>,
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         log: &Logger,
     ) {
@@ -264,7 +264,7 @@ impl OmicronDatasets {
                 Ok(()) => DatasetState::Ensured,
                 Err(err) => DatasetState::FailedToEnsure(err),
             };
-            self.datasets.insert(OmicronDataset { config, state });
+            self.datasets.insert_overwrite(OmicronDataset { config, state });
         }
     }
 
@@ -307,12 +307,14 @@ struct OmicronDataset {
     state: DatasetState,
 }
 
-impl IdMappable for OmicronDataset {
-    type Id = DatasetUuid;
+impl IdOrdItem for OmicronDataset {
+    type Key<'a> = DatasetUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.config.id
     }
+
+    id_upcast!();
 }
 
 #[derive(Debug)]

@@ -46,7 +46,7 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(16, 0, 0);
+const BASE_VERSION: Version = Version::new(18, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -68,7 +68,7 @@ const HOST_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 8] = [
     (&PackageName::new_const("oxlog"), InstallMethod::Install),
     (&PackageName::new_const("propolis-server"), InstallMethod::Bundle),
     (&PackageName::new_const("pumpkind-gz"), InstallMethod::Install),
-    (&PackageName::new_const("crucible-dtrace"), InstallMethod::Install),
+    (&PackageName::new_const("crucible-utils"), InstallMethod::Install),
     (&PackageName::new_const("switch-asic"), InstallMethod::Bundle),
 ];
 /// Packages to install or bundle in the recovery (trampoline) OS image.
@@ -91,7 +91,8 @@ const TUF_PACKAGES: [&PackageName; 12] = [
     &PackageName::new_const("probe"),
 ];
 
-const HELIOS_REPO: &str = "https://pkg.oxide.computer/helios/2/dev/";
+const HELIOS_PKGREPO: &str = "https://pkg.oxide.computer/helios/2/dev/";
+const HELIOS_REPO: &str = "https://github.com/oxidecomputer/helios.git";
 
 static WORKSPACE_DIR: LazyLock<Utf8PathBuf> = LazyLock::new(|| {
     // $CARGO_MANIFEST_DIR is at `.../omicron/dev-tools/releng`
@@ -323,22 +324,19 @@ async fn main() -> Result<()> {
                 }
             } else {
                 // check that our helios clone is up to date
-                Command::new(&args.git_bin)
-                    .arg("-C")
-                    .arg(&args.helios_dir)
-                    // HEAD in a remote repository refers to the default
-                    // branch, even if the default branch is renamed.
-                    // `--no-write-fetch-head` avoids modifying FETCH_HEAD.
-                    .args(["fetch", "--no-write-fetch-head", "origin", "HEAD"])
-                    .ensure_success(&logger)
+                let stdout = Command::new(&args.git_bin)
+                    .args(["ls-remote", "--exit-code", HELIOS_REPO, "HEAD"])
+                    .ensure_stdout(&logger)
                     .await?;
-                let upstream_commit = git_resolve_commit(
-                    &args.git_bin,
-                    &args.helios_dir,
-                    "origin/HEAD",
-                    &logger,
-                )
-                .await?;
+                let upstream_commit = stdout
+                    .lines()
+                    .find_map(|line| match line.split_once('\t') {
+                        Some((commit, "HEAD")) => Some(commit),
+                        _ => None,
+                    })
+                    .with_context(|| {
+                        format!("remote {HELIOS_REPO} did not list HEAD")
+                    })?;
                 if helios_commit != upstream_commit {
                     error!(
                         logger,
@@ -355,7 +353,7 @@ async fn main() -> Result<()> {
     } else {
         info!(logger, "cloning helios to {}", args.helios_dir);
         Command::new(&args.git_bin)
-            .args(["clone", "https://github.com/oxidecomputer/helios.git"])
+            .args(["clone", HELIOS_REPO])
             .arg(&args.helios_dir)
             .ensure_success(&logger)
             .await?;
@@ -674,7 +672,7 @@ async fn main() -> Result<()> {
         if !args.helios_local {
             image_cmd = image_cmd
                 .arg("-p") // use an external package repository
-                .arg(format!("helios-dev={HELIOS_REPO}"))
+                .arg(format!("helios-dev={HELIOS_PKGREPO}"))
         }
 
         // helios-build experiment-image
@@ -715,9 +713,17 @@ async fn main() -> Result<()> {
     .after("host-package")
     .after("recovery-package");
 
-    for (name, base_url) in [
-        ("staging", "https://permslip-staging.corp.oxide.computer"),
-        ("production", "https://signer-us-west.corp.oxide.computer"),
+    for (name, base_url, name_check) in [
+        (
+            "staging",
+            "https://permslip-staging.corp.oxide.computer",
+            "staging-devel",
+        ),
+        (
+            "production",
+            "https://signer-us-west.corp.oxide.computer",
+            "production-release",
+        ),
     ] {
         jobs.push(
             format!("hubris-{}", name),
@@ -727,6 +733,7 @@ async fn main() -> Result<()> {
                 client.clone(),
                 WORKSPACE_DIR.join(format!("tools/permslip_{}", name)),
                 args.output_dir.join(format!("hubris-{}", name)),
+                name_check,
             ),
         );
     }

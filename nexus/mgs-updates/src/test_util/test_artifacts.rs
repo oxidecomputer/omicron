@@ -193,6 +193,12 @@ impl TestArtifacts {
             .unwrap();
 
             ServerBuilder::new(my_api, Arc::new(artifact_data), log)
+                .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                    dropshot::ClientSpecifiesVersionInHeader::new(
+                        omicron_common::api::VERSION_HEADER,
+                        repo_depot_api::latest_version(),
+                    ),
+                )))
                 .start()
                 .context("failed to create server")?
         };

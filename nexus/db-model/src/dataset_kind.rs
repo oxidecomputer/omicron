@@ -25,6 +25,7 @@ impl_enum_type!(
     TransientZone => b"zone"
     Debug => b"debug"
     Update => b"update"
+    LocalStorage => b"local_storage"
 );
 
 impl DatasetKind {
@@ -42,6 +43,7 @@ impl DatasetKind {
             (Self::ExternalDns, None) => ApiKind::ExternalDns,
             (Self::InternalDns, None) => ApiKind::InternalDns,
             (Self::TransientZoneRoot, None) => ApiKind::TransientZoneRoot,
+            (Self::LocalStorage, None) => ApiKind::LocalStorage,
             (Self::TransientZone, Some(name)) => {
                 ApiKind::TransientZone { name }
             }
@@ -98,6 +100,9 @@ impl From<&internal::shared::DatasetKind> for DatasetKind {
                 DatasetKind::TransientZone
             }
             internal::shared::DatasetKind::Debug => DatasetKind::Debug,
+            internal::shared::DatasetKind::LocalStorage => {
+                DatasetKind::LocalStorage
+            }
         }
     }
 }

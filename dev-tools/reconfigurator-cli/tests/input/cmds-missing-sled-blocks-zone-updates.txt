@@ -1,0 +1,74 @@
+# Load example system
+load-example --nsleds 2 --ndisks-per-sled 3
+
+# Create a TUF repository from a fake manifest. (The output TUF repo is
+# written to a temporary directory that this invocation of `reconfigurator-cli`
+# is running out of as its working directory.)
+#
+# This is used to simulate the initial version of the system.
+tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-0.0.1.zip
+
+# Update the install dataset on all sleds to the target release.
+# This will cause zones to be noop converted over to Artifact,
+# unblocking upgrades.
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+
+# Generate inventory, then do a planning run to ensure that all zones
+# are set to Artifact.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+# The above blueprint includes a pending MGS update, which we should delete
+# (we want to start from a fresh state).
+blueprint-edit latest delete-sp-update serial0
+# Also set the Omicron config for all sleds to reflect the
+# corresponding image sources.
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+# Generate inventory once more to reflect the omicron config changes.
+inventory-generate
+
+# Setup is now done -- create another TUF repository which will act as the
+# target release being updated to.
+tuf-assemble ../../update-common/manifests/fake.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-1.0.0.zip
+
+# First step: upgrade one RoT bootloader.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# One by one, update the RoT bootloader, RoT, SP, and host OS of the first sled.
+sled-update-rot-bootloader serial0 --stage0 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-update-rot serial0 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-update-sp serial0 --active 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-update-host-phase2 serial0 --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase1 serial0 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+sled-update-host-phase2 serial0 --boot-disk B
+
+# Before generating the inventory that completes all updates on sled serial0,
+# mark sled serial1 as hidden in inventory. We should see a note in the planner
+# report that we have a blocked MGS update for serial1, specifically because
+# it's missing from inventory so we _don't know_ whether it needs an MGS-driven
+# update.
+sled-set serial1 inventory-hidden
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest

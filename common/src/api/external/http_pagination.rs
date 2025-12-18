@@ -53,6 +53,7 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
 use schemars::JsonSchema;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -160,6 +161,54 @@ pub fn marker_for_name_or_id<T: SimpleIdentityOrName, Selector>(
         NameOrIdSortMode::NameAscending => item.name().clone().into(),
         NameOrIdSortMode::NameDescending => item.name().clone().into(),
         NameOrIdSortMode::IdAscending => item.id().into(),
+    }
+}
+
+// Pagination by semantic version in ascending or descending order
+
+/// Scan parameters for resources that support scanning by semantic version
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct ScanByVersion<Selector = ()> {
+    #[serde(default = "default_version_sort_mode")]
+    sort_by: VersionSortMode,
+    #[serde(flatten)]
+    pub selector: Selector,
+}
+
+/// Supported sort modes when scanning by semantic version
+#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VersionSortMode {
+    /// Sort in increasing semantic version order (oldest first)
+    VersionAscending,
+    /// Sort in decreasing semantic version order (newest first)
+    VersionDescending,
+}
+
+fn default_version_sort_mode() -> VersionSortMode {
+    VersionSortMode::VersionDescending
+}
+
+impl<T> ScanParams for ScanByVersion<T>
+where
+    T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
+{
+    type MarkerValue = Version;
+
+    fn direction(&self) -> PaginationOrder {
+        match self.sort_by {
+            VersionSortMode::VersionAscending => PaginationOrder::Ascending,
+            VersionSortMode::VersionDescending => PaginationOrder::Descending,
+        }
+    }
+
+    fn from_query(
+        p: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
+    ) -> Result<&Self, HttpError> {
+        Ok(match p.page {
+            WhichPage::First(ref scan_params) => scan_params,
+            WhichPage::Next(PageSelector { ref scan, .. }) => scan,
+        })
     }
 }
 
@@ -312,6 +361,13 @@ pub type PaginatedByNameOrId<Selector = ()> = PaginationParams<
 /// Page selector for pagination by name or id
 pub type PageSelectorByNameOrId<Selector = ()> =
     PageSelector<ScanByNameOrId<Selector>, NameOrId>;
+
+/// Query parameters for pagination by semantic version
+pub type PaginatedByVersion<Selector = ()> =
+    PaginationParams<ScanByVersion<Selector>, PageSelectorByVersion<Selector>>;
+/// Page selector for pagination by semantic version
+pub type PageSelectorByVersion<Selector = ()> =
+    PageSelector<ScanByVersion<Selector>, Version>;
 
 pub fn id_pagination<'a, Selector>(
     pag_params: &'a DataPageParams<Uuid>,

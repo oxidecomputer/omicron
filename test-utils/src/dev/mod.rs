@@ -22,8 +22,12 @@ use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
 pub use dropshot::test_util::LogContext;
 use omicron_common::disk::DiskIdentity;
+use sha2::Digest;
+use sha2::Sha256;
 use slog::Logger;
 use std::io::BufReader;
+use std::io::Read;
+use std::path::PathBuf;
 
 /// The environment variable via which the path to the seed tarball is passed.
 pub static CRDB_SEED_TAR_ENV: &str = "CRDB_SEED_TAR";
@@ -159,4 +163,21 @@ pub fn mock_disk_identity() -> DiskIdentity {
         serial: "MOCKSERIAL".to_string(),
         model: "MOCKMODEL".to_string(),
     }
+}
+
+/// Returns the sha2 checksum of a file at `path`.
+pub fn file_checksum(path: PathBuf) -> Result<String> {
+    let mut digest = Sha256::new();
+    let mut buf = vec![0; 1024];
+    let mut file = std::fs::File::open(path)?;
+
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        digest.update(&buf[..n]);
+    }
+
+    Ok(format!("{:x}", digest.finalize()))
 }

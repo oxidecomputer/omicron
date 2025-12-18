@@ -114,6 +114,7 @@ impl ResourceAllocator {
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             },
         )
         .authn_as(self.auth.clone())
@@ -182,8 +183,10 @@ impl ResourceAllocator {
                     description: "".into(),
                 },
                 size: ByteCount::from_gibibytes_u32(size),
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Blank {
+                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    },
                 },
             })),
         )

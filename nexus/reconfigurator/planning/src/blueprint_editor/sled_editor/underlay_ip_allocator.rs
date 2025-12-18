@@ -23,6 +23,7 @@ use std::net::Ipv6Addr;
 // general enough to use here, though this one could potentially be used there.
 #[derive(Debug)]
 pub(crate) struct SledUnderlayIpAllocator {
+    subnet: Ipv6Subnet<SLED_PREFIX>,
     last: Ipv6Addr,
     maximum: Ipv6Addr,
 }
@@ -55,7 +56,7 @@ impl SledUnderlayIpAllocator {
         assert!(sled_subnet.net().contains(minimum));
         assert!(sled_subnet.net().contains(maximum));
 
-        let mut slf = Self { last: minimum, maximum };
+        let mut slf = Self { subnet: sled_subnet, last: minimum, maximum };
         for ip in in_use_ips {
             slf.mark_as_allocated(ip);
         }
@@ -63,6 +64,11 @@ impl SledUnderlayIpAllocator {
         assert!(slf.last < slf.maximum);
 
         slf
+    }
+
+    /// Get the subnet used to create this allocator.
+    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
+        self.subnet
     }
 
     /// Mark an address as used.

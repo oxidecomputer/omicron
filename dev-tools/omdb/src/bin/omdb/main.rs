@@ -60,6 +60,7 @@ mod sled_agent;
 mod support_bundle;
 
 fn main() -> Result<(), anyhow::Error> {
+    sigpipe::reset();
     oxide_tokio_rt::run(main_impl())
 }
 

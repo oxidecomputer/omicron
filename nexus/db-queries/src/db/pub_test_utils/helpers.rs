@@ -31,16 +31,25 @@ use nexus_db_model::SledUpdate;
 use nexus_db_model::Snapshot;
 use nexus_db_model::SnapshotIdentity;
 use nexus_db_model::SnapshotState;
+use nexus_db_model::Vmm;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_common::api::external::{
+    TufArtifactMeta, TufRepoDescription, TufRepoMeta,
+};
+use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
 use uuid::Uuid;
 
 /// Creates a project within the silo of "opctx".
@@ -241,6 +250,7 @@ pub async fn create_stopped_instance_record(
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
         },
     );
 
@@ -259,7 +269,7 @@ pub async fn create_stopped_instance_record(
                 propolis_id: None,
                 migration_id: None,
                 dst_propolis_id: None,
-                gen: Generation::from(Generation::new().0.next()),
+                generation: Generation::from(Generation::new().0.next()),
                 time_last_auto_restarted: None,
             },
         )
@@ -443,7 +453,7 @@ pub async fn create_project_snapshot(
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
 
-                gen: Generation::new(),
+                generation: Generation::new(),
                 state: SnapshotState::Creating,
                 block_size: BlockSize::AdvancedFormat,
 
@@ -494,4 +504,139 @@ pub async fn create_project_image(
         )
         .await
         .unwrap()
+}
+
+/// Create a VMM record for testing.
+pub async fn create_vmm_for_instance(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    instance_id: InstanceUuid,
+    sled_id: SledUuid,
+) -> PropolisUuid {
+    let vmm_id = PropolisUuid::new_v4();
+    let vmm = Vmm::new(
+        vmm_id,
+        instance_id,
+        sled_id,
+        "127.0.0.1".parse().unwrap(), // Test IP
+        12400,                        // Test port
+        nexus_db_model::VmmCpuPlatform::SledDefault, // Test CPU platform
+    );
+    datastore.vmm_insert(opctx, vmm).await.expect("Should create VMM");
+    vmm_id
+}
+
+/// Update instance runtime to point to a VMM.
+pub async fn attach_instance_to_vmm(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    authz_project: &authz::Project,
+    instance_id: InstanceUuid,
+    vmm_id: PropolisUuid,
+) {
+    // Fetch current instance to get generation
+    let authz_instance = authz::Instance::new(
+        authz_project.clone(),
+        instance_id.into_untyped_uuid(),
+        external::LookupType::ById(instance_id.into_untyped_uuid()),
+    );
+    let instance = datastore
+        .instance_refetch(opctx, &authz_instance)
+        .await
+        .expect("Should fetch instance");
+
+    datastore
+        .instance_update_runtime(
+            &instance_id,
+            &InstanceRuntimeState {
+                nexus_state: InstanceState::Vmm,
+                propolis_id: Some(vmm_id.into_untyped_uuid()),
+                dst_propolis_id: None,
+                migration_id: None,
+                generation: Generation::from(
+                    instance.runtime().generation.next(),
+                ),
+                time_updated: Utc::now(),
+                time_last_auto_restarted: None,
+            },
+        )
+        .await
+        .expect("Should update instance runtime state");
+}
+
+/// Create an instance with an associated VMM (convenience function).
+pub async fn create_instance_with_vmm(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    authz_project: &authz::Project,
+    instance_name: &str,
+    sled_id: SledUuid,
+) -> (InstanceUuid, PropolisUuid) {
+    let instance_id = create_stopped_instance_record(
+        opctx,
+        datastore,
+        authz_project,
+        instance_name,
+    )
+    .await;
+
+    let vmm_id =
+        create_vmm_for_instance(opctx, datastore, instance_id, sled_id).await;
+
+    attach_instance_to_vmm(
+        opctx,
+        datastore,
+        authz_project,
+        instance_id,
+        vmm_id,
+    )
+    .await;
+
+    (instance_id, vmm_id)
+}
+
+pub async fn insert_test_tuf_repo(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    version: u32,
+) -> TufRepoUuid {
+    let repo = make_test_repo(version);
+    datastore
+        .tuf_repo_insert(opctx, &repo)
+        .await
+        .expect("inserting repo")
+        .recorded
+        .repo
+        .id()
+}
+
+fn make_test_repo(version: u32) -> TufRepoDescription {
+    // We just need a unique hash for each repo.  We'll key it on the
+    // version for determinism.
+    let version_bytes = version.to_le_bytes();
+    let hash_bytes: [u8; 32] = std::array::from_fn(|i| version_bytes[i % 4]);
+    let hash = ArtifactHash(hash_bytes);
+    let version = semver::Version::new(u64::from(version), 0, 0);
+    let artifact_version = ArtifactVersion::new(version.to_string())
+        .expect("valid artifact version");
+    TufRepoDescription {
+        repo: TufRepoMeta {
+            hash,
+            targets_role_version: 0,
+            valid_until: chrono::Utc::now(),
+            system_version: version,
+            file_name: String::new(),
+        },
+        artifacts: vec![TufArtifactMeta {
+            id: ArtifactId {
+                name: String::new(),
+                version: artifact_version,
+                kind: ArtifactKind::from_static("empty"),
+            },
+            hash,
+            size: 0,
+            board: None,
+            sign: None,
+        }],
+    }
 }

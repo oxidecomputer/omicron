@@ -13,6 +13,7 @@ use nexus_config::RegionAllocationStrategy;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
@@ -113,6 +114,25 @@ async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
     create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
+}
+
+async fn get_crucible_disk(
+    datastore: &Arc<datastore::DataStore>,
+    opctx: &OpContext,
+    disk_id: Uuid,
+) -> datastore::CrucibleDisk {
+    let disk = datastore
+        .disk_get(opctx, disk_id)
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    match disk {
+        datastore::Disk::Crucible(disk) => disk,
+
+        datastore::Disk::LocalStorage(_) => {
+            unreachable!();
+        }
+    }
 }
 
 #[nexus_test]
@@ -340,8 +360,10 @@ async fn test_disk_create_disk_that_already_exists_fails(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -744,8 +766,10 @@ async fn test_disk_region_creation_failure(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -795,8 +819,10 @@ async fn test_disk_invalid_block_size_rejected(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize(1024),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize(1024),
+            },
         },
         size: disk_size,
     };
@@ -838,8 +864,10 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -872,8 +900,10 @@ async fn test_disk_reject_total_size_less_than_min_disk_size_bytes(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -915,8 +945,10 @@ async fn test_disk_reject_total_size_greater_than_max_disk_size_bytes(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -959,8 +991,10 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1009,8 +1043,10 @@ async fn test_disk_backed_by_multiple_region_sets(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1045,8 +1081,10 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1132,8 +1170,10 @@ async fn test_disk_virtual_provisioning_collection(
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1191,8 +1231,10 @@ async fn test_disk_virtual_provisioning_collection(
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1293,8 +1335,10 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1427,8 +1471,10 @@ async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1567,8 +1613,10 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1602,8 +1650,10 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1654,8 +1704,10 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
             name: "disk-three".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1705,8 +1757,10 @@ async fn test_multiple_disks_multiple_zpools(
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1728,8 +1782,10 @@ async fn test_multiple_disks_multiple_zpools(
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1757,8 +1813,10 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::ImportingBlocks {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::ImportingBlocks {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -1802,8 +1860,10 @@ async fn test_project_delete_disk_no_auth_idempotent(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -1955,11 +2015,8 @@ async fn test_region_allocation_strategy_random_is_idempotent(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2085,11 +2142,8 @@ async fn test_single_region_allocate_for_replace(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2169,11 +2223,7 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2257,11 +2307,8 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
     // Grab the db record now, before the delete
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
-        .await
-        .unwrap();
+    let disk_id = disk.identity.id;
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     // Choose one of the datasets, and drop the simulated Crucible agent
     let zpool = disk_test.zpools().next().expect("Expected at least one zpool");
@@ -2337,19 +2384,15 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 
     // Expunge the sled
-    let int_client = &cptestctx.internal_client;
-    int_client
+    cptestctx
+        .lockstep_client
         .make_request(
             Method::POST,
             "/sleds/expunge",
@@ -2400,11 +2443,7 @@ async fn test_do_not_provision_on_dataset(cptestctx: &ControlPlaneTestContext) {
 
     // Assert no region was allocated to the marked dataset
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2451,8 +2490,10 @@ async fn test_do_not_provision_on_dataset_not_enough(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -2516,8 +2557,10 @@ async fn test_zpool_control_plane_storage_buffer(
             name: "disk1".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(8),
     };
@@ -2539,8 +2582,10 @@ async fn test_zpool_control_plane_storage_buffer(
             name: "disk2".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(4),
     };

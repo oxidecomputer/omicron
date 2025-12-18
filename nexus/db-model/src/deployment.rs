@@ -27,7 +27,6 @@ use nexus_db_schema::schema::{
     bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
     debug_log_blueprint_planning,
 };
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -58,6 +57,8 @@ use nexus_types::deployment::{
     OmicronZoneExternalSnatIp,
 };
 use nexus_types::inventory::BaseboardId;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
@@ -66,6 +67,7 @@ use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
     PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
+use sled_agent_types::inventory::OmicronZoneDataset;
 use std::net::{IpAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -217,9 +219,24 @@ pub struct BpSledMetadata {
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
     pub host_phase_2_desired_slot_a: Option<ArtifactHash>,
     pub host_phase_2_desired_slot_b: Option<ArtifactHash>,
+    /// Public only for easy of writing queries; consumers should prefer the
+    /// `subnet()` method.
+    pub subnet: IpNetwork,
 }
 
 impl BpSledMetadata {
+    pub fn subnet(&self) -> anyhow::Result<Ipv6Subnet<SLED_PREFIX>> {
+        let subnet = match self.subnet {
+            IpNetwork::V4(subnet) => bail!(
+                "invalid subnet for sled {}: {subnet} (should be Ipv6)",
+                self.sled_id
+            ),
+            IpNetwork::V6(subnet) => subnet,
+        };
+
+        Ok(subnet.into())
+    }
+
     pub fn host_phase_2(
         &self,
         slot_a_artifact_version: Option<DbArtifactVersion>,
@@ -574,6 +591,7 @@ pub struct BpOmicronZone {
     pub image_source: DbBpZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
     pub nexus_generation: Option<Generation>,
+    pub nexus_lockstep_port: Option<SqlU16>,
 }
 
 impl BpOmicronZone {
@@ -636,6 +654,7 @@ impl BpOmicronZone {
             snat_first_port: None,
             snat_last_port: None,
             nexus_generation: None,
+            nexus_lockstep_port: None,
         };
 
         match &blueprint_zone.zone_type {
@@ -763,6 +782,7 @@ impl BpOmicronZone {
             }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
+                lockstep_port,
                 external_ip,
                 nic,
                 external_tls,
@@ -777,6 +797,8 @@ impl BpOmicronZone {
                 bp_omicron_zone.bp_nic_id = Some(nic.id);
                 bp_omicron_zone.second_service_ip =
                     Some(IpNetwork::from(external_ip.ip));
+                bp_omicron_zone.nexus_lockstep_port =
+                    Some(SqlU16::from(*lockstep_port));
                 bp_omicron_zone.nexus_external_tls = Some(*external_tls);
                 bp_omicron_zone.nexus_external_dns_servers = Some(
                     external_dns_servers
@@ -874,7 +896,7 @@ impl BpOmicronZone {
                     self.snat_last_port,
                 ) {
                     (Some(ip), Some(first_port), Some(last_port)) => {
-                        nexus_types::inventory::SourceNatConfig::new(
+                        nexus_types::inventory::SourceNatConfigGeneric::new(
                             ip.ip(),
                             *first_port,
                             *last_port,
@@ -971,6 +993,9 @@ impl BpOmicronZone {
             ZoneType::Nexus => {
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address: primary_address,
+                    lockstep_port: *self.nexus_lockstep_port.ok_or_else(
+                        || anyhow!("expected 'nexus_lockstep_port'"),
+                    )?,
                     external_ip: OmicronZoneExternalFloatingIp {
                         id: external_ip_id?,
                         ip: self
@@ -1573,11 +1598,11 @@ pub struct DebugLogBlueprintPlanning {
     pub debug_blob: serde_json::Value,
 }
 
-impl TryFrom<Arc<PlanningReport>> for DebugLogBlueprintPlanning {
-    type Error = serde_json::Error;
-
-    fn try_from(report: Arc<PlanningReport>) -> Result<Self, Self::Error> {
-        let blueprint_id = report.blueprint_id.into();
+impl DebugLogBlueprintPlanning {
+    pub fn new(
+        blueprint_id: BlueprintUuid,
+        report: Arc<PlanningReport>,
+    ) -> Result<Self, serde_json::Error> {
         let report = serde_json::to_value(report)?;
 
         // We explicitly _don't_ define a struct describing the format of
@@ -1595,6 +1620,6 @@ impl TryFrom<Arc<PlanningReport>> for DebugLogBlueprintPlanning {
             "report": report,
         });
 
-        Ok(Self { blueprint_id, debug_blob })
+        Ok(Self { blueprint_id: blueprint_id.into(), debug_blob })
     }
 }

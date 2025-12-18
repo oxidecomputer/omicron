@@ -9,7 +9,6 @@ use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
-use gateway_client::types::SpType;
 use internal_dns_types::names::DNS_ZONE;
 use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_db_lookup::LookupPath;
@@ -45,6 +44,7 @@ use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views;
+use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
 use omicron_common::api::external::AddressLotKind;
@@ -222,6 +222,7 @@ impl super::Nexus {
                 &request.blueprint,
                 vec![silo_name],
                 request.external_dns_zone_name,
+                request.blueprint.nexus_generation,
             );
         for (name, records) in external_dns_config.records.into_iter() {
             dns_update.add_name(name, records)?;

@@ -14,12 +14,16 @@ use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::NexusSaga;
+use crate::db::datastore::Disk;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use itertools::Either;
+use itertools::Itertools as _;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::InstanceIntendedState as IntendedState;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
@@ -51,9 +55,14 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::ExternalIpConfig;
+use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
+use omicron_common::api::internal::shared::ExternalIps;
+use omicron_common::api::internal::shared::external_ip::ConcreteIp;
+use omicron_common::api::internal::shared::external_ip::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::MulticastGroupUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use propolis_client::support::InstanceSerialConsoleHelper;
@@ -65,9 +74,12 @@ use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use sagas::instance_common::ExternalIpAttach;
 use sagas::instance_start;
 use sagas::instance_update;
+use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
+use std::collections::HashSet;
 use std::matches;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -314,6 +326,10 @@ async fn normalize_anti_affinity_groups(
 }
 
 impl super::Nexus {
+    /// Look up an instance by name or UUID.
+    ///
+    /// The `project` parameter is required for name-based lookup (provides scope)
+    /// and must NOT be specified for UUID-based lookup.
     pub fn instance_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -348,6 +364,121 @@ impl super::Nexus {
         }
     }
 
+    /// Handle multicast group membership changes during instance reconfiguration.
+    ///
+    /// Diff is computed against the instance's active memberships only
+    /// (i.e., rows with `time_deleted IS NULL`). Removed ("Left") rows are
+    /// ignored here and handled by the reconciler.
+    async fn handle_multicast_group_changes(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        multicast_groups: &[NameOrId],
+    ) -> Result<(), Error> {
+        let instance_id = authz_instance.id();
+
+        // Check if multicast is enabled - if not, skip all multicast operations
+        if !self.multicast_enabled() {
+            debug!(opctx.log,
+                   "multicast not enabled, skipping multicast group changes";
+                   "instance_id" => %instance_id,
+                   "requested_groups_count" => multicast_groups.len());
+            return Ok(());
+        }
+
+        debug!(
+            opctx.log,
+            "processing multicast group changes";
+            "instance_id" => %instance_id,
+            "requested_groups" => ?multicast_groups,
+            "requested_groups_count" => multicast_groups.len()
+        );
+
+        // Get current multicast group memberships (active-only)
+        let current_memberships = self
+            .datastore()
+            .multicast_group_members_list_by_instance(
+                opctx,
+                InstanceUuid::from_untyped_uuid(instance_id),
+                false,
+            )
+            .await?;
+        let current_group_ids: HashSet<_> =
+            current_memberships.iter().map(|m| m.external_group_id).collect();
+
+        debug!(
+            opctx.log,
+            "current multicast memberships";
+            "instance_id" => %instance_id,
+            "current_memberships_count" => current_memberships.len(),
+            "current_group_ids" => ?current_group_ids
+        );
+
+        // Resolve new multicast group names/IDs to group records
+        let mut new_group_ids = HashSet::new();
+        for group_name_or_id in multicast_groups {
+            let multicast_group_selector = params::MulticastGroupSelector {
+                multicast_group: group_name_or_id.clone(),
+            };
+            let multicast_group_lookup =
+                self.multicast_group_lookup(opctx, &multicast_group_selector)?;
+            let (.., db_group) =
+                multicast_group_lookup.fetch_for(authz::Action::Read).await?;
+            let id = db_group.id();
+            new_group_ids.insert(id);
+        }
+
+        // Determine which groups to leave and join
+        let groups_to_leave: Vec<_> =
+            current_group_ids.difference(&new_group_ids).cloned().collect();
+        let groups_to_join: Vec<_> =
+            new_group_ids.difference(&current_group_ids).cloned().collect();
+
+        debug!(
+            opctx.log,
+            "membership changes";
+            "instance_id" => %instance_id,
+            "groups_to_leave" => ?groups_to_leave,
+            "groups_to_join" => ?groups_to_join
+        );
+
+        // Remove members from groups that are no longer wanted
+        for group_id in groups_to_leave {
+            debug!(
+                opctx.log,
+                "removing member from group";
+                "instance_id" => %instance_id,
+                "group_id" => %group_id
+            );
+            self.datastore()
+                .multicast_group_member_detach_by_group_and_instance(
+                    opctx,
+                    MulticastGroupUuid::from_untyped_uuid(group_id),
+                    InstanceUuid::from_untyped_uuid(instance_id),
+                )
+                .await?;
+        }
+
+        // Add members to new groups
+        for group_id in groups_to_join {
+            debug!(
+                opctx.log,
+                "adding member to group (reconciler will handle dataplane updates)";
+                "instance_id" => %instance_id,
+                "group_id" => %group_id
+            );
+            self.datastore()
+                .multicast_group_member_attach_to_instance(
+                    opctx,
+                    MulticastGroupUuid::from_untyped_uuid(group_id),
+                    InstanceUuid::from_untyped_uuid(instance_id),
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
     pub(crate) async fn instance_reconfigure(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -363,6 +494,7 @@ impl super::Nexus {
             auto_restart_policy,
             boot_disk,
             cpu_platform,
+            multicast_groups,
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
@@ -398,9 +530,32 @@ impl super::Nexus {
             memory,
             cpu_platform,
         };
-        self.datastore()
+
+        // Update the instance configuration
+        let result = self
+            .datastore()
             .instance_reconfigure(opctx, &authz_instance, update)
-            .await
+            .await;
+
+        // Handle multicast group updates if specified
+        if let Some(multicast_groups) = multicast_groups {
+            self.handle_multicast_group_changes(
+                opctx,
+                &authz_instance,
+                multicast_groups,
+            )
+            .await?;
+        }
+
+        // Return early with any database errors before activating reconciler
+        let instance_result = result?;
+
+        // Activate multicast reconciler after successful reconfiguration if multicast groups were modified
+        if multicast_groups.is_some() {
+            self.background_tasks.task_multicast_reconciler.activate();
+        }
+
+        Ok(instance_result)
     }
 
     pub(crate) async fn project_create_instance(
@@ -424,18 +579,21 @@ impl super::Nexus {
                 MAX_DISKS_PER_INSTANCE
             )));
         }
+
         for disk in all_disks.iter() {
             if let params::InstanceDiskAttachment::Create(create) = disk {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
             }
         }
+
         if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
                 "An instance may not have more than {} external IP addresses",
                 MAX_EXTERNAL_IPS_PER_INSTANCE,
             )));
         }
+
         if params
             .external_ips
             .iter()
@@ -448,6 +606,7 @@ impl super::Nexus {
                 MAX_EPHEMERAL_IPS_PER_INSTANCE,
             )));
         }
+
         if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
             params.network_interfaces
         {
@@ -554,7 +713,9 @@ impl super::Nexus {
             }
         }
 
+        // Activate background tasks after successful instance creation
         self.background_tasks.task_vpc_route_manager.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
 
         // TODO: This operation should return the instance as it was created.
         // Refetching the instance state here won't return that version of the
@@ -627,8 +788,36 @@ impl super::Nexus {
             )
             .await?;
 
+        // Activate background tasks after successful saga completion
         self.background_tasks.task_vpc_route_manager.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
         Ok(())
+    }
+
+    /// Returns true if any of the attached disks are type LocalStorage
+    pub(crate) async fn instance_uses_local_storage(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> Result<bool, Error> {
+        let disks = self
+            .db_datastore
+            .instance_list_disks(
+                opctx,
+                authz_instance,
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
+                }),
+            )
+            .await?;
+
+        Ok(disks.into_iter().any(|disk| match disk {
+            db::datastore::Disk::LocalStorage(_) => true,
+            db::datastore::Disk::Crucible(_) => false,
+        }))
     }
 
     pub(crate) async fn instance_migrate(
@@ -641,6 +830,14 @@ impl super::Nexus {
             .instance_id(id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
+
+        // Cannot migrate instance if it has local storage
+        if self.instance_uses_local_storage(opctx, &authz_instance).await? {
+            return Err(Error::invalid_request(format!(
+                "cannot migrate instance {} as it uses local storage",
+                authz_instance.id()
+            )));
+        }
 
         let state = self
             .db_datastore
@@ -680,7 +877,9 @@ impl super::Nexus {
             )
             .await?;
 
+        // Activate background tasks after successful saga completion
         self.background_tasks.task_vpc_route_manager.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
 
         // TODO correctness TODO robustness TODO design
         // Should we lookup the instance again here?
@@ -776,6 +975,11 @@ impl super::Nexus {
                     )
                     .await?;
 
+                // Activate multicast reconciler after successful instance start.
+                // The reconciler handles both group and member state, including
+                // Joining→Joined transitions now that sled_id is set.
+                self.background_tasks.task_multicast_reconciler.activate();
+
                 self.db_datastore
                     .instance_fetch_with_vmm(opctx, &authz_instance)
                     .await
@@ -805,6 +1009,20 @@ impl super::Nexus {
                 IntendedState::Stopped,
             )
             .await?;
+
+        // Update multicast member state for this instance to "Left" and clear
+        // `sled_id` - only if multicast is enabled
+        if self.multicast_enabled() {
+            self.db_datastore
+                .multicast_group_members_detach_by_instance(
+                    opctx,
+                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                )
+                .await?;
+        }
+
+        // Activate multicast reconciler to handle switch-level changes
+        self.background_tasks.task_multicast_reconciler.activate();
 
         if let Err(e) = self
             .instance_request_state(
@@ -956,7 +1174,11 @@ impl super::Nexus {
                         InstanceStateChangeRequestAction::UpdateRuntime(
                             db::model::InstanceRuntimeState {
                                 time_updated: chrono::Utc::now(),
-                                r#gen: prev_runtime.r#gen.0.next().into(),
+                                generation: prev_runtime
+                                    .generation
+                                    .0
+                                    .next()
+                                    .into(),
                                 nexus_state: db::model::InstanceState::NoVmm,
                                 ..prev_runtime.clone()
                             },
@@ -1149,80 +1371,50 @@ impl super::Nexus {
             )
             .await?;
 
+        // Each Disk::LocalStorage will require a delegated zvol entry.
+        let mut delegated_zvols: Vec<DelegatedZvol> =
+            Vec::with_capacity(disks.len());
+
+        for disk in &disks {
+            let local_storage_disk = match disk {
+                Disk::Crucible(_) => {
+                    continue;
+                }
+
+                Disk::LocalStorage(local_storage_disk) => local_storage_disk,
+            };
+
+            let Some(local_storage_dataset_allocation) =
+                &local_storage_disk.local_storage_dataset_allocation
+            else {
+                return Err(Error::internal_error(&format!(
+                    "local storage disk {} allocation is None!",
+                    disk.id()
+                ))
+                .into());
+            };
+
+            delegated_zvols.push(DelegatedZvol::LocalStorage {
+                zpool_id: local_storage_dataset_allocation.pool_id(),
+                dataset_id: local_storage_dataset_allocation.id(),
+            });
+        }
+
         let nics = self
             .db_datastore
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
 
-        // Collect the external IPs for the instance.
-        let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
+        // Collect the external IPs for the instance, and construct the external
+        // configuration for the sled-agent request.
+        let all_external_ips = self
             .db_datastore
             .instance_lookup_external_ips(
                 &opctx,
                 InstanceUuid::from_untyped_uuid(authz_instance.id()),
             )
-            .await?
-            .into_iter()
-            .partition(|ip| ip.kind == IpKind::SNat);
-
-        // Sanity checks on the number and kind of each IP address.
-        if external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
-            return Err(Error::internal_error(
-                format!(
-                    "Expected the number of external IPs to be limited to \
-                    {}, but found {}",
-                    MAX_EXTERNAL_IPS_PER_INSTANCE,
-                    external_ips.len(),
-                )
-                .as_str(),
-            )
-            .into());
-        }
-
-        // If there are any external IPs not yet fully attached/detached,then
-        // there are attach/detach sagas in progress. That should complete in
-        // its own time, so return a 503 to indicate a possible retry.
-        if external_ips.iter().any(|v| v.state != IpAttachState::Attached) {
-            return Err(Error::unavail(
-                "External IP attach/detach is in progress during instance_ensure_registered"
-            ).into());
-        }
-
-        // Partition remaining external IPs by class: we can have at most
-        // one ephemeral ip.
-        let (ephemeral_ips, floating_ips): (Vec<_>, Vec<_>) = external_ips
-            .into_iter()
-            .partition(|ip| ip.kind == IpKind::Ephemeral);
-
-        if ephemeral_ips.len() > MAX_EPHEMERAL_IPS_PER_INSTANCE {
-            return Err(Error::internal_error(
-                format!(
-                "Expected at most {} ephemeral IP for an instance, found {}",
-                MAX_EPHEMERAL_IPS_PER_INSTANCE,
-                ephemeral_ips.len()
-            )
-                .as_str(),
-            )
-            .into());
-        }
-
-        let ephemeral_ip = ephemeral_ips.get(0).map(|model| model.ip.ip());
-
-        let floating_ips =
-            floating_ips.into_iter().map(|model| model.ip.ip()).collect();
-        if snat_ip.len() != 1 {
-            return Err(Error::internal_error(
-                "Expected exactly one SNAT IP address for an instance",
-            )
-            .into());
-        }
-        let source_nat =
-            SourceNatConfig::try_from(snat_ip.into_iter().next().unwrap())
-                .map_err(|err| {
-                    Error::internal_error(&format!(
-                        "read invalid SNAT config from db: {err}"
-                    ))
-                })?;
+            .await?;
+        let external_ips = build_external_ip_config(&all_external_ips)?;
 
         // Gather the firewall rules for the VPC this instance is in.
         // The NIC info we gathered above doesn't have VPC information
@@ -1280,19 +1472,62 @@ impl super::Nexus {
             project_id: authz_project.id(),
         };
 
+        let mut multicast_groups = Vec::new();
+
+        if self.multicast_enabled() {
+            let multicast_members = self
+                .db_datastore
+                .multicast_group_members_list_by_instance(
+                    opctx,
+                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    false, // include_removed
+                )
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to list multicast group members for instance: {e}"
+                    ))
+                })?;
+
+            for member in multicast_members {
+                // Get the group details for this membership
+                if let Ok(group) = self
+                    .db_datastore
+                    .multicast_group_fetch(
+                        opctx,
+                        omicron_uuid_kinds::MulticastGroupUuid::from_untyped_uuid(
+                            member.external_group_id,
+                        ),
+                    )
+                    .await
+                {
+                    multicast_groups.push(
+                        sled_agent_client::types::InstanceMulticastMembership {
+                            group_ip: group.multicast_ip.ip(),
+                            sources: group
+                                .source_ips
+                                .into_iter()
+                                .map(|src_ip| src_ip.ip())
+                                .collect(),
+                        },
+                    );
+                }
+            }
+        }
+
         let local_config = sled_agent_client::types::InstanceSledLocalConfig {
             hostname,
             nics,
-            source_nat,
-            ephemeral_ip,
-            floating_ips,
+            external_ips,
             firewall_rules,
+            multicast_groups,
             dhcp_config: sled_agent_client::types::DhcpConfig {
                 dns_servers: self.external_dns_servers.clone(),
                 // TODO: finish designing instance DNS
                 host_domain: None,
                 search_domains: Vec::new(),
             },
+            delegated_zvols,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
@@ -1305,7 +1540,7 @@ impl super::Nexus {
         // state.
         let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
             time_updated: chrono::Utc::now(),
-            r#gen: initial_vmm.runtime.gen.next(),
+            r#gen: initial_vmm.runtime.generation.next(),
             state: match operation {
                 InstanceRegisterReason::Migrate { .. } => {
                     sled_agent_client::types::VmmState::Migrating
@@ -1393,7 +1628,7 @@ impl super::Nexus {
         let new_runtime = VmmRuntimeState {
             state: db::model::VmmState::Failed,
             time_state_updated: chrono::Utc::now(),
-            r#gen: db::model::Generation(vmm.runtime.r#gen.next()),
+            generation: db::model::Generation(vmm.runtime.generation.next()),
         };
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
@@ -1443,7 +1678,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::Disk> {
+    ) -> ListResultVec<db::datastore::Disk> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
@@ -1457,9 +1692,10 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         disk: NameOrId,
-    ) -> UpdateResult<db::model::Disk> {
+    ) -> UpdateResult<db::datastore::Disk> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
+
         let (.., authz_project_disk, authz_disk) = self
             .disk_lookup(
                 opctx,
@@ -1508,6 +1744,7 @@ impl super::Nexus {
                 MAX_DISKS_PER_INSTANCE,
             )
             .await?;
+
         Ok(disk)
     }
 
@@ -1517,7 +1754,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         disk: NameOrId,
-    ) -> UpdateResult<db::model::Disk> {
+    ) -> UpdateResult<db::datastore::Disk> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_disk) = self
@@ -2080,10 +2317,12 @@ impl super::Nexus {
         log: &slog::Logger,
         saga: steno::SagaDag,
         instance_id: InstanceUuid,
-    ) -> impl std::future::Future<Output = ()> + Send {
+    ) -> impl std::future::Future<Output = ()> + Send + use<> {
         let sagas = self.sagas.clone();
         let task_instance_updater =
             self.background_tasks.task_instance_updater.clone();
+        let task_multicast_reconciler =
+            self.background_tasks.task_multicast_reconciler.clone();
         let log = log.clone();
         async move {
             debug!(
@@ -2124,9 +2363,133 @@ impl super::Nexus {
                 // instance, kick the instance-updater background task
                 // to try and start it again in a timely manner.
                 task_instance_updater.activate();
+            } else {
+                // Activate multicast reconciler after successful saga completion
+                task_multicast_reconciler.activate();
             }
         }
     }
+}
+
+fn build_external_ip_config(
+    ips: &[ExternalIp],
+) -> Result<Option<ExternalIpConfig>, Error> {
+    // Partition into concrete IPv4 and IPv6 addresses, using subset of data
+    // needed for the concrete conversions only.
+    let (ipv4, ipv6): (Vec<_>, Vec<_>) =
+        ips.iter().partition_map(|ip| match ip.ip.ip() {
+            IpAddr::V4(v4) => Either::Left(ExternalIpData {
+                ip: v4,
+                first_port: ip.first_port.into(),
+                last_port: ip.last_port.into(),
+                kind: ip.kind,
+                attach_state: ip.state,
+            }),
+            IpAddr::V6(v6) => Either::Right(ExternalIpData {
+                ip: v6,
+                first_port: ip.first_port.into(),
+                last_port: ip.last_port.into(),
+                kind: ip.kind,
+                attach_state: ip.state,
+            }),
+        });
+    let ipv4_config = if ipv4.is_empty() {
+        None
+    } else {
+        Some(build_concrete_external_ip_config(ipv4)?)
+    };
+    let ipv6_config = if ipv6.is_empty() {
+        None
+    } else {
+        Some(build_concrete_external_ip_config(ipv6)?)
+    };
+    match (ipv4_config, ipv6_config) {
+        (None, None) => Ok(None),
+        (None, Some(v6)) => Ok(Some(ExternalIpConfig::V6(v6))),
+        (Some(v4), None) => Ok(Some(ExternalIpConfig::V4(v4))),
+        (Some(v4), Some(v6)) => {
+            Ok(Some(ExternalIpConfig::DualStack { v4, v6 }))
+        }
+    }
+}
+
+// Subset of an `ExternalIp` needed to build the `ExternalIpConfig` for the
+// concrete address version.
+struct ExternalIpData<T: ConcreteIp> {
+    ip: T,
+    first_port: u16,
+    last_port: u16,
+    kind: IpKind,
+    attach_state: IpAttachState,
+}
+
+fn build_concrete_external_ip_config<T>(
+    ips: Vec<ExternalIpData<T>>,
+) -> Result<ExternalIps<T>, Error>
+where
+    T: ConcreteIp,
+{
+    let mut builder = ExternalIpConfigBuilder::new();
+    let mut seen_snat_ip = false;
+    let mut seen_ephemeral_ip = false;
+    let mut floating_ips = Vec::new();
+    for ip in ips.iter() {
+        if ip.attach_state != IpAttachState::Attached {
+            return Err(Error::unavail(
+                "External IP attach/detach is in progress \
+            during instance_ensure_registered",
+            ));
+        }
+        match ip.kind {
+            IpKind::SNat if !seen_snat_ip => {
+                seen_snat_ip = true;
+                let source_nat =
+                    SourceNatConfig::new(ip.ip, ip.first_port, ip.last_port)
+                        .map_err(|e| {
+                            Error::internal_error(
+                                format!(
+                                    "Failed to build source NAT config: {e}"
+                                )
+                                .as_str(),
+                            )
+                        })?;
+                builder = builder.with_source_nat(source_nat);
+            }
+            IpKind::SNat => {
+                return Err(Error::internal_error(
+                    "Expected at most one SNAT IP address for an instance",
+                ));
+            }
+            IpKind::Ephemeral if !seen_ephemeral_ip => {
+                seen_ephemeral_ip = true;
+                builder = builder.with_ephemeral_ip(ip.ip);
+            }
+            IpKind::Ephemeral => {
+                return Err(Error::internal_error(
+                    "Expected at most 1 Ephemeral IP for an instance",
+                ));
+            }
+            IpKind::Floating => floating_ips.push(ip.ip),
+        }
+    }
+
+    // Ensure limit to the number of non-SNAT IPs.
+    let n_external_ips = usize::from(seen_ephemeral_ip) + floating_ips.len();
+    if n_external_ips > MAX_EXTERNAL_IPS_PER_INSTANCE {
+        return Err(Error::internal_error(
+            format!(
+                "Expected the number of external IPs per IP version to \
+            be limited to {}, but found {}",
+                MAX_EXTERNAL_IPS_PER_INSTANCE, n_external_ips
+            )
+            .as_str(),
+        ));
+    }
+    builder.with_floating_ips(floating_ips).build().map_err(|e| {
+        Error::internal_error(
+            format!("Failed to build external IPs: {e}").as_str(),
+        )
+    })
 }
 
 /// Writes the VMM and migration state supplied in `new_runtime_state` to the
@@ -2227,7 +2590,10 @@ fn check_instance_cpu_memory_sizes(
 
     // Reject instances where the memory is not divisible by
     // MIN_MEMORY_BYTES_PER_INSTANCE
-    if (memory.to_bytes() % u64::from(MIN_MEMORY_BYTES_PER_INSTANCE)) != 0 {
+    if !memory
+        .to_bytes()
+        .is_multiple_of(u64::from(MIN_MEMORY_BYTES_PER_INSTANCE))
+    {
         return Err(Error::invalid_value(
             "size",
             format!(
@@ -2474,6 +2840,7 @@ mod tests {
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());

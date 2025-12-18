@@ -7,13 +7,14 @@
 
 use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
 use nexus_types::deployment::{
-    Blueprint, BlueprintSledConfig, BlueprintZoneDisposition,
-    BlueprintZoneType, ClickhouseClusterConfig,
+    BlueprintZoneDisposition, BlueprintZoneType, ClickhouseClusterConfig,
 };
-use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::{Logger, error};
 use std::collections::BTreeSet;
 use thiserror::Error;
+
+use crate::blueprint_builder::BlueprintBuilder;
 
 // The set of clickhouse server and keeper zones that should be running as
 // constructed by the `BlueprintBuilder` in the current planning iteration.
@@ -23,22 +24,18 @@ pub struct ClickhouseZonesThatShouldBeRunning {
 }
 
 impl ClickhouseZonesThatShouldBeRunning {
-    pub fn new<'a, I>(zones_by_sled_id: I) -> Self
-    where
-        I: Iterator<Item = (SledUuid, &'a BlueprintSledConfig)>,
-    {
+    pub fn new(blueprint: &BlueprintBuilder<'_>) -> Self {
         let mut keepers = BTreeSet::new();
         let mut servers = BTreeSet::new();
-        for (_, bp_zone_config) in Blueprint::filtered_zones(
-            zones_by_sled_id,
-            BlueprintZoneDisposition::is_in_service,
-        ) {
-            match bp_zone_config.zone_type {
+        for (_, zone) in
+            blueprint.current_zones(BlueprintZoneDisposition::is_in_service)
+        {
+            match zone.zone_type {
                 BlueprintZoneType::ClickhouseKeeper(_) => {
-                    keepers.insert(bp_zone_config.id);
+                    keepers.insert(zone.id);
                 }
                 BlueprintZoneType::ClickhouseServer(_) => {
-                    servers.insert(bp_zone_config.id);
+                    servers.insert(zone.id);
                 }
                 _ => (),
             }
@@ -147,17 +144,8 @@ impl ClickhouseAllocator {
             return bump_gen_if_necessary(new_config);
         };
 
-        // Save the log index for next time if it's been incremented
-        let inventory_updated = if inventory_membership
-            .leader_committed_log_index
-            > self.parent_config.highest_seen_keeper_leader_committed_log_index
-        {
-            new_config.highest_seen_keeper_leader_committed_log_index =
-                inventory_membership.leader_committed_log_index;
-            true
-        } else {
-            false
-        };
+        let inventory_updated = inventory_membership.leader_committed_log_index
+            > self.parent_config.highest_seen_keeper_leader_committed_log_index;
 
         if current_keepers != inventory_membership.raft_config {
             // We know that there is a reconfiguration in progress. If there has
@@ -166,6 +154,12 @@ impl ClickhouseAllocator {
             if !inventory_updated {
                 return bump_gen_if_necessary(new_config);
             }
+
+            // Save the log index from inventory because we are going to
+            // need to use it to see if inventory has changed next time
+            // through the planner.
+            new_config.highest_seen_keeper_leader_committed_log_index =
+                inventory_membership.leader_committed_log_index;
 
             // We're still trying to reach our desired state. We want to ensure,
             // however, that if we are currently trying to add a node, that we
@@ -212,7 +206,7 @@ impl ClickhouseAllocator {
                 .parent_config
                 .keepers
                 .iter()
-                .find(|(_, &keeper_id)| keeper_id == added_keeper_id)
+                .find(|&(_, &keeper_id)| keeper_id == added_keeper_id)
                 .unwrap();
 
             // Let's ensure that this zone has not been expunged yet. If it has that means
@@ -247,11 +241,20 @@ impl ClickhouseAllocator {
                 // Remove the keeper for the first expunged zone we see.
                 // Remember, we only do one keeper membership change at time.
                 new_config.keepers.remove(zone_id);
+
+                if inventory_updated {
+                    // Save the log index from inventory because we are going to
+                    // need to use it to see if inventory has changed next time
+                    // through the planner.
+                    new_config.highest_seen_keeper_leader_committed_log_index =
+                        inventory_membership.leader_committed_log_index;
+                }
+
                 return bump_gen_if_necessary(new_config);
             }
         }
 
-        // Do we need to add any nodes to in service zones that don't have them
+        // Do we need to add any nodes to in-service zones that don't have them
         for zone_id in &active_clickhouse_zones.keepers {
             if !new_config.keepers.contains_key(zone_id) {
                 // Allocate a new `KeeperId` and map it to the keeper zone
@@ -259,6 +262,15 @@ impl ClickhouseAllocator {
                 new_config
                     .keepers
                     .insert(*zone_id, new_config.max_used_keeper_id);
+
+                if inventory_updated {
+                    // Save the log index from inventory because we are going to
+                    // need to use it to see if inventory has changed next time
+                    // through the planner.
+                    new_config.highest_seen_keeper_leader_committed_log_index =
+                        inventory_membership.leader_committed_log_index;
+                }
+
                 return bump_gen_if_necessary(new_config);
             }
         }
@@ -269,6 +281,10 @@ impl ClickhouseAllocator {
 
     pub fn parent_config(&self) -> &ClickhouseClusterConfig {
         &self.parent_config
+    }
+
+    pub fn into_parent_config(self) -> ClickhouseClusterConfig {
+        self.parent_config
     }
 }
 
@@ -649,7 +665,7 @@ pub mod test {
             .parent_config
             .keepers
             .iter()
-            .find(|(_, &keeper_id)| keeper_id == keeper_to_expunge)
+            .find(|&(_, &keeper_id)| keeper_id == keeper_to_expunge)
             .map(|(zone_id, _)| *zone_id)
             .unwrap();
         active_clickhouse_zones.keepers.remove(&zone_to_expunge);
@@ -742,7 +758,7 @@ pub mod test {
         let zone_to_expunge = new_config
             .keepers
             .iter()
-            .find(|(_, &keeper_id)| keeper_id == 5.into())
+            .find(|&(_, &keeper_id)| keeper_id == 5.into())
             .map(|(zone_id, _)| *zone_id)
             .unwrap();
         allocator.parent_config = new_config;

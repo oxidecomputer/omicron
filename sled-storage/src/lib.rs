@@ -11,10 +11,6 @@
 pub mod config;
 pub mod dataset;
 pub mod disk;
-pub mod error;
 pub(crate) mod keyfile;
-pub mod manager;
-#[cfg(any(feature = "testing", test))]
-pub mod manager_test_harness;
+pub mod nested_dataset;
 pub mod pool;
-pub mod resources;

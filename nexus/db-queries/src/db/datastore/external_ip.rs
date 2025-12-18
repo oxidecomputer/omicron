@@ -7,7 +7,6 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
-use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
@@ -18,6 +17,7 @@ use crate::db::model::FloatingIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
+use crate::db::model::IpPoolType;
 use crate::db::model::Name;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -40,7 +40,6 @@ use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpVersion;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -57,6 +56,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use ref_cast::RefCast;
+use sled_agent_types::inventory::ZoneKind;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -87,7 +87,9 @@ impl DataStore {
         probe_id: Uuid,
         pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalIp> {
-        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
+        let authz_pool = self
+            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .await?;
         let data = IncompleteExternalIp::for_ephemeral_probe(
             ip_id,
             probe_id,
@@ -123,7 +125,9 @@ impl DataStore {
         // Naturally, we now *need* to destroy the ephemeral IP if the newly alloc'd
         // IP was not attached, including on idempotent success.
 
-        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
+        let authz_pool = self
+            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .await?;
         let data = IncompleteExternalIp::for_ephemeral(ip_id, authz_pool.id());
 
         // We might not be able to acquire a new IP, but in the event of an
@@ -174,7 +178,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
-    ) -> LookupResult<Vec<ExternalIp>> {
+    ) -> Result<Vec<ExternalIp>, TransactionError<Error>> {
         use nexus_db_schema::schema::external_ip::dsl;
         dsl::external_ip
             .filter(dsl::is_service.eq(true))
@@ -183,34 +187,7 @@ impl DataStore {
             .select(ExternalIp::as_select())
             .get_results_async(conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    /// If a pool is specified, make sure it's linked to this silo. If a pool is
-    /// not specified, fetch the default pool for this silo. Once the pool is
-    /// resolved (by either method) do an auth check. Then return the pool.
-    async fn resolve_pool_for_allocation(
-        &self,
-        opctx: &OpContext,
-        pool: Option<authz::IpPool>,
-    ) -> LookupResult<authz::IpPool> {
-        let authz_pool = match pool {
-            Some(authz_pool) => {
-                self.ip_pool_fetch_link(opctx, authz_pool.id())
-                    .await
-                    .map_err(|_| authz_pool.not_found())?;
-
-                authz_pool
-            }
-            // If no pool specified, use the default logic
-            None => {
-                let (authz_pool, ..) =
-                    self.ip_pools_fetch_default(opctx).await?;
-                authz_pool
-            }
-        };
-        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-        Ok(authz_pool)
+            .map_err(|err| err.into())
     }
 
     /// Allocates a floating IP address for instance usage.
@@ -224,7 +201,9 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
+        let authz_pool = self
+            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .await?;
 
         let data = if let Some(ip) = ip {
             IncompleteExternalIp::for_floating_explicit(
@@ -254,7 +233,9 @@ impl DataStore {
         data: IncompleteExternalIp,
     ) -> CreateResult<ExternalIp> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        let ip = Self::allocate_external_ip_on_connection(&conn, data).await?;
+        let ip = Self::allocate_external_ip_on_connection(&conn, data)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
         Ok(ip)
     }
 
@@ -264,40 +245,68 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         data: IncompleteExternalIp,
     ) -> Result<ExternalIp, TransactionError<Error>> {
-        use diesel::result::DatabaseErrorKind::UniqueViolation;
         // Name needs to be cloned out here (if present) to give users a
         // sensible error message on name collision.
         let name = data.name().clone();
         let explicit_ip = data.explicit_ip().is_some();
         NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
+            use diesel::result::DatabaseErrorKind::NotNullViolation;
+            use diesel::result::DatabaseErrorKind::UniqueViolation;
             use diesel::result::Error::DatabaseError;
             use diesel::result::Error::NotFound;
+            let emit_err_msg = |explicit_ip: bool,
+                                msg: &str|
+             -> TransactionError<Error> {
+                if explicit_ip {
+                    TransactionError::CustomError(Error::invalid_request(
+                        "Requested external IP address not available",
+                    ))
+                } else {
+                    TransactionError::CustomError(Error::insufficient_capacity(
+                        "No external IP addresses available",
+                        msg,
+                    ))
+                }
+            };
             match e {
-                NotFound => {
-                    if explicit_ip {
+                DatabaseError(NotNullViolation, ref info)
+                    if info.message().contains("in column \"ip\"") =>
+                {
+                    emit_err_msg(
+                        explicit_ip,
+                        "NextExternalIp::new tried to insert NULL ip",
+                    )
+                }
+                NotFound => emit_err_msg(
+                    explicit_ip,
+                    "NextExternalIp::new returned NotFound",
+                ),
+                DatabaseError(UniqueViolation, ref info) => {
+                    // Attempt to re-use same IP address.
+                    if info.constraint_name() == Some("external_ip_unique") {
                         TransactionError::CustomError(Error::invalid_request(
                             "Requested external IP address not available",
                         ))
+                    // Floating IP: name conflict
+                    } else if info
+                        .constraint_name()
+                        .map(|name| name.starts_with("lookup_floating_"))
+                        .unwrap_or(false)
+                    {
+                        TransactionError::CustomError(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::FloatingIp,
+                                name.as_ref()
+                                    .map(|m| m.as_str())
+                                    .unwrap_or_default(),
+                            ),
+                        ))
                     } else {
                         TransactionError::CustomError(
-                            Error::insufficient_capacity(
-                                "No external IP addresses available",
-                                "NextExternalIp::new returned NotFound",
-                            ),
+                            crate::db::queries::external_ip::from_diesel(e),
                         )
                     }
-                }
-                // Floating IP: name conflict
-                DatabaseError(UniqueViolation, ..) if name.is_some() => {
-                    TransactionError::CustomError(public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::FloatingIp,
-                            name.as_ref()
-                                .map(|m| m.as_str())
-                                .unwrap_or_default(),
-                        ),
-                    ))
                 }
                 _ => {
                     if retryable(&e) {
@@ -668,7 +677,9 @@ impl DataStore {
         ip_id: Uuid,
     ) -> Result<bool, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.deallocate_external_ip_on_connection(&conn, ip_id).await
+        self.deallocate_external_ip_on_connection(&conn, ip_id)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())
     }
 
     /// Variant of [Self::deallocate_external_ip] which may be called from a
@@ -677,7 +688,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         ip_id: Uuid,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, TransactionError<Error>> {
         use nexus_db_schema::schema::external_ip::dsl;
         let now = Utc::now();
         diesel::update(dsl::external_ip)
@@ -691,7 +702,7 @@ impl DataStore {
                 UpdateStatus::Updated => true,
                 UpdateStatus::NotUpdatedButExists => false,
             })
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| e.into())
     }
 
     /// Moves an instance's ephemeral IP from 'Attached' to 'Detaching'.
@@ -721,8 +732,8 @@ impl DataStore {
         .map(|res| res.map(|(ip, _do_saga)| ip))
     }
 
-    /// Delete all non-floating IP addresses associated with the provided instance
-    /// ID.
+    /// Delete all non-floating IP addresses associated with the provided
+    /// instance ID.
     ///
     /// This method returns the number of records deleted, rather than the usual
     /// `DeleteResult`. That's mostly useful for tests, but could be important
@@ -834,7 +845,7 @@ impl DataStore {
             .find(|v| v.kind == IpKind::Ephemeral))
     }
 
-    /// Fetch all external IP addresses of any kind for the provided probe
+    /// Fetch all external IP addresses of any kind for the provided probe.
     pub async fn probe_lookup_external_ips(
         &self,
         opctx: &OpContext,
@@ -1152,7 +1163,7 @@ mod tests {
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::shared::IpRange;
-    use nexus_types::inventory::SourceNatConfig;
+    use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -1207,7 +1218,7 @@ mod tests {
             let external_ip = if allocate_snat {
                 OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
                     id: ExternalIpUuid::new_v4(),
-                    snat_cfg: SourceNatConfig::new(
+                    snat_cfg: SourceNatConfigGeneric::new(
                         ip,
                         0,
                         NUM_SOURCE_NAT_PORTS - 1,

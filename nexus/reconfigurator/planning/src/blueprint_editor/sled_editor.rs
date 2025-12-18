@@ -9,6 +9,7 @@ use crate::blueprint_builder::EditedSledScalarEdits;
 use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::EnsureMupdateOverrideUpdatedZone;
 use crate::blueprint_builder::SledEditCounts;
+use crate::planner::NoopConvertGlobalIneligibleReason;
 use crate::planner::NoopConvertSledEligible;
 use crate::planner::NoopConvertSledIneligibleReason;
 use crate::planner::NoopConvertSledInfoMut;
@@ -19,8 +20,6 @@ use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
-use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -46,6 +45,8 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use scalar::ScalarEditor;
+use sled_agent_types::inventory::MupdateOverrideBootInventory;
+use sled_agent_types::inventory::ZoneKind;
 use std::iter;
 use std::mem;
 use std::net::Ipv6Addr;
@@ -147,6 +148,7 @@ pub enum SledEditError {
 pub(crate) struct SledEditor(InnerSledEditor);
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum InnerSledEditor {
     // Internally, `SledEditor` has a variant for each variant of `SledState`,
     // as the operations allowed in different states are substantially different
@@ -157,33 +159,18 @@ enum InnerSledEditor {
 }
 
 impl SledEditor {
-    pub fn for_existing_active(
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub fn for_existing(
         config: BlueprintSledConfig,
     ) -> Result<Self, SledInputError> {
-        assert_eq!(
-            config.state,
-            SledState::Active,
-            "for_existing_active called on non-active sled"
-        );
-        let inner = ActiveSledEditor::new(subnet, config)?;
-        Ok(Self(InnerSledEditor::Active(inner)))
-    }
-
-    pub fn for_existing_decommissioned(
-        config: BlueprintSledConfig,
-    ) -> Result<Self, SledInputError> {
-        assert_eq!(
-            config.state,
-            SledState::Decommissioned,
-            "for_existing_decommissioned called on non-decommissioned sled"
-        );
-        let inner = EditedSled {
-            config,
-            edit_counts: SledEditCounts::zeroes(),
-            scalar_edits: EditedSledScalarEdits::zeroes(),
+        let inner = match config.state {
+            SledState::Active => {
+                InnerSledEditor::Active(ActiveSledEditor::new(config)?)
+            }
+            SledState::Decommissioned => {
+                InnerSledEditor::Decommissioned(EditedSled::new(config))
+            }
         };
-        Ok(Self(InnerSledEditor::Decommissioned(inner)))
+        Ok(Self(inner))
     }
 
     pub fn for_new_active(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
@@ -201,6 +188,17 @@ impl SledEditor {
         match &self.0 {
             InnerSledEditor::Active(_) => SledState::Active,
             InnerSledEditor::Decommissioned(_) => SledState::Decommissioned,
+        }
+    }
+
+    /// Returns the subnet of this sled if it is active, or `None` if it is
+    /// decommissioned.
+    pub fn subnet(&self) -> Option<Ipv6Subnet<SLED_PREFIX>> {
+        match &self.0 {
+            InnerSledEditor::Active(active) => {
+                Some(active.underlay_ip_allocator.subnet())
+            }
+            InnerSledEditor::Decommissioned(_) => None,
         }
     }
 
@@ -491,11 +489,18 @@ pub(crate) struct EditedSled {
     pub scalar_edits: EditedSledScalarEdits,
 }
 
+impl EditedSled {
+    fn new(config: BlueprintSledConfig) -> Self {
+        Self {
+            config,
+            edit_counts: SledEditCounts::zeroes(),
+            scalar_edits: EditedSledScalarEdits::zeroes(),
+        }
+    }
+}
+
 impl ActiveSledEditor {
-    pub fn new(
-        subnet: Ipv6Subnet<SLED_PREFIX>,
-        config: BlueprintSledConfig,
-    ) -> Result<Self, SledInputError> {
+    pub fn new(config: BlueprintSledConfig) -> Result<Self, SledInputError> {
         let zones =
             ZonesEditor::new(config.sled_agent_generation, config.zones);
 
@@ -508,7 +513,8 @@ impl ActiveSledEditor {
 
         Ok(Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
-                subnet, zone_ips,
+                config.subnet,
+                zone_ips,
             ),
             incoming_sled_agent_generation: config.sled_agent_generation,
             zones,
@@ -572,6 +578,7 @@ impl ActiveSledEditor {
         EditedSled {
             config: BlueprintSledConfig {
                 state: SledState::Active,
+                subnet: self.underlay_ip_allocator.subnet(),
                 sled_agent_generation,
                 disks,
                 datasets,
@@ -660,13 +667,19 @@ impl ActiveSledEditor {
 
         self.disks.ensure(disk)?;
 
-        // Every disk also gets a Debug and Transient Zone Root dataset; ensure
-        // both of those exist as well.
-        let debug = PartialDatasetConfig::for_debug(zpool);
-        let zone_root = PartialDatasetConfig::for_transient_zone_root(zpool);
+        // Every disk also gets:
+        let dataset_configs = [
+            // a Debug dataset
+            PartialDatasetConfig::for_debug(zpool),
+            // Transient Zone Root dataset
+            PartialDatasetConfig::for_transient_zone_root(zpool),
+            // a LocalStorage dataset
+            PartialDatasetConfig::for_local_storage_root(zpool),
+        ];
 
-        self.datasets.ensure_in_service(debug, rng);
-        self.datasets.ensure_in_service(zone_root, rng);
+        for dataset_config in dataset_configs {
+            self.datasets.ensure_in_service(dataset_config, rng);
+        }
 
         Ok(())
     }
@@ -980,10 +993,15 @@ impl ActiveSledEditor {
                             })
                         }
                     },
-                    NoopConvertSledInfoMut::GlobalIneligible(reason) => {
-                        Ok(EnsureMupdateOverrideAction::BpOverrideNotCleared {
-                            bp_override,
-                            reason: NoopGlobalIneligible(reason.clone()),
+                    NoopConvertSledInfoMut::GlobalIneligible(
+                        NoopConvertGlobalIneligibleReason::NoTargetRelease,
+                    ) => {
+                        // It's fine to clear the override when there's no
+                        // target release, even though noop conversions aren't
+                        // possible.
+                        self.set_remove_mupdate_override(None);
+                        Ok(EnsureMupdateOverrideAction::BpClearOverride {
+                            prev_bp_override: bp_override,
                         })
                     }
                 }

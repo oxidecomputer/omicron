@@ -104,9 +104,6 @@ sled-set serial2 mupdate-override unset
 # Run the planner again. This will cause sled 2's blueprint
 # remove_mupdate_override to be unset. But no further planning steps will
 # happen because the target release generation is not new enough.
-#
-# TODO: we want to block further planning steps until the target release is
-# uploaded and all install-dataset zones have been converted to artifact ones.
 inventory-generate
 blueprint-plan latest latest
 blueprint-show latest
@@ -119,9 +116,18 @@ blueprint-plan latest latest
 blueprint-show latest
 blueprint-diff latest
 
-# Now clear the mupdate override error. At this point, the rest of the
-# planner starts working.
+# Now clear the mupdate override error. At this point, we're *still* blocked
+# on serial1's install dataset not being known (so cannot be noop converted).
 sled-set serial1 mupdate-override unset
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update serial1's install dataset. Finally the planner is unblocked. (Note that
+# we do noop conversions of serial1 to Artifact and the unblocking of further
+# steps within the same blueprint. In other words, the code that considers
+# whether add/update are blocked takes into account noop conversions.)
+sled-update-install-dataset serial1 --to-target-release
 inventory-generate
 
 # This will attempt to update the RoT bootloader on the first sled.

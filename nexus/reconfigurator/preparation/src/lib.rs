@@ -12,7 +12,6 @@ use nexus_db_model::Generation;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
-use nexus_db_queries::db::datastore::DataStoreInventoryTest;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
@@ -21,6 +20,7 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::ExternalIpPolicy;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::OximeterReadPolicy;
@@ -57,17 +57,22 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::Logger;
 use slog::error;
 use slog_error_chain::InlineErrorChain;
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::net::IpAddr;
+use std::sync::Arc;
 
 /// Given various pieces of database state that go into the blueprint planning
 /// process, produce a `PlanningInput` object encapsulating what the planner
 /// needs to generate a blueprint
 pub struct PlanningInputFromDb<'a> {
+    pub parent_blueprint: Arc<Blueprint>,
     pub sled_rows: &'a [nexus_db_model::Sled],
     pub zpool_rows:
         &'a [(nexus_db_model::Zpool, nexus_db_model::PhysicalDisk)],
     pub ip_pool_range_rows: &'a [nexus_db_model::IpPoolRange],
+    pub external_dns_external_ips: BTreeSet<IpAddr>,
     pub external_ip_rows: &'a [nexus_db_model::ExternalIp],
     pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
     pub target_boundary_ntp_zone_count: usize,
@@ -91,10 +96,43 @@ pub struct PlanningInputFromDb<'a> {
 }
 
 impl PlanningInputFromDb<'_> {
+    /// Read the current set of database state needed to assemble a new
+    /// [`PlanningInput`].
+    ///
+    /// The caller is required to pass `parent_blueprint` in so that we
+    /// statically enforce that any `PlanningInput` information we read from the
+    /// database is _at least as new_ as the parent blueprint on which the
+    /// planner will operate. This is particularly important for the planner's
+    /// "garbage collection" phase where it drops expunged items for which all
+    /// cleanup is complete: if the `PlanningInput` is read before the parent
+    /// blueprint, some of the "is cleanup complete" information that doesn't
+    /// have explicit generation numbers (or equivalent) could show a state
+    /// where the planner believes cleanup is complete when actually it hasn't
+    /// yet had a chance to run; e.g..
+    ///
+    /// * Nexus A constructs a `PlanningInput` that has no record of zone Z.
+    /// * Nexus A goes out to lunch.
+    /// * Nexus B constructs a new blueprint that adds zone Z, makes it the
+    ///   target, and executes it.
+    /// * Zone Z runs, and inserts some records that we'd see in `PlanningInput`
+    ///   indicating it is not yet cleaned up.
+    /// * Nexus B constructs a new blueprint that expunges zone Z, makes it the
+    ///   target, and executes it.
+    /// * At this point zone Z is expunged and ready for cleanup, but cleanup is
+    ///   not yet complete - we still have records related to zone Z in the db.
+    /// * Nexus A resumes. It loads the current target blueprint (which shows
+    ///   zone Z is expunged) and has a `PlanningInput` with no records
+    ///   indicating zone Z is _not_ ready for cleanup, so incorrectly garbage
+    ///   collects zone Z.
+    ///
+    /// We could enforce this instead by loading `parent_blueprint` ourselves
+    /// with a note that it must come first, but in practice our caller has
+    /// already loaded it.
     pub async fn assemble(
         opctx: &OpContext,
         datastore: &DataStore,
         planner_config: PlannerConfig,
+        parent_blueprint: Arc<Blueprint>,
     ) -> Result<PlanningInput, Error> {
         opctx.check_complex_operations_allowed()?;
         // Note we list *all* rows here including the ones for decommissioned
@@ -120,6 +158,14 @@ impl PlanningInputFromDb<'_> {
             .internal_context("fetching all external zpool rows")?;
         let ip_pool_range_rows =
             fetch_all_service_ip_pool_ranges(opctx, datastore).await?;
+        // TODO-correctness We ought to allow the IPs on which we run external
+        // DNS servers to change, but we don't: instead, we always reuse the IPs
+        // that were specified when the rack was set up.
+        //
+        // https://github.com/oxidecomputer/omicron/issues/8255
+        let external_dns_external_ips = datastore
+            .external_dns_external_ips_specified_by_rack_setup(opctx)
+            .await?;
         let external_ip_rows = datastore
             .external_ip_list_service_all_batched(opctx)
             .await
@@ -225,9 +271,11 @@ impl PlanningInputFromDb<'_> {
             not_yet_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
 
         let planning_input = PlanningInputFromDb {
+            parent_blueprint,
             sled_rows: &sled_rows,
             zpool_rows: &zpool_rows,
             ip_pool_range_rows: &ip_pool_range_rows,
+            external_dns_external_ips,
             target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
             target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
@@ -256,11 +304,36 @@ impl PlanningInputFromDb<'_> {
         Ok(planning_input)
     }
 
+    fn build_external_ip_policy(&self) -> Result<ExternalIpPolicy, Error> {
+        let mut builder = ExternalIpPolicy::builder();
+        for range in self.ip_pool_range_rows {
+            let range = IpRange::try_from(range).map_err(|e| {
+                Error::internal_error(&format!(
+                    "invalid IP pool range in database: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+            builder.push_service_pool_range(range).map_err(|e| {
+                Error::internal_error(&format!(
+                    "cannot construct external IP policy: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+        for &ip in &self.external_dns_external_ips {
+            builder.add_external_dns_ip(ip).map_err(|e| {
+                Error::internal_error(&format!(
+                    "cannot construct external IP policy: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+        Ok(builder.build())
+    }
+
     pub fn build(&self) -> Result<PlanningInput, Error> {
-        let service_ip_pool_ranges =
-            self.ip_pool_range_rows.iter().map(IpRange::from).collect();
         let policy = Policy {
-            service_ip_pool_ranges,
+            external_ips: self.build_external_ip_policy()?,
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,
@@ -277,6 +350,7 @@ impl PlanningInputFromDb<'_> {
             planner_config: self.planner_config,
         };
         let mut builder = PlanningInputBuilder::new(
+            Arc::clone(&self.parent_blueprint),
             policy,
             self.internal_dns_version.into(),
             self.external_dns_version.into(),
@@ -406,22 +480,33 @@ async fn fetch_all_service_ip_pool_ranges(
     Ok(ranges)
 }
 
-/// Loads state for import into `reconfigurator-cli`
+/// Loads state for debugging or import into `reconfigurator-cli`
 ///
-/// This is only to be used in omdb or tests.
+/// This is used in omdb, tests, and in Nexus to collect support bundles
 pub async fn reconfigurator_state_load(
     opctx: &OpContext,
     datastore: &DataStore,
+    nmax_blueprints: usize,
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
+    let (_, current_target_blueprint) =
+        datastore.blueprint_target_get_current_full(opctx).await?;
     let planner_config = datastore
         .reconfigurator_config_get_latest(opctx)
         .await?
         .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
-    let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, planner_config).await?;
+    let planning_input = PlanningInputFromDb::assemble(
+        opctx,
+        datastore,
+        planner_config,
+        Arc::new(current_target_blueprint),
+    )
+    .await?;
+
+    // We'll grab the most recent several inventory collections.
+    const NCOLLECTIONS: u8 = 5;
     let collection_ids = datastore
-        .inventory_collections()
+        .inventory_collections_latest(opctx, NCOLLECTIONS)
         .await
         .context("listing collections")?
         .into_iter()
@@ -439,11 +524,13 @@ pub async fn reconfigurator_state_load(
         .collect::<Vec<Collection>>()
         .await;
 
+    // Grab the latest target blueprint.
     let target_blueprint = datastore
         .blueprint_target_get_current(opctx)
         .await
         .context("failed to read current target blueprint")?;
 
+    // Paginate through the list of all blueprints.
     let mut blueprint_ids = Vec::new();
     let mut paginator = Paginator::new(
         SQL_BATCH_SIZE,
@@ -460,6 +547,13 @@ pub async fn reconfigurator_state_load(
         blueprint_ids.extend(batch.into_iter());
     }
 
+    // We'll only grab the most recent blueprints that fit within the limit that
+    // we were given.  This is a heuristic intended to grab what's most likely
+    // to be useful even when the system has a large number of blueprints.  But
+    // the intent is that callers provide a limit that should be large enough to
+    // cover everything.
+    blueprint_ids.sort_by_key(|bpm| Reverse(bpm.time_created));
+    let blueprint_ids = blueprint_ids.into_iter().take(nmax_blueprints);
     let blueprints = futures::stream::iter(blueprint_ids)
         .filter_map(|bpm| async move {
             let blueprint_id = bpm.id.into_untyped_uuid();
@@ -500,14 +594,14 @@ pub async fn reconfigurator_state_load(
             .chain(std::iter::once(*latest_version.version))
             .collect();
         let mut rv = BTreeMap::new();
-        for gen in dns_generations_needed {
+        for r#gen in dns_generations_needed {
             let config = datastore
-                .dns_config_read_version(&opctx, dns_group, gen)
+                .dns_config_read_version(&opctx, dns_group, r#gen)
                 .await
                 .with_context(|| {
-                    format!("reading {:?} DNS version {}", dns_group, gen)
+                    format!("reading {:?} DNS version {}", dns_group, r#gen)
                 })?;
-            rv.insert(gen, config);
+            rv.insert(r#gen, config);
         }
 
         Ok::<BTreeMap<_, _>, anyhow::Error>(rv)
@@ -532,7 +626,7 @@ pub async fn reconfigurator_state_load(
     Ok(UnstableReconfiguratorState {
         planning_input,
         collections,
-        target_blueprint: Some(target_blueprint),
+        target_blueprint,
         blueprints,
         internal_dns,
         external_dns,

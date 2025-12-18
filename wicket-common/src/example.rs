@@ -6,6 +6,7 @@
 
 use std::{collections::BTreeSet, net::Ipv6Addr};
 
+use gateway_types::component::SpType;
 use maplit::{btreemap, btreeset};
 use omicron_common::{
     address::{IpRange, Ipv4Range},
@@ -20,7 +21,7 @@ use omicron_common::{
 use sled_hardware_types::Baseboard;
 
 use crate::{
-    inventory::{SpIdentifier, SpType},
+    inventory::SpIdentifier,
     rack_setup::{
         BgpAuthKeyId, BootstrapSledDescription,
         CurrentRssUserConfigInsensitive, PutRssUserConfigInsensitive,

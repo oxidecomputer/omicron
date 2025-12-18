@@ -16,6 +16,7 @@ pub struct ReconfiguratorConfig {
     pub planner_enabled: bool,
     pub time_modified: DateTime<Utc>,
     pub add_zones_with_mupdate_override: bool,
+    pub tuf_repo_pruner_enabled: bool,
 }
 
 impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
@@ -28,6 +29,7 @@ impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
                 .config
                 .planner_config
                 .add_zones_with_mupdate_override,
+            tuf_repo_pruner_enabled: value.config.tuf_repo_pruner_enabled,
         }
     }
 }
@@ -42,6 +44,7 @@ impl From<ReconfiguratorConfig> for deployment::ReconfiguratorConfigView {
                     add_zones_with_mupdate_override: value
                         .add_zones_with_mupdate_override,
                 },
+                tuf_repo_pruner_enabled: value.tuf_repo_pruner_enabled,
             },
             time_modified: value.time_modified,
         }

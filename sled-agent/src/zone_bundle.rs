@@ -248,9 +248,8 @@ impl ZoneBundler {
         // Omicron. It has since been removed; it may be possible to use
         // dependency injection here ("fake" vs "real" implementation of ZFS)
         // instead of conditional compilation.
-        // See also: The "sled-storage" `StorageManagerTestHarness`, which
-        // might be useful for making ZFS datasets on top of a test-only
-        // temporary directory.
+        // See also: `ZfsTestHarness`, which is used in some illumos-only tests
+        // for making ZFS datasets on top of a test-only temporary directory.
         #[cfg(not(test))]
         initialize_zfs_resources(&log)
             .await
@@ -671,7 +670,8 @@ async fn create_snapshot(
 // A key feature of the zone-bundle process is that we pull all the log files
 // for a zone. This is tricky. The logs are both being written to by the
 // programs we're interested in, and also potentially being rotated by `logadm`,
-// and / or archived out to the U.2s through the code in `crate::dump_setup`.
+// and / or archived out to the U.2s through the code in
+// `crate::debug_collector`.
 //
 // We need to capture all these logs, while avoiding inconsistent state (e.g., a
 // missing log message that existed when the bundle was created) and also
@@ -1034,8 +1034,8 @@ async fn create(
     //
     // Both of these are dynamic. The current log file is likely being written
     // by the service itself, and `logadm` may also be rotating files. At the
-    // same time, the log-archival process in `dump_setup.rs` may be copying
-    // these out to the U.2s, after which it deletes those on the zone
+    // same time, the log-archival process in `debug_collector.rs` may be
+    // copying these out to the U.2s, after which it deletes those on the zone
     // filesystem itself.
     //
     // To avoid various kinds of corruption, such as a bad tarball or missing
@@ -1262,7 +1262,7 @@ async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
                 }
             }
         } else {
-            // The logic in `dump_setup` picks some U.2 in which to start
+            // The logic in `debug_collector` picks some U.2 in which to start
             // archiving logs, and thereafter tries to keep placing new ones
             // there, subject to space constraints. It's not really an error for
             // there to be no entries for the named zone in any particular U.2
@@ -1522,7 +1522,7 @@ async fn run_cleanup(
 
         // Sort all the bundles in the current directory, using the priority
         // described in `context.priority`.
-        info.sort_by(|lhs, rhs| context.priority.compare_bundles(lhs, rhs));
+        info.sort_by(|lhs, rhs| compare_bundles(&context.priority, lhs, rhs));
         let current_usage = usages.get(&dir).unwrap();
 
         // Remove bundles until we fall below the threshold.
@@ -1774,11 +1774,11 @@ mod illumos_tests {
     use sled_agent_config_reconciler::AvailableDatasetsReceiver;
     use sled_agent_config_reconciler::InternalDiskDetails;
     use sled_agent_config_reconciler::InternalDisksReceiver;
-    use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use slog::Drain;
     use slog::Logger;
     use std::sync::Arc;
     use tokio::sync::Mutex;
+    use zfs_test_harness::ZfsTestHarness;
 
     /// An iterator that returns the date of consecutive days beginning with 1st
     /// January 2020. The time portion of each returned date will be fixed at
@@ -1848,25 +1848,16 @@ mod illumos_tests {
         ctx: Arc<Mutex<CleanupTestContextInner>>,
     }
 
-    // A wrapper around `StorageResources`, that automatically creates dummy
-    // directories in the provided test locations and removes them on drop.
-    //
-    // They don't exist when you just do `StorageResources::new_for_test()`.
-    // This type creates the datasets at the expected mountpoints, backed by the
-    // ramdisk, and removes them on drop. This is basically a tempdir-like
-    // system, that creates the directories implied by the `StorageResources`
-    // expected disk structure.
+    // A wrapper around `ZfsTestHarness` that keeps the directores we expect to
+    // use easy to access (and sorted).
     struct ResourceWrapper {
-        storage_test_harness: StorageManagerTestHarness,
+        storage_test_harness: ZfsTestHarness,
         dirs: Vec<Utf8PathBuf>,
     }
 
-    async fn setup_storage(log: &Logger) -> StorageManagerTestHarness {
-        let mut harness = StorageManagerTestHarness::new(&log).await;
-
-        harness.handle().key_manager_ready().await;
-        let _raw_disks =
-            harness.add_vdevs(&["m2_left.vdev", "m2_right.vdev"]).await;
+    async fn setup_storage(log: &Logger) -> ZfsTestHarness {
+        let mut harness = ZfsTestHarness::new(log.clone());
+        harness.add_internal_disks(2).await;
         harness
     }
 
@@ -1874,12 +1865,8 @@ mod illumos_tests {
         // Create new storage resources, and mount datasets at the required
         // locations.
         async fn new(log: &Logger) -> Self {
-            // Spawn the storage related tasks required for testing and insert
-            // synthetic disks.
             let storage_test_harness = setup_storage(log).await;
-            let resources =
-                storage_test_harness.handle().get_latest_disks().await;
-            let mut dirs = resources.all_zone_bundle_directories();
+            let mut dirs = storage_test_harness.all_zone_bundle_directories();
             dirs.sort();
             Self { storage_test_harness, dirs }
         }
@@ -1898,15 +1885,12 @@ mod illumos_tests {
         let log = test_logger();
         let context = CleanupContext::default();
         let resource_wrapper = ResourceWrapper::new(&log).await;
-        let handle = resource_wrapper.storage_test_harness.handle();
-        let all_disks = handle.get_latest_disks().await;
+        let harness = &resource_wrapper.storage_test_harness;
 
-        // Convert from StorageManagerTestHarness to config-reconciler channels.
-        // Do we want to expand config-reconciler test support and not use
-        // StorageManagerTestHarness?
+        // Convert from ZfsTestHarness to config-reconciler channels.
         let internal_disks_rx = InternalDisksReceiver::fake_static(
-            Arc::new(all_disks.mount_config().clone()),
-            all_disks.all_m2_zpool_ids().into_iter().enumerate().map(
+            Arc::clone(harness.mount_config()),
+            harness.all_internal_zpool_ids().enumerate().map(
                 |(i, zpool_id)| {
                     InternalDiskDetails::fake_details(
                         DiskIdentity {
@@ -1923,10 +1907,12 @@ mod illumos_tests {
             ),
         );
         let available_datasets_rx = AvailableDatasetsReceiver::fake_static(
-            all_disks
-                .all_m2_zpools()
-                .into_iter()
-                .zip(all_disks.all_m2_mountpoints(".")),
+            harness.all_internal_zpools().map(|zpool| {
+                (
+                    *zpool,
+                    zpool.dataset_mountpoint(&harness.mount_config().root, "."),
+                )
+            }),
         );
 
         let bundler = ZoneBundler::new(
@@ -1951,7 +1937,7 @@ mod illumos_tests {
         let mut ctx = context.ctx.lock().await;
         let context = ctx.bundler.cleanup_context().await;
         assert_eq!(context, ctx.context, "received incorrect context");
-        ctx.resource_wrapper.storage_test_harness.cleanup().await;
+        ctx.resource_wrapper.storage_test_harness.cleanup();
     }
 
     #[tokio::test]
@@ -1980,7 +1966,7 @@ mod illumos_tests {
             .expect("failed to set context");
         let context = ctx.bundler.cleanup_context().await;
         assert_eq!(context, new_context, "failed to update context");
-        ctx.resource_wrapper.storage_test_harness.cleanup().await;
+        ctx.resource_wrapper.storage_test_harness.cleanup();
     }
 
     // Quota applied to test datasets.
@@ -2009,7 +1995,7 @@ mod illumos_tests {
             &ctx.bundler.log,
             "Test completed, performing cleanup before emitting result"
         );
-        ctx.resource_wrapper.storage_test_harness.cleanup().await;
+        ctx.resource_wrapper.storage_test_harness.cleanup();
         result.expect("test failed!");
     }
 
@@ -2040,13 +2026,10 @@ mod illumos_tests {
         // If this needs to change, go modify the "add_vdevs" call in
         // "setup_storage".
         assert!(
-            TEST_QUOTA
-                < StorageManagerTestHarness::DEFAULT_VDEV_SIZE
-                    .try_into()
-                    .unwrap(),
+            TEST_QUOTA < ZfsTestHarness::DEFAULT_VDEV_SIZE.try_into().unwrap(),
             "Quota larger than underlying device (quota: {:?}, device size: {})",
             TEST_QUOTA,
-            StorageManagerTestHarness::DEFAULT_VDEV_SIZE,
+            ZfsTestHarness::DEFAULT_VDEV_SIZE,
         );
 
         anyhow::ensure!(

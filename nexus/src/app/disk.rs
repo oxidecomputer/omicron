@@ -8,10 +8,13 @@ use crate::app::sagas;
 use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::DiskTypeLocalStorage;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore;
+use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -24,7 +27,6 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -32,7 +34,6 @@ use super::MAX_DISK_SIZE_BYTES;
 use super::MIN_DISK_SIZE_BYTES;
 
 impl super::Nexus {
-    // Disks
     pub fn disk_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -64,21 +65,35 @@ impl super::Nexus {
         }
     }
 
-    pub(super) async fn validate_disk_create_params(
+    pub async fn disk_get(
+        &self,
+        opctx: &OpContext,
+        disk_selector: params::DiskSelector,
+    ) -> LookupResult<db::datastore::Disk> {
+        let disk_lookup = self.disk_lookup(opctx, disk_selector)?;
+
+        let (.., authz_disk) =
+            disk_lookup.lookup_for(authz::Action::Read).await?;
+
+        self.db_datastore.disk_get(opctx, authz_disk.id()).await
+    }
+
+    pub(super) async fn validate_crucible_disk_create_params(
         self: &Arc<Self>,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        params: &params::DiskCreate,
-    ) -> Result<(), Error> {
-        let block_size: u64 = match params.disk_source {
+        disk_source: &params::DiskSource,
+        size: ByteCount,
+    ) -> Result<u64, Error> {
+        let block_size: u64 = match disk_source {
             params::DiskSource::Blank { block_size }
             | params::DiskSource::ImportingBlocks { block_size } => {
-                block_size.into()
+                (*block_size).into()
             }
             params::DiskSource::Snapshot { snapshot_id } => {
                 let (.., db_snapshot) =
                     LookupPath::new(opctx, &self.db_datastore)
-                        .snapshot_id(snapshot_id)
+                        .snapshot_id(*snapshot_id)
                         .fetch()
                         .await?;
 
@@ -92,10 +107,10 @@ impl super::Nexus {
 
                 // If the size of the snapshot is greater than the size of the
                 // disk, return an error.
-                if db_snapshot.size.to_bytes() > params.size.to_bytes() {
+                if db_snapshot.size.to_bytes() > size.to_bytes() {
                     return Err(Error::invalid_request(&format!(
                         "disk size {} must be greater than or equal to snapshot size {}",
-                        params.size.to_bytes(),
+                        size.to_bytes(),
                         db_snapshot.size.to_bytes(),
                     )));
                 }
@@ -104,7 +119,7 @@ impl super::Nexus {
             }
             params::DiskSource::Image { image_id } => {
                 let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
-                    .image_id(image_id)
+                    .image_id(*image_id)
                     .fetch()
                     .await?;
 
@@ -120,10 +135,10 @@ impl super::Nexus {
 
                 // If the size of the image is greater than the size of the
                 // disk, return an error.
-                if db_image.size.to_bytes() > params.size.to_bytes() {
+                if db_image.size.to_bytes() > size.to_bytes() {
                     return Err(Error::invalid_request(&format!(
                         "disk size {} must be greater than or equal to image size {}",
-                        params.size.to_bytes(),
+                        size.to_bytes(),
                         db_image.size.to_bytes(),
                     )));
                 }
@@ -132,9 +147,35 @@ impl super::Nexus {
             }
         };
 
+        Ok(block_size)
+    }
+
+    pub(super) async fn validate_disk_create_params(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        params: &params::DiskCreate,
+    ) -> Result<(), Error> {
+        let block_size: u64 = match &params.disk_backend {
+            params::DiskBackend::Distributed { disk_source, .. } => {
+                self.validate_crucible_disk_create_params(
+                    opctx,
+                    &authz_project,
+                    &disk_source,
+                    params.size,
+                )
+                .await?
+            }
+
+            params::DiskBackend::Local { .. } => {
+                // All LocalStorage disks have a 4k block size
+                4096
+            }
+        };
+
         // Reject disks where the block size doesn't evenly divide the
         // total size
-        if (params.size.to_bytes() % block_size) != 0 {
+        if !params.size.to_bytes().is_multiple_of(block_size) {
             return Err(Error::invalid_value(
                 "size and block_size",
                 format!(
@@ -158,7 +199,11 @@ impl super::Nexus {
 
         // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
         // divide the size
-        if (params.size.to_bytes() % u64::from(MIN_DISK_SIZE_BYTES)) != 0 {
+        if !params
+            .size
+            .to_bytes()
+            .is_multiple_of(u64::from(MIN_DISK_SIZE_BYTES))
+        {
             return Err(Error::invalid_value(
                 "size",
                 format!(
@@ -168,15 +213,69 @@ impl super::Nexus {
             ));
         }
 
-        // Reject disks where the size is greated than MAX_DISK_SIZE_BYTES
-        if params.size.to_bytes() > MAX_DISK_SIZE_BYTES {
-            return Err(Error::invalid_value(
-                "size",
-                format!(
-                    "total size must be less than {}",
-                    ByteCount::try_from(MAX_DISK_SIZE_BYTES).unwrap()
-                ),
-            ));
+        // Check for disk type specific restrictions
+        match &params.disk_backend {
+            params::DiskBackend::Distributed { .. } => {
+                // Reject disks where the size is greated than
+                // MAX_DISK_SIZE_BYTES. This restriction will be changed or
+                // removed when multi-subvolume Volumes can be created by Nexus,
+                // or if the region allocation algorithm changes.
+                if params.size.to_bytes() > MAX_DISK_SIZE_BYTES {
+                    return Err(Error::invalid_value(
+                        "size",
+                        format!(
+                            "total size must be less than {}",
+                            ByteCount::try_from(MAX_DISK_SIZE_BYTES).unwrap()
+                        ),
+                    ));
+                }
+            }
+
+            params::DiskBackend::Local {} => {
+                // If a user requests some outlandish number of TB for local
+                // storage, and there isn't a sled allocation that can fulfill
+                // this, instance create will work but instance start (which
+                // performs the actual vmm + local storage dataset allocation)
+                // will fail.
+                //
+                // There's an opportunity to consult the latest inventory
+                // collection here, and if there aren't zpools that are as large
+                // as this local storage request, reject it. If the user
+                // mistakenly asks for 30 TB instead of 3 TB, such a check would
+                // prevent the instance start request from succeeding. Later, if
+                // new disks are inserted that have a much larger capacity, then
+                // the same instance create request that could use that larger
+                // capacity.
+                //
+                // We don't want to reject creating a bunch of instances
+                // requesting local storage, where if all of them were started
+                // it wouldn't work, but the user's intention is not to ever
+                // start them all at the same time. But we also don't reserve or
+                // allocate any local storage here, so we can't prevent users
+                // from requesting too much local storage to ever start the
+                // instances for.
+                //
+                // TODO consult the latest inventory collection if it isn't too
+                // expensive, and reject local storage disk requests that are
+                // too large to be served by any sled.
+
+                // Test that the disk create saga can create the
+                // DiskTypeLocalStorage record. This won't be the record
+                // actually used by the created disk, but validation here can be
+                // returned to a user with a non-500 error, and validation
+                // failure in a saga will only show up as a 500.
+
+                if let Err(e) =
+                    DiskTypeLocalStorage::new(Uuid::new_v4(), params.size)
+                {
+                    return Err(Error::invalid_value(
+                        "size",
+                        format!(
+                            "error computing required dataset overhead: {e}"
+                        ),
+                    ));
+                }
+            }
         }
 
         Ok(())
@@ -187,9 +286,10 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         params: &params::DiskCreate,
-    ) -> CreateResult<db::model::Disk> {
+    ) -> CreateResult<db::datastore::Disk> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
+
         self.validate_disk_create_params(opctx, &authz_project, params).await?;
 
         let saga_params = sagas::disk_create::Params {
@@ -197,14 +297,19 @@ impl super::Nexus {
             project_id: authz_project.id(),
             create_params: params.clone(),
         };
+
         let saga_outputs = self
             .sagas
             .saga_execute::<sagas::disk_create::SagaDiskCreate>(saga_params)
             .await?;
+
         let disk_created = saga_outputs
-            .lookup_node_output::<db::model::Disk>("created_disk")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .lookup_node_output::<db::datastore::Disk>("created_disk")
+            .map_err(|e| Error::InternalError {
+                internal_message: format!("{e:#}"),
+            })
             .internal_context("looking up output from disk create saga")?;
+
         Ok(disk_created)
     }
 
@@ -213,53 +318,14 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::Disk> {
+    ) -> ListResultVec<external::Disk> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore.disk_list(opctx, &authz_project, pagparams).await
-    }
-
-    /// Modifies the runtime state of the Disk as requested.  This generally
-    /// means attaching or detaching the disk.
-    // TODO(https://github.com/oxidecomputer/omicron/issues/811):
-    // This will be unused until we implement hot-plug support.
-    // However, it has been left for reference until then, as it will
-    // likely be needed once that feature is implemented.
-    #[allow(dead_code)]
-    pub(crate) async fn disk_set_runtime(
-        &self,
-        opctx: &OpContext,
-        authz_disk: &authz::Disk,
-        db_disk: &db::model::Disk,
-        sa: Arc<SledAgentClient>,
-        requested: sled_agent_client::types::DiskStateRequested,
-    ) -> Result<(), Error> {
-        let runtime: DiskRuntimeState = db_disk.runtime().into();
-
-        opctx.authorize(authz::Action::Modify, authz_disk).await?;
-
-        // Ask the Sled Agent to begin the state change.  Then update the
-        // database to reflect the new intermediate state.
-        let new_runtime = sa
-            .disk_put(
-                &authz_disk.id(),
-                &sled_agent_client::types::DiskEnsureBody {
-                    initial_runtime:
-                        sled_agent_client::types::DiskRuntimeState::from(
-                            runtime,
-                        ),
-                    target: requested,
-                },
-            )
-            .await
-            .map_err(Error::from)?;
-
-        let new_runtime: DiskRuntimeState = new_runtime.into_inner().into();
-
-        self.db_datastore
-            .disk_update_runtime(opctx, authz_disk, &new_runtime.into())
-            .await
-            .map(|_| ())
+        let disks = self
+            .db_datastore
+            .disk_list(opctx, &authz_project, pagparams)
+            .await?;
+        Ok(disks.into_iter().map(Into::into).collect())
     }
 
     pub(crate) async fn notify_disk_updated(
@@ -327,20 +393,18 @@ impl super::Nexus {
         let (.., project, authz_disk) =
             disk_lookup.lookup_for(authz::Action::Delete).await?;
 
-        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .disk_id(authz_disk.id())
-            .fetch()
-            .await?;
+        let disk = self.datastore().disk_get(opctx, authz_disk.id()).await?;
 
         let saga_params = sagas::disk_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: project.id(),
-            disk_id: authz_disk.id(),
-            volume_id: db_disk.volume_id(),
+            disk,
         };
+
         self.sagas
             .saga_execute::<sagas::disk_delete::SagaDiskDelete>(saga_params)
             .await?;
+
         Ok(())
     }
 
@@ -356,13 +420,24 @@ impl super::Nexus {
         // First get the internal volume ID that is stored in the disk
         // database entry, once we have that just call the volume method
         // to remove the read only parent.
-        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .disk_id(disk_id)
-            .fetch()
-            .await?;
 
-        self.volume_remove_read_only_parent(&opctx, db_disk.volume_id())
-            .await?;
+        let disk = self.datastore().disk_get(opctx, disk_id).await?;
+
+        match disk {
+            datastore::Disk::Crucible(disk) => {
+                self.volume_remove_read_only_parent(&opctx, disk.volume_id())
+                    .await?;
+            }
+
+            datastore::Disk::LocalStorage(_) => {
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "cannot remove rop for local storage disk {}",
+                        disk.id()
+                    ),
+                });
+            }
+        }
 
         Ok(())
     }
@@ -379,6 +454,21 @@ impl super::Nexus {
 
         (.., authz_disk, db_disk) =
             disk_lookup.fetch_for(authz::Action::Modify).await?;
+
+        match db_disk.disk_type {
+            db::model::DiskType::Crucible => {
+                // ok
+            }
+
+            db::model::DiskType::LocalStorage => {
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "cannot import to local storage disk {}",
+                        authz_disk.id()
+                    ),
+                });
+            }
+        }
 
         let disk_state: DiskState = db_disk.state().into();
         match disk_state {
@@ -405,17 +495,32 @@ impl super::Nexus {
             .map(|_| ())
     }
 
-    /// Bulk write some bytes into a disk that's in state ImportingFromBulkWrites
+    /// Bulk write some bytes into a disk that's in state
+    /// ImportingFromBulkWrites
     pub(crate) async fn disk_manual_import(
         self: &Arc<Self>,
+        opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
         param: params::ImportBlocksBulkWrite,
     ) -> UpdateResult<()> {
-        let db_disk: db::model::Disk;
+        let (.., authz_disk) =
+            disk_lookup.lookup_for(authz::Action::Modify).await?;
 
-        (.., db_disk) = disk_lookup.fetch_for(authz::Action::Modify).await?;
+        let disk =
+            match self.datastore().disk_get(opctx, authz_disk.id()).await? {
+                db::datastore::Disk::Crucible(disk) => disk,
 
-        let disk_state: DiskState = db_disk.state().into();
+                db::datastore::Disk::LocalStorage(_) => {
+                    return Err(Error::InternalError {
+                        internal_message: format!(
+                            "cannot import to local storage disk {}",
+                            authz_disk.id()
+                        ),
+                    });
+                }
+            };
+
+        let disk_state: DiskState = disk.state().into();
         match disk_state {
             DiskState::ImportingFromBulkWrites => {
                 // ok
@@ -423,13 +528,13 @@ impl super::Nexus {
 
             _ => {
                 return Err(Error::invalid_request(&format!(
-                    "cannot import blocks with a bulk write for disk in state {:?}",
-                    disk_state,
+                    "cannot import blocks with a bulk write for disk in state \
+                    {disk_state:?}",
                 )));
             }
         }
 
-        if let Some(endpoint) = db_disk.pantry_address() {
+        if let Some(endpoint) = disk.pantry_address() {
             let data: Vec<u8> = base64::Engine::decode(
                 &base64::engine::general_purpose::STANDARD,
                 &param.base64_encoded_data,
@@ -443,11 +548,11 @@ impl super::Nexus {
 
             info!(
                 self.log,
-                "bulk write of {} bytes to offset {} of disk {} using pantry endpoint {:?}",
+                "bulk write of {} bytes to offset {} of disk {} using pantry \
+                endpoint {endpoint:?}",
                 data.len(),
                 param.offset,
-                db_disk.id(),
-                endpoint,
+                disk.id(),
             );
 
             // The the disk state can change between the check above and here
@@ -495,10 +600,8 @@ impl super::Nexus {
                 base64_encoded_data: param.base64_encoded_data,
             };
 
-            client
-                .bulk_write(&db_disk.id().to_string(), &request)
-                .await
-                .map_err(|e| match e {
+            client.bulk_write(&disk.id().to_string(), &request).await.map_err(
+                |e| match e {
                     crucible_pantry_client::Error::ErrorResponse(rv) => {
                         match rv.status() {
                             status if status.is_client_error() => {
@@ -509,19 +612,23 @@ impl super::Nexus {
                         }
                     }
 
-                    _ => Error::internal_error(&format!(
-                        "error sending bulk write to pantry: {}",
-                        e,
-                    )),
-                })?;
+                    _ => Error::InternalError {
+                        internal_message: format!(
+                            "error sending bulk write to pantry: {e}"
+                        ),
+                    },
+                },
+            )?;
 
             Ok(())
         } else {
-            error!(self.log, "disk {} has no pantry address!", db_disk.id());
-            Err(Error::internal_error(&format!(
-                "disk {} has no pantry address!",
-                db_disk.id(),
-            )))
+            error!(self.log, "disk {} has no pantry address!", disk.id());
+            Err(Error::InternalError {
+                internal_message: format!(
+                    "disk {} has no pantry address!",
+                    disk.id(),
+                ),
+            })
         }
     }
 
@@ -538,6 +645,21 @@ impl super::Nexus {
 
         (.., authz_disk, db_disk) =
             disk_lookup.fetch_for(authz::Action::Modify).await?;
+
+        match db_disk.disk_type {
+            db::model::DiskType::Crucible => {
+                // ok
+            }
+
+            db::model::DiskType::LocalStorage => {
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "cannot import to local storage disk {}",
+                        authz_disk.id()
+                    ),
+                });
+            }
+        }
 
         let disk_state: DiskState = db_disk.state().into();
         match disk_state {
@@ -572,14 +694,28 @@ impl super::Nexus {
         disk_lookup: &lookup::Disk<'_>,
         finalize_params: &params::FinalizeDisk,
     ) -> UpdateResult<()> {
-        let (authz_silo, authz_proj, authz_disk) =
-            disk_lookup.lookup_for(authz::Action::Modify).await?;
+        let (authz_silo, authz_proj, authz_disk, _db_disk) =
+            disk_lookup.fetch_for(authz::Action::Modify).await?;
+
+        let disk: datastore::CrucibleDisk =
+            match self.datastore().disk_get(&opctx, authz_disk.id()).await? {
+                datastore::Disk::Crucible(disk) => disk,
+
+                datastore::Disk::LocalStorage(_) => {
+                    return Err(Error::InternalError {
+                        internal_message: format!(
+                            "cannot finalize local storage disk {}",
+                            authz_disk.id()
+                        ),
+                    });
+                }
+            };
 
         let saga_params = sagas::finalize_disk::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id: authz_silo.id(),
             project_id: authz_proj.id(),
-            disk_id: authz_disk.id(),
+            disk,
             snapshot_name: finalize_params.snapshot_name.clone(),
         };
 

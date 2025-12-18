@@ -320,7 +320,7 @@ impl JsonSchema for Name {
         "Name".to_string()
     }
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         name_schema(schemars::schema::Metadata {
             title: Some(
@@ -401,13 +401,13 @@ impl JsonSchema for NameOrId {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![
-                    label_schema("id", gen.subschema_for::<Uuid>()),
-                    label_schema("name", gen.subschema_for::<Name>()),
+                    label_schema("id", generator.subschema_for::<Uuid>()),
+                    label_schema("name", generator.subschema_for::<Name>()),
                 ]),
                 ..Default::default()
             })),
@@ -453,7 +453,7 @@ impl JsonSchema for UserId {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         name_schema(schemars::schema::Metadata {
             title: Some("A username for a local-only user".to_string()),
@@ -578,13 +578,16 @@ impl ByteCount {
 
 impl Display for ByteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        if self.to_bytes() >= TiB && self.to_bytes() % TiB == 0 {
+        if self.to_bytes() >= TiB && self.to_bytes().is_multiple_of(TiB) {
             write!(f, "{} TiB", self.to_whole_tebibytes())
-        } else if self.to_bytes() >= GiB && self.to_bytes() % GiB == 0 {
+        } else if self.to_bytes() >= GiB && self.to_bytes().is_multiple_of(GiB)
+        {
             write!(f, "{} GiB", self.to_whole_gibibytes())
-        } else if self.to_bytes() >= MiB && self.to_bytes() % MiB == 0 {
+        } else if self.to_bytes() >= MiB && self.to_bytes().is_multiple_of(MiB)
+        {
             write!(f, "{} MiB", self.to_whole_mebibytes())
-        } else if self.to_bytes() >= KiB && self.to_bytes() % KiB == 0 {
+        } else if self.to_bytes() >= KiB && self.to_bytes().is_multiple_of(KiB)
+        {
             write!(f, "{} KiB", self.to_whole_kibibytes())
         } else {
             write!(f, "{} B", self.to_bytes())
@@ -593,7 +596,16 @@ impl Display for ByteCount {
 }
 
 // TODO-cleanup This could use the experimental std::num::IntErrorKind.
-#[derive(Debug, Eq, thiserror::Error, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Debug,
+    Eq,
+    thiserror::Error,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
 pub enum ByteCountRangeError {
     #[error("value is too small for a byte count")]
     TooSmall,
@@ -656,7 +668,12 @@ impl From<ByteCount> for i64 {
     Diffable,
 )]
 #[daft(leaf)]
-pub struct Generation(u64);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct Generation(
+    // Generations are restricted to 2**63 - 1 as documented above.
+    #[cfg_attr(any(test, feature = "testing"), strategy(0..=i64::MAX as u64))]
+    u64,
+);
 
 impl Generation {
     // `as` is a little distasteful because it allows lossy conversion, but we
@@ -872,7 +889,7 @@ impl JsonSchema for Hostname {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -952,6 +969,8 @@ pub enum ResourceType {
     LldpLinkConfig,
     LoopbackAddress,
     MetricProducer,
+    MulticastGroup,
+    MulticastGroupMember,
     NatEntry,
     Oximeter,
     PhysicalDisk,
@@ -964,6 +983,7 @@ pub enum ResourceType {
     RouterRoute,
     SagaDbg,
     SamlIdentityProvider,
+    ScimClientBearerToken,
     Service,
     ServiceNetworkInterface,
     Silo,
@@ -1413,6 +1433,13 @@ impl SimpleIdentityOrName for AntiAffinityGroupMember {
 
 // DISKS
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskType {
+    Distributed,
+    Local,
+}
+
 /// View of a Disk
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
@@ -1427,6 +1454,7 @@ pub struct Disk {
     pub block_size: ByteCount,
     pub state: DiskState,
     pub device_path: String,
+    pub disk_type: DiskType,
 }
 
 /// State of a Disk
@@ -2168,7 +2196,7 @@ impl JsonSchema for L4PortRange {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2288,7 +2316,7 @@ impl JsonSchema for IcmpParamRange {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2460,7 +2488,7 @@ impl JsonSchema for MacAddr {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2509,6 +2537,12 @@ impl Vni {
 
     /// The VNI for the builtin services VPC.
     pub const SERVICES_VNI: Self = Self(100);
+
+    /// VNI default if no VPC is provided for a multicast group.
+    ///
+    /// This is a low-numbered VNI to avoid colliding with user VNIs.
+    /// However, it is not in the Oxide-reserved range yet.
+    pub const DEFAULT_MULTICAST_VNI: Self = Self(77);
 
     /// Oxide reserves a slice of initial VNIs for its own use.
     pub const MIN_GUEST_VNI: u32 = 1024;
@@ -3260,6 +3294,11 @@ pub enum BgpPeerState {
     /// Waiting for keepaliave or notification from peer.
     OpenConfirm,
 
+    /// There is an ongoing Connection Collision that hasn't yet been resolved.
+    /// Two connections are maintained until one connection receives an Open or
+    /// is able to progress into Established.
+    ConnectionCollision,
+
     /// Synchronizing with peer.
     SessionSetup,
 
@@ -3277,6 +3316,9 @@ impl From<mg_admin_client::types::FsmStateKind> for BgpPeerState {
             FsmStateKind::Active => BgpPeerState::Active,
             FsmStateKind::OpenSent => BgpPeerState::OpenSent,
             FsmStateKind::OpenConfirm => BgpPeerState::OpenConfirm,
+            FsmStateKind::ConnectionCollision => {
+                BgpPeerState::ConnectionCollision
+            }
             FsmStateKind::SessionSetup => BgpPeerState::SessionSetup,
             FsmStateKind::Established => BgpPeerState::Established,
         }
@@ -3327,12 +3369,12 @@ impl BgpMessageHistory {
 
 impl JsonSchema for BgpMessageHistory {
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         let obj = schemars::schema::Schema::Object(
             schemars::schema::SchemaObject::default(),
         );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        generator.definitions_mut().insert(Self::schema_name(), obj.clone());
         obj
     }
 
@@ -3421,6 +3463,10 @@ pub struct ServiceIcmpConfig {
     pub enabled: bool,
 }
 
+// TODO: move these TUF repo structs out of this file. They're not external
+// anymore after refactors that use views::TufRepo in the external API. They are
+// still used extensively in internal services.
+
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoDescription {
@@ -3495,40 +3541,6 @@ pub struct TufArtifactMeta {
     pub sign: Option<Vec<u8>>,
 }
 
-/// Data about a successful TUF repo import into Nexus.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct TufRepoInsertResponse {
-    /// The repository as present in the database.
-    pub recorded: TufRepoDescription,
-
-    /// Whether this repository already existed or is new.
-    pub status: TufRepoInsertStatus,
-}
-
-/// Status of a TUF repo import.
-///
-/// Part of `TufRepoInsertResponse`.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum TufRepoInsertStatus {
-    /// The repository already existed in the database.
-    AlreadyExists,
-
-    /// The repository did not exist, and was inserted into the database.
-    Inserted,
-}
-
-/// Data about a successful TUF repo get from Nexus.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct TufRepoGetResponse {
-    /// The description of the repository.
-    pub description: TufRepoDescription,
-}
-
 #[derive(
     Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, ObjectIdentity,
 )]
@@ -3566,7 +3578,7 @@ pub enum ImportExportPolicy {
 /// will fail to parse if the key is not present. The JSON Schema in the
 /// OpenAPI definition will also reflect that the field is required. See
 /// <https://github.com/serde-rs/serde/issues/2753>.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct Nullable<T>(pub Option<T>);
 
 impl<T> From<Option<T>> for Nullable<T> {

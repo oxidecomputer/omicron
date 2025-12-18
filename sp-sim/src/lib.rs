@@ -16,6 +16,7 @@ use async_trait::async_trait;
 pub use config::Config;
 use gateway_messages::SpPort;
 use gateway_types::component::SpState;
+pub use gimlet::FAKE_GIMLET_MODEL;
 pub use gimlet::Gimlet;
 pub use gimlet::GimletPowerState;
 pub use gimlet::SIM_GIMLET_BOARD;

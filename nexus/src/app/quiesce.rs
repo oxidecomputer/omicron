@@ -4,6 +4,7 @@
 
 //! Manage Nexus quiesce state
 
+use crate::app::background::LoadedTargetBlueprint;
 use anyhow::{Context, anyhow, bail};
 use assert_matches::assert_matches;
 use chrono::Utc;
@@ -11,8 +12,6 @@ use nexus_db_model::DbMetadataNexusState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::internal_api::views::QuiesceState;
@@ -56,8 +55,7 @@ pub struct NexusQuiesceHandle {
     my_nexus_id: OmicronZoneUuid,
     sagas: SagaQuiesceHandle,
     quiesce_opctx: Arc<OpContext>,
-    latest_blueprint:
-        watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    latest_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
     state: watch::Sender<QuiesceState>,
 }
 
@@ -65,9 +63,7 @@ impl NexusQuiesceHandle {
     pub fn new(
         datastore: Arc<DataStore>,
         my_nexus_id: OmicronZoneUuid,
-        latest_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
-        >,
+        latest_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
         quiesce_opctx: OpContext,
     ) -> NexusQuiesceHandle {
         let saga_quiesce_log =
@@ -336,12 +332,12 @@ async fn check_all_sagas_drained(
         .await
         // This should be impossible
         .context("latest_blueprint rx channel closed")?
-        .as_deref()
+        .as_ref()
         // unwrap(): wait_for() returns a value for which the closure
         // returns true, and we checked that this is `Some`
         .unwrap()
         // extract just the blueprint part
-        .1
+        .blueprint
         // As usual, we clone to avoid locking the watch channel for the
         // lifetime of this value.
         .clone();
@@ -508,6 +504,7 @@ async fn check_all_sagas_drained(
 
 #[cfg(test)]
 mod test {
+    use crate::app::background::LoadedTargetBlueprint;
     use crate::app::quiesce::NexusQuiesceHandle;
     use crate::app::sagas::test_helpers::test_opctx;
     use assert_matches::assert_matches;
@@ -517,9 +514,9 @@ mod test {
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
     use http::StatusCode;
-    use nexus_client::types::QuiesceState;
-    use nexus_client::types::QuiesceStatus;
     use nexus_db_model::DbMetadataNexusState;
+    use nexus_lockstep_client::types::QuiesceState;
+    use nexus_lockstep_client::types::QuiesceStatus;
     use nexus_test_interface::NexusServer;
     use nexus_test_utils::db::TestDatabase;
     use nexus_test_utils_macros::nexus_test;
@@ -535,16 +532,18 @@ mod test {
     use std::collections::BTreeSet;
     use std::sync::Arc;
     use std::time::Duration;
+    use std::time::Instant;
     use tokio::sync::watch;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
-    type NexusClientError = nexus_client::Error<nexus_client::types::Error>;
+    type NexusClientError =
+        nexus_lockstep_client::Error<nexus_lockstep_client::types::Error>;
 
     async fn wait_quiesce(
         log: &Logger,
-        client: &nexus_client::Client,
+        client: &nexus_lockstep_client::Client,
         timeout: Duration,
     ) -> QuiesceStatus {
         wait_for_condition(
@@ -558,9 +557,7 @@ mod test {
                 if matches!(rv.state, QuiesceState::Quiesced { .. }) {
                     Ok(rv)
                 } else {
-                    Err(CondCheckError::<
-                        nexus_client::Error<nexus_client::types::Error>,
-                    >::NotYet)
+                    Err(CondCheckError::<NexusClientError>::NotYet)
                 }
             },
             &Duration::from_millis(50),
@@ -572,6 +569,7 @@ mod test {
 
     fn verify_quiesced(
         before: DateTime<Utc>,
+        before_instant: Instant,
         after: DateTime<Utc>,
         status: QuiesceStatus,
     ) {
@@ -599,7 +597,7 @@ mod test {
         assert!(duration_total >= duration_draining_sagas);
         assert!(duration_total >= duration_draining_db);
         assert!(duration_total >= duration_recording_quiesce);
-        assert!(duration_total <= (after - before).to_std().unwrap());
+        assert!(duration_total <= before_instant.elapsed());
         assert!(status.sagas.sagas_pending.is_empty());
         assert!(status.db_claims.is_empty());
     }
@@ -628,12 +626,14 @@ mod test {
     #[nexus_test(server = crate::Server)]
     async fn test_quiesce_easy(cptestctx: &ControlPlaneTestContext) {
         let log = &cptestctx.logctx.log;
-        let nexus_internal_url = format!(
+        let nexus_lockstep_url = format!(
             "http://{}",
-            cptestctx.server.get_http_server_internal_address().await
+            cptestctx.server.get_http_server_lockstep_address(),
         );
-        let nexus_client =
-            nexus_client::Client::new(&nexus_internal_url, log.clone());
+        let nexus_client = nexus_lockstep_client::Client::new(
+            &nexus_lockstep_url,
+            log.clone(),
+        );
 
         // We need to enable blueprint execution in order to complete a saga
         // assignment pass, which is required for quiescing to work.
@@ -642,6 +642,7 @@ mod test {
         // If we quiesce the only Nexus while it's not doing anything, that
         // should complete quickly.
         let before = Utc::now();
+        let before_instant = Instant::now();
         let _ = nexus_client
             .quiesce_start()
             .await
@@ -649,7 +650,7 @@ mod test {
         let rv =
             wait_quiesce(log, &nexus_client, Duration::from_secs(30)).await;
         let after = Utc::now();
-        verify_quiesced(before, after, rv);
+        verify_quiesced(before, before_instant, after, rv);
     }
 
     /// Exercise non-trivial app-level quiesce in an environment with just one
@@ -657,12 +658,14 @@ mod test {
     #[nexus_test(server = crate::Server)]
     async fn test_quiesce_full(cptestctx: &ControlPlaneTestContext) {
         let log = &cptestctx.logctx.log;
-        let nexus_internal_url = format!(
+        let nexus_lockstep_url = format!(
             "http://{}",
-            cptestctx.server.get_http_server_internal_address().await
+            cptestctx.server.get_http_server_lockstep_address(),
         );
-        let nexus_client =
-            nexus_client::Client::new(&nexus_internal_url, log.clone());
+        let nexus_client = nexus_lockstep_client::Client::new(
+            &nexus_lockstep_url,
+            log.clone(),
+        );
 
         // We need to enable blueprint execution in order to complete a saga
         // assignment pass, which is required for quiescing to work.
@@ -691,6 +694,7 @@ mod test {
 
         // Start quiescing.
         let before = Utc::now();
+        let before_instant = Instant::now();
         let _ = nexus_client
             .quiesce_start()
             .await
@@ -798,7 +802,7 @@ mod test {
         let rv =
             wait_quiesce(log, &nexus_client, Duration::from_secs(30)).await;
         let after = Utc::now();
-        verify_quiesced(before, after, rv);
+        verify_quiesced(before, before_instant, after, rv);
 
         // Just to be sure, make sure we can neither create new saga nor access
         // the database.
@@ -874,8 +878,10 @@ mod test {
             time_made_target: Utc::now(),
         };
         let blueprint_id = blueprint.id;
-        let (_, blueprint_rx) =
-            watch::channel(Some(Arc::new((bp_target, blueprint))));
+        let (_, blueprint_rx) = watch::channel(Some(LoadedTargetBlueprint {
+            target: bp_target,
+            blueprint: Arc::new(blueprint),
+        }));
 
         // Insert active records for the Nexus instances.
         let conn =

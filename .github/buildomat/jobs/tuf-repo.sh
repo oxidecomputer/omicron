@@ -14,20 +14,10 @@
 #:	"%/work/*.log",
 #: ]
 #: access_repos = [
-#:	"oxidecomputer/amd-apcb",
-#:	"oxidecomputer/amd-efs",
 #:	"oxidecomputer/amd-firmware",
-#:	"oxidecomputer/amd-flash",
-#:	"oxidecomputer/amd-host-image-builder",
-#:	"oxidecomputer/boot-image-tools",
 #:	"oxidecomputer/chelsio-t6-roms",
-#:	"oxidecomputer/compliance-pilot",
-#:	"oxidecomputer/facade",
-#:	"oxidecomputer/helios",
-#:	"oxidecomputer/helios-omicron-brand",
-#:	"oxidecomputer/helios-omnios-build",
-#:	"oxidecomputer/helios-omnios-extra",
-#:	"oxidecomputer/nanobl-rs",
+#:	"oxidecomputer/dmar-report",
+#:	"oxidecomputer/pilot",
 #: ]
 #:
 #: [[publish]]

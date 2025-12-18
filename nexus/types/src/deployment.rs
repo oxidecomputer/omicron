@@ -15,24 +15,21 @@
 use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
-pub use crate::inventory::SourceNatConfig;
+pub use crate::inventory::SourceNatConfigGeneric;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
 use blueprint_display::BpHostPhase2TableSchema;
 use blueprint_display::BpTableColumn;
 use daft::Diffable;
+use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use iddqd::id_ord_map::RefMut;
 use iddqd::id_upcast;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use nexus_sled_agent_shared::inventory::ZoneKind;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::TufArtifactMeta;
@@ -54,10 +51,18 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types_versions::latest::inventory::HostPhase2DesiredContents;
+use sled_agent_types_versions::latest::inventory::HostPhase2DesiredSlots;
+use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
+use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
+use sled_agent_types_versions::latest::inventory::OmicronZoneImageSource;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fmt::Display;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -72,7 +77,7 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
-mod planning_report;
+pub mod planning_report;
 mod reconfigurator_config;
 mod zone_type;
 
@@ -82,7 +87,6 @@ use anyhow::bail;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 pub use clickhouse::ClickhouseClusterConfig;
-use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
@@ -94,12 +98,16 @@ pub use network_resources::OmicronZoneExternalSnatIp;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
+use omicron_common::api::external::Error;
 pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
 pub use planning_input::CockroachDbClusterVersion;
 pub use planning_input::CockroachDbPreserveDowngrade;
 pub use planning_input::CockroachDbSettings;
 pub use planning_input::DiskFilter;
+pub use planning_input::ExternalIpPolicy;
+pub use planning_input::ExternalIpPolicyBuilder;
+pub use planning_input::ExternalIpPolicyError;
 pub use planning_input::OximeterReadMode;
 pub use planning_input::OximeterReadPolicy;
 pub use planning_input::PlanningInput;
@@ -153,7 +161,6 @@ use blueprint_display::{
     BpDiffState, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
     BpTable, BpTableData, BpTableRow, KvList, constants::*,
 };
-use id_map::{IdMap, IdMappable};
 use std::str::FromStr;
 
 /// Describes a complete set of software and configuration for the system
@@ -304,15 +311,17 @@ impl Blueprint {
     /// that match the provided filter, along with the associated sled id.
     pub fn all_omicron_zones<F>(
         &self,
-        filter: F,
+        mut filter: F,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
     where
         F: FnMut(BlueprintZoneDisposition) -> bool,
     {
-        Blueprint::filtered_zones(
-            self.sleds.iter().map(|(sled_id, config)| (*sled_id, config)),
-            filter,
-        )
+        self.sleds
+            .iter()
+            .flat_map(move |(sled_id, config)| {
+                config.zones.iter().map(move |z| (*sled_id, z))
+            })
+            .filter(move |(_, z)| filter(z.disposition))
     }
 
     /// Iterate over all Nexus zones that match the provided filter.
@@ -332,26 +341,6 @@ impl Blueprint {
                 None
             }
         })
-    }
-
-    /// Iterate over the [`BlueprintZoneConfig`] instances that match the
-    /// provided filter, along with the associated sled id.
-    //
-    // This is a scoped function so that it can be used in the
-    // `BlueprintBuilder` during planning as well as in the `Blueprint`.
-    pub fn filtered_zones<'a, I, F>(
-        zones_by_sled_id: I,
-        mut filter: F,
-    ) -> impl Iterator<Item = (SledUuid, &'a BlueprintZoneConfig)>
-    where
-        I: Iterator<Item = (SledUuid, &'a BlueprintSledConfig)>,
-        F: FnMut(BlueprintZoneDisposition) -> bool,
-    {
-        zones_by_sled_id
-            .flat_map(move |(sled_id, config)| {
-                config.zones.iter().map(move |z| (sled_id, z))
-            })
-            .filter(move |(_, z)| filter(z.disposition))
     }
 
     /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the
@@ -391,6 +380,18 @@ impl Blueprint {
     /// Iterate over the ids of all sleds in the blueprint
     pub fn sleds(&self) -> impl Iterator<Item = SledUuid> + '_ {
         self.sleds.keys().copied()
+    }
+
+    /// Iterate over the sled configs of all active (not decommissioned) sleds.
+    pub fn active_sled_configs(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintSledConfig)> {
+        self.sleds.iter().filter_map(
+            |(&sled_id, sled_config)| match sled_config.state {
+                SledState::Active => Some((sled_id, sled_config)),
+                SledState::Decommissioned => None,
+            },
+        )
     }
 
     /// Summarize the difference between two blueprints.
@@ -441,23 +442,167 @@ impl Blueprint {
         &self,
         nexus_zones: &BTreeSet<OmicronZoneUuid>,
     ) -> Result<Option<Generation>, anyhow::Error> {
-        let mut gen = None;
+        let mut r#gen = None;
         for (_, zone, nexus_zone) in
             self.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
         {
             if nexus_zones.contains(&zone.id) {
                 let found_gen = nexus_zone.nexus_generation;
-                if let Some(gen) = gen {
-                    if found_gen != gen {
+                if let Some(r#gen) = r#gen {
+                    if found_gen != r#gen {
                         bail!("Multiple generations found for these zones");
                     }
                 }
-                gen = Some(found_gen);
+                r#gen = Some(found_gen);
             }
         }
 
-        Ok(gen)
+        Ok(r#gen)
     }
+
+    /// Returns the Nexus generation number for Nexus `nexus_id`, which is
+    /// assumed to refer to the currently-running Nexus instance (the current
+    /// process)
+    pub fn find_generation_for_self(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<Generation, Error> {
+        for (_sled_id, zone_config, nexus_config) in
+            self.all_nexus_zones(BlueprintZoneDisposition::could_be_running)
+        {
+            if zone_config.id == nexus_id {
+                return Ok(nexus_config.nexus_generation);
+            }
+        }
+
+        Err(Error::internal_error(&format!(
+            "failed to determine generation of currently-running Nexus: \
+             did not find Nexus {} in blueprint {}",
+            nexus_id, self.id,
+        )))
+    }
+
+    /// Return the configuration of upstream NTP settings (needed to configure
+    /// boundary NTP zones).
+    ///
+    /// This information should be operator-configurable, but currently is not:
+    /// we carry it forward from rack setup time onward from blueprint to
+    /// blueprint. Fixing this is
+    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
+    ///
+    /// Returns `None` if this blueprint contains no boundary NTP zones from
+    /// which we can infer the upstream configuration. (This should only be the
+    /// case for test blueprints - real systems always deploy at least one
+    /// boundary NTP zone).
+    pub fn upstream_ntp_config(&self) -> Option<UpstreamNtpConfig<'_>> {
+        // The upstream NTP config can't be changed, so it's fine to use
+        // `find()` here and include searching both in-service and expunged
+        // zones. (Real racks will always have at least one in-service boundary
+        // NTP zone, but some test or test systems may have 0 if they have only
+        // a single sled and that sled's boundary NTP zone is being upgraded.)
+        self.all_omicron_zones(BlueprintZoneDisposition::any).find_map(
+            |(_sled_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::BoundaryNtp(ntp_config) => {
+                    Some(UpstreamNtpConfig {
+                        ntp_servers: &ntp_config.ntp_servers,
+                        dns_servers: &ntp_config.dns_servers,
+                        domain: ntp_config.domain.as_deref(),
+                    })
+                }
+                _ => None,
+            },
+        )
+    }
+
+    /// Return the operator-specified configuration of Nexus.
+    ///
+    /// This information should be operator-configurable, but currently is not:
+    /// we carry it forward from rack setup time onward from blueprint to
+    /// blueprint. Fixing this is
+    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
+    ///
+    /// Returns `None` if this blueprint contains no Nexus zones from which we
+    /// can infer the configuration. (This should only be the case for test
+    /// blueprints - real systems always deploy at least one Nexus zone).
+    pub fn operator_nexus_config(&self) -> Option<OperatorNexusConfig<'_>> {
+        // The Nexus config can't be changed, so it's fine to use
+        // `find()` here and include searching both in-service and expunged
+        // zones. (Real racks will always have at least one in-service Nexus
+        // zone - the one calling this code - but some tests create blueprints
+        // without any.)
+        self.all_omicron_zones(BlueprintZoneDisposition::any).find_map(
+            |(_sled_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::Nexus(nexus_config) => {
+                    Some(OperatorNexusConfig {
+                        external_tls: nexus_config.external_tls,
+                        external_dns_servers: &nexus_config
+                            .external_dns_servers,
+                    })
+                }
+                _ => None,
+            },
+        )
+    }
+
+    /// Returns the complete set of external IP addresses assigned to external
+    /// DNS servers described by this blueprint, including both in-service and
+    /// expunged external DNS zones.
+    ///
+    /// This information should be operator-configurable, but currently is not:
+    /// we carry it forward from rack setup time onward from blueprint to
+    /// blueprint. Fixing this is
+    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
+    ///
+    /// Returns an empty set if this blueprint contains no external DNS zones.
+    /// (This should only be the case for test blueprints - real systems always
+    /// deploy at least one external DNS zone).
+    pub fn all_external_dns_external_ips(&self) -> BTreeSet<IpAddr> {
+        // We must look for both expunged and in-service zones here: if we've
+        // expunged an external DNS zone on a given IP, the planner needs to
+        // start a new one on that same IP, and today the only way for it to
+        // know that IP is if we look for expunged zones. This also affects the
+        // planner's pruning logic: one condition on pruning external DNS zones
+        // is that the expunged zone's IP must be in use by an in-service zone.
+        //
+        // It's also important we return a set of IPs (as opposed to an iterator
+        // or a vec): we _expect_ to get some number of duplicates here, for a
+        // couple reasons:
+        //
+        // 1. Until we implement "pruning expunged zones from the blueprint",
+        //    we'll have many previously-expunged external DNS zones all using
+        //    the same IP - one for each time an external DNS zone has been
+        //    expunged and then replaced.
+        // 2. Even once we implement pruning, during an upgrade it will be
+        //    common to (a) expunge a zone, (b) add a new one reusing that
+        //    zone's IP, then (c) prune the expunged zone. In between (b) and
+        //    (c), the IP would show up twice.
+        //
+        // We never expect to get duplicates among the in-service zones, but we
+        // don't check for that here. That would be an illegal blueprint; blippy
+        // would complain, and attempting to execute it would fail due to
+        // database constraints on external IP uniqueness.
+        self.all_omicron_zones(BlueprintZoneDisposition::any)
+            .filter_map(|(_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::ExternalDns(dns) => {
+                    Some(dns.dns_address.addr.ip())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UpstreamNtpConfig<'a> {
+    pub ntp_servers: &'a [String],
+    pub dns_servers: &'a [IpAddr],
+    pub domain: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OperatorNexusConfig<'a> {
+    pub external_tls: bool,
+    pub external_dns_servers: &'a [IpAddr],
 }
 
 /// Description of the source of a blueprint.
@@ -513,7 +658,7 @@ impl<'a> BlueprintHostPhase2TableData<'a> {
 
     fn diff_rows<'b>(
         diffs: &'b BlueprintHostPhase2DesiredSlotsDiff<'_>,
-    ) -> impl Iterator<Item = BpTableRow> + 'b {
+    ) -> impl Iterator<Item = BpTableRow> + 'b + use<'b> {
         [(M2Slot::A, &diffs.slot_a), (M2Slot::B, &diffs.slot_b)]
             .into_iter()
             .map(|(slot, diff)| {
@@ -553,11 +698,11 @@ impl BpTableData for BlueprintHostPhase2TableData<'_> {
 /// Wrapper to display a table of a `BlueprintSledConfig`'s disks.
 #[derive(Clone, Debug)]
 struct BlueprintPhysicalDisksTableData<'a> {
-    disks: &'a IdMap<BlueprintPhysicalDiskConfig>,
+    disks: &'a IdOrdMap<BlueprintPhysicalDiskConfig>,
 }
 
 impl<'a> BlueprintPhysicalDisksTableData<'a> {
-    fn new(disks: &'a IdMap<BlueprintPhysicalDiskConfig>) -> Self {
+    fn new(disks: &'a IdOrdMap<BlueprintPhysicalDiskConfig>) -> Self {
         Self { disks }
     }
 }
@@ -584,11 +729,11 @@ impl BpTableData for BlueprintPhysicalDisksTableData<'_> {
 /// Wrapper to display a table of a `BlueprintSledConfig`'s disks.
 #[derive(Clone, Debug)]
 struct BlueprintDatasetsTableData<'a> {
-    datasets: &'a IdMap<BlueprintDatasetConfig>,
+    datasets: &'a IdOrdMap<BlueprintDatasetConfig>,
 }
 
 impl<'a> BlueprintDatasetsTableData<'a> {
-    fn new(datasets: &'a IdMap<BlueprintDatasetConfig>) -> Self {
+    fn new(datasets: &'a IdOrdMap<BlueprintDatasetConfig>) -> Self {
         Self { datasets }
     }
 }
@@ -607,11 +752,11 @@ impl BpTableData for BlueprintDatasetsTableData<'_> {
 /// Wrapper to display a table of a `BlueprintSledConfig`'s zones.
 #[derive(Clone, Debug)]
 struct BlueprintZonesTableData<'a> {
-    zones: &'a IdMap<BlueprintZoneConfig>,
+    zones: &'a IdOrdMap<BlueprintZoneConfig>,
 }
 
 impl<'a> BlueprintZonesTableData<'a> {
-    fn new(zones: &'a IdMap<BlueprintZoneConfig>) -> Self {
+    fn new(zones: &'a IdOrdMap<BlueprintZoneConfig>) -> Self {
         Self { zones }
     }
 }
@@ -796,6 +941,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
         for (sled_id, config) in sleds {
             let BlueprintSledConfig {
                 state,
+                subnet,
                 sled_agent_generation,
                 disks,
                 datasets,
@@ -804,14 +950,13 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 host_phase_2,
             } = config;
 
-            // Report the sled state
-            writeln!(
-                f,
-                "\n  sled: {sled_id} ({state}, config generation \
-                 {sled_agent_generation})",
-            )?;
-
+            // Report toplevel sled info
+            writeln!(f, "\n  sled: {sled_id}")?;
             let mut rows = Vec::new();
+            rows.push((STATE, state.to_string()));
+            rows.push((CONFIG_GENERATION, sled_agent_generation.to_string()));
+            rows.push((SUBNET, subnet.to_string()));
+
             if let Some(id) = remove_mupdate_override {
                 rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
             }
@@ -908,6 +1053,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
 )]
 pub struct BlueprintSledConfig {
     pub state: SledState,
+    pub subnet: Ipv6Subnet<SLED_PREFIX>,
 
     /// Generation number used when this type is converted into an
     /// `OmicronSledConfig` for use by sled-agent.
@@ -920,9 +1066,9 @@ pub struct BlueprintSledConfig {
     /// sent an `OmicronSledConfig`.
     pub sled_agent_generation: Generation,
 
-    pub disks: IdMap<BlueprintPhysicalDiskConfig>,
-    pub datasets: IdMap<BlueprintDatasetConfig>,
-    pub zones: IdMap<BlueprintZoneConfig>,
+    pub disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
+    pub datasets: IdOrdMap<BlueprintDatasetConfig>,
+    pub zones: IdOrdMap<BlueprintZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     pub host_phase_2: BlueprintHostPhase2DesiredSlots,
 }
@@ -1026,7 +1172,7 @@ impl ZoneSortKey for OmicronZoneConfig {
     }
 }
 
-fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
+fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord + use<T> {
     // First sort by kind, then by ID. This makes it so that zones of the same
     // kind (e.g. Crucible zones) are grouped together.
     (z.kind(), z.id())
@@ -1058,12 +1204,14 @@ pub struct BlueprintZoneConfig {
     pub image_source: BlueprintZoneImageSource,
 }
 
-impl IdMappable for BlueprintZoneConfig {
-    type Id = OmicronZoneUuid;
+impl IdOrdItem for BlueprintZoneConfig {
+    type Key<'a> = OmicronZoneUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+
+    id_upcast!();
 }
 
 impl BlueprintZoneConfig {
@@ -1233,6 +1381,7 @@ impl fmt::Display for BlueprintZoneDisposition {
     Diffable,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BlueprintZoneImageSource {
     /// This zone's image source is whatever happens to be on the sled's
     /// "install" dataset.
@@ -1309,6 +1458,7 @@ impl fmt::Display for BlueprintZoneImageSource {
     Diffable,
 )]
 #[serde(tag = "artifact_version", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BlueprintArtifactVersion {
     /// A specific version of the image is available.
     Available { version: ArtifactVersion },
@@ -1419,14 +1569,53 @@ impl fmt::Display for BlueprintHostPhase2DesiredContents {
 }
 
 #[derive(
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+    Copy,
+)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum MgsUpdateComponent {
+    Sp,
+    Rot,
+    RotBootloader,
+    HostOs,
+}
+
+impl Display for MgsUpdateComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            MgsUpdateComponent::HostOs => "Host OS",
+            MgsUpdateComponent::Rot => "RoT",
+            MgsUpdateComponent::RotBootloader => "RoT Bootloader",
+            MgsUpdateComponent::Sp => "SP",
+        };
+        write!(f, "{s}")
+    }
+}
+
+#[derive(
     Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdates {
     // The IdOrdMap key is the baseboard_id. Only one outstanding MGS-managed
     // update is allowed for a given baseboard.
     //
     // Note that keys aren't strings so this can't be serialized as a JSON map,
     // but IdOrdMap serializes as an array.
+    //
+    // For proptest, make this map small to avoid bloating the size of generated
+    // test data.
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
     by_baseboard: IdOrdMap<PendingMgsUpdate>,
 }
 
@@ -1495,6 +1684,7 @@ impl<'a> IntoIterator for &'a PendingMgsUpdates {
 #[derive(
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdate {
     // identity of the baseboard
     /// id of the baseboard that we're going to update
@@ -1526,7 +1716,11 @@ impl PendingMgsUpdate {
             PendingMgsUpdateDetails::Sp { .. } => "SP",
             PendingMgsUpdateDetails::Rot { .. } => "RoT",
             PendingMgsUpdateDetails::RotBootloader { .. } => "RoT bootloader",
-            PendingMgsUpdateDetails::HostPhase1(_) => "host phase 1",
+            // While the `PendingMgsUpdate` technically describes a host phase 1
+            // update, the human-useful description is that it describes a "host
+            // OS" update: it embeds a dependency that the phase 2 is updated
+            // too, and once it's enacted the full OS will be updated.
+            PendingMgsUpdateDetails::HostPhase1(_) => "host OS",
         };
         format!("update {sp_type:?} {slot_id} ({serial}) {kind} to {version}")
     }
@@ -1591,6 +1785,7 @@ impl PendingMgsUpdate {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(tag = "component", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum PendingMgsUpdateDetails {
     /// the SP itself is being updated
     Sp(PendingMgsUpdateSpDetails),
@@ -1603,6 +1798,21 @@ pub enum PendingMgsUpdateDetails {
     /// We write the phase 1 via MGS, and have a precheck condition that
     /// sled-agent has already written the matching phase 2.
     HostPhase1(PendingMgsUpdateHostPhase1Details),
+}
+
+impl From<&PendingMgsUpdateDetails> for MgsUpdateComponent {
+    fn from(details: &PendingMgsUpdateDetails) -> Self {
+        match &details {
+            PendingMgsUpdateDetails::Rot { .. } => MgsUpdateComponent::Rot,
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                MgsUpdateComponent::RotBootloader
+            }
+            PendingMgsUpdateDetails::Sp { .. } => MgsUpdateComponent::Sp,
+            PendingMgsUpdateDetails::HostPhase1(_) => {
+                MgsUpdateComponent::HostOs
+            }
+        }
+    }
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
@@ -1638,6 +1848,7 @@ impl slog::KV for PendingMgsUpdateDetails {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdateSpDetails {
     // implicit: component = SP_ITSELF
     // implicit: firmware slot id = 0 (always 0 for SP itself)
@@ -1670,6 +1881,7 @@ impl slog::KV for PendingMgsUpdateSpDetails {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdateRotDetails {
     // implicit: component = ROT
     // implicit: firmware slot id will be the inactive slot
@@ -1741,6 +1953,7 @@ impl slog::KV for PendingMgsUpdateRotDetails {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdateRotBootloaderDetails {
     // implicit: component = STAGE0
     // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
@@ -1777,6 +1990,7 @@ impl slog::KV for PendingMgsUpdateRotBootloaderDetails {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdateHostPhase1Details {
     /// Which slot is currently active according to the SP.
     ///
@@ -1817,7 +2031,20 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// don't need to be able to represent an invalid inactive slot.
     pub expected_inactive_phase_2_hash: ArtifactHash,
     /// Address for contacting sled-agent to check phase 2 contents.
+    #[cfg_attr(test, strategy(socket_addr_v6_without_flowinfo()))]
     pub sled_agent_address: SocketAddrV6,
+}
+
+// For proptest, we pass in flowinfo = 0, because flowinfo doesn't roundtrip
+// through JSON.
+#[cfg(test)]
+fn socket_addr_v6_without_flowinfo()
+-> impl proptest::strategy::Strategy<Value = SocketAddrV6> {
+    use proptest::strategy::Strategy;
+
+    proptest::arbitrary::any::<(Ipv6Addr, u16, u32)>().prop_map(
+        |(addr, port, scope_id)| SocketAddrV6::new(addr, port, 0, scope_id),
+    )
 }
 
 impl slog::KV for PendingMgsUpdateHostPhase1Details {
@@ -1872,6 +2099,7 @@ impl slog::KV for PendingMgsUpdateHostPhase1Details {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(tag = "kind", content = "version", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum ExpectedVersion {
     /// We expect to find _no_ valid caboose in this slot
     NoValidVersion,
@@ -1904,6 +2132,7 @@ impl fmt::Display for ExpectedVersion {
 #[derive(
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct ExpectedActiveRotSlot {
     pub slot: RotSlot,
     pub version: ArtifactVersion,
@@ -2033,12 +2262,12 @@ pub struct BlueprintPhysicalDiskConfig {
     pub pool_id: ZpoolUuid,
 }
 
-impl IdMappable for BlueprintPhysicalDiskConfig {
-    type Id = PhysicalDiskUuid;
-
-    fn id(&self) -> Self::Id {
+impl IdOrdItem for BlueprintPhysicalDiskConfig {
+    type Key<'a> = PhysicalDiskUuid;
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+    id_upcast!();
 }
 
 impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
@@ -2051,12 +2280,12 @@ impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
     }
 }
 
-impl IdMappable for BlueprintDatasetConfig {
-    type Id = DatasetUuid;
-
-    fn id(&self) -> Self::Id {
+impl IdOrdItem for BlueprintDatasetConfig {
+    type Key<'a> = DatasetUuid;
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+    id_upcast!();
 }
 
 /// The desired state of an Omicron-managed dataset in a blueprint.
@@ -2278,12 +2507,7 @@ impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
 pub struct UnstableReconfiguratorState {
     pub planning_input: PlanningInput,
     pub collections: Vec<Collection>,
-    // When collected from a deployed system, `target_blueprint` will always be
-    // `Some(_)`. `UnstableReconfiguratorState` is also used by
-    // `reconfigurator-cli`, which allows construction of states that do not
-    // represent a fully-deployed system (and maybe no blueprints at all, hence
-    // no target blueprint).
-    pub target_blueprint: Option<BlueprintTarget>,
+    pub target_blueprint: BlueprintTarget,
     pub blueprints: Vec<Blueprint>,
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
     pub external_dns: BTreeMap<Generation, DnsConfigParams>,
@@ -2301,7 +2525,8 @@ mod test {
     use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
     use crate::inventory::BaseboardId;
-    use gateway_client::types::SpType;
+    use gateway_types::component::SpType;
+    use sled_hardware_types::GIMLET_SLED_MODEL;
 
     #[test]
     fn test_serialize_pending_mgs_updates() {
@@ -2318,7 +2543,7 @@ mod test {
         let mut pending_mgs_updates = PendingMgsUpdates::new();
         let update = PendingMgsUpdate {
             baseboard_id: Arc::new(BaseboardId {
-                part_number: String::from("913-0000019"),
+                part_number: String::from(GIMLET_SLED_MODEL),
                 serial_number: String::from("BRM27230037"),
             }),
             sp_type: SpType::Sled,

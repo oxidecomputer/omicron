@@ -1,0 +1,4032 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Oxide Management Gateway Service API",
+    "description": "API for interacting with the Oxide control plane's gateway service",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/ignition": {
+      "get": {
+        "summary": "List SPs via Ignition",
+        "description": "Retreive information for all SPs via the Ignition controller. This is lower latency and has fewer possible failure modes than querying the SP over the management network.",
+        "operationId": "ignition_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SpIgnitionInfo",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpIgnitionInfo"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ignition/{type}/{slot}": {
+      "get": {
+        "summary": "Get SP info via Ignition",
+        "description": "Retreive information for an SP via the Ignition controller. This is lower latency and has fewer possible failure modes than querying the SP over the management network.",
+        "operationId": "ignition_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpIgnitionInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ignition/{type}/{slot}/{command}": {
+      "post": {
+        "summary": "Send an ignition command targeting a specific SP.",
+        "description": "This endpoint can be used to transition a target between A2 and A3 (via power-on / power-off) or reset it.\n\nThe management network traffic caused by requests to this endpoint is between this MGS instance and its local ignition controller, _not_ the SP targeted by the command.",
+        "operationId": "ignition_command",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "command",
+            "description": "Ignition command to perform on the targeted SP.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/IgnitionCommand"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/local/all-sp-ids": {
+      "get": {
+        "summary": "Get the complete list of SP identifiers this MGS instance is configured to",
+        "description": "find and communicate with.\n\nNote that unlike most MGS endpoints, this endpoint does not send any communication on the management network.",
+        "operationId": "sp_all_ids",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SpIdentifier",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpIdentifier"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/local/switch-id": {
+      "get": {
+        "summary": "Get the identifier for the switch this MGS instance is connected to.",
+        "description": "Note that most MGS endpoints behave identically regardless of which scrimlet the MGS instance is running on; this one, however, is intentionally different. This endpoint is _probably_ only useful for clients communicating with MGS over localhost (i.e., other services in the switch zone) who need to know which sidecar they are connected to.",
+        "operationId": "sp_local_switch_id",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpIdentifier"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/recovery/host-phase2": {
+      "post": {
+        "summary": "Upload a host phase2 image that can be served to recovering hosts via the",
+        "description": "host/SP control uart.\n\nMGS caches this image in memory and is limited to a small, fixed number of images (potentially 1). Uploading a new image may evict the least-recently-requested image if our cache is already full.",
+        "operationId": "recovery_host_phase2_upload",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostPhase2RecoveryImageId"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}": {
+      "get": {
+        "summary": "Get info on an SP",
+        "operationId": "sp_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component": {
+      "get": {
+        "summary": "List components of an SP",
+        "description": "A component is a distinct entity under an SP's direct control. This lists all those components for a given SP.",
+        "operationId": "sp_component_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpComponentList"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}": {
+      "get": {
+        "summary": "Get info for an SP component",
+        "description": "This can be useful, for example, to poll the state of a component if another interface has changed the power state of a component or updated a component.",
+        "operationId": "sp_component_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SpComponentDetails",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpComponentDetails"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/active-slot": {
+      "get": {
+        "summary": "Get the currently-active slot for an SP component",
+        "description": "Note that the meaning of \"current\" in \"currently-active\" may vary depending on the component: for example, it may mean \"the actively-running slot\" or \"the slot that will become active the next time the component is booted\".",
+        "operationId": "sp_component_active_slot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpComponentFirmwareSlot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the currently-active slot for an SP component",
+        "description": "Note that the meaning of \"current\" in \"currently-active\" may vary depending on the component: for example, it may mean \"the actively-running slot\" or \"the slot that will become active the next time the component is booted\".",
+        "operationId": "sp_component_active_slot_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "persist",
+            "description": "Persist this choice of active slot.",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpComponentFirmwareSlot"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/caboose": {
+      "get": {
+        "summary": "Get the caboose of an SP component",
+        "description": "Not all components have a caboose.",
+        "operationId": "sp_component_caboose_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "firmware_slot",
+            "description": "The firmware slot to for which we want to request caboose information.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpComponentCaboose"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/cfpa": {
+      "get": {
+        "summary": "Read the requested CFPA slot from a root of trust.",
+        "description": "This endpoint is only valid for the `rot` component.",
+        "operationId": "sp_rot_cfpa_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetCfpaParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotCfpa"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/clear-status": {
+      "post": {
+        "summary": "Clear status of a component",
+        "description": "For components that maintain event counters (e.g., the sidecar `monorail`), this will reset the event counters to zero.",
+        "operationId": "sp_component_clear_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/cmpa": {
+      "get": {
+        "summary": "Read the CMPA from a root of trust.",
+        "description": "This endpoint is only valid for the `rot` component.",
+        "operationId": "sp_rot_cmpa_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotCmpa"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/hash/{firmware_slot}": {
+      "get": {
+        "summary": "Get a computed hash of a given slot of a component.",
+        "description": "This endpoint is only valid for the `host-boot-flash` component.\n\nComputing the hash takes several seconds; this endpoint returns the current status. If the status is `HashNotStarted`, callers should start hashing using `sp_component_hash_firmware_start()`. If the status is `HashInProgress`, callers should wait a bit then call this endpoint again.",
+        "operationId": "sp_component_hash_firmware_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "firmware_slot",
+            "description": "Firmware slot of the component.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentFirmwareHashStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Start computing the hash of a given slot of a component.",
+        "description": "This endpoint is only valid for the `host-boot-flash` component.\n\nComputing the hash takes several seconds; callers should poll for results using `sp_component_hash_firmware_get()`. In general they should call `sp_component_hash_firmware_get()` first anyway, as the hashes are cached in the SP and may already be ready.",
+        "operationId": "sp_component_hash_firmware_start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "firmware_slot",
+            "description": "Firmware slot of the component.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/reset": {
+      "post": {
+        "summary": "Reset an SP component (possibly the SP itself).",
+        "operationId": "sp_component_reset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/SpComponentResetError"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/SpComponentResetError"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/rot-boot-info": {
+      "get": {
+        "summary": "Read the RoT boot state from a root of trust",
+        "description": "This endpoint is only valid for the `rot` component.",
+        "operationId": "sp_rot_boot_info",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetRotBootInfoParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/serial-console/attach": {
+      "get": {
+        "summary": "Upgrade into a websocket connection attached to the given SP",
+        "description": "component's serial console.",
+        "operationId": "sp_component_serial_console_attach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-dropshot-websocket": {}
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/serial-console/detach": {
+      "post": {
+        "summary": "Detach the websocket connection attached to the given SP component's",
+        "description": "serial console, if such a connection exists.",
+        "operationId": "sp_component_serial_console_detach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/update": {
+      "post": {
+        "summary": "Update an SP component",
+        "description": "Update a component of an SP according to its specific update mechanism. This interface is generic for all component types, but resolves to a mechanism specific to the given component type. This may fail for a variety of reasons including the update bundle being invalid or improperly specified or due to an error originating from the SP itself.\n\nNote that not all components may be updated; components without known update mechanisms will return an error without any inspection of the update bundle.\n\nUpdating the SP itself is done via the component name `sp`.",
+        "operationId": "sp_component_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "firmware_slot",
+            "description": "The update slot to apply this image to. Supply 0 if the component only has one update slot.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "description": "An identifier for this update.\n\nThis ID applies to this single instance of the API call; it is not an ID of `image` itself. Multiple API calls with the same `image` should use different IDs.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/update-abort": {
+      "post": {
+        "summary": "Abort any in-progress update an SP component",
+        "description": "Aborting an update to the SP itself is done via the component name `sp`.\n\nOn a successful return, the update corresponding to the given UUID will no longer be in progress (either aborted or applied).",
+        "operationId": "sp_component_update_abort",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAbortBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/update-status": {
+      "get": {
+        "summary": "Get the status of an update being applied to an SP component",
+        "description": "Getting the status of an update to the SP itself is done via the component name `sp`.",
+        "operationId": "sp_component_update_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpUpdateStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/ereports": {
+      "post": {
+        "summary": "Request ereports from the target service processor.",
+        "description": "Query parameters provide the ENAs of the initial ereport in the returned tranche, the SP's restart ID that the control plane believes is current, and the (optional) last committed ENA.",
+        "operationId": "sp_ereports_ingest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "committed",
+            "description": "The ENA of the last ereport committed to persistent storage from the requested reporter restart generation.\n\nIf the restart ID parameter matches the reporter's current restart ID, it is permitted to discard any ereports with ENAs up to and including this value. If the restart ID has changed from the provided one, the reporter will not discard data.",
+            "schema": {
+              "$ref": "#/components/schemas/Ena"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of ereports to return in this tranche.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "restart_id",
+            "description": "The restart ID of the reporter at which all other query parameters are valid.\n\nIf this value does not match the reporter's restart ID, the reporter's response will include the current generation, and will start at the earliest known ENA, rather than the provided `start_at` ENA.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForEreporterRestartKind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_at",
+            "description": "If present, the reporter should not include ENAs earlier than this one in its response, provided that the query's requested restart ID matches the current restart ID.",
+            "schema": {
+              "$ref": "#/components/schemas/Ena"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ereports"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/host-phase2-progress": {
+      "get": {
+        "summary": "Get the most recent host phase2 request we've seen from the target SP.",
+        "description": "This method can be used as an indirect progress report for how far along a host is when it is booting via the MGS -> SP -> UART recovery path. This path is used to install the trampoline image containing installinator to recover a sled.",
+        "operationId": "sp_host_phase2_progress_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostPhase2Progress"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear the most recent host phase2 request we've seen from the target SP.",
+        "operationId": "sp_host_phase2_progress_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/ipcc/installinator-image-id": {
+      "put": {
+        "summary": "Set the installinator image ID the sled should use for recovery.",
+        "description": "This value can be read by the host via IPCC; see the `ipcc` crate.",
+        "operationId": "sp_installinator_image_id_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallinatorImageId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear any previously-set installinator image ID on the target sled.",
+        "operationId": "sp_installinator_image_id_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/power-state": {
+      "get": {
+        "summary": "Get the current power state of a sled via its SP.",
+        "description": "Note that if the sled is in A3, the SP is powered off and will not be able to respond; use the ignition control endpoints for those cases.",
+        "operationId": "sp_power_state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PowerState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the current power state of a sled via its SP.",
+        "description": "Note that if the sled is in A3, the SP is powered off and will not be able to respond; use the ignition control endpoints for those cases.",
+        "operationId": "sp_power_state_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PowerState"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/sensor/{sensor_id}/value": {
+      "get": {
+        "summary": "Read the current value of a sensor by ID",
+        "description": "Sensor IDs come from the host topo tree.",
+        "operationId": "sp_sensor_read_value",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sensor_id",
+            "description": "ID for the sensor on the SP.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpSensorReading"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/startup-options": {
+      "get": {
+        "summary": "Get host startup options for a sled",
+        "description": "This endpoint will currently fail for any `SpType` other than `SpType::Sled`.",
+        "operationId": "sp_startup_options_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostStartupOptions"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set host startup options for a sled",
+        "description": "This endpoint will currently fail for any `SpType` other than `SpType::Sled`.",
+        "operationId": "sp_startup_options_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostStartupOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/task-dump": {
+      "get": {
+        "summary": "Get the number of task dumps present on an SP",
+        "operationId": "sp_task_dump_count",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "uint32",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/task-dump/{task_dump_index}": {
+      "get": {
+        "summary": "Read a single task dump from an SP",
+        "operationId": "sp_task_dump_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_dump_index",
+            "description": "The index of the task dump to be read.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDump"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ComponentFirmwareHashStatus": {
+        "oneOf": [
+          {
+            "description": "The hash is not available; the client must issue a separate request to begin calculating the hash.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "hash_not_calculated"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The hash is currently being calculated; the client should sleep briefly then check again.\n\nWe expect this operation to take a handful of seconds in practice.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "hash_in_progress"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The hash of the given firmware slot.",
+            "type": "object",
+            "properties": {
+              "sha256": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                },
+                "minItems": 32,
+                "maxItems": 32
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "hashed"
+                ]
+              }
+            },
+            "required": [
+              "sha256",
+              "status"
+            ]
+          }
+        ]
+      },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
+      "Ena": {
+        "description": "An Error Numeric Association (ENA)",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "Ereport": {
+        "description": "An ereport message.",
+        "type": "object",
+        "properties": {
+          "ena": {
+            "description": "The ENA of the ereport.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ena"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ena"
+        ],
+        "additionalProperties": true
+      },
+      "Ereports": {
+        "description": "A tranche of ereports received from a reporter.",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ereport"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          },
+          "restart_id": {
+            "description": "The reporter's current restart ID.\n\nIf this is not equal to the current known restart ID, then the reporter has restarted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForEreporterRestartKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "restart_id"
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "GetCfpaParams": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "$ref": "#/components/schemas/RotCfpaSlot"
+          }
+        },
+        "required": [
+          "slot"
+        ]
+      },
+      "GetRotBootInfoParams": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "HostPhase2Progress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "age": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "image_id": {
+                "$ref": "#/components/schemas/HostPhase2RecoveryImageId"
+              },
+              "offset": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "progress": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "total_size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "age",
+              "image_id",
+              "offset",
+              "progress",
+              "total_size"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "progress": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "progress"
+            ]
+          }
+        ]
+      },
+      "HostPhase2RecoveryImageId": {
+        "description": "Identity of a host phase2 recovery image.",
+        "type": "object",
+        "properties": {
+          "sha256_hash": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          }
+        },
+        "required": [
+          "sha256_hash"
+        ]
+      },
+      "HostStartupOptions": {
+        "type": "object",
+        "properties": {
+          "boot_net": {
+            "type": "boolean"
+          },
+          "boot_ramdisk": {
+            "type": "boolean"
+          },
+          "bootrd": {
+            "type": "boolean"
+          },
+          "kbm": {
+            "type": "boolean"
+          },
+          "kmdb": {
+            "type": "boolean"
+          },
+          "kmdb_boot": {
+            "type": "boolean"
+          },
+          "phase2_recovery_mode": {
+            "type": "boolean"
+          },
+          "prom": {
+            "type": "boolean"
+          },
+          "verbose": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "boot_net",
+          "boot_ramdisk",
+          "bootrd",
+          "kbm",
+          "kmdb",
+          "kmdb_boot",
+          "phase2_recovery_mode",
+          "prom",
+          "verbose"
+        ]
+      },
+      "InstallinatorImageId": {
+        "type": "object",
+        "properties": {
+          "control_plane": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "host_phase_2": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "update_id": {
+            "$ref": "#/components/schemas/TypedUuidForMupdateKind"
+          }
+        },
+        "required": [
+          "control_plane",
+          "host_phase_2",
+          "update_id"
+        ]
+      },
+      "LinkStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "down"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "up"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "MeasurementErrorCode": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "invalid_sensor"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "no_reading"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "not_present"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_error"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_unavailable"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_timeout"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_off"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          }
+        ]
+      },
+      "MeasurementKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "temperature"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "power"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "current"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "voltage"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "input_current"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "input_voltage"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "speed"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "cpu_tctl"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "PacketCount": {
+        "type": "object",
+        "properties": {
+          "broadcast": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "multicast": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "unicast": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "broadcast",
+          "multicast",
+          "unicast"
+        ]
+      },
+      "PhyStatus": {
+        "type": "object",
+        "properties": {
+          "mac_link_up": {
+            "$ref": "#/components/schemas/LinkStatus"
+          },
+          "media_link_up": {
+            "$ref": "#/components/schemas/LinkStatus"
+          },
+          "ty": {
+            "$ref": "#/components/schemas/PhyType"
+          }
+        },
+        "required": [
+          "mac_link_up",
+          "media_link_up",
+          "ty"
+        ]
+      },
+      "PhyType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8504"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8522"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8552"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8562"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PortConfig": {
+        "type": "object",
+        "properties": {
+          "dev_num": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "dev_type": {
+            "$ref": "#/components/schemas/PortDev"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/PortMode"
+          },
+          "serdes_num": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "serdes_type": {
+            "$ref": "#/components/schemas/PortSerdes"
+          }
+        },
+        "required": [
+          "dev_num",
+          "dev_type",
+          "mode",
+          "serdes_num",
+          "serdes_type"
+        ]
+      },
+      "PortCounters": {
+        "type": "object",
+        "properties": {
+          "link_down_sticky": {
+            "type": "boolean"
+          },
+          "phy_link_down_sticky": {
+            "type": "boolean"
+          },
+          "rx": {
+            "$ref": "#/components/schemas/PacketCount"
+          },
+          "tx": {
+            "$ref": "#/components/schemas/PacketCount"
+          }
+        },
+        "required": [
+          "link_down_sticky",
+          "phy_link_down_sticky",
+          "rx",
+          "tx"
+        ]
+      },
+      "PortDev": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dev1g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dev2g5"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dev10g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PortMode": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "sfi"
+                ]
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "base_kr"
+                ]
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "sgmii"
+                ]
+              },
+              "speed": {
+                "$ref": "#/components/schemas/Speed"
+              }
+            },
+            "required": [
+              "mode",
+              "speed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "qsgmii"
+                ]
+              },
+              "speed": {
+                "$ref": "#/components/schemas/Speed"
+              }
+            },
+            "required": [
+              "mode",
+              "speed"
+            ]
+          }
+        ]
+      },
+      "PortSerdes": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "serdes1g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "serdes6g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "serdes10g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PortStatusErrorCode": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "unconfigured"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "other"
+                ]
+              },
+              "raw": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "code",
+              "raw"
+            ]
+          }
+        ]
+      },
+      "PowerState": {
+        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
+        "type": "string",
+        "enum": [
+          "A0",
+          "A1",
+          "A2"
+        ]
+      },
+      "RotCfpa": {
+        "type": "object",
+        "properties": {
+          "base64_data": {
+            "type": "string"
+          },
+          "slot": {
+            "$ref": "#/components/schemas/RotCfpaSlot"
+          }
+        },
+        "required": [
+          "base64_data",
+          "slot"
+        ]
+      },
+      "RotCfpaSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "active"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "inactive"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "scratch"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
+        ]
+      },
+      "RotCmpa": {
+        "type": "object",
+        "properties": {
+          "base64_data": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "base64_data"
+        ]
+      },
+      "RotImageError": {
+        "type": "string",
+        "enum": [
+          "unchecked",
+          "first_page_erased",
+          "partially_programmed",
+          "invalid_length",
+          "header_not_programmed",
+          "bootloader_too_small",
+          "bad_magic",
+          "header_image_size",
+          "unaligned_length",
+          "unsupported_type",
+          "reset_vector_not_thumb2",
+          "reset_vector",
+          "signature"
+        ]
+      },
+      "RotSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "a"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "b"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
+        ]
+      },
+      "RotState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "active": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "pending_persistent_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_sha3_256_digest": {
+                "nullable": true,
+                "type": "string"
+              },
+              "slot_b_sha3_256_digest": {
+                "nullable": true,
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "v2"
+                ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "active",
+              "persistent_boot_preference",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "communication_failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "active": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "pending_persistent_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "slot_a_fwid": {
+                "type": "string"
+              },
+              "slot_b_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "slot_b_fwid": {
+                "type": "string"
+              },
+              "stage0_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "stage0_fwid": {
+                "type": "string"
+              },
+              "stage0next_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "stage0next_fwid": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "v3"
+                ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "active",
+              "persistent_boot_preference",
+              "slot_a_fwid",
+              "slot_b_fwid",
+              "stage0_fwid",
+              "stage0next_fwid",
+              "state"
+            ]
+          }
+        ]
+      },
+      "SpComponentCaboose": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string"
+          },
+          "epoch": {
+            "nullable": true,
+            "type": "string"
+          },
+          "git_commit": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sign": {
+            "nullable": true,
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "board",
+          "git_commit",
+          "name",
+          "version"
+        ]
+      },
+      "SpComponentDetails": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "cfg": {
+                "$ref": "#/components/schemas/PortConfig"
+              },
+              "counters": {
+                "$ref": "#/components/schemas/PortCounters"
+              },
+              "link_status": {
+                "$ref": "#/components/schemas/LinkStatus"
+              },
+              "phy_status": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PhyStatus"
+                  }
+                ]
+              },
+              "port": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "port_status"
+                ]
+              }
+            },
+            "required": [
+              "cfg",
+              "counters",
+              "link_status",
+              "port",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/PortStatusErrorCode"
+              },
+              "port": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "port_status_error"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "port",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "$ref": "#/components/schemas/MeasurementKind"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "measurement"
+                ]
+              },
+              "value": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "kind",
+              "name",
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/MeasurementErrorCode"
+              },
+              "kind": {
+                "$ref": "#/components/schemas/MeasurementKind"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "measurement_error"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "kind",
+              "name",
+              "type"
+            ]
+          }
+        ]
+      },
+      "SpComponentFirmwareSlot": {
+        "description": "Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for the host boot flash.",
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "slot"
+        ]
+      },
+      "SpComponentInfo": {
+        "description": "Overview of a single SP component.",
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "description": "`capabilities` is a bitmask; interpret it via [`gateway_messages::DeviceCapabilities`].",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "component": {
+            "description": "The unique identifier for this component.",
+            "type": "string"
+          },
+          "description": {
+            "description": "A human-readable description of the component.",
+            "type": "string"
+          },
+          "device": {
+            "description": "The name of the physical device.",
+            "type": "string"
+          },
+          "presence": {
+            "description": "Whether or not the component is present, to the best of the SP's ability to judge.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentPresence"
+              }
+            ]
+          },
+          "serial_number": {
+            "nullable": true,
+            "description": "The component's serial number, if it has one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capabilities",
+          "component",
+          "description",
+          "device",
+          "presence"
+        ]
+      },
+      "SpComponentList": {
+        "description": "List of components from a single SP.",
+        "type": "object",
+        "properties": {
+          "components": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpComponentInfo"
+            }
+          }
+        },
+        "required": [
+          "components"
+        ]
+      },
+      "SpComponentPresence": {
+        "description": "Description of the presence or absence of a component.\n\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).",
+        "oneOf": [
+          {
+            "description": "The component is present.",
+            "type": "string",
+            "enum": [
+              "present"
+            ]
+          },
+          {
+            "description": "The component is not present.",
+            "type": "string",
+            "enum": [
+              "not_present"
+            ]
+          },
+          {
+            "description": "The component is present but in a failed or faulty state.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The SP is unable to determine the presence of the component.",
+            "type": "string",
+            "enum": [
+              "unavailable"
+            ]
+          },
+          {
+            "description": "The SP's attempt to determine the presence of the component timed out.",
+            "type": "string",
+            "enum": [
+              "timeout"
+            ]
+          },
+          {
+            "description": "The SP's attempt to determine the presence of the component failed.",
+            "type": "string",
+            "enum": [
+              "error"
+            ]
+          }
+        ]
+      },
+      "SpComponentResetError": {
+        "description": "The error type returned by the `sp_component_reset()` MGS endpoint.",
+        "oneOf": [
+          {
+            "description": "MGS refuses to reset its own sled's SP.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "reset_sp_of_local_sled"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Other dropshot errors.",
+            "type": "object",
+            "properties": {
+              "error_code": {
+                "nullable": true,
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "other"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          }
+        ]
+      },
+      "SpIdentifier": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "type": {
+            "$ref": "#/components/schemas/SpType"
+          }
+        },
+        "required": [
+          "slot",
+          "type"
+        ]
+      },
+      "SpIgnition": {
+        "description": "State of an ignition target.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "present": {
+                "type": "string",
+                "enum": [
+                  "no"
+                ]
+              }
+            },
+            "required": [
+              "present"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ctrl_detect_0": {
+                "type": "boolean"
+              },
+              "ctrl_detect_1": {
+                "type": "boolean"
+              },
+              "flt_a2": {
+                "description": "Fault from the A2 power domain",
+                "type": "boolean"
+              },
+              "flt_a3": {
+                "description": "Fault from the A3 power domain",
+                "type": "boolean"
+              },
+              "flt_rot": {
+                "description": "Fault from the RoT",
+                "type": "boolean"
+              },
+              "flt_sp": {
+                "description": "Fault from the SP",
+                "type": "boolean"
+              },
+              "id": {
+                "$ref": "#/components/schemas/SpIgnitionSystemType"
+              },
+              "power": {
+                "type": "boolean"
+              },
+              "present": {
+                "type": "string",
+                "enum": [
+                  "yes"
+                ]
+              }
+            },
+            "required": [
+              "ctrl_detect_0",
+              "ctrl_detect_1",
+              "flt_a2",
+              "flt_a3",
+              "flt_rot",
+              "flt_sp",
+              "id",
+              "power",
+              "present"
+            ]
+          }
+        ]
+      },
+      "SpIgnitionInfo": {
+        "type": "object",
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/SpIgnition"
+          },
+          "id": {
+            "$ref": "#/components/schemas/SpIdentifier"
+          }
+        },
+        "required": [
+          "details",
+          "id"
+        ]
+      },
+      "SpIgnitionSystemType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "sidecar"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "psc"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "cosmo"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          }
+        ]
+      },
+      "SpSensorReading": {
+        "description": "Result of reading an SP sensor.",
+        "type": "object",
+        "properties": {
+          "result": {
+            "description": "Value (or error) from the sensor.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpSensorReadingResult"
+              }
+            ]
+          },
+          "timestamp": {
+            "description": "SP-centric timestamp of when `result` was recorded from this sensor.\n\nCurrently this value represents \"milliseconds since the last SP boot\" and is primarily useful as a delta between sensors on this SP (assuming no reboot in between). The meaning could change with future SP releases.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "result",
+          "timestamp"
+        ]
+      },
+      "SpSensorReadingResult": {
+        "description": "Single reading (or error) from an SP sensor.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              },
+              "value": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_off"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_error"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_not_present"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_unavailable"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_timeout"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "SpState": {
+        "type": "object",
+        "properties": {
+          "base_mac_address": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            },
+            "minItems": 6,
+            "maxItems": 6
+          },
+          "hubris_archive_id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "power_state": {
+            "$ref": "#/components/schemas/PowerState"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "rot": {
+            "$ref": "#/components/schemas/RotState"
+          },
+          "serial_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_mac_address",
+          "hubris_archive_id",
+          "model",
+          "power_state",
+          "revision",
+          "rot",
+          "serial_number"
+        ]
+      },
+      "SpType": {
+        "type": "string",
+        "enum": [
+          "sled",
+          "power",
+          "switch"
+        ]
+      },
+      "SpUpdateStatus": {
+        "oneOf": [
+          {
+            "description": "The SP has no update status.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The SP is preparing to receive an update.\n\nMay or may not include progress, depending on the capabilities of the component being updated.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "progress": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/UpdatePreparationProgress"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "preparing"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ]
+          },
+          {
+            "description": "The SP is currently receiving an update.",
+            "type": "object",
+            "properties": {
+              "bytes_received": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "in_progress"
+                ]
+              },
+              "total_bytes": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "bytes_received",
+              "id",
+              "state",
+              "total_bytes"
+            ]
+          },
+          {
+            "description": "The SP has completed receiving an update.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ]
+          },
+          {
+            "description": "The SP has aborted an in-progress update.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "aborted"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ]
+          },
+          {
+            "description": "The update process failed.",
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "id",
+              "state"
+            ]
+          },
+          {
+            "description": "The update process failed with an RoT-specific error.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "rot_error"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
+              "state"
+            ]
+          }
+        ]
+      },
+      "Speed": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "speed": {
+                "type": "string",
+                "enum": [
+                  "speed100_m"
+                ]
+              }
+            },
+            "required": [
+              "speed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "speed": {
+                "type": "string",
+                "enum": [
+                  "speed1_g"
+                ]
+              }
+            },
+            "required": [
+              "speed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "speed": {
+                "type": "string",
+                "enum": [
+                  "speed10_g"
+                ]
+              }
+            },
+            "required": [
+              "speed"
+            ]
+          }
+        ]
+      },
+      "TaskDump": {
+        "type": "object",
+        "properties": {
+          "archive_id": {
+            "description": "Hex-encoded Hubris archive ID.",
+            "type": "string"
+          },
+          "base64_zip": {
+            "description": "Base64-encoded zip file containing dehydrated task dump.",
+            "type": "string"
+          },
+          "bord": {
+            "description": "`BORD` field from the caboose.",
+            "type": "string"
+          },
+          "gitc": {
+            "description": "`GITC` field from the caboose.",
+            "type": "string"
+          },
+          "task_index": {
+            "description": "Index of the crashed task.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "timestamp": {
+            "description": "Hubris timestamp at which the task crash occurred.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "vers": {
+            "nullable": true,
+            "description": "`VERS` field from the caboose, if present.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "archive_id",
+          "base64_zip",
+          "bord",
+          "gitc",
+          "task_index",
+          "timestamp"
+        ]
+      },
+      "TypedUuidForEreporterRestartKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForMupdateKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "UpdateAbortBody": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The ID of the update to abort.\n\nIf the SP is currently receiving an update with this ID, it will be aborted.\n\nIf the SP is currently receiving an update with a different ID, the abort request will fail.\n\nIf the SP is not currently receiving any update, the request to abort should succeed but will not have actually done anything.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "UpdatePreparationProgress": {
+        "description": "Progress of an SP preparing to update.\n\nThe units of `current` and `total` are unspecified and defined by the SP; e.g., if preparing for an update requires erasing a flash device, this may indicate progress of that erasure without defining units (bytes, pages, sectors, etc.).",
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "current",
+          "total"
+        ]
+      },
+      "IgnitionCommand": {
+        "description": "Ignition command.",
+        "type": "string",
+        "enum": [
+          "power_on",
+          "power_off",
+          "power_reset"
+        ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "SpComponentResetError": {
+        "description": "SpComponentResetError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SpComponentResetError"
+            }
+          }
+        }
+      }
+    }
+  }
+}

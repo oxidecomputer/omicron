@@ -92,6 +92,7 @@ async fn test_omdb_usage_errors() {
         &["db", "ereport", "reporters", "--help"],
         &["db", "ereport", "info", "--help"],
         &["db", "sleds", "--help"],
+        &["db", "sitrep", "--help"],
         &["db", "saga"],
         &["db", "snapshots"],
         &["db", "network"],
@@ -136,8 +137,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let cmd_path = path_to_executable(CMD_OMDB);
 
     let postgres_url = cptestctx.database.listen_url();
-    let nexus_internal_url =
-        format!("http://{}/", cptestctx.internal_client.bind_address);
+    let nexus_lockstep_url =
+        format!("http://{}/", cptestctx.lockstep_client.bind_address);
     let mgs_url = cptestctx
         .gateway
         .get(&SwitchLocation::Switch0)
@@ -156,7 +157,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     // Get the CockroachDB metadata from the blueprint so we can redact it
     let initial_blueprint: Blueprint = dropshot::test_util::read_json(
         &mut cptestctx
-            .internal_client
+            .lockstep_client
             .make_request_no_body(
                 Method::GET,
                 &format!("/deployment/blueprints/all/{initial_blueprint_id}"),
@@ -178,6 +179,20 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 
     let invocations: &[&[&str]] = &[
         &["db", "db-metadata", "ls-nexus"],
+        // We expect this operation to fail (the nexus generation is the same
+        // as the one in the target blueprint - it shouldn't be trying to
+        // quiesce yet).
+        //
+        // We test a version of this command which sets this record to quiesced
+        // anyway as the final invocation.
+        &[
+            "--destructive",
+            "db",
+            "db-metadata",
+            "force-mark-nexus-quiesced",
+            "--skip-confirmation",
+            &cptestctx.server.server_context().nexus.id().to_string(),
+        ],
         &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
@@ -249,6 +264,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["nexus", "blueprints", "diff", &initial_blueprint_id],
         // reconfigurator config: show and set
         &["nexus", "reconfigurator-config", "show", "current"],
+        &["nexus", "update-status"],
+        &["nexus", "update-status", "--details"],
         // NOTE: Enabling the planner here _may_ cause Nexus to start creating
         // new blueprints; any commands whose output is only stable if the set
         // of blueprints is stable must come before this command to avoid being
@@ -274,6 +291,28 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
+
+        // Test the whatis command with two known UUIDs
+        &[
+            "db",
+            "whatis",
+            "001de000-5110-4000-8000-000000000000",
+            "001de000-05e4-4000-8000-000000004007",
+        ],
+        // This operation will set the "db_metadata_nexus" state to quiesced.
+        //
+        // This would normally only be set by a Nexus as it shuts itself down;
+        // save it for last to avoid causing a weird state while testing other
+        // commands.
+        &[
+            "--destructive",
+            "db",
+            "db-metadata",
+            "force-mark-nexus-quiesced",
+            "--skip-confirmation",
+            "--skip-blueprint-validation",
+            &cptestctx.server.server_context().nexus.id().to_string(),
+        ],
     ];
 
     let mut redactor = Redactor::default();
@@ -303,10 +342,30 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         .field("triggered by", r"[\w ]+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
 
+    // The `sp_ereport_ingester` task's output depends on how many simulated
+    // sled agents ahppen to register with Nexus before its first execution.
+    // These redactions work around the issue described in
+    // https://github.com/oxidecomputer/omicron/issues/8979
+    redactor
+        .field("total ereports received:", r"\d+")
+        .field("new ereports ingested:", r"\d+")
+        .field("total HTTP requests sent:", r"\d+")
+        .field("total collection errors:", r"\d+")
+        .field("reporters with ereports:", r"\d+")
+        .field("reporters with collection errors:", r"\d+")
+        .totally_annihilate_section(&[
+            "task: \"sp_ereport_ingester\"",
+            "errors listing reporters:",
+        ])
+        .totally_annihilate_section(&[
+            "task: \"sp_ereport_ingester\"",
+            "service processors:",
+        ]);
+
     for args in invocations {
         println!("running commands with args: {:?}", args);
         let p = postgres_url.to_string();
-        let u = nexus_internal_url.clone();
+        let u = nexus_lockstep_url.clone();
         let g = mgs_url.clone();
         let ox = ox_url.clone();
         let ch = ch_url.clone();
@@ -396,8 +455,8 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
 
     let cmd_path = path_to_executable(CMD_OMDB);
     let postgres_url = cptestctx.database.listen_url().to_string();
-    let nexus_internal_url =
-        format!("http://{}", cptestctx.internal_client.bind_address);
+    let nexus_lockstep_url =
+        format!("http://{}", cptestctx.lockstep_client.bind_address);
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
@@ -425,7 +484,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let args = &[
         "nexus",
         "--nexus-internal-url",
-        &nexus_internal_url.clone(),
+        &nexus_lockstep_url.clone(),
         "background-tasks",
         "doc",
     ];
@@ -434,7 +493,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     // Case 2: specified in multiple places (command-line argument wins)
     let args =
         &["nexus", "--nexus-internal-url", "junk", "background-tasks", "doc"];
-    let n = nexus_internal_url.clone();
+    let n = nexus_lockstep_url.clone();
     do_run(
         &mut output,
         move |exec| exec.env("OMDB_NEXUS_URL", &n),
@@ -628,6 +687,7 @@ fn clear_omdb_env() {
     for (env_var, _) in std::env::vars().filter(|(k, _)| k.starts_with("OMDB_"))
     {
         eprintln!("removing {:?} from environment", env_var);
-        std::env::remove_var(env_var);
+        // SAFETY: https://nexte.st/docs/configuration/env-vars/#altering-the-environment-within-tests
+        unsafe { std::env::remove_var(env_var) };
     }
 }

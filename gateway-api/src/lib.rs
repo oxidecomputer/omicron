@@ -9,29 +9,8 @@ use dropshot::{
     RequestContext, TypedBody, UntypedBody, WebsocketEndpointResult,
     WebsocketUpgrade,
 };
-use gateway_types::{
-    caboose::SpComponentCaboose,
-    component::{
-        PowerState, SpComponentFirmwareSlot, SpComponentList, SpIdentifier,
-        SpState,
-    },
-    component_details::SpComponentDetails,
-    host::{ComponentFirmwareHashStatus, HostStartupOptions},
-    ignition::{IgnitionCommand, SpIgnitionInfo},
-    rot::{RotCfpa, RotCfpaSlot, RotCmpa, RotState},
-    sensor::SpSensorReading,
-    task_dump::TaskDump,
-    update::{
-        HostPhase2Progress, HostPhase2RecoveryImageId, InstallinatorImageId,
-        SpComponentResetError, SpUpdateStatus,
-    },
-};
-use openapi_manager_types::{
-    SupportedVersion, SupportedVersions, api_versions,
-};
-use schemars::JsonSchema;
-use serde::Deserialize;
-use uuid::Uuid;
+use dropshot_api_manager_types::api_versions;
+use gateway_types_versions::{latest, v1};
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -45,6 +24,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (3, NEWTYPE_UUID_BUMP),
+    (2, COSMO),
     (1, INITIAL),
 ]);
 
@@ -77,8 +58,8 @@ pub trait GatewayApi {
     }]
     async fn sp_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<SpState>, HttpError>;
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::component::SpState>, HttpError>;
 
     /// Get host startup options for a sled
     ///
@@ -90,8 +71,8 @@ pub trait GatewayApi {
     }]
     async fn sp_startup_options_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<HostStartupOptions>, HttpError>;
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::host::HostStartupOptions>, HttpError>;
 
     /// Set host startup options for a sled
     ///
@@ -103,8 +84,8 @@ pub trait GatewayApi {
     }]
     async fn sp_startup_options_set(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
-        body: TypedBody<HostStartupOptions>,
+        path: Path<latest::component::PathSp>,
+        body: TypedBody<latest::host::HostStartupOptions>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Read the current value of a sensor by ID
@@ -116,8 +97,8 @@ pub trait GatewayApi {
     }]
     async fn sp_sensor_read_value(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpSensorId>,
-    ) -> Result<HttpResponseOk<SpSensorReading>, HttpError>;
+        path: Path<latest::sensor::PathSpSensorId>,
+    ) -> Result<HttpResponseOk<latest::sensor::SpSensorReading>, HttpError>;
 
     /// List components of an SP
     ///
@@ -129,8 +110,8 @@ pub trait GatewayApi {
     }]
     async fn sp_component_list(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<SpComponentList>, HttpError>;
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::component::SpComponentList>, HttpError>;
 
     /// Get info for an SP component
     ///
@@ -143,8 +124,11 @@ pub trait GatewayApi {
     }]
     async fn sp_component_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
-    ) -> Result<HttpResponseOk<Vec<SpComponentDetails>>, HttpError>;
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::component_details::SpComponentDetails>>,
+        HttpError,
+    >;
 
     /// Get the caboose of an SP component
     ///
@@ -155,9 +139,9 @@ pub trait GatewayApi {
     }]
     async fn sp_component_caboose_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
-        query_params: Query<ComponentCabooseSlot>,
-    ) -> Result<HttpResponseOk<SpComponentCaboose>, HttpError>;
+        path: Path<latest::component::PathSpComponent>,
+        query_params: Query<latest::caboose::ComponentCabooseSlot>,
+    ) -> Result<HttpResponseOk<latest::caboose::SpComponentCaboose>, HttpError>;
 
     /// Clear status of a component
     ///
@@ -169,7 +153,7 @@ pub trait GatewayApi {
     }]
     async fn sp_component_clear_status(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
+        path: Path<latest::component::PathSpComponent>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get the currently-active slot for an SP component
@@ -184,8 +168,11 @@ pub trait GatewayApi {
     }]
     async fn sp_component_active_slot_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
-    ) -> Result<HttpResponseOk<SpComponentFirmwareSlot>, HttpError>;
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<
+        HttpResponseOk<latest::component::SpComponentFirmwareSlot>,
+        HttpError,
+    >;
 
     /// Set the currently-active slot for an SP component
     ///
@@ -199,9 +186,9 @@ pub trait GatewayApi {
     }]
     async fn sp_component_active_slot_set(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
-        query_params: Query<SetComponentActiveSlotParams>,
-        body: TypedBody<SpComponentFirmwareSlot>,
+        path: Path<latest::component::PathSpComponent>,
+        query_params: Query<latest::component::SetComponentActiveSlotParams>,
+        body: TypedBody<latest::component::SpComponentFirmwareSlot>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Upgrade into a websocket connection attached to the given SP
@@ -226,7 +213,7 @@ pub trait GatewayApi {
     }]
     async fn sp_component_serial_console_attach(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
+        path: Path<latest::component::PathSpComponent>,
         websocket: WebsocketUpgrade,
     ) -> WebsocketEndpointResult;
 
@@ -238,7 +225,7 @@ pub trait GatewayApi {
     }]
     async fn sp_component_serial_console_detach(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
+        path: Path<latest::component::PathSpComponent>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Reset an SP component (possibly the SP itself).
@@ -248,8 +235,11 @@ pub trait GatewayApi {
     }]
     async fn sp_component_reset(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
-    ) -> Result<HttpResponseUpdatedNoContent, SpComponentResetError>;
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<
+        HttpResponseUpdatedNoContent,
+        latest::update::SpComponentResetError,
+    >;
 
     /// Update an SP component
     ///
@@ -271,8 +261,8 @@ pub trait GatewayApi {
     }]
     async fn sp_component_update(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
-        query_params: Query<ComponentUpdateIdSlot>,
+        path: Path<latest::component::PathSpComponent>,
+        query_params: Query<latest::update::ComponentUpdateIdSlot>,
         body: UntypedBody,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
@@ -286,8 +276,8 @@ pub trait GatewayApi {
     }]
     async fn sp_component_update_status(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
-    ) -> Result<HttpResponseOk<SpUpdateStatus>, HttpError>;
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseOk<latest::update::SpUpdateStatus>, HttpError>;
 
     /// Start computing the hash of a given slot of a component.
     ///
@@ -303,7 +293,7 @@ pub trait GatewayApi {
     }]
     async fn sp_component_hash_firmware_start(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponentFirmwareSlot>,
+        path: Path<latest::component::PathSpComponentFirmwareSlot>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get a computed hash of a given slot of a component.
@@ -321,8 +311,11 @@ pub trait GatewayApi {
     }]
     async fn sp_component_hash_firmware_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponentFirmwareSlot>,
-    ) -> Result<HttpResponseOk<ComponentFirmwareHashStatus>, HttpError>;
+        path: Path<latest::component::PathSpComponentFirmwareSlot>,
+    ) -> Result<
+        HttpResponseOk<latest::host::ComponentFirmwareHashStatus>,
+        HttpError,
+    >;
 
     /// Abort any in-progress update an SP component
     ///
@@ -337,8 +330,8 @@ pub trait GatewayApi {
     }]
     async fn sp_component_update_abort(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
-        body: TypedBody<UpdateAbortBody>,
+        path: Path<latest::component::PathSpComponent>,
+        body: TypedBody<latest::update::UpdateAbortBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Read the CMPA from a root of trust.
@@ -350,8 +343,8 @@ pub trait GatewayApi {
     }]
     async fn sp_rot_cmpa_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
-    ) -> Result<HttpResponseOk<RotCmpa>, HttpError>;
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseOk<latest::rot::RotCmpa>, HttpError>;
 
     /// Read the requested CFPA slot from a root of trust.
     ///
@@ -362,9 +355,9 @@ pub trait GatewayApi {
     }]
     async fn sp_rot_cfpa_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
-        params: TypedBody<GetCfpaParams>,
-    ) -> Result<HttpResponseOk<RotCfpa>, HttpError>;
+        path: Path<latest::component::PathSpComponent>,
+        params: TypedBody<latest::rot::GetCfpaParams>,
+    ) -> Result<HttpResponseOk<latest::rot::RotCfpa>, HttpError>;
 
     /// Read the RoT boot state from a root of trust
     ///
@@ -375,9 +368,9 @@ pub trait GatewayApi {
     }]
     async fn sp_rot_boot_info(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpComponent>,
-        params: TypedBody<GetRotBootInfoParams>,
-    ) -> Result<HttpResponseOk<RotState>, HttpError>;
+        path: Path<latest::component::PathSpComponent>,
+        params: TypedBody<latest::rot::GetRotBootInfoParams>,
+    ) -> Result<HttpResponseOk<latest::rot::RotState>, HttpError>;
 
     /// Get the number of task dumps present on an SP
     #[endpoint {
@@ -386,7 +379,7 @@ pub trait GatewayApi {
     }]
     async fn sp_task_dump_count(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
+        path: Path<latest::component::PathSp>,
     ) -> Result<HttpResponseOk<u32>, HttpError>;
 
     /// Read a single task dump from an SP
@@ -396,8 +389,8 @@ pub trait GatewayApi {
     }]
     async fn sp_task_dump_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpTaskDumpIndex>,
-    ) -> Result<HttpResponseOk<TaskDump>, HttpError>;
+        path: Path<latest::task_dump::PathSpTaskDumpIndex>,
+    ) -> Result<HttpResponseOk<latest::task_dump::TaskDump>, HttpError>;
 
     /// List SPs via Ignition
     ///
@@ -407,10 +400,31 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/ignition",
+        versions = VERSION_COSMO..
     }]
     async fn ignition_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<latest::ignition::SpIgnitionInfo>>, HttpError>;
+
+    /// List SPs via Ignition
+    ///
+    /// Retreive information for all SPs via the Ignition controller. This is
+    /// lower latency and has fewer possible failure modes than querying the SP
+    /// over the management network.
+    #[endpoint {
+        method = GET,
+        path = "/ignition",
+        operation_id = "ignition_list",
+        versions = VERSION_INITIAL..VERSION_COSMO
+    }]
+    async fn ignition_list_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v1::ignition::SpIgnitionInfo>>, HttpError>
+    {
+        Ok(Self::ignition_list(rqctx)
+            .await?
+            .map(|v| v.into_iter().map(Into::into).collect()))
+    }
 
     /// Get SP info via Ignition
     ///
@@ -420,11 +434,30 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/ignition/{type}/{slot}",
+        versions = VERSION_COSMO..
     }]
     async fn ignition_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError>;
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::ignition::SpIgnitionInfo>, HttpError>;
+
+    /// Get SP info via Ignition
+    ///
+    /// Retreive information for an SP via the Ignition controller. This is
+    /// lower latency and has fewer possible failure modes than querying the SP
+    /// over the management network.
+    #[endpoint {
+        method = GET,
+        path = "/ignition/{type}/{slot}",
+        operation_id = "ignition_get",
+        versions = VERSION_INITIAL..VERSION_COSMO
+    }]
+    async fn ignition_get_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v1::component::PathSp>,
+    ) -> Result<HttpResponseOk<v1::ignition::SpIgnitionInfo>, HttpError> {
+        Ok(Self::ignition_get(rqctx, path).await?.map(Into::into))
+    }
 
     /// Send an ignition command targeting a specific SP.
     ///
@@ -440,7 +473,7 @@ pub trait GatewayApi {
     }]
     async fn ignition_command(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpIgnitionCommand>,
+        path: Path<latest::ignition::PathSpIgnitionCommand>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get the current power state of a sled via its SP.
@@ -453,8 +486,8 @@ pub trait GatewayApi {
     }]
     async fn sp_power_state_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<PowerState>, HttpError>;
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::component::PowerState>, HttpError>;
 
     /// Set the current power state of a sled via its SP.
     ///
@@ -466,8 +499,8 @@ pub trait GatewayApi {
     }]
     async fn sp_power_state_set(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
-        body: TypedBody<PowerState>,
+        path: Path<latest::component::PathSp>,
+        body: TypedBody<latest::component::PowerState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Set the installinator image ID the sled should use for recovery.
@@ -479,8 +512,8 @@ pub trait GatewayApi {
     }]
     async fn sp_installinator_image_id_set(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
-        body: TypedBody<InstallinatorImageId>,
+        path: Path<latest::component::PathSp>,
+        body: TypedBody<latest::update::InstallinatorImageId>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Clear any previously-set installinator image ID on the target sled.
@@ -490,7 +523,7 @@ pub trait GatewayApi {
     }]
     async fn sp_installinator_image_id_delete(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
+        path: Path<latest::component::PathSp>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get the most recent host phase2 request we've seen from the target SP.
@@ -505,8 +538,8 @@ pub trait GatewayApi {
     }]
     async fn sp_host_phase2_progress_get(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<HostPhase2Progress>, HttpError>;
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::update::HostPhase2Progress>, HttpError>;
 
     /// Clear the most recent host phase2 request we've seen from the target SP.
     #[endpoint {
@@ -515,7 +548,7 @@ pub trait GatewayApi {
     }]
     async fn sp_host_phase2_progress_delete(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
+        path: Path<latest::component::PathSp>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Upload a host phase2 image that can be served to recovering hosts via the
@@ -532,7 +565,10 @@ pub trait GatewayApi {
     async fn recovery_host_phase2_upload(
         rqctx: RequestContext<Self::Context>,
         body: UntypedBody,
-    ) -> Result<HttpResponseOk<HostPhase2RecoveryImageId>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::update::HostPhase2RecoveryImageId>,
+        HttpError,
+    >;
 
     /// Get the identifier for the switch this MGS instance is connected to.
     ///
@@ -547,7 +583,7 @@ pub trait GatewayApi {
     }]
     async fn sp_local_switch_id(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<SpIdentifier>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::component::SpIdentifier>, HttpError>;
 
     /// Get the complete list of SP identifiers this MGS instance is configured to
     /// find and communicate with.
@@ -560,7 +596,7 @@ pub trait GatewayApi {
     }]
     async fn sp_all_ids(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SpIdentifier>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<latest::component::SpIdentifier>>, HttpError>;
 
     /// Request ereports from the target service processor.
     ///
@@ -573,123 +609,7 @@ pub trait GatewayApi {
     }]
     async fn sp_ereports_ingest(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
+        path: Path<latest::component::PathSp>,
         query: Query<ereport_types::EreportQuery>,
     ) -> Result<HttpResponseOk<ereport_types::Ereports>, HttpError>;
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct PathSp {
-    /// ID for the SP that the gateway service translates into the appropriate
-    /// port for communicating with the given SP.
-    #[serde(flatten)]
-    pub sp: SpIdentifier,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct PathSpSensorId {
-    /// ID for the SP that the gateway service translates into the appropriate
-    /// port for communicating with the given SP.
-    #[serde(flatten)]
-    pub sp: SpIdentifier,
-    /// ID for the sensor on the SP.
-    pub sensor_id: u32,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct PathSpComponent {
-    /// ID for the SP that the gateway service translates into the appropriate
-    /// port for communicating with the given SP.
-    #[serde(flatten)]
-    pub sp: SpIdentifier,
-    /// ID for the component of the SP; this is the internal identifier used by
-    /// the SP itself to identify its components.
-    pub component: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct PathSpComponentFirmwareSlot {
-    /// ID for the SP that the gateway service translates into the appropriate
-    /// port for communicating with the given SP.
-    #[serde(flatten)]
-    pub sp: SpIdentifier,
-    /// ID for the component of the SP; this is the internal identifier used by
-    /// the SP itself to identify its components.
-    pub component: String,
-    /// Firmware slot of the component.
-    pub firmware_slot: u16,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct PathSpTaskDumpIndex {
-    /// ID for the SP that the gateway service translates into the appropriate
-    /// port for communicating with the given SP.
-    #[serde(flatten)]
-    pub sp: SpIdentifier,
-    /// The index of the task dump to be read.
-    pub task_dump_index: u32,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ComponentCabooseSlot {
-    /// The firmware slot to for which we want to request caboose information.
-    pub firmware_slot: u16,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct SetComponentActiveSlotParams {
-    /// Persist this choice of active slot.
-    pub persist: bool,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ComponentUpdateIdSlot {
-    /// An identifier for this update.
-    ///
-    /// This ID applies to this single instance of the API call; it is not an
-    /// ID of `image` itself. Multiple API calls with the same `image` should
-    /// use different IDs.
-    pub id: Uuid,
-    /// The update slot to apply this image to. Supply 0 if the component only
-    /// has one update slot.
-    pub firmware_slot: u16,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct UpdateAbortBody {
-    /// The ID of the update to abort.
-    ///
-    /// If the SP is currently receiving an update with this ID, it will be
-    /// aborted.
-    ///
-    /// If the SP is currently receiving an update with a different ID, the
-    /// abort request will fail.
-    ///
-    /// If the SP is not currently receiving any update, the request to abort
-    /// should succeed but will not have actually done anything.
-    pub id: Uuid,
-}
-
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, JsonSchema,
-)]
-pub struct GetCfpaParams {
-    pub slot: RotCfpaSlot,
-}
-
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, JsonSchema,
-)]
-pub struct GetRotBootInfoParams {
-    pub version: u8,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct PathSpIgnitionCommand {
-    /// ID for the SP that the gateway service translates into the appropriate
-    /// port for communicating with the given SP.
-    #[serde(flatten)]
-    pub sp: SpIdentifier,
-    /// Ignition command to perform on the targeted SP.
-    pub command: IgnitionCommand,
 }

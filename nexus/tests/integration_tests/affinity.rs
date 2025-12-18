@@ -73,6 +73,8 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
             None,
             // Instance CPU platform=
             None,
+            // Multicast groups=
+            Vec::new(),
         )
         .await
     }

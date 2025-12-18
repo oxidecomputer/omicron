@@ -7,6 +7,7 @@
 
 pub mod disk;
 pub mod external_ip;
+pub mod external_multicast_group;
 pub mod ip_pool;
 #[macro_use]
 mod next_item;

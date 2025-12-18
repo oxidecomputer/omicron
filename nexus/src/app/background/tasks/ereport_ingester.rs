@@ -12,13 +12,12 @@
 use crate::app::background::BackgroundTask;
 use chrono::Utc;
 use ereport_types::Ena;
-use ereport_types::Ereport;
 use ereport_types::EreportId;
 use futures::future::BoxFuture;
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_types::fm::ereport::EreportData;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::SpEreportIngesterStatus;
 use nexus_types::internal_api::background::SpEreporterStatus;
@@ -201,21 +200,19 @@ impl Ingester {
         slot: u16,
     ) -> Option<EreporterStatus> {
         // Fetch the latest ereport from this SP.
-        let latest = match self
-            .datastore
-            .sp_latest_ereport_id(&opctx, sp_type, slot)
-            .await
-        {
-            Ok(latest) => latest,
-            Err(error) => {
-                return Some(EreporterStatus {
-                    errors: vec![format!(
-                        "failed to query for latest ereport: {error:#}"
-                    )],
-                    ..Default::default()
-                });
-            }
-        };
+        let reporter = nexus_types::fm::ereport::Reporter::Sp { sp_type, slot };
+        let latest =
+            match self.datastore.latest_ereport_id(&opctx, reporter).await {
+                Ok(latest) => latest,
+                Err(error) => {
+                    return Some(EreporterStatus {
+                        errors: vec![format!(
+                            "failed to query for latest ereport: {error:#}"
+                        )],
+                        ..Default::default()
+                    });
+                }
+            };
 
         let mut params = EreportQueryParams::from_latest(latest);
         let mut status = None;
@@ -247,86 +244,23 @@ impl Ingester {
             } else {
                 status.get_or_insert_default().requests += 1;
             }
-            let db_ereports = reports
-                .items
-                .into_iter()
-                .map(|ereport| {
-                    const MISSING_VPD: &str =
-                        " (perhaps the SP doesn't know its own VPD?)";
-                    let part_number = get_sp_metadata_string(
-                        "baseboard_part_number",
-                        &ereport,
-                        &restart_id,
-                        &opctx.log,
-                        MISSING_VPD,
-                    );
-                    let serial_number = get_sp_metadata_string(
-                        "baseboard_serial_number",
-                        &ereport,
-                        &restart_id,
-                        &opctx.log,
-                        MISSING_VPD,
-                    );
-
-                    let class = ereport
-                        .data
-                        // "k" (for "kind") is used as an abbreviation of
-                        // "class" to save 4 bytes of ereport.
-                        .get("k")
-                        .or_else(|| ereport.data.get("class"));
-                    let class = match (class, ereport.data.get("lost")) {
-                        (Some(serde_json::Value::String(class)), _) => {
-                            Some(class.to_string())
-                        }
-                        (Some(v), _) => {
-                            slog::warn!(
-                                &opctx.log,
-                                "malformed ereport: value for 'k'/'class' \
-                                 should be a string, but found: {v:?}";
-                                "ena" => ?ereport.ena,
-                                "restart_id" => ?restart_id,
-                            );
-                            None
-                        }
-                        // This is a loss record! I know this!
-                        (None, Some(serde_json::Value::Null)) => {
-                            Some("ereport.data_loss.possible".to_string())
-                        }
-                        (None, Some(serde_json::Value::Number(_))) => {
-                            Some("ereport.data_loss.certain".to_string())
-                        }
-                        (None, _) => {
-                            slog::warn!(
-                                &opctx.log,
-                                "ereport missing 'k'/'class' key";
-                                "ena" => ?ereport.ena,
-                                "restart_id" => ?restart_id,
-                            );
-                            None
-                        }
-                    };
-
-                    db::model::SpEreport {
-                        restart_id: restart_id.into(),
-                        ena: ereport.ena.into(),
-                        time_collected: Utc::now(),
-                        time_deleted: None,
-                        collector_id: self.nexus_id.into(),
-                        sp_type: sp_type.into(),
-                        sp_slot: slot.into(),
-                        part_number,
-                        serial_number,
-                        class,
-                        report: serde_json::Value::Object(ereport.data),
-                    }
-                })
-                .collect::<Vec<_>>();
-            let received = db_ereports.len();
+            let time_collected = Utc::now();
+            let received = reports.items.len();
             let status = status.get_or_insert_default();
             status.ereports_received += received;
+
+            let db_ereports = reports.items.into_iter().map(|ereport| {
+                EreportData::from_sp_ereport(
+                    &opctx.log,
+                    restart_id,
+                    ereport,
+                    time_collected,
+                    self.nexus_id,
+                )
+            });
             let created = match self
                 .datastore
-                .sp_ereports_insert(&opctx, sp_type, slot, db_ereports)
+                .ereports_insert(&opctx, reporter, db_ereports)
                 .await
             {
                 Ok((created, latest)) => {
@@ -372,7 +306,7 @@ impl Ingester {
         &self,
         opctx: &OpContext,
         clients: &[GatewayClient],
-        EreportQueryParams { ref committed_ena,ref start_ena, restart_id }: &EreportQueryParams,
+        EreportQueryParams { committed_ena,start_ena, restart_id }: &EreportQueryParams,
         sp_type: nexus_types::inventory::SpType,
         slot: u16,
         status: &mut Option<EreporterStatus>,
@@ -390,7 +324,7 @@ impl Ingester {
             );
             let res = client
                 .sp_ereports_ingest(
-                    sp_type,
+                    &sp_type,
                     slot,
                     committed_ena.as_ref(),
                     LIMIT,
@@ -432,41 +366,6 @@ impl Ingester {
         }
 
         None
-    }
-}
-
-/// Attempt to extract a VPD metadata from an SP ereport, logging a warning if
-/// it's missing. We still want to keep such ereports, as the error condition
-/// could be that the SP couldn't determine the metadata field, but it's
-/// uncomfortable, so we ought to complain about it.
-fn get_sp_metadata_string(
-    key: &str,
-    ereport: &Ereport,
-    restart_id: &EreporterRestartUuid,
-    log: &slog::Logger,
-    extra_context: &'static str,
-) -> Option<String> {
-    match ereport.data.get(key) {
-        Some(serde_json::Value::String(s)) => Some(s.clone()),
-        Some(v) => {
-            slog::warn!(
-                &log,
-                "malformed ereport: value for '{key}' should be a string, \
-                 but found: {v:?}";
-                "ena" => ?ereport.ena,
-                "restart_id" => ?restart_id,
-            );
-            None
-        }
-        None => {
-            slog::warn!(
-                &log,
-                "ereport missing '{key}'{extra_context}";
-                "ena" => ?ereport.ena,
-                "restart_id" => ?restart_id,
-            );
-            None
-        }
     }
 }
 
@@ -763,7 +662,7 @@ mod tests {
             class: impl Into<Option<&'static str>>,
             mut json: serde_json::Value,
         ) -> ExpectedEreport {
-            if let serde_json::Value::Object(ref mut map) = &mut json {
+            if let serde_json::Value::Object(map) = &mut json {
                 map.insert(
                     "baseboard_part_number".to_string(),
                     self.part.into(),
@@ -801,7 +700,7 @@ mod tests {
         let mut found_ereports = BTreeMap::new();
         while let Some(p) = paginator.next() {
             let batch = datastore
-                .sp_ereport_list_by_restart(
+                .ereport_list_by_restart(
                     &opctx,
                     restart_id,
                     &p.current_pagparams(),
@@ -810,7 +709,9 @@ mod tests {
                 .expect("should be able to query for ereports");
             paginator = p.found_batch(&batch, &|ereport| ereport.ena);
             found_ereports.extend(
-                batch.into_iter().map(|ereport| (ereport.ena.0, ereport)),
+                batch
+                    .into_iter()
+                    .map(|ereport| (Ena::from(ereport.ena), ereport)),
             );
         }
         assert_eq!(

@@ -131,7 +131,25 @@ pub struct Redactor<'a> {
     uuids: bool,
     extra: Vec<(&'a str, String)>,
     extra_regex: Vec<(regex::Regex, String)>,
-    sections: Vec<&'a [&'a str]>,
+    sections: Vec<(&'a [&'a str], SectionMode)>,
+}
+
+/// How to handle a redacted section heading.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum SectionMode {
+    /// Redact the indented contents of the section, replacing them with
+    /// `<REDACTED_SECTION>` at the current indentation level.
+    ///
+    /// This is intended for sections which are always present but whose
+    /// contents may be variable.
+    RedactContents,
+    /// Totally remove the redacted section, including its heading, from the
+    /// output.
+    ///
+    /// This is intended for sections which may or may not be *present* across
+    /// invocations. Generally, this is a very blunt instrument that should
+    /// normally not be necessary.
+    TotallyAnnihilate,
 }
 
 impl Default for Redactor<'_> {
@@ -256,7 +274,26 @@ impl<'a> Redactor<'a> {
     /// order for the section to be redacted.
     pub fn section(&mut self, headings: &'a [&'a str]) -> &mut Self {
         assert!(!headings.is_empty(), "headings should not be empty");
-        self.sections.push(headings);
+        self.sections.push((headings, SectionMode::RedactContents));
+        self
+    }
+
+    /// Completely and utterly destroy an entire indented section.
+    ///
+    /// While [`Redactor::section`] will redact the _contents_ of an indented
+    /// section, this method will completely remove the section, including its
+    /// heading, from the output. This is a very blunt instrument, and is
+    /// intended for situations in which a section's *presence* may vary across
+    /// invocations.
+    ///
+    /// If only the section's *content* may vary, prefer to use
+    /// [`Redactor::section`].
+    pub fn totally_annihilate_section(
+        &mut self,
+        headings: &'a [&'a str],
+    ) -> &mut Self {
+        assert!(!headings.is_empty(), "headings should not be empty");
+        self.sections.push((headings, SectionMode::TotallyAnnihilate));
         self
     }
 
@@ -272,8 +309,8 @@ impl<'a> Redactor<'a> {
         for (regex, replacement) in &self.extra_regex {
             s = regex.replace_all(&s, replacement).into_owned();
         }
-        for headings in &self.sections {
-            s = redact_section(&s, headings);
+        for &(ref headings, mode) in &self.sections {
+            s = redact_section(&s, headings, mode);
         }
 
         if self.basic {
@@ -384,7 +421,7 @@ fn redact_uuids(input: &str) -> String {
         .to_string()
 }
 
-fn redact_section(input: &str, headings: &[&str]) -> String {
+fn redact_section(input: &str, headings: &[&str], mode: SectionMode) -> String {
     let mut output = String::new();
     let mut indent_stack = Vec::new();
     let mut print_redacted = false;
@@ -399,20 +436,27 @@ fn redact_section(input: &str, headings: &[&str]) -> String {
             }
         }
         if indent_stack.len() == headings.len() {
-            if print_redacted {
+            if print_redacted && mode == SectionMode::RedactContents {
                 print_redacted = false;
                 output.push_str(&line[..indent]);
                 output.push_str("<REDACTED_SECTION>\n");
             }
             continue;
         }
-        output.push_str(line);
         if line[indent..].trim_end() == headings[indent_stack.len()] {
             indent_stack.push(indent);
             if indent_stack.len() == headings.len() {
+                // If we just found the section's heading line, and we have been
+                // instructed to totally annihilate the section, don't push the
+                // heading line to the output.
+                if mode == SectionMode::TotallyAnnihilate {
+                    continue;
+                }
                 print_redacted = true;
             }
         }
+
+        output.push_str(line);
     }
     output
 }
@@ -526,6 +570,37 @@ section B:
 
         let mut redactor = Redactor::default();
         redactor.section(&["section A:", "ringbuf:"]);
+        assert_eq!(redactor.do_redact(INPUT), OUTPUT);
+    }
+
+    #[test]
+    fn test_totally_annihilate_section() {
+        const INPUT: &str = "\
+section A:
+  nested:
+    ringbuf:
+      this should be redacted
+      a second line to be redacted
+
+      a line followed by an empty line
+    this line should not be redacted
+section B:
+  ringbuf:
+    this should not be redacted
+
+    a line followed by an empty line";
+        const OUTPUT: &str = "\
+section A:
+  nested:
+    this line should not be redacted
+section B:
+  ringbuf:
+    this should not be redacted
+
+    a line followed by an empty line";
+
+        let mut redactor = Redactor::default();
+        redactor.totally_annihilate_section(&["section A:", "ringbuf:"]);
         assert_eq!(redactor.do_redact(INPUT), OUTPUT);
     }
 }

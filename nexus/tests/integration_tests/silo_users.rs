@@ -7,6 +7,7 @@ use http::{StatusCode, method::Method};
 use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::SiloGroupApiOnly;
 use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
@@ -15,6 +16,7 @@ use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::SiloGroupUuid;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -53,7 +55,17 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
     // create a group
     let group_name = "group1".to_string();
     nexus
-        .silo_group_lookup_or_create_by_name(&opctx, &authz_silo, &group_name)
+        .datastore()
+        .silo_group_ensure(
+            &opctx,
+            &authz_silo,
+            SiloGroupApiOnly::new(
+                authz_silo.id(),
+                SiloGroupUuid::new_v4(),
+                group_name.clone(),
+            )
+            .into(),
+        )
         .await
         .expect("Group created");
 

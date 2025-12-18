@@ -16,9 +16,6 @@ use dropshot::{
     HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
     Query, RequestContext, StreamingBody, TypedBody,
 };
-use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, SledRole,
-};
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::{
@@ -27,19 +24,44 @@ use omicron_common::api::internal::shared::{
 };
 use range_requests::PotentialRange;
 use sled_agent_api::*;
+use sled_agent_types::artifact::{
+    ArtifactConfig, ArtifactCopyFromDepotBody, ArtifactCopyFromDepotResponse,
+    ArtifactListResponse, ArtifactPathParam, ArtifactPutResponse,
+    ArtifactQueryParam,
+};
 use sled_agent_types::bootstore::BootstoreStatus;
-use sled_agent_types::disk::DiskEnsureBody;
+use sled_agent_types::dataset::{
+    LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
+};
+use sled_agent_types::debug::OperatorSwitchZonePolicy;
+use sled_agent_types::diagnostics::{
+    SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
+};
+use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateBody,
-    VmmPutStateResponse, VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
+    VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
+    VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
+use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
-use sled_agent_types::zone_bundle::{
-    BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
-    StorageLimit, ZoneBundleId, ZoneBundleMetadata,
+use sled_agent_types::support_bundle::{
+    RangeRequestHeaders, SupportBundleFilePathParam,
+    SupportBundleFinalizeQueryParams, SupportBundleListPathParam,
+    SupportBundleMetadata, SupportBundlePathParam,
+    SupportBundleTransferQueryParams,
 };
+use sled_agent_types::zone_bundle::{
+    BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
+    CleanupPeriod, StorageLimit, ZoneBundleFilter, ZoneBundleId,
+    ZoneBundleMetadata, ZonePathParam,
+};
+// Fixed identifiers for prior versions only
+use sled_agent_types_versions::v1;
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -481,9 +503,9 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn sled_role_get(
+    async fn sled_role_get_v1(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<SledRole>, HttpError> {
+    ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(sa.get_role()))
     }
@@ -551,6 +573,30 @@ impl SledAgentApi for SledAgentImpl {
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
         sa.instance_delete_external_ip(id, &body_args).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn vmm_join_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+        sa.instance_join_multicast_group(id, &body_args).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn vmm_leave_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+        sa.instance_leave_multicast_group(id, &body_args).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -987,11 +1033,11 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_logs_download(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
         query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = request_context.context();
-        let SledDiagnosticsLogsDownloadPathParm { zone } =
+        let SledDiagnosticsLogsDownloadPathParam { zone } =
             path_params.into_inner();
         let SledDiagnosticsLogsDownloadQueryParam { max_rotated } =
             query_params.into_inner();
@@ -1002,10 +1048,12 @@ impl SledAgentApi for SledAgentImpl {
             .map_err(HttpError::from)
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_get(
+    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
+        HttpError,
+    > {
         // This API has been removed, but we still provide an endpoint for
         // backwards compatibility. Only `omdb` ever called this endpoint, so we
         // could probably just always return an error, but we can at least
@@ -1013,16 +1061,16 @@ impl SledAgentApi for SledAgentImpl {
         // and always attempt to destroy orphans, so we can just claim the
         // chicken switch is always in that state.
         let destroy_orphans = true;
-        Ok(HttpResponseOk(ChickenSwitchDestroyOrphanedDatasets {
+        Ok(HttpResponseOk(v1::debug::ChickenSwitchDestroyOrphanedDatasets {
             destroy_orphans,
         }))
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_put(
+    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
         _request_context: RequestContext<Self::Context>,
-        body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+        body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
+        let v1::debug::ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
             body.into_inner();
 
         // This API has been removed, but we still provide an endpoint for
@@ -1085,6 +1133,49 @@ impl SledAgentApi for SledAgentImpl {
             }
         }
         sa.hardware_monitor().set_switch_zone_policy(policy);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn probes_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        request_context.context().set_probes(body.into_inner().probes);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn local_storage_dataset_ensure(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetEnsureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let path_params = path_params.into_inner();
+        let request = body.into_inner();
+
+        sa.create_local_storage_dataset(
+            path_params.zpool_id,
+            path_params.dataset_id,
+            request,
+        )
+        .await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn local_storage_dataset_delete(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let path_params = path_params.into_inner();
+
+        sa.delete_local_storage_dataset(
+            path_params.zpool_id,
+            path_params.dataset_id,
+        )
+        .await?;
+
         Ok(HttpResponseUpdatedNoContent())
     }
 }

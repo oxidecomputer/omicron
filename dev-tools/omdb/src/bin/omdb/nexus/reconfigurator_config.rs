@@ -52,6 +52,9 @@ pub struct ReconfiguratorConfigOpts {
 
     #[clap(long, action = ArgAction::Set)]
     add_zones_with_mupdate_override: Option<bool>,
+
+    #[clap(long, action = ArgAction::Set)]
+    tuf_repo_pruner_enabled: Option<bool>,
 }
 
 impl ReconfiguratorConfigOpts {
@@ -69,6 +72,9 @@ impl ReconfiguratorConfigOpts {
                         current.planner_config.add_zones_with_mupdate_override,
                     ),
             },
+            tuf_repo_pruner_enabled: self
+                .tuf_repo_pruner_enabled
+                .unwrap_or(current.tuf_repo_pruner_enabled),
         }
     }
 
@@ -113,7 +119,7 @@ impl FromStr for ReconfiguratorConfigVersionOrCurrent {
 
 pub async fn cmd_nexus_reconfigurator_config(
     omdb: &Omdb,
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &ReconfiguratorConfigArgs,
 ) -> Result<(), anyhow::Error> {
     match &args.command {
@@ -127,7 +133,7 @@ pub async fn cmd_nexus_reconfigurator_config(
     }
 }
 async fn reconfigurator_config_show(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &ReconfiguratorConfigShowArgs,
 ) -> Result<(), anyhow::Error> {
     let res = match args.version {
@@ -161,7 +167,7 @@ async fn reconfigurator_config_show(
 }
 
 async fn reconfigurator_config_set(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &ReconfiguratorConfigSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {

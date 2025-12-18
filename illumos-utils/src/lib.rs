@@ -10,6 +10,8 @@ use slog_error_chain::InlineErrorChain;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub mod addrobj;
+#[cfg(target_os = "illumos")]
+pub mod contract;
 pub mod coreadm;
 pub mod destructor;
 pub mod dkio;
@@ -64,8 +66,8 @@ pub enum ExecutionError {
     #[error("{0}")]
     CommandFailure(Box<CommandFailureInfo>),
 
-    #[error("Failed to manipulate process contract: {err}")]
-    ContractFailure { err: std::io::Error },
+    #[error("contract error: {msg}: {err}")]
+    ContractFailure { msg: String, err: std::io::Error },
 
     #[error("Failed to parse command output")]
     ParseFailure(String),

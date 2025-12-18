@@ -66,6 +66,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         .blueprint_target_get_current_full(&opctx)
         .await
         .expect("failed to read current target blueprint");
+
     let mut disk_test = DiskTest::new(&cptestctx).await;
     disk_test.add_blueprint_disks(&initial_blueprint).await;
 
@@ -116,7 +117,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
 
     // Assemble state that we can load into reconfigurator-cli.
     let state1 = nexus_reconfigurator_preparation::reconfigurator_state_load(
-        &opctx, datastore,
+        &opctx, datastore, 20,
     )
     .await
     .expect("failed to assemble reconfigurator state");
@@ -127,7 +128,15 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         .planning_input
         .sled_lookup(SledFilter::Commissioned, sled_id)
         .expect("state1 has initial sled");
-    assert!(!state1.planning_input.service_ip_pool_ranges().is_empty());
+    assert_ne!(
+        state1
+            .planning_input
+            .external_ip_policy()
+            .clone()
+            .into_non_external_dns_ips()
+            .next(),
+        None,
+    );
     assert!(!state1.silo_names.is_empty());
     assert!(!state1.external_dns_zone_names.is_empty());
     // We waited for the first inventory collection already.
@@ -162,8 +171,24 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // Run this reconfigurator-cli invocation.
     write_json(&saved_state1_path, &state1).unwrap();
     let exec = Exec::cmd(path_to_cli()).arg(&script1_path);
-    let (exit_status, _, stderr_text) = run_command(exec);
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // Save the CLI stdout / stderr.
+    //
+    // The CLI intentionally doesn't bail if any of the steps fail. Record the
+    // output in a file in the tempdir, so that we can see any errors we happen
+    // to catch.
+    let stdout_path1 = tmpdir_path.join("reconfigurator-cli-script1.stdout");
+    let stderr_path1 = tmpdir_path.join("reconfigurator-cli-script1.stderr");
+    for (output, path) in
+        [(&stdout_text, &stdout_path1), (&stdout_text, &stderr_path1)]
+    {
+        println!("writing reconfigurator-cli script1 output to {path}");
+        std::fs::write(&path, &output)
+            .with_context(|| format!("write CLI output to {}", path))
+            .unwrap();
+    }
 
     // Load the new file and find the new blueprint name.
     let state2: UnstableReconfiguratorState =
@@ -189,15 +214,27 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     let (exit_status, _, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
 
+    // Save the output again.
+    let stdout_path2 = tmpdir_path.join("reconfigurator-cli-script2.stdout");
+    let stderr_path2 = tmpdir_path.join("reconfigurator-cli-script2.stderr");
+    for (output, path) in
+        [(&stdout_text, &stdout_path2), (&stdout_text, &stderr_path2)]
+    {
+        println!("writing reconfigurator-cli script2 output to {path}");
+        std::fs::write(&path, &output)
+            .with_context(|| format!("write CLI output to {}", path))
+            .unwrap();
+    }
+
     // Load the blueprint we just wrote.
     let new_blueprint2: Blueprint = read_json(&new_blueprint_path).unwrap();
     assert_eq!(new_blueprint, new_blueprint2);
 
     // Import the new blueprint.
-    let nexus_internal_url =
-        format!("http://{}/", cptestctx.internal_client.bind_address);
+    let nexus_lockstep_url =
+        format!("http://{}/", cptestctx.lockstep_client.bind_address);
     let nexus_client =
-        nexus_client::Client::new(&nexus_internal_url, log.clone());
+        nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone());
     nexus_client
         .blueprint_import(&new_blueprint)
         .await
@@ -212,10 +249,12 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
 
     // Set the blueprint as the (disabled) target.
     nexus_client
-        .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
-            target_id: new_blueprint.id,
-            enabled: false,
-        })
+        .blueprint_target_set(
+            &nexus_lockstep_client::types::BlueprintTargetSet {
+                target_id: new_blueprint.id,
+                enabled: false,
+            },
+        )
         .await
         .context("setting target blueprint")
         .unwrap();
@@ -235,6 +274,10 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         script1_path,
         script2_path,
         new_blueprint_path,
+        stdout_path1,
+        stderr_path1,
+        stdout_path2,
+        stderr_path2,
     ] {
         std::fs::remove_file(&path)
             .with_context(|| format!("remove {}", path))

@@ -10,7 +10,7 @@ session_absolute_timeout_minutes = 1440 # 24 hours
 
 # List of authentication schemes to support.
 [authn]
-schemes_external = ["session_cookie", "access_token"]
+schemes_external = ["session_cookie", "access_token", "scim_token"]
 
 [log]
 # Show log messages of this level and more severe
@@ -53,6 +53,11 @@ default_request_body_max_bytes = 1048576
 bind_address = "[::1]:12221"
 default_request_body_max_bytes = 1048576
 
+[deployment.dropshot_lockstep]
+# IP Address and TCP port on which to listen for the lockstep API
+bind_address = "[::1]:12232"
+default_request_body_max_bytes = 1048576
+
 [deployment.internal_dns]
 # Example address.
 # If you're using `omicron-dev run-all`, this is value is overwritten
@@ -93,13 +98,16 @@ metrics_producer_gc.period_secs = 60
 external_endpoints.period_secs = 60
 nat_cleanup.period_secs = 30
 bfd_manager.period_secs = 30
+# How frequently to check for a new inventory collection (made by any Nexus).
+# This is cheap, so we should check frequently.
+inventory.period_secs_load = 15
 # How frequently to collect hardware/software inventory from the whole system
 # (even if we don't have reason to believe anything has changed).
-inventory.period_secs = 600
+inventory.period_secs_collect = 600
 # Maximum number of past collections to keep in the database
 inventory.nkeep = 5
 # Disable inventory collection altogether (for emergencies)
-inventory.disable = false
+inventory.disable_collect = false
 phantom_disks.period_secs = 30
 physical_disk_adoption.period_secs = 30
 support_bundle_collector.period_secs = 30
@@ -131,12 +139,38 @@ region_snapshot_replacement_step.period_secs = 30
 region_snapshot_replacement_finish.period_secs = 30
 tuf_artifact_replication.period_secs = 300
 tuf_artifact_replication.min_sled_replication = 1
+tuf_repo_pruner.period_secs = 300
+# How many extra recent target releases to keep
+# The system always keeps two: the current release and the previous one.
+# This number is in addition to that.
+tuf_repo_pruner.nkeep_extra_target_releases = 1
+# How many extra recently uploaded repos to keep
+# The system always keeps one, assuming that the operator may be about to
+# update to it.  This number is in addition to that.
+tuf_repo_pruner.nkeep_extra_newly_uploaded = 1
 # In general, the webhook dispatcher will be activated when events are queued,
 # so we don't need to periodically activate it *that* frequently.
 alert_dispatcher.period_secs = 60
 webhook_deliverator.period_secs = 60
 read_only_region_replacement_start.period_secs = 30
 sp_ereport_ingester.period_secs = 30
+# How frequently to check for a new fault management sitrep (made by any
+# Nexus).
+# This is cheap, so we should check frequently.
+fm.sitrep_load_period_secs = 15
+# Sitrep GC, on the other hand, does not need to be activated very frequently,
+# as it does not impact the responsiveness of the fault management system, and
+# is activated every time the current sitrep changes. Periodic activations are
+# only necessary to ensure that it always happens eventually.
+fm.sitrep_gc_period_secs = 600
+probe_distributor.period_secs = 60
+multicast_reconciler.period_secs = 60
+# TTL for sled-to-backplane-port mapping cache
+# Default: 3600 seconds (1 hour) - detects new sleds and inventory changes
+# multicast_reconciler.sled_cache_ttl_secs = 3600
+# TTL for backplane topology cache (static platform configuration)
+# Default: 86400 seconds (24 hours) - refreshed on-demand when validation fails
+# multicast_reconciler.backplane_cache_ttl_secs = 86400
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.
@@ -148,3 +182,8 @@ type = "random"
 # setting `seed` to a fixed value will make dataset selection ordering use the
 # same shuffling order for every region allocation.
 # seed = 0
+
+[omdb]
+# In production omdb is shipped alongside Nexus in its zone; this doesn't happen
+# (and isn't needed) in simulated environments.
+bin_path = "/cannot/fetch/omdb/in/simulated/environments"

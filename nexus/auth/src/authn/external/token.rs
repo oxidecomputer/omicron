@@ -11,6 +11,7 @@ use super::SchemeResult;
 use super::SiloUserSilo;
 use crate::authn;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use headers::HeaderMapExt;
 use headers::authorization::{Authorization, Bearer};
 
@@ -63,9 +64,14 @@ where
         match parse_token(headers.typed_get().as_ref()) {
             Err(error) => SchemeResult::Failed(error),
             Ok(None) => SchemeResult::NotRequested,
-            Ok(Some(token)) => match ctx.token_actor(token).await {
+            Ok(Some(token)) => match ctx.authenticate_token(token).await {
                 Err(error) => SchemeResult::Failed(error),
-                Ok(actor) => SchemeResult::Authenticated(Details { actor }),
+                Ok((actor, device_token_expiration)) => {
+                    SchemeResult::Authenticated(Details {
+                        actor,
+                        device_token_expiration,
+                    })
+                }
             },
         }
     }
@@ -91,7 +97,12 @@ fn parse_token(
 /// A context that can look up a Silo user and client ID from a token.
 #[async_trait]
 pub trait TokenContext {
-    async fn token_actor(&self, token: String) -> Result<authn::Actor, Reason>;
+    /// Returns the actor authenticated by the token and the token's expiration
+    /// time (if any).
+    async fn authenticate_token(
+        &self,
+        token: String,
+    ) -> Result<(authn::Actor, Option<DateTime<Utc>>), Reason>;
 }
 
 #[cfg(test)]

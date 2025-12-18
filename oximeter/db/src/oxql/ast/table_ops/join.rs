@@ -24,6 +24,10 @@ impl Join {
         let mut tables = tables.iter().cloned().enumerate();
         let (_, mut out) = tables.next().unwrap();
         anyhow::ensure!(
+            out.len() > 0,
+            "Input tables for a join operation must not be empty",
+        );
+        anyhow::ensure!(
             out.is_aligned(),
             "Input tables for a join operation must be aligned"
         );

@@ -14,6 +14,7 @@ use crate::app::background::BackgroundTask;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
+use mg_admin_client::ClientInfo;
 use mg_admin_client::types::{BfdPeerConfig, SessionMode};
 use nexus_db_model::{BfdMode, BfdSession};
 use nexus_db_queries::{context::OpContext, db::DataStore};
@@ -131,7 +132,7 @@ impl BackgroundTask for BfdManager {
                 },
             };
 
-            let mgd_clients = build_mgd_clients(mappings, log);
+            let mgd_clients = build_mgd_clients(mappings, log, &self.resolver).await;
 
             for (location, c) in &mgd_clients {
                 let client_current = match c.get_bfd_peers().await {

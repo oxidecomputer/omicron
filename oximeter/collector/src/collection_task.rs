@@ -14,9 +14,9 @@ use chrono::Utc;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter::types::ProducerResults;
 use oximeter::types::ProducerResultsItem;
-use oximeter_api::FailedCollection;
-use oximeter_api::ProducerDetails;
-use oximeter_api::SuccessfulCollection;
+use oximeter_types::producer::FailedCollection;
+use oximeter_types::producer::ProducerDetails;
+use oximeter_types::producer::SuccessfulCollection;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -381,6 +381,8 @@ impl CollectionTaskHandle {
         let log = log.new(o!(
             "component" => "collection-task-handle",
             "producer_id" => producer.id.to_string(),
+            "producer_ip" => producer.address.ip().to_string(),
+            "producer_port" => producer.address.port(),
         ));
         Self { notifiers, log }
     }
@@ -536,6 +538,8 @@ impl CollectionTask {
         let log = log.new(o!(
             "component" => "collection-task",
             "producer_id" => producer.id.to_string(),
+            "producer_ip" => producer.address.ip().to_string(),
+            "producer_port" => producer.address.port(),
         ));
 
         // Watch channel for changes to the producer's endpoint information.

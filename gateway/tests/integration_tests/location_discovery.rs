@@ -35,7 +35,7 @@ async fn discovery_both_locations() {
     for (switch, expected_serial) in [(0, "SimSidecar0"), (1, "SimSidecar1")] {
         for client in [client0, client1] {
             let state = client
-                .sp_get(gateway_client::types::SpType::Switch, switch)
+                .sp_get(&SpType::Switch, switch)
                 .await
                 .unwrap()
                 .into_inner();
