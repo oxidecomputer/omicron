@@ -1433,11 +1433,22 @@ impl SimpleIdentityOrName for AntiAffinityGroupMember {
 
 // DISKS
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum DiskType {
-    Distributed,
-    Local,
+    Distributed {
+        /// ID of snapshot from which disk was created, if any
+        snapshot_id: Option<Uuid>,
+        /// ID of image from which disk was created, if any
+        image_id: Option<Uuid>,
+    },
+
+    Local {
+        /// ID of the sled this local disk is allocated on, if it has been
+        /// allocated. Once allocated it cannot be changed or migrated.
+        #[schemars(with = "Option<Uuid>")]
+        sled_id: Option<SledUuid>,
+    },
 }
 
 /// View of a Disk
@@ -1446,14 +1457,9 @@ pub struct Disk {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub project_id: Uuid,
-    /// ID of snapshot from which disk was created, if any
-    pub snapshot_id: Option<Uuid>,
-    /// ID of image from which disk was created, if any
-    pub image_id: Option<Uuid>,
     pub size: ByteCount,
     pub block_size: ByteCount,
     pub state: DiskState,
-    pub device_path: String,
     pub disk_type: DiskType,
 }
 

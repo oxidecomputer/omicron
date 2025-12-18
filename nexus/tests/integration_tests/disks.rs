@@ -34,6 +34,7 @@ use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
+use omicron_common::api::external::DiskType;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceState;
@@ -231,8 +232,10 @@ async fn test_disk_create_attach_detach_delete(
     assert_eq!(disk.identity.name, DISK_NAME);
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, project_id);
-    assert_eq!(disk.snapshot_id, None);
-    assert_eq!(disk.image_id, None);
+    assert_eq!(
+        disk.disk_type,
+        DiskType::Distributed { snapshot_id: None, image_id: None }
+    );
     assert_eq!(disk.size.to_whole_mebibytes(), 1024);
     assert_eq!(disk.block_size.to_bytes(), 512);
     assert_eq!(disk.state, DiskState::Creating);
@@ -244,8 +247,10 @@ async fn test_disk_create_attach_detach_delete(
     assert_eq!(disk.identity.name, DISK_NAME);
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, project_id);
-    assert_eq!(disk.snapshot_id, None);
-    assert_eq!(disk.image_id, None);
+    assert_eq!(
+        disk.disk_type,
+        DiskType::Distributed { snapshot_id: None, image_id: None }
+    );
     assert_eq!(disk.size.to_whole_mebibytes(), 1024);
     assert_eq!(disk.block_size.to_bytes(), 512);
     assert_eq!(disk.state, DiskState::Detached);
@@ -2696,10 +2701,8 @@ async fn disk_post(
 fn disks_eq(disk1: &Disk, disk2: &Disk) {
     identity_eq(&disk1.identity, &disk2.identity);
     assert_eq!(disk1.project_id, disk2.project_id);
-    assert_eq!(disk1.snapshot_id, disk2.snapshot_id);
-    assert_eq!(disk1.image_id, disk2.image_id);
+    assert_eq!(disk1.disk_type, disk2.disk_type);
     assert_eq!(disk1.size.to_bytes(), disk2.size.to_bytes());
     assert_eq!(disk1.block_size.to_bytes(), disk2.block_size.to_bytes());
     assert_eq!(disk1.state, disk2.state);
-    assert_eq!(disk1.device_path, disk2.device_path);
 }

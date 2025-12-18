@@ -263,40 +263,34 @@ impl Into<api::external::Disk> for Disk {
     fn into(self) -> api::external::Disk {
         match self {
             Disk::Crucible(CrucibleDisk { disk, disk_type_crucible }) => {
-                // XXX can we remove this?
-                let device_path = format!("/mnt/{}", disk.name().as_str());
                 api::external::Disk {
                     identity: disk.identity(),
                     project_id: disk.project_id,
-                    snapshot_id: disk_type_crucible.create_snapshot_id,
-                    image_id: disk_type_crucible.create_image_id,
                     size: disk.size.into(),
                     block_size: disk.block_size.into(),
                     state: disk.state().into(),
-                    device_path,
-                    disk_type: api::external::DiskType::Distributed,
+                    disk_type: api::external::DiskType::Distributed {
+                        snapshot_id: disk_type_crucible.create_snapshot_id,
+                        image_id: disk_type_crucible.create_image_id,
+                    },
                 }
             }
 
             Disk::LocalStorage(LocalStorageDisk {
                 disk,
                 disk_type_local_storage: _,
-                local_storage_dataset_allocation: _,
-            }) => {
-                // XXX can we remove this?
-                let device_path = format!("/mnt/{}", disk.name().as_str());
-                api::external::Disk {
-                    identity: disk.identity(),
-                    project_id: disk.project_id,
-                    snapshot_id: None,
-                    image_id: None,
-                    size: disk.size.into(),
-                    block_size: disk.block_size.into(),
-                    state: disk.state().into(),
-                    device_path,
-                    disk_type: api::external::DiskType::Local,
-                }
-            }
+                local_storage_dataset_allocation,
+            }) => api::external::Disk {
+                identity: disk.identity(),
+                project_id: disk.project_id,
+                size: disk.size.into(),
+                block_size: disk.block_size.into(),
+                state: disk.state().into(),
+                disk_type: api::external::DiskType::Local {
+                    sled_id: local_storage_dataset_allocation
+                        .map(|allocation| allocation.sled_id()),
+                },
+            },
         }
     }
 }
