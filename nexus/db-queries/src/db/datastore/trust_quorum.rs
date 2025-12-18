@@ -1077,6 +1077,9 @@ mod tests {
             datastore.lrtq_members(opctx, rack_id2).await.unwrap();
         assert_eq!(hw_baseboard_ids2.len(), 5);
         assert_ne!(hw_baseboard_ids1, hw_baseboard_ids2);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1163,6 +1166,9 @@ mod tests {
             .expect_err(
                 "insert should fail because previous epoch is incorrect",
             );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1384,6 +1390,9 @@ mod tests {
                 |(_, info)| info.state == TrustQuorumMemberState::Committed
             )
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1520,5 +1529,8 @@ mod tests {
             .tq_abort_config(opctx, config2.rack_id, config2.epoch)
             .await
             .unwrap_err();
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }
