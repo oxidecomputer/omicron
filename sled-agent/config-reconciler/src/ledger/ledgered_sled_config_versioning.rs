@@ -28,6 +28,9 @@ use std::error::Error as StdError;
 /// [`OmicronSledConfig`] alias from `latest`. The `Previous` associated type
 /// should point to the prior version (what was the current version before your
 /// change).
+///
+/// Also update the unit tests at the bottom of this file to cover your new
+/// version as well.
 trait VersionConversionChain: Ledgerable {
     /// A description of the version. This shows up in logs.
     const DESCRIPTION: &str;
@@ -243,220 +246,124 @@ impl TryFrom<VersionConversionChainTerminal>
 
 #[cfg(test)]
 pub(super) mod tests {
-    use crate::ledger::CONFIG_LEDGER_FILENAME;
-
     use super::*;
-    use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
+    use camino_tempfile_ext::prelude::*;
     use omicron_test_utils::dev;
 
-    // Legacy configs collected from a test system.
-    pub(crate) const LEGACY_DISKS_PATH: &str =
-        "test-data/omicron-physical-disks.json";
-    pub(crate) const LEGACY_DATASETS_PATH: &str =
-        "test-data/omicron-datasets.json";
-    pub(crate) const LEGACY_ZONES_PATH: &str = "test-data/omicron-zones.json";
+    // v4 config collected from a test system.
+    const V4_CONFIG_PATH: &str = "test-data/v4-sled-config.json";
 
-    // The merged legacy configs above. We assert that it matches in
-    // test_merge_old_configs below.
-    const MERGED_CONFIG_PATH: &str =
-        "test-data/expectorate/merged-sled-config.json";
+    // paths for expectorate checks
+    const EXPECTORATE_V10_CONFIG_PATH: &str =
+        "expectorate/v10-sled-config.json";
+    const EXPECTORATE_V11_CONFIG_PATH: &str =
+        "expectorate/v11-sled-config.json";
 
-    #[test]
-    fn test_old_config_schema() {
-        let schema = schemars::schema_for!(OmicronZonesConfigLocal);
-        expectorate::assert_contents(
-            "../../schema/all-zones-requests.json",
-            &serde_json::to_string_pretty(&schema).unwrap(),
-        );
-    }
-
+    // This is solely an expectorate test to guarantee:
+    //
+    // * the conversions for various versions function (at least starting from
+    //   the v4 config we've committed)
+    // * we have input files at intermediate versions we can use in other tests
     #[tokio::test]
-    async fn can_convert_v9_config_version() {
-        let logctx = dev::test_setup_log("can_convert_v9_config_version");
-        let tempdir = Utf8TempDir::new().expect("created tempdir");
+    async fn can_convert_v4_to_newer_versions() {
+        let logctx = dev::test_setup_log("can_convert_v4_to_newer_versions");
+        let log = &logctx.log;
 
-        // Copy version 6 into a tempdir.
-        println!("logging to {}", tempdir.path());
-        let dst_file_name = Utf8PathBuf::from(
-            Utf8PathBuf::from(MERGED_CONFIG_PATH).file_name().unwrap(),
-        );
-        let dst_file = tempdir.path().join(&dst_file_name);
-        tokio::fs::copy(MERGED_CONFIG_PATH, &dst_file)
-            .await
-            .expect("Copy old config into tempdir");
-        println!("copied {} => {}", MERGED_CONFIG_PATH, dst_file);
-
-        // Convert, which will rewrite the config as well.
-        let converted =
-            try_convert_v4_sled_config(&logctx.log, vec![dst_file.clone()])
-                .await
-                .expect("Should have found and converted v9 config");
-
-        // And make sure it matches the new, directly loaded and converted from
-        // disk.
-        let new_as_v4: OmicronSledConfigV4 = serde_json::from_str(
-            tokio::fs::read_to_string(dst_file).await.unwrap().as_str(),
-        )
-        .expect("successfully converted config");
-        let new_as_v10 = OmicronSledConfigV10::try_from(new_as_v4)
-            .expect("successfully converted v4 config to v10");
-        let new = OmicronSledConfig::try_from(new_as_v10)
-            .expect("successfully converted v10 config to current");
-        assert_eq!(new, converted);
-        logctx.cleanup_successful();
-    }
-
-    #[test]
-    fn test_merge_old_configs() {
-        let disks: OmicronPhysicalDisksConfig = {
-            let mut f = std::fs::File::open(LEGACY_DISKS_PATH)
-                .expect("opened disks test data");
-            serde_json::from_reader(&mut f).expect("parsed disks test data")
-        };
-        let datasets: DatasetsConfig = {
-            let mut f = std::fs::File::open(LEGACY_DATASETS_PATH)
-                .expect("opened datasets test data");
-            serde_json::from_reader(&mut f).expect("parsed datasets test data")
-        };
-        let zones: OmicronZonesConfigLocal = {
-            let mut f = std::fs::File::open(LEGACY_ZONES_PATH)
-                .expect("opened zones test data");
-            serde_json::from_reader(&mut f).expect("parsed zones test data")
-        };
-
-        let merged_config =
-            merge_old_configs(disks.clone(), datasets.clone(), zones.clone());
-
-        assert_eq!(merged_config.generation, zones.omicron_generation);
-        assert_eq!(merged_config.disks.len(), disks.disks.len());
-        assert_eq!(merged_config.datasets.len(), datasets.datasets.len());
-        assert_eq!(merged_config.zones.len(), zones.zones.len());
-
-        for disk in disks.disks {
-            assert_eq!(merged_config.disks.get(&disk.id), Some(&disk));
-        }
-        for dataset in datasets.datasets.into_values() {
-            assert_eq!(merged_config.datasets.get(&dataset.id), Some(&dataset));
-        }
-        for zone in zones.zones.into_iter().map(|z| z.zone) {
-            assert_eq!(merged_config.zones.get(&zone.id), Some(&zone));
-        }
-
-        let serialized_merged_config =
-            serde_json::to_string_pretty(&merged_config)
-                .expect("config always serializes");
-
-        expectorate::assert_contents(
-            MERGED_CONFIG_PATH,
-            &serialized_merged_config,
-        );
-    }
-
-    // Helper to read the expected sled config from our combined test data.
-    pub(crate) fn test_data_merged_config() -> OmicronSledConfig {
-        let mut f = std::fs::File::open(MERGED_CONFIG_PATH)
-            .expect("opened merged sled config test data");
-        serde_json::from_reader(&mut f).expect("parsed sled config")
-    }
-
-    #[tokio::test]
-    async fn convert_legacy_ledgers_merges_old_configs() {
-        let logctx =
-            dev::test_setup_log("convert_legacy_ledgers_merges_old_configs");
-        let tempdir = Utf8TempDir::new().expect("created tempdir");
-
-        // Copy the legacy configs into this directory.
-        for src in [LEGACY_DISKS_PATH, LEGACY_DATASETS_PATH, LEGACY_ZONES_PATH]
-        {
-            let src = Utf8Path::new(src);
-            let dst = tempdir.path().join(src.file_name().unwrap());
-
-            tokio::fs::copy(src, dst).await.expect("staged file in tempdir");
-        }
-
-        // We should get back the merged config.
-        let config = match convert_legacy_ledgers(
-            &[tempdir.path().to_owned()],
-            &logctx.log,
+        let v4 = Ledger::<v4::inventory::OmicronSledConfig>::new(
+            log,
+            vec![V4_CONFIG_PATH.into()],
         )
         .await
-        {
-            Some(config) => {
-                assert_eq!(config, test_data_merged_config());
-                config
-            }
-            None => panic!("convert_legacy_ledgers didn't merge configs"),
-        };
+        .expect("read v4 from test-data")
+        .into_inner();
 
-        // The merged config should also have been written to the "dataset"...
-        let merged =
-            tokio::fs::read(tempdir.path().join(CONFIG_LEDGER_FILENAME))
-                .await
-                .expect("merged config written");
-        assert_eq!(
-            config,
-            serde_json::from_slice::<OmicronSledConfig>(&merged)
-                .expect("parsed merged config")
+        // For each version after the oldest, confirm we can convert and then
+        // assert the expectorate contents.
+
+        let v10 = v10::inventory::OmicronSledConfig::try_from(v4)
+            .expect("converted from v4");
+        let v11 = v11::inventory::OmicronSledConfig::try_from(v10.clone())
+            .expect("converted from v10");
+
+        expectorate::assert_contents(
+            EXPECTORATE_V10_CONFIG_PATH,
+            &serde_json::to_string_pretty(&v10).unwrap(),
         );
-
-        // ... and the legacy configs should have been removed.
-        // Copy the legacy configs into this directory.
-        for p in [LEGACY_DISKS_PATH, LEGACY_DATASETS_PATH, LEGACY_ZONES_PATH] {
-            let p = Utf8Path::new(p);
-            let old = tempdir.path().join(p.file_name().unwrap());
-            assert!(!old.exists(), "legacy file wasn't removed: {old}");
-        }
+        expectorate::assert_contents(
+            EXPECTORATE_V11_CONFIG_PATH,
+            &serde_json::to_string_pretty(&v11).unwrap(),
+        );
 
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
-    async fn convert_legacy_ledgers_returns_none_if_no_legacy_configs() {
-        let logctx = dev::test_setup_log(
-            "convert_legacy_ledgers_returns_none_if_no_legacy_configs",
-        );
-        let tempdir = Utf8TempDir::new().expect("created tempdir");
+    async fn read_config_converts_from_older_versions() {
+        let logctx = dev::test_setup_log("can_convert_v4_to_newer_versions");
+        let log = &logctx.log;
 
-        match convert_legacy_ledgers(&[tempdir.path().to_owned()], &logctx.log)
+        // All our configs should match the latest version. We use an explicit
+        // type here instead of the generic `OmicronSledConfig` so we get a
+        // compilation error if the latest version changes. Bump the
+        // version here and add the new version's path to the array of ledger
+        // paths below.
+        let latest_version_path = EXPECTORATE_V11_CONFIG_PATH;
+        let expected_config = v11::inventory::OmicronSledConfig::read_from(
+            log,
+            latest_version_path.into(),
+        )
+        .await
+        .expect("read v11 config");
+
+        // Reading old configs should rewrite the file to match the newest
+        // version.
+        let expected_rewritten =
+            serde_json::to_string(&expected_config).expect("serialized config");
+
+        // If no conversion was necessary, we should keep the same contents.
+        // This is semantically equivalent to `expected_rewritten` but may be
+        // formatted differently (e.g., our expectorate files are written
+        // pretty-printed, but ledgered files generally aren't).
+        let expected_unchanged = tokio::fs::read_to_string(latest_version_path)
             .await
-        {
-            Some(config) => panic!("unexpected config: {config:?}"),
-            None => (),
+            .expect("read latest version");
+
+        let tempdir = Utf8TempDir::new().unwrap();
+
+        // For each older version, confirm we can read a ledger of that version
+        // and that it's converted to the current version.
+        for src_ledger_path in [
+            V4_CONFIG_PATH,
+            EXPECTORATE_V10_CONFIG_PATH,
+            EXPECTORATE_V11_CONFIG_PATH,
+        ] {
+            // Copy the ledger into `my-ledger.json`
+            let dst_ledger_path = tempdir.child("my-ledger.json");
+            dst_ledger_path.write_file(src_ledger_path.into()).unwrap();
+
+            // Attempt to read `my-ledger.json`; this should give us back a
+            // current-version `OmicronSledConfig` and also have rewritten the
+            // config.
+            let converted_config = read_ledgered_sled_config(
+                log,
+                vec![dst_ledger_path.to_path_buf()],
+            )
+            .await
+            .expect("read and converted ledger");
+            assert_eq!(expected_config, converted_config);
+
+            // We should only rewrite the file if we converted it.
+            let data = tokio::fs::read_to_string(&dst_ledger_path)
+                .await
+                .expect("read tempdir ledger");
+            if data != expected_unchanged {
+                // The data changed - we must have done a conversion. Assert it
+                // matches what we expect.
+                assert_eq!(data, expected_rewritten);
+            }
         }
 
         logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    #[should_panic(
-        expected = "Found partial legacy ledgers; unsafe to proceed"
-    )]
-    async fn convert_legacy_ledgers_panics_if_partial_legacy_configs() {
-        // This test intends to panic, but we still want to cleanup the logctx
-        // on that panic. Stuff it into a scopeguard to do so.
-        let logctx =
-            dev::test_setup_log("convert_legacy_ledgers_merges_old_configs");
-        let logctx = scopeguard::guard(logctx, |logctx| {
-            logctx.cleanup_successful();
-        });
-
-        // Copy just the disk and zones legacy configs; omit datasets. (This
-        // test would work equally well if we copied any 1 or 2 of the legacy
-        // files; we just pick one such combo.)
-        let tempdir = Utf8TempDir::new().expect("created tempdir");
-        for src in [LEGACY_DISKS_PATH, LEGACY_ZONES_PATH] {
-            let src = Utf8Path::new(src);
-            let dst = tempdir.path().join(src.file_name().unwrap());
-
-            tokio::fs::copy(src, dst).await.expect("staged file in tempdir");
-        }
-
-        // This call should panic: it's not safe to proceed with startup if we
-        // have some but not all three legacy configs.
-        _ = convert_legacy_ledgers(&[tempdir.path().to_owned()], &logctx.log)
-            .await;
-
-        unreachable!("convert_legacy_ledgers should have panicked");
     }
 }

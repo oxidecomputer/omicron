@@ -12974,6 +12974,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
+ "camino-tempfile-ext",
  "chrono",
  "debug-ignore",
  "derive_more 0.99.20",

@@ -663,14 +663,9 @@ enum LedgerTaskExit {
 
 #[cfg(test)]
 mod tests {
-    use super::ledgered_sled_config_versioning::tests::LEGACY_DATASETS_PATH;
-    use super::ledgered_sled_config_versioning::tests::LEGACY_DISKS_PATH;
-    use super::ledgered_sled_config_versioning::tests::LEGACY_ZONES_PATH;
     use super::*;
     use crate::internal_disks::InternalDiskDetails;
-    use crate::ledger::ledgered_sled_config_versioning::tests::test_data_merged_config;
     use anyhow::anyhow;
-    use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
     use camino_tempfile::tempfile;
     use iddqd::IdOrdMap;
@@ -748,7 +743,7 @@ mod tests {
 
     impl TestHarness {
         async fn new(log: Logger) -> Self {
-            Self::build(log, FakeArtifactStore::default(), None, false).await
+            Self::build(log, FakeArtifactStore::default(), None).await
         }
 
         async fn with_fake_artifacts(
@@ -759,7 +754,6 @@ mod tests {
                 log,
                 FakeArtifactStore { artifacts: Some(artifacts.collect()) },
                 None,
-                false,
             )
             .await
         }
@@ -768,23 +762,15 @@ mod tests {
             log: Logger,
             config: &OmicronSledConfig,
         ) -> Self {
-            Self::build(log, FakeArtifactStore::default(), Some(config), false)
-                .await
-        }
-
-        async fn with_legacy_ledgers(log: Logger) -> Self {
-            Self::build(log, FakeArtifactStore::default(), None, true).await
+            Self::build(log, FakeArtifactStore::default(), Some(config)).await
         }
 
         // If `sled_config` is `Some(_)`, that config will be written to the
         // tempdir's config dataset before the ledger task is spawned.
-        // Otherwise, if `copy_legacy_ledgers` is true, we'll copy our test data
-        // legacy ledgers into the tempdir's config dataset.
         async fn build(
             log: Logger,
             fake_artifact_store: FakeArtifactStore,
             sled_config: Option<&OmicronSledConfig>,
-            copy_legacy_ledgers: bool,
         ) -> Self {
             // Create the tempdir.
             let tempdir = Utf8TempDir::new().expect("created temp directory");
@@ -810,19 +796,6 @@ mod tests {
                         .expect("created config file");
                     serde_json::to_writer(file, &sled_config)
                         .expect("wrote config to file");
-                } else if copy_legacy_ledgers {
-                    for src in [
-                        LEGACY_DISKS_PATH,
-                        LEGACY_DATASETS_PATH,
-                        LEGACY_ZONES_PATH,
-                    ] {
-                        let src = Utf8Path::new(src);
-                        let dst = path.join(src.file_name().unwrap());
-
-                        tokio::fs::copy(src, dst)
-                            .await
-                            .expect("staged file in tempdir");
-                    }
                 }
             }
 
@@ -844,11 +817,11 @@ mod tests {
                         Err(CondCheckError::<()>::NotYet)
                     }
                     CurrentSledConfig::WaitingForInitialConfig => {
-                        assert!(sled_config.is_none() && !copy_legacy_ledgers);
+                        assert!(sled_config.is_none());
                         Ok(())
                     }
                     CurrentSledConfig::Ledgered(_) => {
-                        assert!(sled_config.is_some() || copy_legacy_ledgers);
+                        assert!(sled_config.is_some());
                         Ok(())
                     }
                 },
@@ -1337,25 +1310,6 @@ mod tests {
             .await
             .expect("no ledger task error")
             .expect("config is valid");
-
-        logctx.cleanup_successful();
-    }
-
-    // Basic test that we convert the legacy triple of config ledgers if they're
-    // present. The `legacy_configs` submodule has more extensive tests of this
-    // functionality.
-    #[tokio::test]
-    async fn convert_legacy_ledgers_if_present() {
-        let logctx = dev::test_setup_log("convert_legacy_ledgers_if_present");
-
-        let test_harness =
-            TestHarness::with_legacy_ledgers(logctx.log.clone()).await;
-
-        // It should have combined the legacy ledgers.
-        assert_eq!(
-            *test_harness.current_config_rx.borrow(),
-            CurrentSledConfig::Ledgered(Box::new(test_data_merged_config())),
-        );
 
         logctx.cleanup_successful();
     }
