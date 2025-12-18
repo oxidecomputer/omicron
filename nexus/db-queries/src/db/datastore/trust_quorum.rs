@@ -90,6 +90,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Get the latest trust quorum configuration from the database
     pub async fn tq_get_latest_config(
         &self,
         opctx: &OpContext,
@@ -256,6 +257,7 @@ impl DataStore {
     /// members to acknowledge the prepare.
     ///
     /// Also, update any digests or encrypted rack secrets if necessary.
+    /// Lastly, if enough members have acked prepares then commit the configuration.
     pub async fn tq_update_prepare_status(
         &self,
         opctx: &OpContext,
@@ -458,6 +460,8 @@ impl DataStore {
             })
     }
 
+    /// If this configuration is in the `Committed` state, then update any
+    /// members to acknowledge their commit acknowledgements.
     pub async fn tq_update_commit_status(
         &self,
         opctx: &OpContext,
@@ -537,6 +541,11 @@ impl DataStore {
             })
     }
 
+    /// Abort the configuration for a trust quorum if `epoch` is the latest per `rack_id`
+    /// and the configuration has not been committed.
+    ///
+    /// This operation returns `Ok(())` if the configuration has already been
+    /// aborted and it is still the latest configuration.
     pub async fn tq_abort_config(
         &self,
         opctx: &OpContext,
@@ -839,6 +848,7 @@ impl DataStore {
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::encrypted_rack_secrets_salt.is_null())
             .filter(dsl::encrypted_rack_secrets.is_null())
+            .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Preparing))
             .set((
                 dsl::encrypted_rack_secrets_salt.eq(salt),
                 dsl::encrypted_rack_secrets.eq(secrets),
