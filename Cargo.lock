@@ -7628,7 +7628,7 @@ dependencies = [
  "dropshot",
  "dropshot-api-manager-types",
  "http",
- "ntp-admin-types",
+ "ntp-admin-types-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7654,14 +7654,17 @@ dependencies = [
 name = "ntp-admin-types"
 version = "0.1.0"
 dependencies = [
- "chrono",
- "omicron-common",
+ "ntp-admin-types-versions",
  "omicron-workspace-hack",
- "proptest",
+]
+
+[[package]]
+name = "ntp-admin-types-versions"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
- "test-strategy",
- "thiserror 2.0.17",
 ]
 
 [[package]]

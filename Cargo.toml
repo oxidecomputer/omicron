@@ -109,6 +109,7 @@ members = [
     "ntp-admin",
     "ntp-admin/api",
     "ntp-admin/types",
+    "ntp-admin/types/versions",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -274,6 +275,7 @@ default-members = [
     "ntp-admin",
     "ntp-admin/api",
     "ntp-admin/types",
+    "ntp-admin/types/versions",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -546,6 +548,7 @@ newtype_derive = "0.1.6"
 ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
+ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
 multimap = "0.10.1"
