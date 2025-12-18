@@ -17,7 +17,6 @@ use cockroach_admin_types::NodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use iddqd::IdOrdMap;
-use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
@@ -41,6 +40,7 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::Inventory;
+use sled_agent_types::sled::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -797,7 +797,6 @@ mod test {
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
     use gateway_types::rot::RotSlot;
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;
@@ -805,6 +804,7 @@ mod test {
     use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
     use sled_agent_types::inventory::SledRole;
+    use sled_agent_types::sled::BaseboardId;
 
     // Verify the contents of an empty collection.
     #[test]

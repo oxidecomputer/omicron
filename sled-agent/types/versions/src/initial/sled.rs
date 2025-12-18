@@ -30,6 +30,7 @@ use uuid::Uuid;
     Diffable,
 )]
 #[daft(leaf)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct BaseboardId {
     /// Oxide Part Number
     pub part_number: String,

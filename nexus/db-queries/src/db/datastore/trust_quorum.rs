@@ -28,9 +28,10 @@ use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
+use sled_agent_types::sled::BaseboardId;
 use std::collections::{BTreeMap, BTreeSet};
 use trust_quorum_protocol::{
-    BaseboardId, EncryptedRackSecrets, Epoch, Salt, Sha3_256Digest, Threshold,
+    EncryptedRackSecrets, Epoch, Salt, Sha3_256Digest, Threshold,
 };
 
 macro_rules! bail_txn {

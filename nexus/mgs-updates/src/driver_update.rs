@@ -782,8 +782,8 @@ mod test {
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::internal_api::views::UpdateAttemptStatus;
     use nexus_types::internal_api::views::UpdateCompletedHow;
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::SpType;
+    use sled_agent_types::sled::BaseboardId;
     use slog_error_chain::InlineErrorChain;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;

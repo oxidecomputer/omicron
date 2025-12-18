@@ -47,9 +47,8 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
-    BaseboardId, Caboose, CockroachStatus, Collection,
-    InternalDnsGenerationStatus, NvmeFirmware, PowerState, RotPage, RotSlot,
-    TimeSync,
+    Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
+    NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -94,6 +93,7 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
+use sled_agent_types::sled::BaseboardId;
 use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddrV6};
 use std::time::Duration;
@@ -496,15 +496,6 @@ pub struct HwBaseboardId {
     pub id: Uuid,
     pub part_number: String,
     pub serial_number: String,
-}
-
-impl From<HwBaseboardId> for trust_quorum_protocol::BaseboardId {
-    fn from(value: HwBaseboardId) -> Self {
-        Self {
-            part_number: value.part_number,
-            serial_number: value.serial_number,
-        }
-    }
 }
 
 impl From<BaseboardId> for HwBaseboardId {

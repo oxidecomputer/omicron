@@ -41,6 +41,7 @@ schemars = { workspace = true, features = ["chrono", "uuid1", "url"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
+sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
@@ -51,13 +52,8 @@ test-strategy.workspace = true
 textwrap.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tufaceous-artifact.workspace = true
-
-# TODO: This currently depends on `sled-agent-types`. But that is only because
-# of `BaseboardId`. `BaseboardId` is moving to `sled-agent-types-conversions` as
-# part of https://github.com/oxidecomputer/omicron/pull/9488. At that point, we
-# can remove the dependency from `trust-quorum-protocol`. Yay.
 trust-quorum-protocol.workspace = true
+tufaceous-artifact.workspace = true
 
 newtype-uuid.workspace = true
 update-engine.workspace = true
