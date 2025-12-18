@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     -- Foreign key into the `hw_baseboard_id` table
     hw_baseboard_id UUID NOT NULL,
 
+    -- Whether a node has acknowledged a prepare or commit yet
+    state omicron.public.trust_quorum_member_state NOT NULL,
+
     -- The sha3-256 hash of the key share for this node. This is only filled in
     -- after Nexus has retrieved the configuration from the coordinator during
     -- the prepare phase of the protocol.
