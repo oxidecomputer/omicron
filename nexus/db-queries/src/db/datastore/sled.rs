@@ -5266,7 +5266,7 @@ pub(in crate::db::datastore) mod test {
 
                     crucible_dataset_id: DatasetUuid::new_v4(),
                     crucible_dataset_addr: format!(
-                        "[fd00:1122:3344:{i}0{n}::1]:12345"
+                        "[fd00:1122:3344:{i}{n:02x}::1]:12345"
                     )
                     .parse()
                     .unwrap(),
