@@ -72,12 +72,7 @@ impl SvcsInMaintenanceResult {
             && self.time_of_status == None
     }
 
-    // This method is only used when the target OS is "illumos". It is not
-    // marked as a configuration option based on target OS because it is not
-    // Illumos specific itself. Additionally, we would not be able to run the
-    // unit tests on any other OS if we mark it to be used on Illumos only.
-    // We mark it as unused instead.
-    #[allow(dead_code)]
+    #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
     fn parse(log: &Logger, data: &[u8]) -> Self {
         let mut services = vec![];
         let mut errors = vec![];
@@ -119,7 +114,8 @@ impl SvcsInMaintenanceResult {
                             ));
                             error!(
                                 log,
-                                "unable to parse; output line missing zone: {line}",
+                                "unable to parse; output line missing data: \
+                                {line}",
                             );
                         }
 
@@ -136,9 +132,8 @@ impl SvcsInMaintenanceResult {
                         ));
                         info!(
                             log,
-                            "output from 'svcs' contains a service with an unknown \
-                            state: {}",
-                            state
+                            "output from 'svcs' contains a service with an \
+                            unknown state: {state}",
                         )
                     }
                     _ => (),
@@ -202,9 +197,7 @@ pub struct SvcInMaintenance {
 }
 
 impl SvcInMaintenance {
-    // As above, this method is marked as dead code as it only runs when the
-    // target OS is illumos
-    #[allow(dead_code)]
+    #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
     fn new() -> SvcInMaintenance {
         SvcInMaintenance { fmri: String::new(), zone: String::new() }
     }
