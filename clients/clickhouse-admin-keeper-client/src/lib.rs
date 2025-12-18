@@ -24,8 +24,8 @@ progenitor::generate_api!(
     },
     derives = [schemars::JsonSchema],
     replace = {
-        KeeperConfigurableSettings = clickhouse_admin_types::KeeperConfigurableSettings,
-        ClickhouseKeeperClusterMembership = clickhouse_admin_types::ClickhouseKeeperClusterMembership,
-        KeeperId = clickhouse_admin_types::KeeperId
+        KeeperConfigurableSettings = clickhouse_admin_types::keeper::KeeperConfigurableSettings,
+        ClickhouseKeeperClusterMembership = clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership,
+        KeeperId = clickhouse_admin_types::keeper::KeeperId,
     }
 );

@@ -6,6 +6,7 @@ members = [
     "clickhouse-admin",
     "clickhouse-admin/api",
     "clickhouse-admin/test-utils",
+    "clickhouse-admin/types/versions",
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
@@ -169,6 +170,7 @@ default-members = [
     "clickhouse-admin",
     "clickhouse-admin/api",
     "clickhouse-admin/types",
+    "clickhouse-admin/types/versions",
     "clickhouse-admin/test-utils",
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
@@ -411,6 +413,7 @@ clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-clien
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
 clickhouse-admin-single-client = { path = "clients/clickhouse-admin-single-client" }
 clickhouse-admin-types = { path = "clickhouse-admin/types" }
+clickhouse-admin-types-versions = { path = "clickhouse-admin/types/versions" }
 clickhouse-admin-test-utils = { path = "clickhouse-admin/test-utils" }
 clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "e3d9a1c35cf3cd04f9cb2e997b0ad88324d30737" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
