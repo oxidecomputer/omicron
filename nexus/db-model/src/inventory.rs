@@ -487,7 +487,7 @@ impl<'a> From<&'a Collection> for InvCollection {
     }
 }
 
-/// See [`nexus_types::inventory::BaseboardId`].
+/// See [`sled_agent_types::sled::BaseboardId`].
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq, Eq)]
 #[diesel(table_name = hw_baseboard_id)]
 pub struct HwBaseboardId {
