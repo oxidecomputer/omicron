@@ -588,7 +588,7 @@ impl ActiveSledEditor {
                     .remove_mupdate_override
                     .finalize(),
                 host_phase_2: self.host_phase_2.finalize(),
-                // This will come later
+                // TODO this will come in a subsequent PR
                 measurements:
                     BlueprintMeasurementsDesiredContents::default_contents(),
             },
