@@ -156,7 +156,7 @@ fn slot_to_pci_bdf(
         PciDeviceKind::Nic if logical_slot < 8 => logical_slot + 0x8,
         PciDeviceKind::Disk if logical_slot < 8 => logical_slot + 0x10,
         PciDeviceKind::CloudInitDisk if logical_slot == 0 => 0x18,
-        PciDeviceKind::Disk if logical_slot >= 8 && logical_slot < 12 => {
+        PciDeviceKind::Disk if (8..12).contains(&logical_slot) => {
             (logical_slot - 8) + 0x1A
         }
         _ => {
