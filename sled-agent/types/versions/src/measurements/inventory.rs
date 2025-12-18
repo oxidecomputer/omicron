@@ -29,7 +29,6 @@ use crate::v1::inventory::{
     ManifestInventory, MupdateOverrideInventory, OrphanedDataset,
     RemoveMupdateOverrideInventory, SledRole,
 };
-use crate::v10;
 use crate::v11;
 use crate::v11::inventory::OmicronZoneConfig;
 use camino::Utf8PathBuf;
@@ -60,36 +59,6 @@ pub struct Inventory {
 }
 
 impl TryFrom<Inventory> for v11::inventory::Inventory {
-    type Error = external::Error;
-
-    fn try_from(value: Inventory) -> Result<Self, Self::Error> {
-        let ledgered_sled_config =
-            value.ledgered_sled_config.map(TryInto::try_into).transpose()?;
-        let last_reconciliation =
-            value.last_reconciliation.map(TryInto::try_into).transpose()?;
-        let zone_image_resolver = value.zone_image_resolver.try_into()?;
-        let reconciler_status = value.reconciler_status.try_into()?;
-        Ok(Self {
-            sled_id: value.sled_id,
-            sled_agent_address: value.sled_agent_address,
-            sled_role: value.sled_role,
-            baseboard: value.baseboard,
-            usable_hardware_threads: value.usable_hardware_threads,
-            usable_physical_ram: value.usable_physical_ram,
-            cpu_family: value.cpu_family,
-            reservoir_size: value.reservoir_size,
-            disks: value.disks,
-            zpools: value.zpools,
-            datasets: value.datasets,
-            ledgered_sled_config,
-            reconciler_status,
-            last_reconciliation,
-            zone_image_resolver,
-        })
-    }
-}
-
-impl TryFrom<Inventory> for v10::inventory::Inventory {
     type Error = external::Error;
 
     fn try_from(value: Inventory) -> Result<Self, Self::Error> {
@@ -184,25 +153,6 @@ impl TryFrom<ConfigReconcilerInventory>
     }
 }
 
-impl TryFrom<ConfigReconcilerInventory>
-    for v10::inventory::ConfigReconcilerInventory
-{
-    type Error = external::Error;
-
-    fn try_from(value: ConfigReconcilerInventory) -> Result<Self, Self::Error> {
-        let last_reconciled_config = value.last_reconciled_config.try_into()?;
-        Ok(Self {
-            last_reconciled_config,
-            external_disks: value.external_disks,
-            datasets: value.datasets,
-            orphaned_datasets: value.orphaned_datasets,
-            zones: value.zones,
-            boot_partitions: value.boot_partitions,
-            remove_mupdate_override: value.remove_mupdate_override,
-        })
-    }
-}
-
 /// Status of the sled-agent-config-reconciler task.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -223,37 +173,6 @@ pub enum ConfigReconcilerInventoryStatus {
     /// attempt, because that's always available via
     /// [`ConfigReconcilerInventory::last_reconciled_config`].
     Idle { completed_at: DateTime<Utc>, ran_for: Duration },
-}
-
-impl TryFrom<ConfigReconcilerInventoryStatus>
-    for v10::inventory::ConfigReconcilerInventoryStatus
-{
-    type Error = external::Error;
-
-    fn try_from(
-        value: ConfigReconcilerInventoryStatus,
-    ) -> Result<Self, Self::Error> {
-        match value {
-            ConfigReconcilerInventoryStatus::NotYetRun => {
-                Ok(v10::inventory::ConfigReconcilerInventoryStatus::NotYetRun)
-            }
-            ConfigReconcilerInventoryStatus::Running {
-                config,
-                started_at,
-                running_for,
-            } => Ok(v10::inventory::ConfigReconcilerInventoryStatus::Running {
-                config: Box::new((*config).try_into()?),
-                started_at,
-                running_for,
-            }),
-            ConfigReconcilerInventoryStatus::Idle { completed_at, ran_for } => {
-                Ok(v10::inventory::ConfigReconcilerInventoryStatus::Idle {
-                    completed_at,
-                    ran_for,
-                })
-            }
-        }
-    }
 }
 
 impl TryFrom<ConfigReconcilerInventoryStatus>
@@ -323,44 +242,17 @@ impl TryFrom<OmicronSledConfig> for v11::inventory::OmicronSledConfig {
     }
 }
 
-impl TryFrom<OmicronSledConfig> for v10::inventory::OmicronSledConfig {
-    type Error = external::Error;
-
-    fn try_from(value: OmicronSledConfig) -> Result<Self, Self::Error> {
-        let zones = value
-            .zones
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-
-        Ok(Self {
-            generation: value.generation,
-            disks: value.disks,
-            datasets: value.datasets,
-            zones,
-            remove_mupdate_override: value.remove_mupdate_override,
-            host_phase_2: value.host_phase_2,
-        })
-    }
-}
-
-impl TryFrom<v10::inventory::OmicronSledConfig> for OmicronSledConfig {
+impl TryFrom<v11::inventory::OmicronSledConfig> for OmicronSledConfig {
     type Error = external::Error;
 
     fn try_from(
-        value: v10::inventory::OmicronSledConfig,
+        value: v11::inventory::OmicronSledConfig,
     ) -> Result<Self, Self::Error> {
-        let zones = value
-            .zones
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-
         Ok(Self {
             generation: value.generation,
             disks: value.disks,
             datasets: value.datasets,
-            zones,
+            zones: value.zones,
             remove_mupdate_override: value.remove_mupdate_override,
             host_phase_2: value.host_phase_2,
             measurements: OmicronMeasurements::measurements_defaults(),
