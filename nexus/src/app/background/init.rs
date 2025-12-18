@@ -358,6 +358,7 @@ impl BackgroundTasksInitializer {
             task_reconfigurator_config_loader,
             task_fm_sitrep_loader,
             task_fm_sitrep_gc,
+            task_fm_rendezvous,
             task_probe_distributor,
             task_multicast_reconciler,
             // Add new background tasks here.  Be sure to use this binding in a

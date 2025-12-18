@@ -282,6 +282,7 @@ impl DataStore {
                         de: de.into(),
                         comment,
                         ereports,
+                        alerts_requested: Default::default(),
                     }
                 }));
             }
@@ -1466,6 +1467,7 @@ mod tests {
                 closed_sitrep_id: None,
                 de: fm::DiagnosisEngineKind::PowerShelf,
                 ereports,
+                alerts_requested: todo!(),
                 comment: "my cool case".to_string(),
             }
         };
@@ -1486,6 +1488,7 @@ mod tests {
                 closed_sitrep_id: None,
                 de: fm::DiagnosisEngineKind::PowerShelf,
                 ereports,
+                alerts_requested: todo!(),
                 comment: "break in case of emergency".to_string(),
             }
         };
@@ -1542,6 +1545,7 @@ mod tests {
                 comment,
                 de,
                 ereports,
+                alerts_requested,
             } = dbg!(case);
             let Some(expected) = sitrep.cases.get(&case.id) else {
                 panic!("expected case {id} to exist in the original sitrep")

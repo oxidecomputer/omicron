@@ -10,6 +10,8 @@
 pub mod ereport;
 pub use ereport::{Ereport, EreportId};
 
+mod alert;
+pub use alert::*;
 pub mod case;
 pub use case::Case;
 
