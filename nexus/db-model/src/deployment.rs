@@ -65,8 +65,9 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, ExternalIpUuid,
-    GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
-    PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
+    GenericUuid, MeasurementKind, MupdateOverrideKind, OmicronZoneKind,
+    OmicronZoneUuid, PhysicalDiskKind, SledKind, SledUuid, ZpoolKind,
+    ZpoolUuid,
 };
 use sled_agent_types::inventory::OmicronZoneDataset;
 use std::net::{IpAddr, SocketAddrV6};
@@ -1223,7 +1224,7 @@ impl TryFrom<DbBpZoneImageSourceColumns> for BlueprintZoneImageSource {
 pub struct BpSingleMeasurement {
     pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub id: DbTypedUuid<PhysicalDiskKind>,
+    pub id: DbTypedUuid<MeasurementKind>,
 
     pub image_artifact_sha256: Option<ArtifactHash>,
     pub prune: bool,
@@ -1238,8 +1239,7 @@ impl BpSingleMeasurement {
         Self {
             blueprint_id: blueprint_id.into(),
             sled_id: sled_id.into(),
-            // XXX lol this should probably just be a regular uuid
-            id: omicron_uuid_kinds::PhysicalDiskUuid::new_v4().into(),
+            id: omicron_uuid_kinds::MeasurementUuid::new_v4().into(),
             image_artifact_sha256: Some(measurement.hash.into()),
             prune: measurement.prune,
         }

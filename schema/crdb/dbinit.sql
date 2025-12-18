@@ -3997,6 +3997,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
         )
     ),
 
+    -- For the measurement manifest, there are three valid states:
+    -- 1. Successfully read from installinator (has mupdate_id, no error)
+    -- 2. Synthetic from sled-agent (no mupdate_id, no error)
+    -- 3. Error reading (no mupdate_id, has error)
+    --
+    -- This is equivalent to Result<OmicronZoneManifestSource, String>.
+    CONSTRAINT measurement_manifest_consistency CHECK (
+        (measurement_manifest_source = 'installinator'
+            AND measurement_manifest_mupdate_id IS NOT NULL
+            AND measurement_manifest_boot_disk_error IS NULL)
+        OR (measurement_manifest_source = 'sled-agent'
+            AND measurement_manifest_mupdate_id IS NULL
+            AND measurement_manifest_boot_disk_error IS NULL)
+        OR (
+            measurement_manifest_source IS NULL
+            AND measurement_manifest_mupdate_id IS NULL
+            AND measurement_manifest_boot_disk_error IS NOT NULL
+        )
+    ),
+
     -- For the mupdate override, three states are valid:
     -- 1. No override, no error
     -- 2. Override, no error
@@ -4254,8 +4274,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
 CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_measurements (
     inv_collection_id UUID NOT NULL,
     sled_id UUID NOT NULL,
-    file_name TEXT,
-    path TEXT,
+    file_name TEXT NOT NULL,
+    path TEXT NOT NULL,
     error_message TEXT,
     PRIMARY KEY (inv_collection_id, sled_id, file_name)
 );
@@ -4871,8 +4891,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_single_measurements (
     sled_id UUID NOT NULL,
     id UUID NOT NULL,
 
-    image_artifact_sha256 STRING(64),
-    prune BOOLEAN,
+    image_artifact_sha256 STRING(64) NOT NULL,
+    prune BOOLEAN NOT NULL default false,
     PRIMARY KEY (blueprint_id, id)
 );
 
