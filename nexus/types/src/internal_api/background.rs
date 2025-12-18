@@ -892,15 +892,15 @@ pub struct SitrepGcStatus {
     pub errors: Vec<String>,
 }
 
-/// The status of a `fm_sitrep_execution` background task activation.
+/// The status of a `fm_rendezvouz` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub enum SitrepExecutionStatus {
+pub enum FmRendezvousStatus {
     NoSitrep,
-    Executed { sitrep_id: SitrepUuid, alerts: SitrepAlertRequestStatus },
+    Executed { sitrep_id: SitrepUuid, alerts: FmAlertStatus },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct SitrepAlertRequestStatus {
+pub struct FmAlertStatus {
     /// The total number of alerts requested by the current sitrep.
     pub total_alerts_requested: usize,
     /// The total number of alerts which were *first* requested in the current sitrep.

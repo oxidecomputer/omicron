@@ -104,6 +104,7 @@ use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
+use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_load;
 use super::tasks::instance_reincarnation;
@@ -1126,6 +1127,18 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_fm_sitrep_loader,
+        });
+
+        driver.register(TaskDefinition {
+            name: "fm_rendezvous",
+            description:
+                "updates externally visible database tables to match the \
+                 current fault management sitrep",
+            period: config.fm.rendezvous_period_secs,
+            task_impl: Box::new(FmRendezvous::new(datastore.clone(), sitrep_watcher.clone(), task_alert_dispatcher.clone())),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(sitrep_watcher.clone())],
+            activator: task_fm_rendezvous,
         });
 
         driver.register(TaskDefinition {

@@ -934,7 +934,7 @@ pub struct FmTasksConfig {
     /// updates externally-visible database tables to match the current situation
     /// report.
     #[serde_as(as = "DurationSeconds<u64>")]
-    pub rendezvouz_period_secs: Duration,
+    pub rendezvous_period_secs: Duration,
 }
 
 impl Default for FmTasksConfig {
@@ -947,7 +947,7 @@ impl Default for FmTasksConfig {
             sitrep_gc_period_secs: Duration::from_secs(600),
             // This, too, is activated whenever a new sitrep is loaded, so we
             // need not set the periodic activation interval too high.
-            rendezvouz_period_secs: Duration::from_secs(300),
+            rendezvous_period_secs: Duration::from_secs(300),
         }
     }
 }
@@ -1538,7 +1538,7 @@ mod test {
                         fm: FmTasksConfig {
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
-                            rendezvouz_period_secs: Duration::from_secs(51),
+                            rendezvous_period_secs: Duration::from_secs(51),
                         },
                         probe_distributor: ProbeDistributorConfig {
                             period_secs: Duration::from_secs(50),

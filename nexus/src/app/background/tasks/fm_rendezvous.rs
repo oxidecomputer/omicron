@@ -11,11 +11,11 @@ use futures::future::BoxFuture;
 use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::fm::AlertRequest;
 use nexus_types::fm::Sitrep;
 use nexus_types::fm::SitrepVersion;
-use nexus_types::internal_api::background::SitrepAlertRequestStatus as AlertStatus;
-use nexus_types::internal_api::background::SitrepExecutionStatus as Status;
+use nexus_types::fm::case::AlertRequest;
+use nexus_types::internal_api::background::FmAlertStatus as AlertStats;
+use nexus_types::internal_api::background::FmRendezvousStatus as Status;
 use omicron_common::api::external::Error;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -75,9 +75,9 @@ impl FmRendezvous {
         &self,
         sitrep: &Arc<(SitrepVersion, Sitrep)>,
         opctx: &OpContext,
-    ) -> AlertStatus {
+    ) -> AlertStats {
         let (_, ref sitrep) = **sitrep;
-        let mut status = AlertStatus::default();
+        let mut status = AlertStats::default();
 
         // XXX(eliza): is it better to allocate all of these into a big array
         // and do a single `INSERT INTO` query, or iterate over them one by one

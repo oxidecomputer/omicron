@@ -12,9 +12,12 @@ pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
 
+use case::AlertRequest;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
-use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid, SitrepUuid};
+use omicron_uuid_kinds::{
+    CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
+};
 use serde::{Deserialize, Serialize};
 
 /// A fault management situation report, or _sitrep_.
@@ -55,6 +58,16 @@ impl Sitrep {
     /// child sitreps that descend from this one.
     pub fn open_cases(&self) -> impl Iterator<Item = &Case> + '_ {
         self.cases.iter().filter(|c| c.is_open())
+    }
+
+    /// Iterate over all alerts requested by cases in this sitrep.
+    pub fn alerts_requested(
+        &self,
+    ) -> impl Iterator<Item = (CaseUuid, &'_ AlertRequest)> + '_ {
+        self.cases.iter().flat_map(|case| {
+            let case_id = case.id;
+            case.alerts_requested.iter().map(move |alert| (case_id, alert))
+        })
     }
 }
 
