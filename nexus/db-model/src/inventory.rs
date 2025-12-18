@@ -1692,7 +1692,7 @@ impl InvZoneManifestZone {
             sled_id: sled_id.into(),
             zone_file_name: artifact.file_name.clone(),
             path: artifact.path.clone().into(),
-            expected_size: artifact.expected_size as i64,
+            expected_size: artifact.expected_size.try_into().unwrap(),
             expected_sha256: artifact.expected_hash.into(),
             error: artifact.status.as_ref().err().cloned(),
         }
@@ -1704,7 +1704,7 @@ impl From<InvZoneManifestZone> for ZoneArtifactInventory {
         Self {
             file_name: row.zone_file_name,
             path: row.path.into(),
-            expected_size: row.expected_size as u64,
+            expected_size: row.expected_size.try_into().unwrap(),
             expected_hash: row.expected_sha256.into(),
             status: match row.error {
                 None => Ok(()),
