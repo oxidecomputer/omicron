@@ -44,6 +44,7 @@ use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::params::IpAssignment;
 use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::external_api::params::PrivateIpv4StackCreate;
+use nexus_types::external_api::params::PrivateIpv4StackUpdate;
 use nexus_types::external_api::params::PrivateIpv6StackCreate;
 use nexus_types::external_api::params::SshKeyCreate;
 use nexus_types::external_api::shared::IpKind;
@@ -3568,7 +3569,7 @@ async fn test_instance_update_network_interfaces(
             description: Some(new_description.clone()),
         },
         primary: false,
-        transit_ips: vec![],
+        ..Default::default()
     };
 
     // Verify we fail to update the NIC when the instance is running
@@ -3655,7 +3656,7 @@ async fn test_instance_update_network_interfaces(
             description: None,
         },
         primary: true,
-        transit_ips: vec![],
+        ..Default::default()
     };
     let updated_primary_iface1 = NexusRequest::object_put(
         client,
@@ -3753,7 +3754,7 @@ async fn test_instance_update_network_interfaces(
             description: None,
         },
         primary: true,
-        transit_ips: vec![],
+        ..Default::default()
     };
     let new_primary_iface = NexusRequest::object_put(
         client,
@@ -3850,6 +3851,21 @@ async fn test_instance_update_network_interfaces(
 }
 
 #[nexus_test]
+async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
+    _cptestctx: &ControlPlaneTestContext,
+) {
+    todo!()
+}
+
+
+#[nexus_test]
+async fn cannot_remove_ip_stack_with_outstanding_external_ips_of_the_same_version(
+    _cptestctx: &ControlPlaneTestContext,
+) {
+    todo!()
+}
+
+#[nexus_test]
 async fn can_add_instance_network_interface_ip_stack(
     _cptestctx: &ControlPlaneTestContext,
 ) {
@@ -3906,11 +3922,13 @@ async fn test_instance_update_network_interface_transit_ips(
             description: None,
         },
         primary: false,
-        transit_ips: vec![
-            "10.0.0.0/9".parse().unwrap(),
-            "10.128.0.0/9".parse().unwrap(),
-            "1.1.1.1/32".parse().unwrap(),
-        ],
+        ipv4: PrivateIpv4StackUpdate::Modify {
+            transit_ips: vec![
+                "10.0.0.0/9".parse().unwrap(),
+                "10.128.0.0/9".parse().unwrap(),
+                "1.1.1.1/32".parse().unwrap(),
+            ],
+        },
     };
 
     // Verify that a selection of transit IPs (mixture of private and global
@@ -3926,12 +3944,14 @@ async fn test_instance_update_network_interface_transit_ips(
     // Non-canonical form (e.g., host identifier is nonzero) subnets should
     // be rejected.
     let with_extra_bits = params::InstanceNetworkInterfaceUpdate {
-        transit_ips: vec![
-            "10.0.0.0/9".parse().unwrap(),
-            "10.128.0.0/9".parse().unwrap(),
-            //  Invalid vvv
-            "172.30.255.255/24".parse().unwrap(),
-        ],
+        ipv4: PrivateIpv4StackUpdate::Modify {
+            transit_ips: vec![
+                "10.0.0.0/9".parse().unwrap(),
+                "10.128.0.0/9".parse().unwrap(),
+                //  Invalid vvv
+                "172.30.255.255/24".parse().unwrap(),
+            ],
+        },
         ..base_update.clone()
     };
     let err = object_put_error(
@@ -3948,11 +3968,13 @@ async fn test_instance_update_network_interface_transit_ips(
 
     // Multicast IP blocks should be rejected.
     let with_mc1 = params::InstanceNetworkInterfaceUpdate {
-        transit_ips: vec![
-            "10.0.0.0/9".parse().unwrap(),
-            "10.128.0.0/9".parse().unwrap(),
-            "224.0.0.0/4".parse().unwrap(),
-        ],
+        ipv4: PrivateIpv4StackUpdate::Modify {
+            transit_ips: vec![
+                "10.0.0.0/9".parse().unwrap(),
+                "10.128.0.0/9".parse().unwrap(),
+                "224.0.0.0/4".parse().unwrap(),
+            ],
+        },
         ..base_update.clone()
     };
     let err = object_put_error(
@@ -3968,11 +3990,13 @@ async fn test_instance_update_network_interface_transit_ips(
     );
 
     let with_mc2 = params::InstanceNetworkInterfaceUpdate {
-        transit_ips: vec![
-            "10.0.0.0/9".parse().unwrap(),
-            "10.128.0.0/9".parse().unwrap(),
-            "230.20.20.128/32".parse().unwrap(),
-        ],
+        ipv4: PrivateIpv4StackUpdate::Modify {
+            transit_ips: vec![
+                "10.0.0.0/9".parse().unwrap(),
+                "10.128.0.0/9".parse().unwrap(),
+                "230.20.20.128/32".parse().unwrap(),
+            ],
+        },
         ..base_update.clone()
     };
     let err = object_put_error(
@@ -3989,11 +4013,13 @@ async fn test_instance_update_network_interface_transit_ips(
 
     // Loopback ranges.
     let with_lo1 = params::InstanceNetworkInterfaceUpdate {
-        transit_ips: vec![
-            "10.0.0.0/9".parse().unwrap(),
-            "10.128.0.0/9".parse().unwrap(),
-            "127.42.77.0/24".parse().unwrap(),
-        ],
+        ipv4: PrivateIpv4StackUpdate::Modify {
+            transit_ips: vec![
+                "10.0.0.0/9".parse().unwrap(),
+                "10.128.0.0/9".parse().unwrap(),
+                "127.42.77.0/24".parse().unwrap(),
+            ],
+        },
         ..base_update.clone()
     };
     let err = object_put_error(
@@ -4009,11 +4035,13 @@ async fn test_instance_update_network_interface_transit_ips(
     );
 
     let with_lo2 = params::InstanceNetworkInterfaceUpdate {
-        transit_ips: vec![
-            "10.0.0.0/9".parse().unwrap(),
-            "10.128.0.0/9".parse().unwrap(),
-            "127.0.0.1/32".parse().unwrap(),
-        ],
+        ipv4: PrivateIpv4StackUpdate::Modify {
+            transit_ips: vec![
+                "10.0.0.0/9".parse().unwrap(),
+                "10.128.0.0/9".parse().unwrap(),
+                "127.0.0.1/32".parse().unwrap(),
+            ],
+        },
         ..base_update.clone()
     };
     let err = object_put_error(
@@ -4027,11 +4055,13 @@ async fn test_instance_update_network_interface_transit_ips(
 
     // Overlapping IP ranges should be rejected, as should identical ranges.
     let with_dup1 = params::InstanceNetworkInterfaceUpdate {
-        transit_ips: vec![
-            "10.0.0.0/9".parse().unwrap(),
-            "10.128.0.0/9".parse().unwrap(),
-            "10.0.0.0/9".parse().unwrap(),
-        ],
+        ipv4: PrivateIpv4StackUpdate::Modify {
+            transit_ips: vec![
+                "10.0.0.0/9".parse().unwrap(),
+                "10.128.0.0/9".parse().unwrap(),
+                "10.0.0.0/9".parse().unwrap(),
+            ],
+        },
         ..base_update.clone()
     };
     let err = object_put_error(
@@ -4047,11 +4077,13 @@ async fn test_instance_update_network_interface_transit_ips(
     );
 
     let with_dup2 = params::InstanceNetworkInterfaceUpdate {
-        transit_ips: vec![
-            "10.0.0.0/9".parse().unwrap(),
-            "10.128.0.0/9".parse().unwrap(),
-            "10.128.32.0/24".parse().unwrap(),
-        ],
+        ipv4: PrivateIpv4StackUpdate::Modify {
+            transit_ips: vec![
+                "10.0.0.0/9".parse().unwrap(),
+                "10.128.0.0/9".parse().unwrap(),
+                "10.128.32.0/24".parse().unwrap(),
+            ],
+        },
         ..base_update.clone()
     };
     let err = object_put_error(
@@ -4068,10 +4100,12 @@ async fn test_instance_update_network_interface_transit_ips(
 
     // Verify that we also catch more specific CIDRs appearing sooner in the list.
     let with_dup3 = params::InstanceNetworkInterfaceUpdate {
-        transit_ips: vec![
-            "10.20.20.0/30".parse().unwrap(),
-            "10.0.0.0/8".parse().unwrap(),
-        ],
+        ipv4: PrivateIpv4StackUpdate::Modify {
+            transit_ips: vec![
+                "10.20.20.0/30".parse().unwrap(),
+                "10.0.0.0/8".parse().unwrap(),
+            ],
+        },
         ..base_update.clone()
     };
     let err = object_put_error(
@@ -4097,7 +4131,9 @@ async fn test_instance_update_network_interface_transit_ips(
     // As a final sanity test, we can still effectively remove spoof checking
     // using the unspecified network address.
     let allow_all = params::InstanceNetworkInterfaceUpdate {
-        transit_ips: vec!["0.0.0.0/0".parse().unwrap()],
+        ipv4: PrivateIpv4StackUpdate::Modify {
+            transit_ips: vec!["0.0.0.0/0".parse().unwrap()],
+        },
         ..base_update.clone()
     };
 

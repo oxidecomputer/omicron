@@ -957,6 +957,44 @@ pub struct InstanceNetworkInterfaceCreate {
     pub ip_config: PrivateIpStackCreate,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum PrivateIpv4StackUpdate {
+    #[default]
+    NoChange,
+    Remove,
+    Add(PrivateIpv4StackCreate),
+    Modify { transit_ips: Vec<Ipv4Net> },
+}
+
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum PrivateIpv6StackUpdate {
+    #[default]
+    NoChange,
+    Remove,
+    Add(PrivateIpv6StackCreate),
+    Modify { transit_ips: Vec<Ipv6Net> },
+}
+
+// Do nothing to a specific IP stack
+// Remove a specific IP stack
+// Add a specific IP stack
+// Modify the transit IPs of a stack
+//
+// Independently for IPv6 / IPv4, though we need to do a bunch of validation in
+// the database queries for that:
+//
+// - If adding, don't already have a stack of the same version (UPDATE ... SET
+// .. WHERE ip IS NULL, basically)
+// - If we're removing, we have a stack of the _other_ version so that the NIC
+//   is still valid, although the CHECK constraint we have should take care of
+//   that.
+//
+//  TODO(ben): We need to beef up the check for making a new primary NIC. That
+//  has to ensure that we have private IP stacks for all the external addresses
+//  the instance might have.
+
 /// Parameters for updating an `InstanceNetworkInterface`
 ///
 /// Note that modifying IP addresses for an interface is not yet supported, a
@@ -982,10 +1020,13 @@ pub struct InstanceNetworkInterfaceUpdate {
     #[serde(default)]
     pub primary: bool,
 
-    /// A set of additional networks that this interface may send and
-    /// receive traffic on.
+    /// Update the interface's VPC-private IPv4 stack.
     #[serde(default)]
-    pub transit_ips: Vec<IpNet>,
+    pub ipv4: PrivateIpv4StackUpdate,
+
+    /// Update the interface's VPC-private IPv6 stack.
+    #[serde(default)]
+    pub ipv6: PrivateIpv6StackUpdate,
 }
 
 /// How a VPC-private IP address is assigned to a network interface.
