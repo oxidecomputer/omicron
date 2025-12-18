@@ -1434,7 +1434,7 @@ impl SimpleIdentityOrName for AntiAffinityGroupMember {
 // DISKS
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum DiskType {
     Distributed {
         /// ID of snapshot from which disk was created, if any

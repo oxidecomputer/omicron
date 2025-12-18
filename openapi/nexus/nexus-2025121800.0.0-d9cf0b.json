@@ -18805,48 +18805,48 @@
           {
             "type": "object",
             "properties": {
-              "distributed": {
-                "type": "object",
-                "properties": {
-                  "image_id": {
-                    "nullable": true,
-                    "description": "ID of image from which disk was created, if any",
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "snapshot_id": {
-                    "nullable": true,
-                    "description": "ID of snapshot from which disk was created, if any",
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                }
+              "image_id": {
+                "nullable": true,
+                "description": "ID of image from which disk was created, if any",
+                "type": "string",
+                "format": "uuid"
+              },
+              "snapshot_id": {
+                "nullable": true,
+                "description": "ID of snapshot from which disk was created, if any",
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "distributed"
+                ]
               }
             },
             "required": [
-              "distributed"
-            ],
-            "additionalProperties": false
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "local": {
-                "type": "object",
-                "properties": {
-                  "sled_id": {
-                    "nullable": true,
-                    "description": "ID of the sled this local disk is allocated on, if it has been allocated. Once allocated it cannot be changed or migrated.",
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                }
+              "sled_id": {
+                "nullable": true,
+                "description": "ID of the sled this local disk is allocated on, if it has been allocated. Once allocated it cannot be changed or migrated.",
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "local"
+                ]
               }
             },
             "required": [
-              "local"
-            ],
-            "additionalProperties": false
+              "type"
+            ]
           }
         ]
       },
