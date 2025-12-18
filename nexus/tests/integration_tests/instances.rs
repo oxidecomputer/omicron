@@ -4366,34 +4366,41 @@ async fn test_attach_eight_disks_to_instance(
 
 // Test that disk attach limit is enforced
 #[nexus_test]
-async fn test_cannot_attach_nine_disks_to_instance(
-    cptestctx: &ControlPlaneTestContext,
-) {
+async fn test_disk_attach_limit(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let project_name = "bit-barrel";
 
-    // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
+    // Each 1 GB Crucible disk requires 1.25 GB overhead. With the default size
+    // for DiskTest of 16 GB disks, this means 12 regions can be allocated on
+    // each zpool. This means 4 disks per pool.
+    //
+    // This test creates 13 1 GB disks, so we need 4 pools.
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(4)
+        .build()
+        .await;
+
     create_project(client, project_name).await;
 
-    // Make 9 disks
-    for i in 0..9 {
-        create_disk(&client, project_name, &format!("probablydata{}", i,))
-            .await;
+    // Make 13 disks
+    for i in 0..13 {
+        create_disk(&client, project_name, &format!("probablydata{}", i)).await;
     }
 
-    let disks_url = format!("/v1/disks?project={}", project_name,);
+    let disks_url = format!("/v1/disks?project={}", project_name);
 
-    // Assert we created 9 disks
+    // Assert we created 13 disks
     let disks: Vec<Disk> =
         NexusRequest::iter_collection_authn(client, &disks_url, "", None)
             .await
             .expect("failed to list disks")
             .all_items;
-    assert_eq!(disks.len(), 9);
+    assert_eq!(disks.len(), 13);
 
-    // Try to boot an instance that has 9 disks attached
+    // Try to boot an instance that has 13 disks attached
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nfs")).unwrap(),
@@ -4411,7 +4418,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
             },
         )),
-        disks: (1..9)
+        disks: (0..13)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -4447,7 +4454,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
             .await
             .expect("failed to list disks")
             .all_items;
-    assert_eq!(disks.len(), 9);
+    assert_eq!(disks.len(), 13);
 
     for disk in disks {
         assert_eq!(disk.state, DiskState::Detached);
