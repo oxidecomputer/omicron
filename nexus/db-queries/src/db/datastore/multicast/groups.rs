@@ -457,7 +457,8 @@ impl DataStore {
 
         let pool_result = if has_sources {
             // Try SSM first for source-filtered groups
-            match self.ip_pools_fetch_ssm_multicast(opctx, db_ip_version).await {
+            match self.ip_pools_fetch_ssm_multicast(opctx, db_ip_version).await
+            {
                 Ok((pool, _)) => Ok(pool),
                 Err(_) => {
                     // SSM pool unavailable - fall back to ASM pool.

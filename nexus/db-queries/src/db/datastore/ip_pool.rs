@@ -324,7 +324,6 @@ impl DataStore {
         // resource_type is an enum in the DB and therefore gets its order
         // from the definition; it's not lexicographic. So correctness here
         // relies on the types being most-specific-first in the definition.
-        // There are tests for this.
         let pools: Vec<IpPool> = query
             .order(ip_pool_resource::resource_type.asc())
             .select(IpPool::as_select())
@@ -3370,6 +3369,113 @@ mod test {
             Error::ObjectNotFound { .. },
             "Unicast pools also require linking"
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that `ip_pools_fetch_any_by_type` correctly filters by IP version
+    /// and returns an error when multiple IP versions exist without specifying one.
+    #[tokio::test]
+    async fn test_ip_pools_fetch_any_by_type_ip_version_filtering() {
+        let logctx = dev::test_setup_log(
+            "test_ip_pools_fetch_any_by_type_ip_version_filtering",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create and link an IPv4 multicast pool
+        let v4_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &IdentityMetadataCreateParams {
+                        name: "multicast-v4-pool".parse().unwrap(),
+                        description: "IPv4 multicast pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create IPv4 multicast pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: v4_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link IPv4 pool");
+
+        // Create and link an IPv6 multicast pool
+        let v6_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &IdentityMetadataCreateParams {
+                        name: "multicast-v6-pool".parse().unwrap(),
+                        description: "IPv6 multicast pool".to_string(),
+                    },
+                    IpVersion::V6,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create IPv6 multicast pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: v6_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link IPv6 pool");
+
+        // With ip_version=None and both V4/V6 pools, should return an error
+        // asking to specify the IP version (check_ip_version_conflict)
+        let error = datastore
+            .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast, None)
+            .await
+            .expect_err("Should fail with ip_version conflict");
+        assert!(
+            error.to_string().contains("IP versions"),
+            "Expected IP version conflict error, got: {error}"
+        );
+
+        // With ip_version=V4, should return the IPv4 pool
+        let found_v4 = datastore
+            .ip_pools_fetch_any_by_type(
+                &opctx,
+                IpPoolType::Multicast,
+                Some(IpVersion::V4),
+            )
+            .await
+            .expect("Should find IPv4 pool");
+        assert_eq!(found_v4.1.id(), v4_pool.id());
+        assert_eq!(found_v4.1.ip_version, IpVersion::V4);
+
+        // With ip_version=V6, should return the IPv6 pool
+        let found_v6 = datastore
+            .ip_pools_fetch_any_by_type(
+                &opctx,
+                IpPoolType::Multicast,
+                Some(IpVersion::V6),
+            )
+            .await
+            .expect("Should find IPv6 pool");
+        assert_eq!(found_v6.1.id(), v6_pool.id());
+        assert_eq!(found_v6.1.ip_version, IpVersion::V6);
 
         db.terminate().await;
         logctx.cleanup_successful();
