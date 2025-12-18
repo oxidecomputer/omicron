@@ -216,7 +216,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTimeError, UNIX_EPOCH};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot;
-use zone::ZoneError;
 
 // Parameters related to management of storage on debug datasets
 
@@ -1128,14 +1127,6 @@ impl DebugCollectorWorker {
 
 #[derive(thiserror::Error, Debug)]
 pub enum ArchiveLogsError {
-    #[error("I/O error: {0}")]
-    IoError(#[from] tokio::io::Error),
-    #[error("Error calling zoneadm: {0}")]
-    Zoneadm(#[from] ZoneError),
-    #[error("Non-UTF8 zone path for zone {0}")]
-    Utf8(String),
-    #[error("Glob pattern invalid: {0}")]
-    Glob(#[from] glob::PatternError),
     #[error(
         "No debug dir into which we should archive logs has yet been chosen"
     )]
@@ -1183,6 +1174,7 @@ mod tests {
     use std::time::SystemTime;
     use tokio::io::AsyncWriteExt;
     use zone::Zone;
+    use zone::ZoneError;
 
     impl Clone for ZfsGetError {
         fn clone(&self) -> Self {

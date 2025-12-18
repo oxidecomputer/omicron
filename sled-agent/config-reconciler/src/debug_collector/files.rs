@@ -545,6 +545,7 @@ impl ArchivePlan<'_> {
                                 output_directory,
                                 namer: &*group.rule.naming,
                                 delete_original: group.rule.delete_original,
+                                #[cfg(test)]
                                 rule: group.rule.label,
                             }))
                         })
@@ -646,6 +647,7 @@ struct ArchiveFile<'a> {
     output_directory: Utf8PathBuf,
     namer: &'a (dyn NamingRule + Send + Sync),
     delete_original: bool,
+    #[cfg(test)]
     rule: &'static str,
 }
 
