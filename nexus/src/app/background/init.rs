@@ -269,6 +269,7 @@ impl BackgroundTasksInitializer {
             task_reconfigurator_config_loader: Activator::new(),
             task_fm_sitrep_loader: Activator::new(),
             task_fm_sitrep_gc: Activator::new(),
+            task_fm_rendezvous: Activator::new(),
             task_probe_distributor: Activator::new(),
             task_multicast_reconciler: Activator::new(),
 

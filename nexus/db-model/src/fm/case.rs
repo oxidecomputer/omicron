@@ -4,13 +4,14 @@
 
 //! Fault management cases.
 
+use super::AlertRequest;
 use super::DiagnosisEngine;
 use crate::DbTypedUuid;
 use crate::ereport;
 use nexus_db_schema::schema::{fm_case, fm_ereport_in_case};
 use nexus_types::fm;
 use omicron_uuid_kinds::{
-    CaseEreportKind, CaseKind, EreporterRestartKind, SitrepKind, SitrepUuid,
+    CaseEreportKind, CaseKind, EreporterRestartKind, SitrepKind,
 };
 
 /// Metadata describing a fault management case.
@@ -43,6 +44,31 @@ pub struct CaseMetadata {
     /// emit a different comment string for an analogous determination across
     /// different software versions.
     pub comment: String,
+}
+
+impl CaseMetadata {
+    pub fn from_sitrep(
+        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
+        case: &fm::Case,
+    ) -> Self {
+        let fm::Case {
+            id,
+            created_sitrep_id,
+            closed_sitrep_id,
+            de,
+            comment,
+            alerts_requested: _,
+            ereports: _,
+        } = case;
+        Self {
+            sitrep_id: sitrep_id.into(),
+            id: (*id).into(),
+            created_sitrep_id: (*created_sitrep_id).into(),
+            closed_sitrep_id: closed_sitrep_id.map(Into::into),
+            de: (*de).into(),
+            comment: comment.clone(),
+        }
+    }
 }
 
 /// An association between an ereport and a case.
@@ -83,53 +109,33 @@ pub struct CaseEreport {
     pub comment: String,
 }
 
+impl CaseEreport {
+    pub fn from_sitrep(
+        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
+        case_id: impl Into<DbTypedUuid<CaseKind>>,
+        ereport: fm::case::CaseEreport,
+    ) -> Self {
+        let fm::case::CaseEreport { id, ereport, assigned_sitrep_id, comment } =
+            ereport;
+        let restart_id = ereport.id().restart_id.into();
+        let ena = ereport.id().ena.into();
+        Self {
+            id: id.into(),
+            case_id: case_id.into(),
+            restart_id,
+            ena,
+            comment,
+            sitrep_id: sitrep_id.into(),
+            assigned_sitrep_id: assigned_sitrep_id.into(),
+        }
+    }
+}
+
 /// The complete state of a case in a particular sitrep, consisting of the
 /// [`CaseMetadata`] record and any other records belonging to the case.
 #[derive(Clone, Debug)]
 pub struct Case {
     pub metadata: CaseMetadata,
     pub ereports: Vec<CaseEreport>,
-}
-
-impl Case {
-    pub fn from_sitrep(sitrep_id: SitrepUuid, case: fm::Case) -> Self {
-        let sitrep_id = sitrep_id.into();
-        let case_id = case.id.into();
-        let ereports = case
-            .ereports
-            .into_iter()
-            .map(
-                |fm::case::CaseEreport {
-                     id,
-                     ereport,
-                     assigned_sitrep_id,
-                     comment,
-                 }| {
-                    let restart_id = ereport.id().restart_id.into();
-                    let ena = ereport.id().ena.into();
-                    CaseEreport {
-                        id: id.into(),
-                        case_id,
-                        restart_id,
-                        ena,
-                        comment,
-                        sitrep_id,
-                        assigned_sitrep_id: assigned_sitrep_id.into(),
-                    }
-                },
-            )
-            .collect();
-
-        Self {
-            metadata: CaseMetadata {
-                id: case_id,
-                sitrep_id,
-                de: case.de.into(),
-                created_sitrep_id: case.created_sitrep_id.into(),
-                closed_sitrep_id: case.closed_sitrep_id.map(Into::into),
-                comment: case.comment,
-            },
-            ereports,
-        }
-    }
+    pub alerts_requested: Vec<AlertRequest>,
 }

@@ -30,6 +30,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
+use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
@@ -39,6 +40,8 @@ use nexus_types::fm::Sitrep;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_uuid_kinds::AlertKind;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseEreportKind;
 use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
@@ -238,8 +241,63 @@ impl DataStore {
 
             map
         };
+
+        // Next, fetch all the alert requests belonging to cases in this sitrep.
+        // We do this in one big batched query that's paginated by case ID,
+        // rather than by querying alert requests per case, since this will
+        // generally result in fewer queries overall (most cases will have less
+        // than SQL_BATCH_SIZE alerts in them).
+        let mut alert_requests = {
+            let mut by_case = HashMap::<
+                CaseUuid,
+                iddqd::IdOrdMap<fm::case::AlertRequest>,
+            >::new();
+
+            let mut paginator: Paginator<DbTypedUuid<AlertKind>> =
+                Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    alert_req_dsl::fm_alert_request,
+                    alert_req_dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(alert_req_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+                .select(model::fm::AlertRequest::as_select())
+                .load_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to load case alert requests assignments",
+                        )
+                })?;
+
+                paginator = p.found_batch(&batch, &|alert_req| alert_req.id);
+                for alert_req in batch {
+                    let case_id = alert_req.case_id.into();
+                    let id: AlertUuid = alert_req.id.into();
+                    by_case
+                        .entry(case_id)
+                        .or_default()
+                        .insert_unique(alert_req.into())
+                        .map_err(|_| {
+                            let internal_message = format!(
+                                "encountered multiple alert requests for case \
+                                 {case_id} with the same alert UUID {id}. \
+                                 this should really not be possible, as the \
+                                 alert UUID is a primary key!",
+                            );
+                            Error::InternalError { internal_message }
+                        })?;
+                }
+            }
+
+            by_case
+        };
+
         // Next, load the case metadata entries and marry them to the sets of
-        // ereports assigned to those cases that we loaded in the previous step.
+        // ereports and alert requests for to those cases that we loaded in the
+        // previous steps.
         let cases = {
             let mut cases = iddqd::IdOrdMap::new();
             let mut paginator =
@@ -275,6 +333,8 @@ impl DataStore {
                         // case has no ereports assigned to it, so insert an empty
                         // map here.
                         .unwrap_or_default();
+                    let alerts_requested =
+                        alert_requests.remove(&id).unwrap_or_default();
                     fm::Case {
                         id,
                         created_sitrep_id: created_sitrep_id.into(),
@@ -282,7 +342,7 @@ impl DataStore {
                         de: de.into(),
                         comment,
                         ereports,
-                        alerts_requested: Default::default(),
+                        alerts_requested,
                     }
                 }));
             }
@@ -384,29 +444,52 @@ impl DataStore {
             })?;
 
         // Create case records.
+        //
+        // We do this by collecting all the records for cases into big `Vec`s
+        // and inserting each category of case records in one big INSERT query,
+        // rather than doing smaller ones for each case in the sitrep. This uses
+        // more memory in Nexus but reduces the number of small db queries we
+        // perform.
         let mut cases = Vec::with_capacity(sitrep.cases.len());
+        let mut alerts_requested = Vec::new();
+        let mut case_ereports = Vec::new();
         for case in sitrep.cases {
-            // TODO(eliza): some of this could be done in parallel using a
-            // `ParallelTaskSet`, if the time it takes to insert a sitrep were
-            // to become important?
-            let model::fm::Case { metadata, ereports } =
-                model::fm::Case::from_sitrep(sitrep_id, case);
+            let case_id = case.id;
+            cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
+            case_ereports.extend(case.ereports.into_iter().map(|ereport| {
+                model::fm::CaseEreport::from_sitrep(sitrep_id, case_id, ereport)
+            }));
+            alerts_requested.extend(case.alerts_requested.into_iter().map(
+                |req| {
+                    model::fm::AlertRequest::from_sitrep(
+                        sitrep_id, case_id, req,
+                    )
+                },
+            ));
+        }
 
-            if !ereports.is_empty() {
-                diesel::insert_into(case_ereport_dsl::fm_ereport_in_case)
-                    .values(ereports)
-                    .execute_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                            .internal_context(format!(
-                                "failed to insert ereport records for case {}",
-                                metadata.id
-                            ))
-                    })?;
-            }
+        if !case_ereports.is_empty() {
+            diesel::insert_into(case_ereport_dsl::fm_ereport_in_case)
+                .values(case_ereports)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert case ereport assignments",
+                        )
+                })?;
+        }
 
-            cases.push(metadata);
+        if !alerts_requested.is_empty() {
+            diesel::insert_into(alert_req_dsl::fm_alert_request)
+                .values(alerts_requested)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to insert alert requests")
+                })?;
         }
 
         if !cases.is_empty() {
@@ -865,6 +948,7 @@ mod tests {
     use chrono::Utc;
     use diesel::pg::Pg;
     use ereport_types;
+    use nexus_types::alert::AlertClass;
     use nexus_types::fm;
     use nexus_types::fm::ereport::{EreportData, Reporter};
     use omicron_test_utils::dev;
@@ -1461,13 +1545,31 @@ mod tests {
                 })
                 .unwrap();
 
+            let mut alerts_requested = iddqd::IdOrdMap::new();
+            alerts_requested
+                .insert_unique(fm::case::AlertRequest {
+                    id: AlertUuid::new_v4(),
+                    class: AlertClass::TestFoo,
+                    payload: serde_json::json!({}),
+                    requested_sitrep_id: sitrep_id,
+                })
+                .unwrap();
+            alerts_requested
+                .insert_unique(fm::case::AlertRequest {
+                    id: AlertUuid::new_v4(),
+                    class: AlertClass::TestFooBar,
+                    payload: serde_json::json!({}),
+                    requested_sitrep_id: sitrep_id,
+                })
+                .unwrap();
+
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
                 created_sitrep_id: sitrep_id,
                 closed_sitrep_id: None,
                 de: fm::DiagnosisEngineKind::PowerShelf,
                 ereports,
-                alerts_requested: todo!(),
+                alerts_requested,
                 comment: "my cool case".to_string(),
             }
         };
@@ -1482,13 +1584,24 @@ mod tests {
                     comment: "this has something to do with case 2".to_string(),
                 })
                 .unwrap();
+
+            let mut alerts_requested = iddqd::IdOrdMap::new();
+            alerts_requested
+                .insert_unique(fm::case::AlertRequest {
+                    id: AlertUuid::new_v4(),
+                    class: AlertClass::TestQuuxBar,
+                    payload: serde_json::json!({}),
+                    requested_sitrep_id: sitrep_id,
+                })
+                .unwrap();
+
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
                 created_sitrep_id: sitrep_id,
                 closed_sitrep_id: None,
                 de: fm::DiagnosisEngineKind::PowerShelf,
                 ereports,
-                alerts_requested: todo!(),
+                alerts_requested: Default::default(),
                 comment: "break in case of emergency".to_string(),
             }
         };
@@ -1559,6 +1672,11 @@ mod tests {
             assert_eq!(closed_sitrep_id, &expected.closed_sitrep_id);
             assert_eq!(comment, &expected.comment);
             assert_eq!(de, &expected.de);
+
+            // Check that all the expected ereports exist in the case we read
+            // back. We must iterate over the map and make assertions for each
+            // entry in order to skip comparing timestamps that may have lost
+            // some precision whilst roundtripped through CRDB.
             for expected in &expected.ereports {
                 let Some(ereport) = ereports.get(&expected.ereport.id()) else {
                     panic!(
@@ -1578,6 +1696,11 @@ mod tests {
                 assert_eq!(assigned_sitrep_id, &expected.assigned_sitrep_id);
                 assert_eq!(comment, &expected.comment);
             }
+
+            // Since these don't have any timestamps in them, we can just assert
+            // the whole map is the same.
+            assert_eq!(alerts_requested, &expected.alerts_requested);
+
             eprintln!();
         }
 

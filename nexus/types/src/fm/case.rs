@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::fm::AlertRequest;
+use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
 use iddqd::{IdOrdItem, IdOrdMap};
-use omicron_uuid_kinds::{CaseEreportUuid, CaseUuid, SitrepUuid};
+use omicron_uuid_kinds::{AlertUuid, CaseEreportUuid, CaseUuid, SitrepUuid};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
@@ -66,6 +66,23 @@ impl IdOrdItem for CaseEreport {
     type Key<'a> = <Arc<Ereport> as IdOrdItem>::Key<'a>;
     fn key(&self) -> Self::Key<'_> {
         self.ereport.key()
+    }
+
+    iddqd::id_upcast!();
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AlertRequest {
+    pub id: AlertUuid,
+    pub class: AlertClass,
+    pub payload: serde_json::Value,
+    pub requested_sitrep_id: SitrepUuid,
+}
+
+impl iddqd::IdOrdItem for AlertRequest {
+    type Key<'a> = &'a AlertUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
     }
 
     iddqd::id_upcast!();
@@ -207,7 +224,7 @@ impl fmt::Display for DisplayCase<'_> {
                 const WIDTH: usize = const_max_len(&[CLASS, REQUESTED_IN]);
 
                 writeln!(f, "{BULLET:>indent$}alert {id}",)?;
-                writeln!(f, "{:>indent$}{CLASS:<WIDTH$} {class:?}", "",)?;
+                writeln!(f, "{:>indent$}{CLASS:<WIDTH$} {class}", "",)?;
                 writeln!(
                     f,
                     "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}\n",
@@ -226,7 +243,6 @@ impl fmt::Display for DisplayCase<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fm::AlertClass;
     use crate::fm::DiagnosisEngineKind;
     use crate::inventory::SpType;
     use ereport_types::{Ena, EreportId};
@@ -319,7 +335,7 @@ mod tests {
         alerts_requested
             .insert_unique(AlertRequest {
                 id: alert1_id,
-                class: AlertClass::PsuRemoved,
+                class: AlertClass::TestFoo,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: created_sitrep_id,
             })
@@ -327,7 +343,7 @@ mod tests {
         alerts_requested
             .insert_unique(AlertRequest {
                 id: alert2_id,
-                class: AlertClass::PsuInserted,
+                class: AlertClass::TestFooBar,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: closed_sitrep_id,
             })

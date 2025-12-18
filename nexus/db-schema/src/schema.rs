@@ -2993,7 +2993,7 @@ table! {
         sitrep_id -> Uuid,
         requested_sitrep_id -> Uuid,
         case_id -> Uuid,
-        class -> crate::enums::AlertClassEnum,
+        alert_class -> crate::enums::AlertClassEnum,
         payload -> Jsonb,
     }
 }
