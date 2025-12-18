@@ -7,8 +7,9 @@
 use std::collections::BTreeMap;
 
 use omicron_uuid_kinds::RackUuid;
+use sled_agent_types::sled::BaseboardId;
 use trust_quorum_protocol::{
-    BaseboardId, EncryptedRackSecrets, Epoch, Sha3_256Digest, Threshold,
+    EncryptedRackSecrets, Epoch, Sha3_256Digest, Threshold,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -13,7 +13,7 @@ pub use event::Event;
 pub use event_log::EventLog;
 pub use state::TqState;
 
-use trust_quorum_protocol::BaseboardId;
+use sled_agent_types::sled::BaseboardId;
 
 /// All possible members used in a test
 pub fn member_universe(size: usize) -> Vec<BaseboardId> {

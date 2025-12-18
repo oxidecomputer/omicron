@@ -21,11 +21,12 @@ use derive_more::From;
 use iddqd::{IdHashItem, IdHashMap, id_upcast};
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::sled::BaseboardId;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task;
 use trust_quorum_protocol::{
-    BaseboardId, CommitError, Configuration, Epoch, PrepareAndCommitError,
+    CommitError, Configuration, Epoch, PrepareAndCommitError,
 };
 use uuid::Uuid;
 

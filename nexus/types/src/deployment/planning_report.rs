@@ -10,7 +10,6 @@ use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
 use super::PlannerConfig;
-use crate::inventory::BaseboardId;
 use crate::inventory::CabooseWhich;
 
 use daft::Diffable;
@@ -30,7 +29,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types_versions::latest::inventory::ZoneKind;
+use sled_agent_types::inventory::ZoneKind;
+use sled_agent_types::sled::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;

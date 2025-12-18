@@ -13,7 +13,7 @@ use daft::Diffable;
 use derive_more::Display;
 use gfss::shamir::Share;
 use serde::{Deserialize, Serialize};
-pub use sled_agent_types::sled::BaseboardId;
+use sled_agent_types::sled::BaseboardId;
 use slog::{Logger, error, warn};
 
 mod alarm;

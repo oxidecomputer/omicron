@@ -12,12 +12,12 @@ use proptest::collection::{btree_set, size_range};
 use proptest::prelude::*;
 use proptest::sample::Selector;
 use secrecy::ExposeSecret;
+use sled_agent_types::sled::BaseboardId;
 use slog::{Logger, info, o};
 use std::collections::BTreeSet;
 use test_strategy::{Arbitrary, proptest};
 use trust_quorum_protocol::{
-    BaseboardId, CoordinatorOperation, Epoch, NodeCallerCtx, NodeCommonCtx,
-    Threshold,
+    CoordinatorOperation, Epoch, NodeCallerCtx, NodeCommonCtx, Threshold,
 };
 use trust_quorum_test_utils::TqState;
 use trust_quorum_test_utils::{
