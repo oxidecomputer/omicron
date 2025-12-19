@@ -5327,10 +5327,12 @@ pub(in crate::db::datastore) mod test {
             instances: vec![],
         };
 
+        const MAX_U2_PER_INSTANCE: usize = 10;
+
         for i in 0..32 {
             let mut u2s = vec![];
 
-            for n in 0..MAX_DISKS_PER_INSTANCE {
+            for n in 0..MAX_U2_PER_INSTANCE {
                 u2s.push(LocalStorageTestSledU2 {
                     physical_disk_id: PhysicalDiskUuid::new_v4(),
                     physical_disk_serial: format!("phys_{i}_{n}"),
@@ -5344,7 +5346,7 @@ pub(in crate::db::datastore) mod test {
 
                     crucible_dataset_id: DatasetUuid::new_v4(),
                     crucible_dataset_addr: format!(
-                        "[fd00:1122:3344:{i}0{n}::1]:12345"
+                        "[fd00:1122:3344:{i}{n:02x}::1]:12345"
                     )
                     .parse()
                     .unwrap(),
@@ -5361,7 +5363,7 @@ pub(in crate::db::datastore) mod test {
 
             let mut disks = vec![];
 
-            for n in 0..MAX_DISKS_PER_INSTANCE {
+            for n in 0..MAX_U2_PER_INSTANCE {
                 disks.push(LocalStorageTestInstanceDisk {
                     id: Uuid::new_v4(),
                     name: external::Name::try_from(format!("local-{i}-{n}"))
