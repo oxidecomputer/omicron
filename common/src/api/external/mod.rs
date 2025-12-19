@@ -578,13 +578,16 @@ impl ByteCount {
 
 impl Display for ByteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        if self.to_bytes() >= TiB && self.to_bytes() % TiB == 0 {
+        if self.to_bytes() >= TiB && self.to_bytes().is_multiple_of(TiB) {
             write!(f, "{} TiB", self.to_whole_tebibytes())
-        } else if self.to_bytes() >= GiB && self.to_bytes() % GiB == 0 {
+        } else if self.to_bytes() >= GiB && self.to_bytes().is_multiple_of(GiB)
+        {
             write!(f, "{} GiB", self.to_whole_gibibytes())
-        } else if self.to_bytes() >= MiB && self.to_bytes() % MiB == 0 {
+        } else if self.to_bytes() >= MiB && self.to_bytes().is_multiple_of(MiB)
+        {
             write!(f, "{} MiB", self.to_whole_mebibytes())
-        } else if self.to_bytes() >= KiB && self.to_bytes() % KiB == 0 {
+        } else if self.to_bytes() >= KiB && self.to_bytes().is_multiple_of(KiB)
+        {
             write!(f, "{} KiB", self.to_whole_kibibytes())
         } else {
             write!(f, "{} B", self.to_bytes())

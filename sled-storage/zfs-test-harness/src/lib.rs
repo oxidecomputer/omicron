@@ -409,7 +409,7 @@ struct DatasetCreationDetails {
     full_name: String,
 }
 
-/// A [`key-manager::SecretRetriever`] that only returns hardcoded IKM for
+/// A [`key_manager::SecretRetriever`] that only returns hardcoded IKM for
 /// epoch 0
 #[derive(Debug, Default)]
 struct HardcodedSecretRetriever;

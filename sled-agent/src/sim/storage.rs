@@ -2230,14 +2230,14 @@ impl Pantry {
             }
         };
 
-        if (offset % region_block_size) != 0 {
+        if !offset.is_multiple_of(region_block_size) {
             return Err(HttpError::for_bad_request(
                 None,
                 "offset not multiple of block size!".to_string(),
             ));
         }
 
-        if (data.len() as u64 % region_block_size) != 0 {
+        if !(data.len() as u64).is_multiple_of(region_block_size) {
             return Err(HttpError::for_bad_request(
                 None,
                 "data length not multiple of block size!".to_string(),

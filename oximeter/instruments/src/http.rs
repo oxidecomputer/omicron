@@ -196,8 +196,7 @@ impl LatencyTracker {
 impl Producer for LatencyTracker {
     fn produce(
         &mut self,
-    ) -> Result<Box<(dyn Iterator<Item = Sample> + 'static)>, MetricsError>
-    {
+    ) -> Result<Box<dyn Iterator<Item = Sample> + 'static>, MetricsError> {
         // Clippy isn't correct here. It recommends using the iterator
         // over the latencies directly, but there is a lifetime mismatch
         // in that case: '_ would have to be 'static. The point is that

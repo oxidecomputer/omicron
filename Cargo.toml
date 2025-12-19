@@ -60,6 +60,7 @@ members = [
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
+    "gateway-types/versions",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -222,6 +223,7 @@ default-members = [
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
+    "gateway-types/versions",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -472,6 +474,7 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
+gateway-types-versions = { path = "gateway-types/versions" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
 trust-quorum = { path = "trust-quorum" }
@@ -663,6 +666,7 @@ rand_distr = "0.5.1"
 rand_seeder = "0.4.0"
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
+rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f0d5d5168d3d31487a56df32c676b0c6240bcc6b" }
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"

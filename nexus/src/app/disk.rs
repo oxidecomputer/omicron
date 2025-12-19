@@ -175,7 +175,7 @@ impl super::Nexus {
 
         // Reject disks where the block size doesn't evenly divide the
         // total size
-        if (params.size.to_bytes() % block_size) != 0 {
+        if !params.size.to_bytes().is_multiple_of(block_size) {
             return Err(Error::invalid_value(
                 "size and block_size",
                 format!(
@@ -199,7 +199,11 @@ impl super::Nexus {
 
         // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
         // divide the size
-        if (params.size.to_bytes() % u64::from(MIN_DISK_SIZE_BYTES)) != 0 {
+        if !params
+            .size
+            .to_bytes()
+            .is_multiple_of(u64::from(MIN_DISK_SIZE_BYTES))
+        {
             return Err(Error::invalid_value(
                 "size",
                 format!(

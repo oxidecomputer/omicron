@@ -24,14 +24,15 @@ use installinator_common::{
 use omicron_common::{
     disk::M2Slot,
     update::{
-        MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
-        OmicronZoneManifestSource,
+        MupdateOverrideInfo, OmicronInstallManifest,
+        OmicronInstallManifestSource, OmicronInstallMetadata,
     },
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
 use tokio::{
+    fs,
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
     task::JoinSet,
@@ -60,6 +61,9 @@ struct ArtifactDestination {
 
     // Zpool containing `control_plane_dir`, if we're on a real gimlet.
     control_plane_zpool: Option<ZpoolName>,
+
+    // Directory in which we save the measurements.
+    measurement_dir: Utf8PathBuf,
 }
 
 impl ArtifactDestination {
@@ -69,11 +73,17 @@ impl ArtifactDestination {
         std::fs::create_dir_all(&control_plane_dir)
             .with_context(|| format!("error creating directories at {dir}"))?;
 
+        // For now we store the measurements within the install dataset.
+        let measurement_dir = control_plane_dir.join("measurements");
+        std::fs::create_dir_all(&measurement_dir)
+            .with_context(|| format!("error creating directories at {dir}"))?;
+
         Ok(Self {
             host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
             clean_control_plane_dir: false,
             control_plane_dir,
             control_plane_zpool: None,
+            measurement_dir,
         })
     }
 }
@@ -141,6 +151,9 @@ impl WriteDestination {
                         sled_storage::dataset::INSTALL_DATASET,
                     );
 
+                    let measurement_dir =
+                        control_plane_dir.join("measurements");
+
                     match drives.entry(slot) {
                         Entry::Vacant(entry) => {
                             entry.insert(ArtifactDestination {
@@ -148,6 +161,7 @@ impl WriteDestination {
                                 clean_control_plane_dir: true,
                                 control_plane_dir,
                                 control_plane_zpool: Some(zpool_name),
+                                measurement_dir,
                             });
                         }
                         Entry::Occupied(_) => {
@@ -196,8 +210,11 @@ enum DriveWriteProgress {
     /// We succeeded in writing the host phase 2 image, but failed to write the
     /// control plane `attempts` times.
     ControlPlaneFailed,
-    /// We succeeded in writing both the host phase 2 image and the control
-    /// plane image.
+    /// We succeeded in writing host phase 2 and control plane but failed to
+    /// write the reference measurements.
+    MeasurementCorpusFailed,
+    /// We succeeded in writing both the host phase 2 image, the control
+    /// plane image, and reference measurements.
     Done,
 }
 
@@ -214,6 +231,9 @@ impl<'a> ArtifactWriter<'a> {
         host_phase_2_data: &'a BufList,
         control_plane_id: &'a ArtifactHashId,
         control_plane_zones: &'a ControlPlaneZoneImages,
+
+        measurement_corpus: &'a [MeasurementToWrite],
+
         destination: WriteDestination,
     ) -> Self {
         let drives = destination
@@ -239,6 +259,7 @@ impl<'a> ArtifactWriter<'a> {
                 control_plane_zones,
                 mupdate_id,
                 mupdate_override_uuid,
+                measurement_corpus,
             },
         }
     }
@@ -334,6 +355,10 @@ impl<'a> ArtifactWriter<'a> {
                                     *progress =
                                         DriveWriteProgress::ControlPlaneFailed;
                                 }
+                                WriteComponent::MeasurementCorpus => {
+                                    *progress =
+                                        DriveWriteProgress::MeasurementCorpusFailed;
+                                }
                                 WriteComponent::Unknown => {
                                     unreachable!(
                                         "we should never generate an unknown component"
@@ -398,7 +423,8 @@ impl SlotWriteContext<'_> {
                     control_plane_transport,
                 );
             }
-            DriveWriteProgress::ControlPlaneFailed => {
+            DriveWriteProgress::ControlPlaneFailed
+            | DriveWriteProgress::MeasurementCorpusFailed => {
                 self.register_control_plane_step(
                     engine,
                     control_plane_transport,
@@ -546,6 +572,7 @@ struct ArtifactsToWrite<'a> {
     control_plane_zones: &'a ControlPlaneZoneImages,
     mupdate_id: MupdateUuid,
     mupdate_override_uuid: MupdateOverrideUuid,
+    measurement_corpus: &'a [MeasurementToWrite],
 }
 
 impl ArtifactsToWrite<'_> {
@@ -590,9 +617,11 @@ impl ArtifactsToWrite<'_> {
             slot,
             clean_output_directory: destinations.clean_control_plane_dir,
             output_directory: &destinations.control_plane_dir,
+            measurement_directory: &destinations.measurement_dir,
             zones: self.control_plane_zones,
             host_phase_2_id: self.host_phase_2_id,
             control_plane_id: self.control_plane_id,
+            measurement_corpus: self.measurement_corpus,
             mupdate_id: self.mupdate_id,
             mupdate_override_uuid: self.mupdate_override_uuid,
         };
@@ -623,13 +652,20 @@ impl ArtifactsToWrite<'_> {
     }
 }
 
+pub(crate) struct MeasurementToWrite {
+    pub(crate) name: String,
+    pub(crate) artifact: BufList,
+}
+
 struct ControlPlaneZoneWriteContext<'a> {
     slot: M2Slot,
     clean_output_directory: bool,
     output_directory: &'a Utf8Path,
+    measurement_directory: &'a Utf8Path,
     zones: &'a ControlPlaneZoneImages,
     host_phase_2_id: &'a ArtifactHashId,
     control_plane_id: &'a ArtifactHashId,
+    measurement_corpus: &'a [MeasurementToWrite],
     mupdate_id: MupdateUuid,
     mupdate_override_uuid: MupdateOverrideUuid,
 }
@@ -730,7 +766,7 @@ impl ControlPlaneZoneWriteContext<'_> {
 
                     let out_path = self
                         .output_directory
-                        .join(OmicronZoneManifest::FILE_NAME);
+                        .join(OmicronInstallManifest::ZONES_FILE_NAME);
 
                     write_artifact_impl(
                         WriteComponent::ControlPlane,
@@ -765,6 +801,84 @@ impl ControlPlaneZoneWriteContext<'_> {
                             WriteComponent::ControlPlane,
                             slot,
                             data.clone().into(),
+                            &out_path,
+                            transport,
+                            &cx,
+                        )
+                        .await?;
+
+                        StepSuccess::new(transport).into()
+                    },
+                )
+                .register();
+        }
+
+        engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                ControlPlaneZonesStepId::CreateMeasurementDir,
+                "Creating measurement directory".to_string(),
+                async move |_cx| {
+                    if let Err(e) =
+                        fs::create_dir(self.measurement_directory).await
+                    {
+                        match e.kind() {
+                            std::io::ErrorKind::AlreadyExists => {}
+                            _ => {
+                                return Err(WriteError::CreateDirError {
+                                    error: e,
+                                });
+                            }
+                        }
+                    }
+                    StepSuccess::new(()).into()
+                },
+            )
+            .register();
+
+        transport = engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                ControlPlaneZonesStepId::MeasurementManifest,
+                "Writing measurement manifest",
+                async move |cx| {
+                    let transport = transport.into_value(cx.token()).await;
+                    let measurement_manifest_json =
+                        self.omicron_measurement_manifest_artifact().await;
+
+                    let out_path = self
+                        .measurement_directory
+                        .join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
+
+                    write_artifact_impl(
+                        WriteComponent::MeasurementCorpus,
+                        slot,
+                        measurement_manifest_json,
+                        &out_path,
+                        transport,
+                        &cx,
+                    )
+                    .await?;
+
+                    StepSuccess::new(transport).into()
+                },
+            )
+            .register();
+
+        for data in self.measurement_corpus {
+            let name = data.name.clone();
+            let out_path = self.measurement_directory.join(&name);
+            transport = engine
+                .new_step(
+                    WriteComponent::MeasurementCorpus,
+                    ControlPlaneZonesStepId::Measurement { name: name.clone() },
+                    format!("Writing measurement {name}"),
+                    async move |cx| {
+                        let transport = transport.into_value(cx.token()).await;
+                        write_artifact_impl(
+                            WriteComponent::MeasurementCorpus,
+                            slot,
+                            data.artifact.clone(),
                             &out_path,
                             transport,
                             &cx,
@@ -826,19 +940,73 @@ impl ControlPlaneZoneWriteContext<'_> {
         BufList::from(json_bytes)
     }
 
-    async fn omicron_zone_manifest_artifact(&self) -> BufList {
-        let zones = compute_zone_hashes(&self.zones).await;
+    async fn omicron_measurement_manifest_artifact(&self) -> BufList {
+        let files = compute_measurement_hashes(self.measurement_corpus).await;
 
-        let omicron_zone_manifest = OmicronZoneManifest {
-            source: OmicronZoneManifestSource::Installinator {
+        let omicron_zone_manifest = OmicronInstallManifest {
+            source: OmicronInstallManifestSource::Installinator {
                 mupdate_id: self.mupdate_id,
             },
-            zones,
+            files,
         };
         let json_bytes = serde_json::to_vec(&omicron_zone_manifest)
             .expect("this serialization is infallible");
         BufList::from(json_bytes)
     }
+
+    async fn omicron_zone_manifest_artifact(&self) -> BufList {
+        let files = compute_zone_hashes(&self.zones).await;
+
+        let omicron_zone_manifest = OmicronInstallManifest {
+            source: OmicronInstallManifestSource::Installinator {
+                mupdate_id: self.mupdate_id,
+            },
+            files,
+        };
+        let json_bytes = serde_json::to_vec(&omicron_zone_manifest)
+            .expect("this serialization is infallible");
+        BufList::from(json_bytes)
+    }
+}
+
+/// Computes the measurement hash IDs.
+///
+/// Hash computation is done in parallel on blocking tasks.
+///
+/// # Panics
+///
+/// Panics if the runtime shuts down causing a task abort, or a task panics.
+async fn compute_measurement_hashes(
+    images: &[MeasurementToWrite],
+) -> IdOrdMap<OmicronInstallMetadata> {
+    let mut tasks = JoinSet::new();
+    for m in images {
+        let file_name = m.name.clone();
+        let data: BufList = m.artifact.clone();
+        // Compute hashes in parallel.
+        tasks.spawn_blocking(move || {
+            let mut hasher = Sha256::new();
+            for d in &data {
+                hasher.update(&d);
+            }
+            let hash = hasher.finalize();
+            OmicronInstallMetadata {
+                file_name,
+                file_size: u64::try_from(data.num_bytes()).unwrap(),
+                hash: ArtifactHash(hash.into()),
+            }
+        });
+    }
+
+    let mut output = IdOrdMap::new();
+    while let Some(res) = tasks.join_next().await {
+        // Propagate panics across tasks—this is the standard pattern we follow
+        // in installinator.
+        output
+            .insert_unique(res.expect("task panicked"))
+            .expect("filenames are unique");
+    }
+    output
 }
 
 /// Computes the zone hash IDs.
@@ -850,7 +1018,7 @@ impl ControlPlaneZoneWriteContext<'_> {
 /// Panics if the runtime shuts down causing a task abort, or a task panics.
 async fn compute_zone_hashes(
     images: &ControlPlaneZoneImages,
-) -> IdOrdMap<OmicronZoneFileMetadata> {
+) -> IdOrdMap<OmicronInstallMetadata> {
     let mut tasks = JoinSet::new();
     for (file_name, data) in &images.zones {
         let file_name = file_name.clone();
@@ -861,7 +1029,7 @@ async fn compute_zone_hashes(
             let mut hasher = Sha256::new();
             hasher.update(&data);
             let hash = hasher.finalize();
-            OmicronZoneFileMetadata {
+            OmicronInstallMetadata {
                 file_name,
                 file_size: u64::try_from(data.len()).unwrap(),
                 hash: ArtifactHash(hash.into()),
@@ -999,7 +1167,7 @@ impl WriteTransport for BlockDeviceTransport {
         // When writing to a block device, we must write a multiple of the block
         // size. We can assume the image we're given should be
         // appropriately-sized: return an error here if it is not.
-        if total_bytes % block_size != 0 {
+        if !total_bytes.is_multiple_of(block_size) {
             return Err(WriteError::WriteError {
                 component,
                 slot,
@@ -1127,10 +1295,12 @@ mod tests {
         data1: Vec<Vec<u8>>,
         #[strategy(prop::collection::vec(prop::collection::vec(any::<u8>(), 0..8192), 0..16))]
         data2: Vec<Vec<u8>>,
+        #[strategy(prop::collection::vec(prop::collection::vec(any::<u8>(), 0..8192), 0..16))]
+        data3: Vec<Vec<u8>>,
         #[strategy(WriteOps::strategy())] write_ops: WriteOps,
     ) {
         with_test_runtime(async move {
-            proptest_write_artifact_impl(data1, data2, write_ops)
+            proptest_write_artifact_impl(data1, data2, data3, write_ops)
                 .await
                 .expect("test failed");
         })
@@ -1209,6 +1379,7 @@ mod tests {
     async fn proptest_write_artifact_impl(
         data1: Vec<Vec<u8>>,
         data2: Vec<Vec<u8>>,
+        data3: Vec<Vec<u8>>,
         write_ops: WriteOps,
     ) -> Result<()> {
         let logctx = test_setup_log("test_write_artifact");
@@ -1223,6 +1394,9 @@ mod tests {
             data1.into_iter().map(Bytes::from).collect();
         let mut artifact_control_plane: BufList =
             data2.into_iter().map(Bytes::from).collect();
+
+        let artifact_measurement_corpus: BufList =
+            data3.into_iter().map(Bytes::from).collect();
 
         let host_id = ArtifactHashId {
             kind: ArtifactKind::HOST_PHASE_2,
@@ -1265,6 +1439,9 @@ mod tests {
         // Create a `WriteDestination` that points to our tempdir paths.
         let mut drives = BTreeMap::new();
 
+        let control_plane_dir = tempdir_path;
+
+        let measurement_dir = control_plane_dir.join("measurements");
         // TODO This only tests writing to a single drive; we should expand this
         // test (or maybe write a different one, given how long this one already
         // is?) that checks writing to both drives.
@@ -1273,7 +1450,8 @@ mod tests {
             ArtifactDestination {
                 host_phase_2: destination_host.clone(),
                 clean_control_plane_dir: false,
-                control_plane_dir: tempdir_path.into(),
+                control_plane_dir: control_plane_dir.into(),
+                measurement_dir,
                 control_plane_zpool: None,
             },
         );
@@ -1289,12 +1467,17 @@ mod tests {
             )],
         };
 
+        let all_corpus = vec![MeasurementToWrite {
+            artifact: artifact_measurement_corpus,
+            name: "blah".to_string(),
+        }];
         let mut writer = ArtifactWriter::new(
             MupdateUuid::new_v4(),
             &host_id,
             &artifact_host,
             &control_plane_id,
             &control_plane_zone_images,
+            &all_corpus,
             destination,
         );
 
