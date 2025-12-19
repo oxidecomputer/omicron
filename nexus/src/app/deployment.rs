@@ -15,7 +15,6 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
@@ -367,9 +366,7 @@ fn is_target_release_change_allowed(
     }
 
     // Now check zone configs.
-    for (_, zone_config) in current_blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-    {
+    for (_, zone_config) in current_blueprint.in_service_zones() {
         match &zone_config.image_source {
             BlueprintZoneImageSource::InstallDataset => {
                 // A mupdate has occurred; we must allow a new target release.
@@ -418,6 +415,7 @@ mod tests {
     use super::*;
     use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;

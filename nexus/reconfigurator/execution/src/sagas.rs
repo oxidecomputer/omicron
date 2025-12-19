@@ -7,7 +7,7 @@
 use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::{Blueprint, BlueprintZoneDisposition};
+use nexus_types::deployment::{Blueprint, BlueprintExpungedZoneAccessReason};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use slog::{debug, info, warn};
@@ -87,7 +87,9 @@ fn find_expunged_same_generation(
     let active_nexus_generation =
         blueprint.find_generation_for_self(nexus_zone_id)?;
     Ok(blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
+        .expunged_nexus_zones_ready_for_cleanup(
+            BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+        )
         .filter_map(|(_sled_id, zone_config, nexus_config)| {
             (nexus_config.nexus_generation == active_nexus_generation)
                 .then_some(zone_config.id)
@@ -126,7 +128,7 @@ mod test {
             ExampleSystemBuilder::new(log, TEST_NAME).nexus_count(4).build();
         let g1 = Generation::new();
         let g1_nexus_ids: Vec<_> = blueprint1
-            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_nexus_zones()
             .map(|(sled_id, zone_config, nexus_config)| {
                 assert_eq!(nexus_config.nexus_generation, g1);
                 (sled_id, zone_config.id, zone_config.image_source.clone())
@@ -181,7 +183,7 @@ mod test {
 
         let blueprint2 = builder.build(BlueprintSource::Test);
         let g2_nexus_ids: Vec<_> = blueprint2
-            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_nexus_zones()
             .filter_map(|(sled_id, zone_config, nexus_config)| {
                 (nexus_config.nexus_generation == g2)
                     .then_some((sled_id, zone_config.id))

@@ -10,7 +10,7 @@ use internal_dns_resolver::Resolver;
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_types::{
     deployment::{
-        Blueprint, BlueprintZoneDisposition, PendingMgsUpdates,
+        Blueprint, PendingMgsUpdates,
         execution::{EventBuffer, Overridables},
     },
     quiesce::SagaQuiesceHandle,
@@ -44,7 +44,7 @@ pub(crate) async fn realize_blueprint_and_expect(
     // Act on behalf of one of the Nexus instances that could be currently
     // active in the blueprint.
     let nexus_id = blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_nexus_zones()
         .find_map(|(_sled_id, zone_config, nexus_config)| {
             (nexus_config.nexus_generation == blueprint.nexus_generation)
                 .then_some(zone_config.id)
