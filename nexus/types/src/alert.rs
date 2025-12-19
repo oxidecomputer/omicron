@@ -6,6 +6,19 @@
 
 use std::fmt;
 
+/// Alert classes.
+///
+/// This is an internal, structured representation of the list of all alert
+/// classes as an enum.
+///
+/// Note that this type is distinct from the
+/// [`shared::AlertSubscription`](crate::external_api::shared::AlertSubscription)
+/// type, which represents an alert *subscription* rather than a single alert
+/// class. A subscription may be to a single alert class, *or* to a glob pattern
+/// that matches multiple alert classes. The
+/// [`external_api::views::AlertClass`](crate::external_api::views::AlertClass)
+/// type represents the response message to the alert class view API and
+/// contains a human-readable description of that alert class.
 #[derive(
     Copy,
     Clone,
@@ -109,7 +122,8 @@ impl fmt::Display for AlertClassParseError {
 }
 
 impl AlertClassParseError {
-    // Strum's derive requires that this function take a &str, but we ignore it.
+    // Strum's derive requires that this function take a &str, but we ignore
+    // it.
     fn from_input(_: &str) -> Self {
         Self(())
     }
