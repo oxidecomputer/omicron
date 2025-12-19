@@ -1,13 +1,10 @@
--- Working with INET values in SQL is "fun".
---
 -- In `up01.sql`, we added the new `last_allocated_ip_subnet_offset` column to
 -- `bp_sled_metadata`, but left it as `NULL` for all rows. We now need to fill
 -- in all rows with the correct value. The correct value is nontrivial:
 --
 -- For the given blueprint and the given sled in that blueprint, look at all of
 -- its `bp_omicron_zone` rows (except internal DNS; more below). Extract the
--- last hextet of each of those rows. (This has to be done via a combination of
--- inet functions and string manipulations.) Convert it to an integer. Take the
+-- last hextet of each of those rows. Convert it to an integer. Take the
 -- maximum of these integers, or 32 if there are no zones or if there are no
 -- zones with a final hextet of at least 32.
 --
@@ -32,24 +29,14 @@ UPDATE omicron.public.bp_sled_metadata AS bpm SET
         -- greater than 32, we'll get that; otherwise, `MAX(final_hextet)` will
         -- be `NULL` and the `COALESCE` will give us 32.
         SELECT COALESCE(MAX(final_hextet), 32) FROM (
-            SELECT ('x' ||
-                lpad(
-                    substr(
-                        -- bitwise & the IP with a /112 hostmask, which
-                        -- squishes this IP down to the string '::NNNN',
-                        -- where there will be 1-4 hex-valued X characters.
-                        host(primary_service_ip & hostmask('::/112')),
-                    -- Final arg to `substr()`: this trims off the leading
-                    -- `::` in the `::NNNN` we produced above.
-                    3),
-                -- Final args to `lpad()`: this ensure we always have
-                -- exactly 4 hex digits, left padding with 0 if needed.
-                4, '0')
-            -- We concatenated a literal 'x' prefix onto the front of the
-            -- `NNNN` value we just produced, which causes `bit(16)` to
-            -- interpret it as a 16-bit hex value (which it is!). Then
-            -- convert that bitstring into an integer.
-            )::bit(16)::int AS final_hextet
+            SELECT (
+                -- Flatten the primary service IP down to just its final
+                -- hextet (16 bits).
+                (primary_service_ip & hostmask('::/112'))
+                -
+                -- Convert it to an integer by subtracting the base ipv6 inet
+                '::'::inet
+            ) AS final_hextet
             FROM bp_omicron_zone WHERE
                 blueprint_id = bpm.blueprint_id
                 AND sled_id = bpm.sled_id
