@@ -65,7 +65,7 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
             Err(error) => {
                 warn!(
                     log, "failed to clean up expunged zone";
-                    "error" => #%error,
+                    InlineErrorChain::new(&*error),
                 );
                 Some(error)
             }
