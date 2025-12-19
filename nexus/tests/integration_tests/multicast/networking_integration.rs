@@ -34,176 +34,14 @@ use crate::integration_tests::instances::{
     fetch_instance_external_ips, instance_simulate, instance_wait_for_state,
 };
 
-/// Verify instances can have both external IPs and multicast group membership.
+/// Verify external IP allocation/deallocation works with multicast group members.
 ///
-/// External IP allocation works for multicast group members, multicast state persists
-/// through external IP operations, and no conflicts occur between external IP and multicast
-/// DPD configuration.
-#[nexus_test]
-async fn test_multicast_with_external_ip_basic(
-    cptestctx: &nexus_test_utils::ControlPlaneTestContext<
-        omicron_nexus::Server,
-    >,
-) {
-    let client = &cptestctx.external_client;
-    let project_name = "external-ip-mcast-project";
-    let group_name = "external-ip-mcast-group";
-    let instance_name = "external-ip-mcast-instance";
-
-    // Setup: project and IP pools in parallel
-    let (_, _, _) = ops::join3(
-        create_project(client, project_name),
-        create_default_ip_pool(client), // For external IPs
-        create_multicast_ip_pool_with_range(
-            client,
-            "external-ip-mcast-pool",
-            (224, 100, 0, 1),
-            (224, 100, 0, 255),
-        ),
-    )
-    .await;
-
-    // Create instance (will start by default)
-    let instance_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: instance_name.parse().unwrap(),
-            description: "Instance with external IP and multicast".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: instance_name.parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
-        external_ips: vec![], // Start without external IP
-        multicast_groups: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: true, // Start the instance
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
-
-    let instance_url = format!("/v1/instances?project={project_name}");
-    let instance: Instance =
-        object_create(client, &instance_url, &instance_params).await;
-    let instance_id = instance.identity.id;
-
-    // Transition instance to Running state
-    let nexus = &cptestctx.server.server_context().nexus;
-    let instance_uuid = InstanceUuid::from_untyped_uuid(instance_id);
-    instance_simulate(nexus, &instance_uuid).await;
-    instance_wait_for_state(client, instance_uuid, InstanceState::Running)
-        .await;
-
-    // Ensure multicast test prerequisites (inventory + DPD) are ready
-    ensure_multicast_test_ready(cptestctx).await;
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
-    // Add instance to multicast group via instance-centric API
-    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
-        .await;
-    wait_for_group_active(client, group_name).await;
-
-    // Wait for multicast member to reach "Joined" state
-    wait_for_member_state(
-        cptestctx,
-        group_name,
-        instance_id,
-        nexus_db_model::MulticastGroupMemberState::Joined,
-    )
-    .await;
-
-    // Verify member count
-    let members = list_multicast_group_members(client, group_name).await;
-    assert_eq!(members.len(), 1, "Should have one multicast member");
-
-    // Allocate ephemeral external IP to the same instance
-    let ephemeral_ip_url = format!(
-        "/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}"
-    );
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
-            .body(Some(&EphemeralIpCreate {
-                pool: None, // Use default pool
-            }))
-            .expect_status(Some(StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
-
-    // Verify both multicast and external IP work together
-
-    // Check that multicast membership is preserved
-    let members_after_ip =
-        list_multicast_group_members(client, group_name).await;
-    assert_eq!(
-        members_after_ip.len(),
-        1,
-        "Multicast member should still exist after external IP allocation"
-    );
-    assert_eq!(members_after_ip[0].instance_id, instance_id);
-    assert_eq!(
-        members_after_ip[0].state, "Joined",
-        "Member state should remain Joined"
-    );
-
-    // Check that external IP is properly attached
-    let external_ips_after_attach =
-        fetch_instance_external_ips(client, instance_name, project_name).await;
-    assert!(
-        !external_ips_after_attach.is_empty(),
-        "Instance should have external IP"
-    );
-    // Note: external_ip.ip() from the response may differ from what's actually attached,
-    // so we just verify that an external IP exists
-
-    // Remove ephemeral external IP and verify multicast is unaffected
-    let external_ip_detach_url = format!(
-        "/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}"
-    );
-    object_delete(client, &external_ip_detach_url).await;
-
-    // Wait for operations to settle
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
-    // Verify multicast membership is still intact after external IP removal
-    let members_after_detach =
-        list_multicast_group_members(client, group_name).await;
-    assert_eq!(
-        members_after_detach.len(),
-        1,
-        "Multicast member should persist after external IP removal"
-    );
-    assert_eq!(members_after_detach[0].instance_id, instance_id);
-    assert_eq!(
-        members_after_detach[0].state, "Joined",
-        "Member should remain Joined"
-    );
-
-    // Verify ephemeral external IP is removed (SNAT IP may still be present)
-    let external_ips_after_detach =
-        fetch_instance_external_ips(client, instance_name, project_name).await;
-    // Instance should have at most 1 IP left (the SNAT IP), not the ephemeral IP we attached
-    assert!(
-        external_ips_after_detach.len() <= 1,
-        "Instance should have at most SNAT IP remaining"
-    );
-
-    // Cleanup
-    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    // Implicit deletion model: group is implicitly deleted when last member (instance) is removed
-    wait_for_group_deleted(client, group_name).await;
-}
-
-/// Verify external IP allocation/deallocation lifecycle for multicast group members.
+/// External IP attach/detach doesn't affect multicast state, and dataplane
+/// configuration remains consistent throughout the lifecycle.
 ///
-/// Multiple external IP attach/detach cycles don't affect multicast state, concurrent
-/// operations don't cause race conditions, and dataplane configuration remains consistent
-/// throughout the lifecycle.
+/// This is the canonical test for external IP + multicast coexistence. The
+/// DPD configuration paths for external IPs and multicast are independent,
+/// so testing one attach/detach cycle is sufficient to verify no interference.
 #[nexus_test]
 async fn test_multicast_external_ip_lifecycle(
     cptestctx: &nexus_test_utils::ControlPlaneTestContext<
@@ -286,80 +124,76 @@ async fn test_multicast_external_ip_lifecycle(
     assert_eq!(initial_members.len(), 1);
     assert_eq!(initial_members[0].state, "Joined");
 
-    // Test multiple external IP allocation/deallocation cycles
-    for cycle in 1..=3 {
-        // Allocate ephemeral external IP
-        let ephemeral_ip_url = format!(
-            "/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}"
-        );
-        NexusRequest::new(
-            RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
-                .body(Some(&EphemeralIpCreate {
-                    pool: None, // Use default pool
-                }))
-                .expect_status(Some(StatusCode::ACCEPTED)),
-        )
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap();
+    // Test external IP allocation/deallocation cycle
+    // Allocate ephemeral external IP
+    let ephemeral_ip_url = format!(
+        "/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}"
+    );
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
+            .body(Some(&EphemeralIpCreate {
+                pool: None, // Use default pool
+            }))
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 
-        // Wait for dataplane configuration to settle
-        wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+    // Wait for dataplane configuration to settle
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-        // Verify multicast state is preserved
-        let members_with_ip =
-            list_multicast_group_members(client, group_name).await;
-        assert_eq!(
-            members_with_ip.len(),
-            1,
-            "Cycle {cycle}: Multicast member should persist during external IP allocation"
-        );
-        assert_eq!(
-            members_with_ip[0].state, "Joined",
-            "Cycle {cycle}: Member should remain Joined"
-        );
+    // Verify multicast state is preserved
+    let members_with_ip =
+        list_multicast_group_members(client, group_name).await;
+    assert_eq!(
+        members_with_ip.len(),
+        1,
+        "Multicast member should persist during external IP allocation"
+    );
+    assert_eq!(
+        members_with_ip[0].state, "Joined",
+        "Member should remain Joined"
+    );
 
-        // Verify external IP is attached
-        let external_ips_with_ip =
-            fetch_instance_external_ips(client, instance_name, project_name)
-                .await;
-        assert!(
-            !external_ips_with_ip.is_empty(),
-            "Cycle {cycle}: Instance should have external IP"
-        );
+    // Verify external IP is attached
+    let external_ips_with_ip =
+        fetch_instance_external_ips(client, instance_name, project_name).await;
+    assert!(
+        !external_ips_with_ip.is_empty(),
+        "Instance should have external IP"
+    );
 
-        // Deallocate ephemeral external IP
-        let external_ip_detach_url = format!(
-            "/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}"
-        );
-        object_delete(client, &external_ip_detach_url).await;
+    // Deallocate ephemeral external IP
+    let external_ip_detach_url = format!(
+        "/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}"
+    );
+    object_delete(client, &external_ip_detach_url).await;
 
-        // Wait for operations to settle
-        wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+    // Wait for operations to settle
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-        // Verify multicast state is still preserved
-        let members_without_ip =
-            list_multicast_group_members(client, group_name).await;
-        assert_eq!(
-            members_without_ip.len(),
-            1,
-            "Cycle {cycle}: Multicast member should persist after external IP removal"
-        );
-        assert_eq!(
-            members_without_ip[0].state, "Joined",
-            "Cycle {cycle}: Member should remain Joined after IP removal"
-        );
+    // Verify multicast state is still preserved
+    let members_without_ip =
+        list_multicast_group_members(client, group_name).await;
+    assert_eq!(
+        members_without_ip.len(),
+        1,
+        "Multicast member should persist after external IP removal"
+    );
+    assert_eq!(
+        members_without_ip[0].state, "Joined",
+        "Member should remain Joined after IP removal"
+    );
 
-        // Verify ephemeral external IP is removed (SNAT IP may still be present)
-        let external_ips_without_ip =
-            fetch_instance_external_ips(client, instance_name, project_name)
-                .await;
-        assert!(
-            external_ips_without_ip.len() <= 1,
-            "Cycle {cycle}: Instance should have at most SNAT IP remaining"
-        );
-    }
+    // Verify ephemeral external IP is removed (SNAT IP may still be present)
+    let external_ips_without_ip =
+        fetch_instance_external_ips(client, instance_name, project_name).await;
+    assert!(
+        external_ips_without_ip.len() <= 1,
+        "Instance should have at most SNAT IP remaining"
+    );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
     wait_for_group_deleted(client, group_name).await;

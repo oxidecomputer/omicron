@@ -2734,6 +2734,12 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Test error handling for invalid group/instance in attach operations.
+    ///
+    /// Tests three error cases:
+    /// 1. Attach to non-existent group → fails
+    /// 2. Attach non-existent instance to existing group → fails
+    /// 3. Both group and instance don't exist → fails with instance error
     #[tokio::test]
     async fn test_member_attach_invalid_group_or_instance() {
         let logctx =
@@ -2741,6 +2747,26 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
+        // Case: Both invalid -> instance error takes priority
+        let fake_group_id = Uuid::new_v4();
+        let fake_instance_id = Uuid::new_v4();
+        let result = datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(fake_group_id),
+                InstanceUuid::from_untyped_uuid(fake_instance_id),
+                Some(vec![]),
+            )
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, external::Error::InvalidRequest { .. }));
+        assert!(
+            err.to_string().contains("Instance does not exist"),
+            "Expected InstanceNotFound error priority, got: {err}"
+        );
+
+        // Setup for remaining tests
         let setup = multicast::create_test_setup(
             &opctx,
             &datastore,
@@ -2749,7 +2775,7 @@ mod tests {
         )
         .await;
 
-        // Create a valid instance
+        // Case: Valid instance, but a non-existent group
         let (instance, _vmm) = create_instance_with_vmm(
             &opctx,
             &datastore,
@@ -2760,8 +2786,6 @@ mod tests {
         .await;
         let instance_id = *instance.as_untyped_uuid();
 
-        // Attach to non-existent group
-        let fake_group_id = Uuid::new_v4();
         let result = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
@@ -2770,13 +2794,13 @@ mod tests {
                 Some(vec![]),
             )
             .await;
-
-        // Should fail with GroupNotFound (group doesn't exist)
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err, external::Error::InvalidRequest { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            external::Error::InvalidRequest { .. }
+        ));
 
-        // Create a valid active group
+        // Case: Valid group, but non-existent instance
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
@@ -2787,8 +2811,6 @@ mod tests {
         )
         .await;
 
-        // Attach non-existent instance
-        let fake_instance_id = Uuid::new_v4();
         let result = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
@@ -2797,12 +2819,11 @@ mod tests {
                 Some(vec![]),
             )
             .await;
-
-        // Should fail because CTE validates instance exists atomically
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        // The error will be InvalidRequest from the CTE (instance not found)
-        assert!(matches!(err, external::Error::InvalidRequest { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            external::Error::InvalidRequest { .. }
+        ));
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -3363,40 +3384,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_member_attach_error_priority_both_invalid() {
-        let logctx = dev::test_setup_log(
-            "test_member_attach_error_priority_both_invalid",
-        );
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let fake_group_id = Uuid::new_v4();
-        let fake_instance_id = Uuid::new_v4();
-
-        // Attempt to attach non-existent instance to non-existent group
-        let result = datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(fake_group_id),
-                InstanceUuid::from_untyped_uuid(fake_instance_id),
-                Some(vec![]),
-            )
-            .await;
-
-        // Should fail with InstanceNotFound (checked first), not GroupNotFound
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err, external::Error::InvalidRequest { .. }));
-        assert!(
-            err.to_string().contains("Instance does not exist"),
-            "Expected InstanceNotFound error, got: {err}"
-        );
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
     async fn test_member_attach_stopped_instance() {
         let logctx = dev::test_setup_log("test_member_attach_stopped_instance");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
@@ -3463,13 +3450,25 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Test for `multicast_groups_source_ips_union` covering:
+    /// - Empty input returns empty map
+    /// - Group with no members returns empty source_ips
+    /// - Union across multiple members with overlapping IPs
+    /// - ASM members (no source_ips) don't affect union
     #[tokio::test]
-    async fn test_source_ips_union_across_members() {
-        let logctx =
-            dev::test_setup_log("test_source_ips_union_across_members");
+    async fn test_source_ips_union() {
+        let logctx = dev::test_setup_log("test_source_ips_union");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
+        // Case: Empty input returns empty map without DB query
+        let result = datastore
+            .multicast_groups_source_ips_union(&opctx, &[])
+            .await
+            .expect("Empty input should succeed");
+        assert!(result.is_empty(), "Empty input should return empty map");
+
+        // Setup for remaining tests
         let setup = multicast::create_test_setup(
             &opctx,
             &datastore,
@@ -3478,7 +3477,33 @@ mod tests {
         )
         .await;
 
-        // Create active group
+        // Case: Group with no members returns empty source_ips
+        let empty_group = multicast::create_test_group_with_state(
+            &opctx,
+            &datastore,
+            &setup,
+            "empty-group",
+            "224.10.1.1",
+            true, // make_active
+        )
+        .await;
+        let empty_group_id =
+            MulticastGroupUuid::from_untyped_uuid(empty_group.id());
+
+        let result = datastore
+            .multicast_groups_source_ips_union(&opctx, &[empty_group_id])
+            .await
+            .expect("Should succeed for group with no members");
+        assert!(
+            result.contains_key(&empty_group.id()),
+            "Group should be present in result map"
+        );
+        assert!(
+            result.get(&empty_group.id()).unwrap().is_empty(),
+            "Group with no members should have empty source_ips"
+        );
+
+        // Case: Union across members with overlapping IPs
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
@@ -3512,7 +3537,6 @@ mod tests {
             .await
             .expect("Should add member1");
 
-        // Verify union with single member
         let union_map = datastore
             .multicast_groups_source_ips_union(&opctx, &[group_id])
             .await
@@ -3542,7 +3566,6 @@ mod tests {
             .await
             .expect("Should add member2");
 
-        // Verify union deduplicates overlapping IPs
         let union_map = datastore
             .multicast_groups_source_ips_union(&opctx, &[group_id])
             .await
@@ -3551,10 +3574,10 @@ mod tests {
         assert_eq!(
             union.len(),
             3,
-            "Union should have 3 unique IPs (10.0.0.1, 10.0.0.2, 10.0.0.3)"
+            "Union should have 3 unique IPs (deduplicates overlapping)"
         );
 
-        // Add member3 with no source IPs (ASM member)
+        // Case: ASM member (no source_ips) doesn't affect union
         let instance3 = create_stopped_instance_record(
             &opctx,
             &datastore,
@@ -3573,7 +3596,6 @@ mod tests {
             .await
             .expect("Should add ASM member");
 
-        // Union should still be 3 (ASM member contributes nothing)
         let union_map = datastore
             .multicast_groups_source_ips_union(&opctx, &[group_id])
             .await
@@ -3584,8 +3606,6 @@ mod tests {
             3,
             "Union should still be 3 (ASM member has no sources)"
         );
-
-        // Verify actual IPs in union
         assert!(union.contains(&"10.0.0.1".parse().unwrap()));
         assert!(union.contains(&"10.0.0.2".parse().unwrap()));
         assert!(union.contains(&"10.0.0.3".parse().unwrap()));
@@ -3594,82 +3614,15 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// Test that empty group IDs returns empty map without DB query.
-    #[tokio::test]
-    async fn test_source_ips_union_empty_input() {
-        let logctx = dev::test_setup_log("test_source_ips_union_empty_input");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // Call with empty slice - should return empty map without hitting DB
-        let result = datastore
-            .multicast_groups_source_ips_union(&opctx, &[])
-            .await
-            .expect("Empty input should succeed");
-
-        assert!(result.is_empty(), "Empty input should return empty map");
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_source_ips_union_group_with_no_members() {
-        let logctx =
-            dev::test_setup_log("test_source_ips_union_group_with_no_members");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let setup = multicast::create_test_setup(
-            &opctx,
-            &datastore,
-            "no-members-pool",
-            "no-members-project",
-        )
-        .await;
-
-        // Create active group with no members
-        let group = multicast::create_test_group_with_state(
-            &opctx,
-            &datastore,
-            &setup,
-            "empty-group",
-            "224.10.1.1",
-            true, // make_active
-        )
-        .await;
-        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
-
-        // Query source IPs for group with no members
-        let result = datastore
-            .multicast_groups_source_ips_union(&opctx, &[group_id])
-            .await
-            .expect("Should succeed for group with no members");
-
-        // Group should be in result map with empty vector (not missing)
-        assert!(
-            result.contains_key(&group.id()),
-            "Group should be present in result map"
-        );
-        let sources = result.get(&group.id()).unwrap();
-        assert!(
-            sources.is_empty(),
-            "Group with no members should have empty source_ips"
-        );
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    /// Test that `None` preserves source_ips on reactivation.
+    /// Test covering source_ips handling on reactivation.
     ///
-    /// This verifies the distinction between:
+    /// Verifies the distinction between:
     /// - `None` → preserve existing source_ips
     /// - `Some([])` → clear source_ips (switch to ASM)
     #[tokio::test]
-    async fn test_member_attach_preserves_sources_on_reactivation() {
+    async fn test_member_attach_source_ips_on_reactivation() {
         let logctx = dev::test_setup_log(
-            "test_member_attach_preserves_sources_on_reactivation",
+            "test_member_attach_source_ips_on_reactivation",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -3677,8 +3630,8 @@ mod tests {
         let setup = multicast::create_test_setup(
             &opctx,
             &datastore,
-            "add-preserve-sources-pool",
-            "add-preserve-sources-project",
+            "reactivation-sources-pool",
+            "reactivation-sources-project",
         )
         .await;
 
@@ -3694,173 +3647,106 @@ mod tests {
         .await;
         let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
 
-        // Create stopped instance
-        let instance = create_stopped_instance_record(
+        let original_sources =
+            vec!["10.5.5.1".parse().unwrap(), "10.5.5.2".parse().unwrap()];
+
+        // Case: `None` preserves source_ips
+        let instance1 = create_stopped_instance_record(
             &opctx,
             &datastore,
             &setup.authz_project,
-            "test-instance",
+            "instance-preserve",
         )
         .await;
 
-        // Add member with `source_ips` via HTTP API path
-        let original_sources =
-            vec!["10.5.5.1".parse().unwrap(), "10.5.5.2".parse().unwrap()];
-        let member = datastore
+        let member1 = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 group_id,
-                instance,
+                instance1,
                 Some(original_sources.clone()),
             )
             .await
             .expect("Should add member with sources");
-
-        assert_eq!(
-            member.source_ips.len(),
-            2,
-            "Member should have 2 source IPs"
-        );
+        assert_eq!(member1.source_ips.len(), 2);
 
         // Transition to "Left" state
         datastore
-            .multicast_group_members_detach_by_instance(&opctx, instance)
+            .multicast_group_members_detach_by_instance(&opctx, instance1)
             .await
             .expect("Should detach");
 
-        // Verify member is in "Left" state
         let left_member = datastore
-            .multicast_group_member_get_by_id(&opctx, member.id, false)
+            .multicast_group_member_get_by_id(&opctx, member1.id, false)
             .await
             .expect("Should get member")
             .expect("Member should exist");
         assert_eq!(left_member.state, MulticastGroupMemberState::Left);
-        // Source IPs should still be stored (just in "Left" state)
         assert_eq!(left_member.source_ips.len(), 2);
 
-        // Reactivate via HTTP API path with `None` (preserve existing sources)
-        let reactivated = datastore
+        // Reactivate with `None` → should preserve source_ips
+        let reactivated1 = datastore
             .multicast_group_member_attach_to_instance(
-                &opctx, group_id, instance,
+                &opctx, group_id, instance1,
                 None, // None = preserve existing source_ips
             )
             .await
             .expect("Should reactivate member");
 
-        // Verify `source_ips` were preserved (not cleared)
         assert_eq!(
-            reactivated.source_ips.len(),
+            reactivated1.source_ips.len(),
             2,
             "Source IPs should be preserved on reactivation with None"
         );
-        let reactivated_ips: Vec<IpAddr> =
-            reactivated.source_ips.iter().map(|n| n.ip()).collect();
-        assert!(reactivated_ips.contains(&"10.5.5.1".parse().unwrap()));
-        assert!(reactivated_ips.contains(&"10.5.5.2".parse().unwrap()));
+        let ips: Vec<IpAddr> =
+            reactivated1.source_ips.iter().map(|n| n.ip()).collect();
+        assert!(ips.contains(&"10.5.5.1".parse().unwrap()));
+        assert!(ips.contains(&"10.5.5.2".parse().unwrap()));
+        assert_eq!(reactivated1.state, MulticastGroupMemberState::Joining);
 
-        // Verify state is back to Joining
-        assert_eq!(reactivated.state, MulticastGroupMemberState::Joining);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    /// Test that `Some([])` clears `source_ips` on reactivation (switch to ASM).
-    ///
-    /// This verifies the distinction between:
-    /// - `None` → preserve existing `source_ips`
-    /// - `Some([])` → clear `source_ips` (switch to ASM)
-    #[tokio::test]
-    async fn test_member_attach_clears_sources_on_reactivation() {
-        let logctx = dev::test_setup_log(
-            "test_member_attach_clears_sources_on_reactivation",
-        );
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let setup = multicast::create_test_setup(
-            &opctx,
-            &datastore,
-            "add-clear-sources-pool",
-            "add-clear-sources-project",
-        )
-        .await;
-
-        // Create active group
-        let group = multicast::create_test_group_with_state(
-            &opctx,
-            &datastore,
-            &setup,
-            "test-group",
-            "224.10.1.1",
-            true, // make_active
-        )
-        .await;
-        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
-
-        // Create stopped instance
-        let instance = create_stopped_instance_record(
+        // Case: `Some([])` clears source_ips
+        let instance2 = create_stopped_instance_record(
             &opctx,
             &datastore,
             &setup.authz_project,
-            "test-instance",
+            "instance-clear",
         )
         .await;
 
-        // Add member with `source_ips`
-        let original_sources =
-            vec!["10.5.5.1".parse().unwrap(), "10.5.5.2".parse().unwrap()];
-        let member = datastore
+        let member2 = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 group_id,
-                instance,
+                instance2,
                 Some(original_sources.clone()),
             )
             .await
             .expect("Should add member with sources");
-
-        assert_eq!(
-            member.source_ips.len(),
-            2,
-            "Member should have 2 source IPs"
-        );
+        assert_eq!(member2.source_ips.len(), 2);
 
         // Transition to "Left" state
         datastore
-            .multicast_group_members_detach_by_instance(&opctx, instance)
+            .multicast_group_members_detach_by_instance(&opctx, instance2)
             .await
             .expect("Should detach");
 
-        // Verify member is in "Left" state with sources still stored
-        let left_member = datastore
-            .multicast_group_member_get_by_id(&opctx, member.id, false)
-            .await
-            .expect("Should get member")
-            .expect("Member should exist");
-        assert_eq!(left_member.state, MulticastGroupMemberState::Left);
-        assert_eq!(left_member.source_ips.len(), 2);
-
-        // Reactivate to clear sources (switch to ASM)
-        let reactivated = datastore
+        // Reactivate with `Some([])` → should clear source_ips
+        let reactivated2 = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 group_id,
-                instance,
+                instance2,
                 Some(vec![]), // Some([]) = clear source_ips
             )
             .await
             .expect("Should reactivate member");
 
-        // Verify `source_ips` were cleared
         assert_eq!(
-            reactivated.source_ips.len(),
+            reactivated2.source_ips.len(),
             0,
             "Source IPs should be cleared on reactivation with Some([])"
         );
-
-        // Verify state is back to "Joining"
-        assert_eq!(reactivated.state, MulticastGroupMemberState::Joining);
+        assert_eq!(reactivated2.state, MulticastGroupMemberState::Joining);
 
         db.terminate().await;
         logctx.cleanup_successful();

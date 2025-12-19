@@ -66,8 +66,15 @@ mod networking_integration;
 mod pool_selection;
 
 // Timeout constants for test operations
-const POLL_INTERVAL: Duration = Duration::from_millis(80);
-const MULTICAST_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
+const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+// Tiered timeouts for different operation types:
+// - Short: For operations that should complete quickly (group state checks, member lists)
+// - Medium: For operations requiring reconciler processing or simulation (state transitions)
+// - Long: For test setup operations requiring external systems (inventory population)
+const SHORT_TIMEOUT: Duration = Duration::from_secs(15);
+const MEDIUM_TIMEOUT: Duration = Duration::from_secs(60);
+const LONG_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Generic helper for PUT upsert requests that return 201 Created.
 ///
@@ -202,8 +209,8 @@ pub(crate) async fn activate_multicast_reconciler(
 /// Wait for a condition to be true, activating the reconciler periodically.
 ///
 /// This is like `wait_for_condition` but activates the multicast reconciler
-/// periodically (not on every poll) to drive state changes. We activate the
-/// reconciler every 500ms.
+/// periodically (not on every poll) to drive state changes. We first wait for
+/// any in-progress run, then activate every 60ms in the poll loop.
 ///
 /// Useful for tests that need to wait for reconciler-driven state changes
 /// (e.g., member state transitions).
@@ -217,18 +224,16 @@ where
     F: Fn() -> Fut,
     Fut: Future<Output = Result<T, CondCheckError<E>>>,
 {
-    // Activate reconciler less frequently than we check the condition
-    // This reduces overhead while still driving state changes forward
-    const RECONCILER_ACTIVATION_INTERVAL: Duration = Duration::from_millis(500);
+    const RECONCILER_ACTIVATION_INTERVAL: Duration = Duration::from_millis(60);
 
     let last_reconciler_activation = Arc::new(Mutex::new(Instant::now()));
 
-    // Activate once at the start to kick things off
+    // Wait for any in-progress run to complete first
     wait_for_multicast_reconciler(lockstep_client).await;
 
     wait_for_condition(
         || async {
-            // Only activate reconciler if enough time has passed
+            // Activate reconciler if enough time has passed since last activation
             let now = Instant::now();
             let should_activate = {
                 let last = last_reconciler_activation.lock().unwrap();
@@ -236,7 +241,7 @@ where
             };
 
             if should_activate {
-                wait_for_multicast_reconciler(lockstep_client).await;
+                activate_multicast_reconciler(lockstep_client).await;
                 *last_reconciler_activation.lock().unwrap() = now;
             }
 
@@ -331,8 +336,8 @@ pub(crate) async fn ensure_inventory_ready(
                 Err(CondCheckError::<String>::NotYet)
             }
         },
-        &Duration::from_millis(500), // Check every 500ms
-        &Duration::from_secs(120),   // Wait up to 120s
+        &Duration::from_millis(150),
+        &LONG_TIMEOUT,
     )
     .await
     {
@@ -394,8 +399,8 @@ pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
                 }
             }
         },
-        &Duration::from_millis(200), // Check every 200ms
-        &Duration::from_secs(30),    // Wait up to 30 seconds for switches
+        &Duration::from_millis(100),
+        &Duration::from_secs(30),
     )
     .await
     {
@@ -467,7 +472,7 @@ pub(crate) async fn wait_for_group_state(
             }
         },
         &POLL_INTERVAL,
-        &MULTICAST_OPERATION_TIMEOUT,
+        &SHORT_TIMEOUT, // Group state checks should be quick
     )
     .await
     {
@@ -564,7 +569,8 @@ pub(crate) async fn wait_for_member_state(
         }
     };
 
-    // Use reconciler-activating wait for "Joined" state
+    // Use reconciler-activating wait for "Joined" state (requires DPD programming)
+    // For other states, use shorter timeout since they're simpler state changes
     let res = if expected_state
         == nexus_db_model::MulticastGroupMemberState::Joined
     {
@@ -572,14 +578,14 @@ pub(crate) async fn wait_for_member_state(
             lockstep_client,
             check_member,
             &POLL_INTERVAL,
-            &MULTICAST_OPERATION_TIMEOUT,
+            &MEDIUM_TIMEOUT, // Joined requires reconciler + DPD
         )
         .await
     } else {
         wait_for_condition(
             check_member,
             &POLL_INTERVAL,
-            &MULTICAST_OPERATION_TIMEOUT,
+            &SHORT_TIMEOUT, // Left/Joining are quick state changes
         )
         .await
     };
@@ -666,7 +672,7 @@ pub(crate) async fn wait_for_instance_sled_assignment(
             }
         },
         &POLL_INTERVAL,
-        &MULTICAST_OPERATION_TIMEOUT,
+        &MEDIUM_TIMEOUT, // VMM creation requires sled agent simulation
     )
     .await
     {
@@ -838,7 +844,7 @@ pub(crate) async fn wait_for_member_count(
             }
         },
         &POLL_INTERVAL,
-        &MULTICAST_OPERATION_TIMEOUT,
+        &SHORT_TIMEOUT, // Member count checks are simple queries
     )
     .await
     {
@@ -880,7 +886,7 @@ pub(crate) async fn wait_for_group_deleted(
             }
         },
         &POLL_INTERVAL,
-        &MULTICAST_OPERATION_TIMEOUT,
+        &MEDIUM_TIMEOUT, // Group deletion requires reconciler processing
     )
     .await
     {
@@ -894,39 +900,6 @@ pub(crate) async fn wait_for_group_deleted(
             );
         }
     }
-}
-
-/// Verify a group is either deleted or in one of the expected states.
-///
-/// Useful when DPD is unavailable and groups can't complete state transitions.
-/// For example, when DPD is down during deletion, groups may be stuck in
-/// "Creating" or "Deleting" state rather than being fully deleted.
-pub(crate) async fn verify_group_deleted_or_in_states(
-    client: &ClientTestContext,
-    group_name: &str,
-    expected_states: &[&str],
-) {
-    let groups_result =
-        nexus_test_utils::resource_helpers::objects_list_page_authz::<
-            MulticastGroup,
-        >(client, "/v1/multicast-groups")
-        .await;
-
-    let matching_groups: Vec<_> = groups_result
-        .items
-        .into_iter()
-        .filter(|g| g.identity.name == group_name)
-        .collect();
-
-    if !matching_groups.is_empty() {
-        // Group still exists - should be in one of the expected states
-        let actual_state = &matching_groups[0].state;
-        assert!(
-            expected_states.contains(&actual_state.as_str()),
-            "Group {group_name} should be in one of {expected_states:?} states, found: \"{actual_state}\""
-        );
-    }
-    // If group is gone, that's also valid - operation completed
 }
 
 /// Wait for a multicast group to be deleted from DPD (dataplane) with reconciler activation.
@@ -952,7 +925,7 @@ pub(crate) async fn wait_for_group_deleted_from_dpd(
             }
         },
         &POLL_INTERVAL,
-        &MULTICAST_OPERATION_TIMEOUT,
+        &MEDIUM_TIMEOUT, // DPD deletion requires reconciler
     )
     .await
     {

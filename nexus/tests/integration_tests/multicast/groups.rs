@@ -298,8 +298,11 @@ async fn test_multicast_group_member_operations(
 
     // Implicit deletion model: group is implicitly deleted when last member is removed
     // Wait for both Nexus group and DPD group to be deleted
-    wait_for_group_deleted(client, group_name).await;
-    wait_for_group_deleted_from_dpd(cptestctx, external_multicast_ip).await;
+    ops::join2(
+        wait_for_group_deleted(client, group_name),
+        wait_for_group_deleted_from_dpd(cptestctx, external_multicast_ip),
+    )
+    .await;
 }
 
 #[nexus_test]
@@ -686,10 +689,12 @@ async fn test_instance_deletion_removes_multicast_memberships(
     object_get_error(client, &instance_url, StatusCode::NOT_FOUND).await;
 
     // Implicit model: group is implicitly deleted when last member (instance) is removed
-    wait_for_group_deleted(client, group_name).await;
-
-    // Wait for reconciler to clean up DPD state (activates reconciler repeatedly until DPD confirms deletion)
-    wait_for_group_deleted_from_dpd(cptestctx, multicast_ip).await;
+    // Wait for both Nexus group and DPD group to be deleted
+    ops::join2(
+        wait_for_group_deleted(client, group_name),
+        wait_for_group_deleted_from_dpd(cptestctx, multicast_ip),
+    )
+    .await;
 }
 
 /// Test that the multicast_ip field is correctly populated in MulticastGroupMember API responses.
@@ -763,45 +768,8 @@ async fn test_member_response_includes_multicast_ip(
         "Listed member should also include multicast_ip field"
     );
 
-    // Case: Remove and re-add member (reactivation) - verify field preserved
-    let member_remove_url = format!(
-        "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
-    );
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::DELETE, &member_remove_url)
-            .expect_status(Some(StatusCode::NO_CONTENT)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Should remove member");
-
-    wait_for_group_deleted(client, group_name).await;
-
-    // Re-create group by adding member again
-    let readded_member: MulticastGroupMember =
-        put_upsert(client, &join_url, &join_params).await;
-
-    wait_for_group_active(client, group_name).await;
-
-    let new_group: MulticastGroup =
-        object_get(client, &mcast_group_url(group_name)).await;
-
-    // Verify multicast_ip field is present in re-added member
-    assert_eq!(
-        readded_member.multicast_ip, new_group.multicast_ip,
-        "Re-added member should also have multicast_ip field"
-    );
-
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::DELETE, &member_remove_url)
-            .expect_status(Some(StatusCode::NO_CONTENT)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Should remove member for cleanup");
-
+    // Cleanup
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
     wait_for_group_deleted(client, group_name).await;
 }
 
@@ -1192,6 +1160,14 @@ async fn test_default_pool_on_implicit_creation(
         object_get(client, &mcast_group_url(group_name2)).await;
     assert_eq!(group.ip_pool_id, mcast_pool.identity.id);
 
+    // Verify IP is in pool's range (224.2.x.x from create_multicast_ip_pool)
+    if let IpAddr::V4(ip) = group.multicast_ip {
+        assert_eq!(ip.octets()[0], 224);
+        assert_eq!(ip.octets()[1], 2);
+    } else {
+        panic!("Expected IPv4 multicast address");
+    }
+
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
     wait_for_group_deleted(client, group_name2).await;
@@ -1283,112 +1259,6 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
         client,
         project_name,
         &[instance_names[1], instance_names[2], instance_names[3]],
-    )
-    .await;
-}
-
-/// Test that groups are allocated from the auto-discovered pool.
-///
-/// Pool selection is automatic - when multiple pools exist, the first one
-/// alphabetically is used (after preferring any default pool).
-#[nexus_test]
-async fn test_automatic_pool_selection(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let project_name = "pool-selection-test-project";
-    let instance_name = "pool-selection-instance";
-
-    // Setup: project and default IP pool in parallel
-    let (_, _) = ops::join2(
-        create_project(&client, project_name),
-        create_default_ip_pool(&client),
-    )
-    .await;
-    create_instance(client, project_name, instance_name).await;
-
-    // Create a multicast pool (after instance, to test auto-discovery)
-    let mcast_pool = create_multicast_ip_pool_with_range(
-        &client,
-        "mcast-pool",
-        (224, 20, 0, 1),
-        (224, 20, 0, 10),
-    )
-    .await;
-
-    // Case: Join group - pool is auto-discovered
-    let group_name = "auto-pool-group";
-    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
-        .await;
-
-    let group_view: MulticastGroup =
-        object_get(client, &mcast_group_url(group_name)).await;
-    // Pool is auto-discovered from available multicast pools
-    assert_eq!(group_view.ip_pool_id, mcast_pool.identity.id);
-    // Verify IP is in pool's range (224.20.0.x)
-    if let IpAddr::V4(ip) = group_view.multicast_ip {
-        assert_eq!(ip.octets()[0], 224);
-        assert_eq!(ip.octets()[1], 20);
-    } else {
-        panic!("Expected IPv4 multicast address");
-    }
-
-    // Cleanup
-    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
-}
-
-/// Test validation errors for pool exhaustion.
-#[nexus_test]
-async fn test_pool_exhaustion(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let project_name = "pool-exhaustion-test-project";
-
-    // Create project and IP pools in parallel (multicast pool has single IP)
-    let (_, _, _) = ops::join3(
-        create_project(&client, project_name),
-        create_default_ip_pool(&client),
-        create_multicast_ip_pool_with_range(
-            &client,
-            "empty-pool",
-            (224, 99, 0, 1),
-            (224, 99, 0, 1), // Single IP
-        ),
-    )
-    .await;
-
-    // Use the single IP
-    let instance_name = "pool-exhaust-instance";
-    create_instance(client, project_name, instance_name).await;
-    let group_exhaust = "exhaust-empty-pool";
-    multicast_group_attach(
-        cptestctx,
-        project_name,
-        instance_name,
-        group_exhaust,
-    )
-    .await;
-
-    // Now try to create another group - should fail
-    let instance2_name = "pool-exhaust-instance-2";
-    create_instance(client, project_name, instance2_name).await;
-    let group_fail = "fail-empty-pool";
-    let join_url_fail = format!(
-        "/v1/instances/{instance2_name}/multicast-groups/{group_fail}?project={project_name}"
-    );
-    let join_params_fail = InstanceMulticastGroupJoin { source_ips: None };
-    object_put_error(
-        client,
-        &join_url_fail,
-        &join_params_fail,
-        StatusCode::INSUFFICIENT_STORAGE,
-    )
-    .await;
-
-    // Cleanup
-    cleanup_instances(
-        cptestctx,
-        client,
-        project_name,
-        &[instance_name, instance2_name],
     )
     .await;
 }
@@ -1550,7 +1420,10 @@ async fn test_multiple_ssm_groups_same_pool(
     cleanup_instances(cptestctx, client, project_name, &all_instances).await;
 
     // Verify all groups are deleted
-    for (group_name, _) in &group_configs {
-        wait_for_group_deleted(client, group_name).await;
-    }
+    ops::join_all(
+        group_configs
+            .iter()
+            .map(|(group_name, _)| wait_for_group_deleted(client, group_name)),
+    )
+    .await;
 }

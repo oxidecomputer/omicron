@@ -97,11 +97,13 @@ async fn test_ssm_to_asm_fallback_with_sources(
     assert_eq!(group.state, "Active");
 }
 
-/// Test that SSM pool is preferred when both ASM and SSM pools exist.
+/// Test pool selection: SSM preferred with sources, ASM used without.
+///
+/// When both ASM and SSM pools exist:
+/// - With sources → SSM pool is preferred (232.x.x.x)
+/// - Without sources → ASM pool is used directly (224.x.x.x)
 #[nexus_test]
-async fn test_ssm_pool_preferred_with_sources(
-    cptestctx: &ControlPlaneTestContext,
-) {
+async fn test_pool_selection_ssm_vs_asm(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Setup: create both ASM and SSM pools
@@ -116,8 +118,8 @@ async fn test_ssm_pool_preferred_with_sources(
     )
     .await;
 
-    // Create an instance
-    let instance = instance_for_multicast_groups(
+    // Case: With sources → SSM pool preferred
+    let ssm_instance = instance_for_multicast_groups(
         cptestctx,
         PROJECT_NAME,
         "ssm-prefer-instance",
@@ -126,65 +128,37 @@ async fn test_ssm_pool_preferred_with_sources(
     )
     .await;
 
-    // Join with sources - should use SSM pool (not ASM)
-    let join_url = format!(
+    let ssm_join_url = format!(
         "/v1/instances/{}/multicast-groups/ssm-preferred-group?project={PROJECT_NAME}",
-        instance.identity.id
+        ssm_instance.identity.id
     );
-
     put_upsert::<_, MulticastGroupMember>(
         client,
-        &join_url,
+        &ssm_join_url,
         &InstanceMulticastGroupJoin {
             source_ips: Some(vec!["10.0.0.1".parse::<IpAddr>().unwrap()]),
         },
     )
     .await;
 
-    // Trigger reconciler to process the new group ("Creating" → "Active")
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+    let ssm_group = wait_for_group_active(client, "ssm-preferred-group").await;
 
-    // Wait for group to become Active
-    let group = wait_for_group_active(client, "ssm-preferred-group").await;
-
-    // Verify the group got an SSM IP (232.x.x.x)
-    let ip = group.multicast_ip;
-    match ip {
+    // Verify SSM IP (232.x.x.x)
+    match ssm_group.multicast_ip {
         IpAddr::V4(v4) => {
             assert!(
                 v4.octets()[0] == 232,
-                "Expected SSM IP (232.x.x.x), got {ip}"
+                "Expected SSM IP (232.x.x.x), got {}",
+                ssm_group.multicast_ip
             );
         }
-        IpAddr::V6(_) => {
-            panic!("Expected IPv4 SSM address, got IPv6: {ip}");
-        }
+        IpAddr::V6(_) => panic!("Expected IPv4 SSM address"),
     }
+    assert_eq!(ssm_group.state, "Active");
 
-    assert_eq!(group.state, "Active");
-}
-
-/// Test that ASM pool is used directly when no sources provided.
-#[nexus_test]
-async fn test_asm_pool_used_without_sources(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    // Setup: create both ASM and SSM pools
-    create_default_ip_pool(client).await;
-    create_project(client, PROJECT_NAME).await;
-    create_multicast_ip_pool(client, "asm-pool").await;
-    create_multicast_ip_pool_with_range(
-        client,
-        "ssm-pool",
-        (232, 1, 0, 0),
-        (232, 1, 0, 255),
-    )
-    .await;
-
-    // Create an instance
-    let instance = instance_for_multicast_groups(
+    // Case: Without sources → ASM pool used
+    let asm_instance = instance_for_multicast_groups(
         cptestctx,
         PROJECT_NAME,
         "asm-direct-instance",
@@ -193,38 +167,30 @@ async fn test_asm_pool_used_without_sources(
     )
     .await;
 
-    // Join without sources - should use ASM pool directly (skip SSM)
-    let join_url = format!(
+    let asm_join_url = format!(
         "/v1/instances/{}/multicast-groups/asm-direct-group?project={PROJECT_NAME}",
-        instance.identity.id
+        asm_instance.identity.id
     );
-
     put_upsert::<_, MulticastGroupMember>(
         client,
-        &join_url,
+        &asm_join_url,
         &InstanceMulticastGroupJoin { source_ips: None },
     )
     .await;
 
-    // Trigger reconciler to process the new group ("Creating" → "Active")
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+    let asm_group = wait_for_group_active(client, "asm-direct-group").await;
 
-    // Wait for group to become Active
-    let group = wait_for_group_active(client, "asm-direct-group").await;
-
-    // Verify the group got an ASM IP (224.x.x.x)
-    let ip = group.multicast_ip;
-    match ip {
+    // Verify ASM IP (224.x.x.x)
+    match asm_group.multicast_ip {
         IpAddr::V4(v4) => {
             assert!(
                 v4.octets()[0] == 224,
-                "Expected ASM IP (224.x.x.x), got {ip}"
+                "Expected ASM IP (224.x.x.x), got {}",
+                asm_group.multicast_ip
             );
         }
-        IpAddr::V6(_) => {
-            panic!("Expected IPv4 ASM address, got IPv6: {ip}");
-        }
+        IpAddr::V6(_) => panic!("Expected IPv4 ASM address"),
     }
-
-    assert_eq!(group.state, "Active");
+    assert_eq!(asm_group.state, "Active");
 }
