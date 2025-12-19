@@ -56,6 +56,8 @@ use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
+use nexus_types::internal_api::background::FmAlertStats;
+use nexus_types::internal_api::background::FmRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
@@ -1249,6 +1251,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "fm_sitrep_gc" => {
             print_task_fm_sitrep_gc(details);
+        }
+        "fm_rendezvous" => {
+            print_task_fm_rendezvous(details);
         }
         _ => {
             println!(
@@ -3241,6 +3246,64 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     println!(
         "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
     );
+}
+
+fn print_task_fm_rendezvous(details: &serde_json::Value) {
+    match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(FmRendezvousStatus::NoSitrep) => {
+            println!("    no FM situation report loaded");
+        }
+        Ok(FmRendezvousStatus::Executed { sitrep_id, alerts }) => {
+            println!("    current sitrep: {sitrep_id}");
+            display_fm_alert_stats(&alerts);
+        }
+    }
+}
+
+fn display_fm_alert_stats(stats: &FmAlertStats) {
+    let FmAlertStats {
+        total_alerts_requested,
+        current_sitrep_alerts_requested,
+        alerts_created,
+        errors,
+    } = stats;
+    let already_created =
+        total_alerts_requested - alerts_created - errors.len();
+    pub const REQUESTED: &str = "alerts requested:";
+    pub const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
+    pub const CREATED: &str = "  created in this activation:";
+    pub const ALREADY_CREATED: &str = "  already created:";
+    pub const ERRORS: &str = "  errors:";
+    pub const WIDTH: usize = const_max_len(&[
+        REQUESTED,
+        REQUESTED_THIS_SITREP,
+        CREATED,
+        ALREADY_CREATED,
+        ERRORS,
+    ]) + 1;
+    pub const NUM_WIDTH: usize = 4;
+    println!("    {REQUESTED:<WIDTH$}{total_alerts_requested:>NUM_WIDTH$}");
+    println!(
+        "    {REQUESTED_THIS_SITREP:<WIDTH$}{:>NUM_WIDTH$}",
+        current_sitrep_alerts_requested
+    );
+    println!("    {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
+    println!("    {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}");
+    println!(
+        "{} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+        warn_if_nonzero(errors.len()),
+        errors.len()
+    );
+    for error in errors {
+        println!("      > {error}");
+    }
 }
 
 const ERRICON: &str = "/!\\";
