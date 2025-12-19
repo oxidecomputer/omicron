@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "4d8a50fbd88c55f447969d6eb5d3591564ef4913"
+source.commit = "3877aa0467fe275806f07ff4f7e92efa43e6fa6d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "4bef444e5d47477ffcc7728e83de12b8b2f7f36e5440141443b86aecdebb5011"
+source.sha256 = "c317e4bd2958324a6de2b5eba3380cd3b4071617676684213eb6ddbd33087118"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -670,10 +670,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "4d8a50fbd88c55f447969d6eb5d3591564ef4913"
+source.commit = "3877aa0467fe275806f07ff4f7e92efa43e6fa6d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "81f641bb7a09b65fc2a88601e425e22b30096c5131de144237cf1091a04d64a7"
+source.sha256 = "e74b8bd7bc8384dec558a5afafc624c67e9704a2a976f5cb75664f62d969bd97"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -685,7 +685,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "4d8a50fbd88c55f447969d6eb5d3591564ef4913"
+source.commit = "3877aa0467fe275806f07ff4f7e92efa43e6fa6d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "c32c66f81c2a6b9149d97c83153327e7d6897c53e047ae425291bd622d8559ec"
