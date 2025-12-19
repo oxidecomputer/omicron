@@ -200,7 +200,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let (sitrep_tx, mut sitrep_rx) = watch::channel(None);
+        let (sitrep_tx, sitrep_rx) = watch::channel(None);
 
         let alert_dispatcher_activator = Activator::new();
         // We are going to check that the alert dispatcher task is activated, so
