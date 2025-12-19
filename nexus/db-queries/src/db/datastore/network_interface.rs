@@ -51,8 +51,6 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
-use oxnet::Ipv4Net;
-use oxnet::Ipv6Net;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -85,7 +83,9 @@ struct NicInfo {
     #[diesel(select_expression = nexus_db_schema::schema::network_interface::slot)]
     slot: SqlU8,
     #[diesel(select_expression = nexus_db_schema::schema::network_interface::transit_ips)]
-    transit_ips: Vec<ipnetwork::IpNetwork>,
+    transit_ips_v4: Vec<crate::db::model::Ipv4Net>,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::transit_ips_v6)]
+    transit_ips_v6: Vec<crate::db::model::Ipv6Net>,
 }
 
 impl TryFrom<NicInfo>
@@ -99,77 +99,47 @@ impl TryFrom<NicInfo>
         omicron_common::api::internal::shared::NetworkInterface,
         Self::Error,
     > {
-        let ip = match (nic.ipv4, nic.ipv6) {
+        let maybe_ipv4_config = match nic.ipv4 {
+            None => None,
+            Some(ipv4) => {
+                let transit_ips = nic
+                    .transit_ips_v4
+                    .iter()
+                    .copied()
+                    .map(Into::into)
+                    .collect();
+                Some(PrivateIpv4Config::new_with_transit_ips(
+                    *ipv4,
+                    *nic.ipv4_block,
+                    transit_ips,
+                )?)
+            }
+        };
+        let maybe_ipv6_config = match nic.ipv6 {
+            None => None,
+            Some(ipv6) => {
+                let transit_ips = nic
+                    .transit_ips_v6
+                    .iter()
+                    .copied()
+                    .map(Into::into)
+                    .collect();
+                Some(PrivateIpv6Config::new_with_transit_ips(
+                    *ipv6,
+                    *nic.ipv6_block,
+                    transit_ips,
+                )?)
+            }
+        };
+        let ip = match (maybe_ipv4_config, maybe_ipv6_config) {
             (None, None) => {
                 return Err(Error::internal_error(
                     "Found NIC with no VPC-private IP addresses at all",
                 ));
             }
-            (Some(ipv4), None) => {
-                let transit_ips = nic
-                    .transit_ips
-                    .iter()
-                    .map(|net| {
-                        let ipnetwork::IpNetwork::V4(net) = net else {
-                            return Err(Error::internal_error(
-                                "Found NIC with IPv4 address only, but \
-                                which has IPv6 transit IPs",
-                            ));
-                        };
-                        Ok(Ipv4Net::from(*net))
-                    })
-                    .collect::<Result<_, _>>()?;
-                PrivateIpConfig::V4(PrivateIpv4Config::new_with_transit_ips(
-                    *ipv4,
-                    *nic.ipv4_block,
-                    transit_ips,
-                )?)
-            }
-            (None, Some(ipv6)) => {
-                let transit_ips = nic
-                    .transit_ips
-                    .iter()
-                    .map(|net| {
-                        let ipnetwork::IpNetwork::V6(net) = net else {
-                            return Err(Error::internal_error(
-                                "Found NIC with IPv6 address only, but \
-                                which has IPv4 transit IPs",
-                            ));
-                        };
-                        Ok(Ipv6Net::from(*net))
-                    })
-                    .collect::<Result<_, _>>()?;
-                PrivateIpConfig::V6(PrivateIpv6Config::new_with_transit_ips(
-                    *ipv6,
-                    *nic.ipv6_block,
-                    transit_ips,
-                )?)
-            }
-            (Some(ipv4), Some(ipv6)) => {
-                let mut ipv4_transit_ips = Vec::new();
-                let mut ipv6_transit_ips = Vec::new();
-                for net in nic.transit_ips.iter() {
-                    match net {
-                        ipnetwork::IpNetwork::V4(net) => {
-                            ipv4_transit_ips.push(Ipv4Net::from(*net))
-                        }
-                        ipnetwork::IpNetwork::V6(net) => {
-                            ipv6_transit_ips.push(Ipv6Net::from(*net))
-                        }
-                    }
-                }
-                let v4 = PrivateIpv4Config::new_with_transit_ips(
-                    *ipv4,
-                    *nic.ipv4_block,
-                    ipv4_transit_ips,
-                )?;
-                let v6 = PrivateIpv6Config::new_with_transit_ips(
-                    *ipv6,
-                    *nic.ipv6_block,
-                    ipv6_transit_ips,
-                )?;
-                PrivateIpConfig::DualStack { v4, v6 }
-            }
+            (Some(v4), None) => PrivateIpConfig::V4(v4),
+            (None, Some(v6)) => PrivateIpConfig::V6(v6),
+            (Some(v4), Some(v6)) => PrivateIpConfig::DualStack { v4, v6 },
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {

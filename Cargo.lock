@@ -6741,6 +6741,7 @@ dependencies = [
  "hex",
  "iddqd",
  "ipnetwork",
+ "itertools 0.14.0",
  "macaddr",
  "newtype_derive",
  "nexus-config",
