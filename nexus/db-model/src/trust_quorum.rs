@@ -8,7 +8,7 @@ use super::impl_enum_type;
 use crate::SqlU8;
 use crate::typed_uuid::DbTypedUuid;
 use nexus_db_schema::schema::{
-    lrtq_member, trust_quorum_configuration, trust_quorum_member,
+    trust_quorum_configuration, trust_quorum_member,
 };
 use nexus_types::trust_quorum::{
     TrustQuorumConfigState, TrustQuorumMemberState,
@@ -25,6 +25,8 @@ impl_enum_type!(
 
     // Enum values
     Preparing => b"preparing"
+    PreparingLrtqUpgrade => b"preparing-lrtq-upgrade"
+    Committing => b"committing"
     Committed => b"committed"
     Aborted => b"aborted"
 );
@@ -33,6 +35,10 @@ impl From<DbTrustQuorumConfigurationState> for TrustQuorumConfigState {
     fn from(value: DbTrustQuorumConfigurationState) -> Self {
         match value {
             DbTrustQuorumConfigurationState::Preparing => Self::Preparing,
+            DbTrustQuorumConfigurationState::PreparingLrtqUpgrade => {
+                Self::PreparingLrtqUpgrade
+            }
+            DbTrustQuorumConfigurationState::Committing => Self::Committing,
             DbTrustQuorumConfigurationState::Committed => Self::Committed,
             DbTrustQuorumConfigurationState::Aborted => Self::Aborted,
         }
@@ -43,6 +49,10 @@ impl From<TrustQuorumConfigState> for DbTrustQuorumConfigurationState {
     fn from(value: TrustQuorumConfigState) -> Self {
         match value {
             TrustQuorumConfigState::Preparing => Self::Preparing,
+            TrustQuorumConfigState::PreparingLrtqUpgrade => {
+                Self::PreparingLrtqUpgrade
+            }
+            TrustQuorumConfigState::Committing => Self::Committing,
             TrustQuorumConfigState::Committed => Self::Committed,
             TrustQuorumConfigState::Aborted => Self::Aborted,
         }
@@ -79,13 +89,6 @@ impl From<TrustQuorumMemberState> for DbTrustQuorumMemberState {
             TrustQuorumMemberState::Committed => Self::Committed,
         }
     }
-}
-
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[diesel(table_name = lrtq_member)]
-pub struct LrtqMember {
-    pub rack_id: DbTypedUuid<RackKind>,
-    pub hw_baseboard_id: Uuid,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]

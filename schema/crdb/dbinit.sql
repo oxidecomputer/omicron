@@ -7469,28 +7469,19 @@ ON
 WHERE
   time_deleted IS NULL;
 
--- An LRTQ configuration explicitly placed in the database via a DB migration
--- 
--- LRTQ configurations are always epoch 1, and any subsequent trust quorum
--- configuration must have epoch > 1.
-CREATE TABLE IF NOT EXISTS omicron.public.lrtq_member (
-    -- Foreign key into the rack table
-    rack_id UUID NOT NULL,
-
-    -- Foreign key into the `hw_baseboard_id` table
-    -- A sled can only be in one rack, hence the UNIQUE constraint.
-    hw_baseboard_id UUID NOT NULL UNIQUE,
-
-    PRIMARY KEY (rack_id, hw_baseboard_id)
-);
-
 -- The state of a given trust quorum configuration
 CREATE TYPE IF NOT EXISTS omicron.public.trust_quorum_configuration_state AS ENUM (
     -- Nexus is waiting for prepare acknowledgments by polling the coordinator
-    -- These may come as part of a reconfiguration or LRTQ upgrade
+    -- In this case, a normal trust quorum reconfiguration is being prepared
     'preparing',
+    -- Nexus is waiting for prepare acknowledgments by polling the coordinator
+    -- In this case, an LRTQ upgrade is being prepared.
+    'preparing-lrtq-upgrade',
     -- The configuration has committed to the dataabase, and nexus may still be
     -- trying to inform nodes about the commit.
+    'committing',
+    -- All nodes in the trust quorum have committed the configuration and nexus
+    -- has no more work to do.
     'committed',
     -- The configuration has aborted and will not commit. The epoch can be
     -- skipped.

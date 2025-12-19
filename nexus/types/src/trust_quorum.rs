@@ -15,6 +15,8 @@ use trust_quorum_protocol::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrustQuorumConfigState {
     Preparing,
+    PreparingLrtqUpgrade,
+    Committing,
     Committed,
     Aborted,
 }

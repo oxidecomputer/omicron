@@ -2991,16 +2991,6 @@ allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
 
 table! {
-    lrtq_member (rack_id, hw_baseboard_id) {
-        rack_id -> Uuid,
-        hw_baseboard_id -> Uuid,
-    }
-}
-
-allow_tables_to_appear_in_same_query!(lrtq_member, hw_baseboard_id);
-joinable!(lrtq_member -> hw_baseboard_id(hw_baseboard_id));
-
-table! {
     trust_quorum_configuration (rack_id, epoch) {
         rack_id -> Uuid,
         epoch -> Int8,

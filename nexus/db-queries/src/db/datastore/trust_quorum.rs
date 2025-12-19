@@ -65,31 +65,6 @@ fn epoch_to_i64(epoch: Epoch) -> Result<i64, Error> {
 }
 
 impl DataStore {
-    /// Return all `HwBaseboardId`s for a given rack that has run LRTQ
-    ///
-    /// No need for pagination, as there at most 32 member sleds per rack
-    pub async fn lrtq_members(
-        &self,
-        opctx: &OpContext,
-        rack_id: RackUuid,
-    ) -> ListResultVec<HwBaseboardId> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        let conn = &*self.pool_connection_authorized(opctx).await?;
-
-        use nexus_db_schema::schema::hw_baseboard_id::dsl as hw_baseboard_id_dsl;
-        use nexus_db_schema::schema::lrtq_member::dsl as lrtq_member_dsl;
-
-        lrtq_member_dsl::lrtq_member
-            .filter(lrtq_member_dsl::rack_id.eq(rack_id.into_untyped_uuid()))
-            .inner_join(hw_baseboard_id_dsl::hw_baseboard_id.on(
-                hw_baseboard_id_dsl::id.eq(lrtq_member_dsl::hw_baseboard_id),
-            ))
-            .select(HwBaseboardId::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
     /// Return a `RackUuid` for each trust quorum along with its latest `Epoch`.
     ///
     /// For now, since we do not have multirack, and we aren't sure how big
@@ -108,6 +83,51 @@ impl DataStore {
 
         let values: Vec<(DbTypedUuid<RackKind>, i64)> =
             dsl::trust_quorum_configuration
+                .select((dsl::rack_id, dsl::epoch))
+                .order_by((dsl::rack_id, dsl::epoch.desc()))
+                .distinct_on(dsl::rack_id)
+                .load_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+        let mut output = Vec::with_capacity(values.len());
+
+        for (rack_id, epoch) in values {
+            output.push((rack_id.into(), i64_to_epoch(epoch)?));
+        }
+
+        Ok(output)
+    }
+
+    /// Return any active `RackUuid` for each trust quorum along with its latest
+    /// `Epoch`.
+    ///
+    /// An active trust quorum configuration is one that has not `Committed`
+    /// or `Aborted`, which means that nexus has more work to do on that
+    /// configuration.
+    ///
+    /// For now, since we do not have multirack, and we aren't sure how big
+    /// those clusters are going to be we return all values and don't bother
+    /// paginating. The current `SQL_BATCH_SIZE` is also 1000, and it's unlikely
+    /// that there will ever be more than 1000 racks in a single fleet, sharing
+    /// a single CRDB cluster.
+    pub async fn tq_get_all_active_rack_id_and_latest_epoch(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<(RackUuid, Epoch)> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+
+        let values: Vec<(DbTypedUuid<RackKind>, i64)> =
+            dsl::trust_quorum_configuration
+                .filter(dsl::state.ne_all(vec![
+                    DbTrustQuorumConfigurationState::Committed,
+                    DbTrustQuorumConfigurationState::Aborted,
+                ]))
                 .select((dsl::rack_id, dsl::epoch))
                 .order_by((dsl::rack_id, dsl::epoch.desc()))
                 .distinct_on(dsl::rack_id)
@@ -343,14 +363,17 @@ impl DataStore {
                     // Nexuses race to completion and we don't want to worry
                     // about overwriting commits with prepares in the `state`
                     // field of each member.
-                    if db_config.state
-                        != DbTrustQuorumConfigurationState::Preparing
-                    {
+                    if db_config.state !=
+                        DbTrustQuorumConfigurationState::Preparing
+                      && db_config.state
+                        != DbTrustQuorumConfigurationState::PreparingLrtqUpgrade
+                  {
                         let state = db_config.state;
                         bail_txn!(
                             err,
                             "Ignoring stale update of trust quorum prepare \
-                            status. Expected state = preparing, Got {:?}",
+                            status. Expected state = preparing || \
+                            preparing-lrtq-upgrade, Got {:?}",
                             state
                         );
                     }
@@ -496,7 +519,7 @@ impl DataStore {
             })
     }
 
-    /// If this configuration is in the `Committed` state, then update any
+    /// If this configuration is in the `Committing` state, then update any
     /// members to acknowledge their commit acknowledgements.
     pub async fn tq_update_commit_status(
         &self,
@@ -544,15 +567,15 @@ impl DataStore {
                     }
 
                     // Nexus should not be retrieving committed acks if the
-                    // configuration is `Preparing` or `Aborted`.
+                    // configuration is not `Committing`.
                     if db_config.state
-                        != DbTrustQuorumConfigurationState::Committed
+                        != DbTrustQuorumConfigurationState::Committing
                     {
                         let state = db_config.state;
                         bail_txn!(
                             err,
                             "Invalid update of trust quorum commit status. \
-                            Expected `Committed`, got {:?}",
+                            Expected `Committing`, got {:?}",
                             state
                         );
                     }
@@ -632,14 +655,18 @@ impl DataStore {
                         return Ok(());
                     }
 
-                    // If we've already committed, we can't abort
+                    // If we've already started committing , we can't abort
                     if db_config.state
-                        == DbTrustQuorumConfigurationState::Committed
+                        == DbTrustQuorumConfigurationState::Committing
+                        || db_config.state
+                            == DbTrustQuorumConfigurationState::Committed
                     {
+                        let state = db_config.state;
                         bail_txn!(
                             err,
                             "Invalid update of trust quorum abort status. \
-                            Expected `Preparing`, got `Committed`"
+                            Expected `Preparing`, got `{:?}`",
+                            state
                         );
                     }
 
@@ -884,11 +911,14 @@ impl DataStore {
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::encrypted_rack_secrets_salt.is_null())
             .filter(dsl::encrypted_rack_secrets.is_null())
-            .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Preparing))
+            .filter(dsl::state.eq_any(vec![
+                DbTrustQuorumConfigurationState::Preparing,
+                DbTrustQuorumConfigurationState::PreparingLrtqUpgrade,
+            ]))
             .set((
                 dsl::encrypted_rack_secrets_salt.eq(salt),
                 dsl::encrypted_rack_secrets.eq(secrets),
-                dsl::state.eq(DbTrustQuorumConfigurationState::Committed),
+                dsl::state.eq(DbTrustQuorumConfigurationState::Committing),
             ))
             .execute_async(conn)
             .await?;
@@ -909,8 +939,11 @@ impl DataStore {
         let num_rows_updated = diesel::update(dsl::trust_quorum_configuration)
             .filter(dsl::rack_id.eq(rack_id))
             .filter(dsl::epoch.eq(epoch))
-            .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Preparing))
-            .set(dsl::state.eq(DbTrustQuorumConfigurationState::Committed))
+            .filter(dsl::state.eq_any(vec![
+                DbTrustQuorumConfigurationState::Preparing,
+                DbTrustQuorumConfigurationState::PreparingLrtqUpgrade,
+            ]))
+            .set(dsl::state.eq(DbTrustQuorumConfigurationState::Committing))
             .execute_async(conn)
             .await?;
 
@@ -929,7 +962,10 @@ impl DataStore {
         diesel::update(dsl::trust_quorum_configuration)
             .filter(dsl::rack_id.eq(rack_id))
             .filter(dsl::epoch.eq(epoch))
-            .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Preparing))
+            .filter(dsl::state.eq_any([
+                DbTrustQuorumConfigurationState::Preparing,
+                DbTrustQuorumConfigurationState::PreparingLrtqUpgrade,
+            ]))
             .set(dsl::state.eq(DbTrustQuorumConfigurationState::Aborted))
             .execute_async(conn)
             .await?;
@@ -1036,7 +1072,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_db_model::{HwBaseboardId, LrtqMember};
+    use nexus_db_model::HwBaseboardId;
     use nexus_types::trust_quorum::{
         TrustQuorumConfigState, TrustQuorumMemberState,
     };
@@ -1063,59 +1099,6 @@ mod tests {
             .unwrap();
 
         hw_baseboard_ids
-    }
-
-    async fn insert_lrtq_members(
-        db: &TestDatabase,
-        rack_id1: RackUuid,
-        rack_id2: RackUuid,
-        hw_ids: Vec<HwBaseboardId>,
-    ) {
-        let (_, datastore) = (db.opctx(), db.datastore());
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-        use nexus_db_schema::schema::lrtq_member::dsl;
-        for (i, hw_baseboard_id) in hw_ids.into_iter().enumerate() {
-            let rack_id = if i < 5 { rack_id1.into() } else { rack_id2.into() };
-            diesel::insert_into(dsl::lrtq_member)
-                .values(LrtqMember {
-                    rack_id,
-                    hw_baseboard_id: hw_baseboard_id.id,
-                })
-                .execute_async(&*conn)
-                .await
-                .unwrap();
-        }
-    }
-
-    #[tokio::test]
-    async fn test_lrtq_members() {
-        let logctx = test_setup_log("test_lrtq_members");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let rack_id1 = RackUuid::new_v4();
-        let rack_id2 = RackUuid::new_v4();
-
-        // Listing lrtq members should return an empty vec
-        assert!(
-            datastore.lrtq_members(opctx, rack_id1).await.unwrap().is_empty()
-        );
-
-        // Insert some data
-        let hw_ids = insert_hw_baseboard_ids(&db).await;
-        insert_lrtq_members(&db, rack_id1, rack_id2, hw_ids.clone()).await;
-
-        let hw_baseboard_ids1 =
-            datastore.lrtq_members(opctx, rack_id1).await.unwrap();
-        println!("{:?}", hw_baseboard_ids1);
-        assert_eq!(hw_baseboard_ids1.len(), 5);
-        let hw_baseboard_ids2 =
-            datastore.lrtq_members(opctx, rack_id2).await.unwrap();
-        assert_eq!(hw_baseboard_ids2.len(), 5);
-        assert_ne!(hw_baseboard_ids1, hw_baseboard_ids2);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1347,7 +1330,7 @@ mod tests {
 
         // We've acked enough nodes and should have committed
         assert_eq!(read_config.epoch, config.epoch);
-        assert_eq!(read_config.state, TrustQuorumConfigState::Committed);
+        assert_eq!(read_config.state, TrustQuorumConfigState::Committing);
         assert!(read_config.encrypted_rack_secrets.is_none());
         assert_eq!(
             acked_prepares,
@@ -1393,7 +1376,7 @@ mod tests {
             .expect("returned config");
 
         assert_eq!(read_config.epoch, config.epoch);
-        assert_eq!(read_config.state, TrustQuorumConfigState::Committed);
+        assert_eq!(read_config.state, TrustQuorumConfigState::Committing);
         assert!(read_config.encrypted_rack_secrets.is_none());
         assert!(
             read_config.members.iter().all(
@@ -1419,7 +1402,7 @@ mod tests {
             .expect("returned config");
 
         assert_eq!(read_config.epoch, config.epoch);
-        assert_eq!(read_config.state, TrustQuorumConfigState::Committed);
+        assert_eq!(read_config.state, TrustQuorumConfigState::Committing);
         assert!(read_config.encrypted_rack_secrets.is_none());
         assert!(
             read_config.members.iter().all(
