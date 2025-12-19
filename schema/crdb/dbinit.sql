@@ -1883,9 +1883,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
     is_primary BOOL NOT NULL,
 
     /*
-     * A supplementary list of addresses/CIDR blocks which a NIC is
+     * A supplementary list of IPv4 addresses/CIDR blocks which a NIC is
      * *allowed* to send/receive traffic on, in addition to its
      * assigned address.
+     *
+     * NOTE: Despite the name, these are always IPv4 networks or addresses.
+     * We've kept the original name since renaming columns idempotently is difficult
+     * in CRDB right now.
      */
     transit_ips INET[] NOT NULL DEFAULT ARRAY[],
 
@@ -1895,11 +1899,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
      */
     ipv6 INET,
 
+    /*
+     * A supplementary list of IPv6 addresses/CIDR blocks which a NIC is
+     * *allowed* to send/receive traffic on, in addition to its
+     * assigned address.
+     */
+    transit_ips_v6 INET[] NOT NULL DEFAULT ARRAY[],
+
     /* Constraint ensuring we have at least one IP address from either family.
      * Both may be specified.
      */
     CONSTRAINT at_least_one_ip_address CHECK (
         ip IS NOT NULL OR ipv6 IS NOT NULL
+    ),
+
+    /* Constraint ensuring that if we have transit IPs of a specific version, we
+     * also have a corresponding IP address.
+     */
+    CONSTRAINT transit_ips_require_ip_address CHECK (
+        (array_length(transit_ips, 1) = 0 OR ip IS NOT NULL) AND
+        (array_length(transit_ips_v6, 1) = 0 OR ipv6 IS NOT NULL)
     )
 );
 
@@ -1923,7 +1942,8 @@ SELECT
     ipv6,
     slot,
     is_primary,
-    transit_ips
+    transit_ips as transit_ips_v4,
+    transit_ips_v6
 FROM
     omicron.public.network_interface
 WHERE
@@ -7458,7 +7478,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '213.0.0', NULL)
+    (TRUE, NOW(), NOW(), '214.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
