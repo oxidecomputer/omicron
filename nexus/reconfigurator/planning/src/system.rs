@@ -8,7 +8,7 @@
 use anyhow::{Context, anyhow, bail, ensure};
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;

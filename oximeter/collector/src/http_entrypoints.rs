@@ -18,7 +18,12 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use oximeter_api::*;
+use oximeter_api::OximeterApi;
+use oximeter_api::oximeter_api_mod;
+use oximeter_types::collector::CollectorInfo;
+use oximeter_types::producer::{
+    ProducerDetails, ProducerIdPathParams, ProducerPage,
+};
 use std::sync::Arc;
 
 // Build the HTTP API internal to the control plane

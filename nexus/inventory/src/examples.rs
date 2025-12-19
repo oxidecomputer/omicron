@@ -7,8 +7,8 @@
 use crate::CollectionBuilder;
 use crate::now_db_precision;
 use camino::Utf8Path;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
-use clickhouse_admin_types::KeeperId;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::KeeperId;
 use gateway_client::types::PowerState;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
