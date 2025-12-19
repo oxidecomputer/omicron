@@ -681,16 +681,16 @@ impl ArchiveFile<'_> {
 
 #[cfg(test)]
 mod test {
+    use super::ALL_RULES;
+    use super::ArchiveFile;
+    use super::ArchivePlan;
+    use super::ArchivePlanner;
+    use super::ArchiveStep;
+    use super::ArchiveWhat;
+    use super::FileLister;
     use super::Filename;
-    use crate::debug_collector::files::ALL_RULES;
-    use crate::debug_collector::files::ArchiveFile;
-    use crate::debug_collector::files::ArchivePlan;
-    use crate::debug_collector::files::ArchivePlanner;
-    use crate::debug_collector::files::ArchiveStep;
-    use crate::debug_collector::files::ArchiveWhat;
-    use crate::debug_collector::files::FileLister;
-    use crate::debug_collector::files::MAX_COLLIDING_FILENAMES;
-    use crate::debug_collector::files::NameRotatedLogFile;
+    use super::MAX_COLLIDING_FILENAMES;
+    use super::NameRotatedLogFile;
     use anyhow::Context;
     use anyhow::anyhow;
     use anyhow::bail;

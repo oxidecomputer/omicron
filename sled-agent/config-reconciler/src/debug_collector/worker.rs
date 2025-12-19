@@ -186,8 +186,8 @@
 //! the _live_ log files are also archived, since they will not have a chance
 //! to get rotated and so would otherwise be lost.
 
-use super::files::ArchivePlanner;
-use super::files::ArchiveWhat;
+use super::file_archiver::ArchivePlanner;
+use super::file_archiver::ArchiveWhat;
 use super::helpers::CoreDumpAdmInvoker;
 use super::helpers::ZFS_PROP_AVAILABLE;
 use super::helpers::ZFS_PROP_USED;
