@@ -1724,11 +1724,7 @@ mod tests {
             .expect("failed to insert sitrep");
 
         // Verify the sitrep, cases, and ereport assignments exist
-        let conn = db
-            .datastore()
-            .pool_connection_authorized(&opctx)
-            .await
-            .expect("failed to get connection");
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         let sitreps_before: i64 = sitrep_dsl::fm_sitrep
             .filter(sitrep_dsl::id.eq(sitrep_id.into_untyped_uuid()))
@@ -1757,6 +1753,17 @@ mod tests {
         assert_eq!(
             case_ereports_before, 2,
             "two case ereport assignments should exist before deletion"
+        );
+
+        let alert_requests_before: i64 = alert_req_dsl::fm_alert_request
+            .filter(alert_req_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .expect("failed to count alert requests before deletion");
+        assert_eq!(
+            alert_requests_before, 2,
+            "two alert requests should exist before deletion"
         );
 
         // Now delete the sitrep
@@ -1795,6 +1802,17 @@ mod tests {
         assert_eq!(
             case_ereports_after, 0,
             "case ereport assignments should not exist after deletion"
+        );
+
+        let alert_requests_after: i64 = alert_req_dsl::fm_alert_request
+            .filter(alert_req_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .expect("failed to count alert requests before deletion");
+        assert_eq!(
+            alert_requests_after, 0,
+            "alert requests should not exist after deletion"
         );
 
         // Clean up

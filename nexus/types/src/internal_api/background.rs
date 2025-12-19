@@ -896,11 +896,11 @@ pub struct SitrepGcStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum FmRendezvousStatus {
     NoSitrep,
-    Executed { sitrep_id: SitrepUuid, alerts: FmAlertStatus },
+    Executed { sitrep_id: SitrepUuid, alerts: FmAlertStats },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct FmAlertStatus {
+pub struct FmAlertStats {
     /// The total number of alerts requested by the current sitrep.
     pub total_alerts_requested: usize,
     /// The total number of alerts which were *first* requested in the current sitrep.
