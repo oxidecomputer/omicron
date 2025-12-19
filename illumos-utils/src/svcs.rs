@@ -359,7 +359,7 @@ maintenance
         let log = log();
         let result = SvcsInMaintenanceResult::parse(&log, output.as_bytes());
 
-        // We want to make sure we only have three services in maintenance
+        // We want to make sure we only have one service in maintenance
         assert_eq!(result.services.len(), 1);
         assert_eq!(
             result.services[0],
