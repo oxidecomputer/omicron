@@ -8430,6 +8430,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-util",
  "tough",
+ "trust-quorum-protocol",
  "tufaceous",
  "tufaceous-artifact",
  "tufaceous-lib",
