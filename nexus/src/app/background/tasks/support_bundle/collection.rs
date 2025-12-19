@@ -53,9 +53,11 @@ pub struct BundleCollection {
     request: BundleRequest,
     bundle: SupportBundle,
     transfer_chunk_size: NonZeroU64,
+    omdb_config: nexus_config::OmdbConfig,
 }
 
 impl BundleCollection {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         datastore: Arc<DataStore>,
         resolver: Resolver,
@@ -64,6 +66,7 @@ impl BundleCollection {
         request: BundleRequest,
         bundle: SupportBundle,
         transfer_chunk_size: NonZeroU64,
+        omdb_config: nexus_config::OmdbConfig,
     ) -> Self {
         Self {
             datastore,
@@ -73,6 +76,7 @@ impl BundleCollection {
             request,
             bundle,
             transfer_chunk_size,
+            omdb_config,
         }
     }
 
@@ -98,6 +102,10 @@ impl BundleCollection {
 
     pub fn bundle(&self) -> &SupportBundle {
         &self.bundle
+    }
+
+    pub fn omdb_config(&self) -> &nexus_config::OmdbConfig {
+        &self.omdb_config
     }
 
     /// Collect the bundle within Nexus, and store it on a target sled.

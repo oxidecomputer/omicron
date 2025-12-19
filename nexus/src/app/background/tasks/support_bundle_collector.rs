@@ -56,6 +56,7 @@ pub struct SupportBundleCollector {
     resolver: Resolver,
     disable: bool,
     nexus_id: OmicronZoneUuid,
+    omdb_config: nexus_config::OmdbConfig,
 }
 
 impl SupportBundleCollector {
@@ -64,8 +65,15 @@ impl SupportBundleCollector {
         resolver: Resolver,
         disable: bool,
         nexus_id: OmicronZoneUuid,
+        omdb_config: nexus_config::OmdbConfig,
     ) -> Self {
-        SupportBundleCollector { datastore, resolver, disable, nexus_id }
+        SupportBundleCollector {
+            datastore,
+            resolver,
+            disable,
+            nexus_id,
+            omdb_config,
+        }
     }
 
     // Tells a sled agent to delete a support bundle
@@ -357,6 +365,7 @@ impl SupportBundleCollector {
             request.clone(),
             bundle.clone(),
             request.transfer_chunk_size,
+            self.omdb_config.clone(),
         ));
 
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
@@ -490,6 +499,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
 
         let report = collector
@@ -516,6 +526,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
 
         let request = BundleRequest::default();
@@ -823,6 +834,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
 
         // The bundle collection should complete successfully.
@@ -902,6 +914,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
 
         // Collect the bundle
@@ -1013,6 +1026,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
 
         // The bundle collection should complete successfully.
@@ -1121,6 +1135,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
@@ -1235,6 +1250,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
 
         let report = collector
@@ -1288,6 +1304,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
         let mut request = BundleRequest::default();
         request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
@@ -1387,6 +1404,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
 
         let report = collector
@@ -1443,6 +1461,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
         let mut request = BundleRequest::default();
         request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
@@ -1528,6 +1547,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
         let mut request = BundleRequest::default();
         request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
@@ -1612,6 +1632,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            nexus_config::OmdbConfig { bin_path: "/nonexistent/omdb".into() },
         );
 
         // Collect the bundle

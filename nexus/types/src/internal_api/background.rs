@@ -304,6 +304,7 @@ impl SupportBundleCollectionStep {
     pub const STEP_SPAWN_SP_DUMPS: &'static str =
         "spawn steps to query all SP dumps";
     pub const STEP_SPAWN_SLEDS: &'static str = "spawn steps to query all sleds";
+    pub const STEP_OMDB: &'static str = "omdb diagnostic output";
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
