@@ -445,46 +445,16 @@ impl DataStore {
             .await
     }
 
-    /// List disks associated with a given instance by name.
-    pub async fn instance_list_disks_on_conn(
-        &self,
+    /// Consume a query result listing all parts of the higher level Disk type,
+    /// and assemble it.
+    async fn process_tuples_to_disk_list(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        instance_id: Uuid,
-        pagparams: &PaginatedBy<'_>,
+        results: Vec<(
+            model::Disk,
+            Option<DiskTypeCrucible>,
+            Option<DiskTypeLocalStorage>,
+        )>,
     ) -> ListResultVec<Disk> {
-        use nexus_db_schema::schema::disk::dsl;
-        use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
-        use nexus_db_schema::schema::disk_type_local_storage::dsl as disk_type_local_storage_dsl;
-
-        let results = match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(dsl::disk, dsl::id, &pagparams)
-            }
-            PaginatedBy::Name(pagparams) => paginated(
-                dsl::disk,
-                dsl::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
-        }
-        .left_join(
-            disk_type_crucible_dsl::disk_type_crucible
-                .on(dsl::id.eq(disk_type_crucible_dsl::disk_id)),
-        )
-        .left_join(
-            disk_type_local_storage_dsl::disk_type_local_storage
-                .on(dsl::id.eq(disk_type_local_storage_dsl::disk_id)),
-        )
-        .filter(dsl::time_deleted.is_null())
-        .filter(dsl::attach_instance_id.eq(instance_id))
-        .select((
-            model::Disk::as_select(),
-            Option::<DiskTypeCrucible>::as_select(),
-            Option::<DiskTypeLocalStorage>::as_select(),
-        ))
-        .get_results_async(conn)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
         let mut list = Vec::with_capacity(results.len());
 
         for result in results {
@@ -553,6 +523,49 @@ impl DataStore {
         }
 
         Ok(list)
+    }
+
+    /// List disks associated with a given instance by name.
+    pub async fn instance_list_disks_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        instance_id: Uuid,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<Disk> {
+        use nexus_db_schema::schema::disk::dsl;
+        use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
+        use nexus_db_schema::schema::disk_type_local_storage::dsl as disk_type_local_storage_dsl;
+
+        let results = match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::disk, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::disk,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .left_join(
+            disk_type_crucible_dsl::disk_type_crucible
+                .on(dsl::id.eq(disk_type_crucible_dsl::disk_id)),
+        )
+        .left_join(
+            disk_type_local_storage_dsl::disk_type_local_storage
+                .on(dsl::id.eq(disk_type_local_storage_dsl::disk_id)),
+        )
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::attach_instance_id.eq(instance_id))
+        .select((
+            model::Disk::as_select(),
+            Option::<DiskTypeCrucible>::as_select(),
+            Option::<DiskTypeLocalStorage>::as_select(),
+        ))
+        .get_results_async(conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Self::process_tuples_to_disk_list(conn, results).await
     }
 
     pub(super) async fn project_create_disk_in_txn(
@@ -702,6 +715,9 @@ impl DataStore {
 
         use nexus_db_schema::schema::disk::dsl;
         use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
+        use nexus_db_schema::schema::disk_type_local_storage::dsl as disk_type_local_storage_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let results = match pagparams {
             PaginatedBy::Id(pagparams) => {
@@ -717,37 +733,22 @@ impl DataStore {
             disk_type_crucible_dsl::disk_type_crucible
                 .on(dsl::id.eq(disk_type_crucible_dsl::disk_id)),
         )
+        .left_join(
+            disk_type_local_storage_dsl::disk_type_local_storage
+                .on(dsl::id.eq(disk_type_local_storage_dsl::disk_id)),
+        )
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::project_id.eq(authz_project.id()))
         .select((
             model::Disk::as_select(),
             Option::<DiskTypeCrucible>::as_select(),
+            Option::<DiskTypeLocalStorage>::as_select(),
         ))
-        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        .get_results_async(&*conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let mut list = Vec::with_capacity(results.len());
-
-        for result in results {
-            match result {
-                (disk, Some(disk_type_crucible)) => {
-                    list.push(Disk::Crucible(CrucibleDisk {
-                        disk,
-                        disk_type_crucible,
-                    }));
-                }
-
-                (disk, None) => {
-                    return Err(Error::internal_error(&format!(
-                        "disk {} is invalid!",
-                        disk.id(),
-                    )));
-                }
-            }
-        }
-
-        Ok(list)
+        Self::process_tuples_to_disk_list(&conn, results).await
     }
 
     /// Attaches a disk to an instance, if both objects:

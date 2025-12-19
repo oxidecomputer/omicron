@@ -2658,6 +2658,81 @@ async fn test_zpool_control_plane_storage_buffer(
     .unwrap();
 }
 
+#[nexus_test]
+async fn test_list_all_types_of_disk(cptestctx: &ControlPlaneTestContext) {
+    // Create three zpools, each with one dataset
+    DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(3)
+        .build()
+        .await;
+
+    // Assert default is still 16 GiB
+    assert_eq!(16, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    let disks_url = get_disks_url();
+
+    // Distributed disk
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk1".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
+        },
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Local disk
+
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk2".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_backend: params::DiskBackend::Local {},
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // List them all
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
     NexusRequest::object_get(client, disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
