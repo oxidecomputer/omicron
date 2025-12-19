@@ -1870,8 +1870,6 @@ pub async fn start_sled_agent_with_config(
         sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
             .await
             .map_err(|e| e.to_string())?;
-
-    eprintln!("Sled agent address: {:?}", server.http_server.local_addr());
     Ok(server)
 }
 
