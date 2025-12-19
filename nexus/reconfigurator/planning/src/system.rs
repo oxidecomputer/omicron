@@ -62,6 +62,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
@@ -1473,6 +1474,7 @@ impl Sled {
                 ),
                 // XXX: return something more reasonable here?
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                health_monitor: HealthMonitorInventory::new(),
             }
         };
 
@@ -1651,6 +1653,7 @@ impl Sled {
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
             zone_image_resolver: inv_sled_agent.zone_image_resolver.clone(),
+            health_monitor: HealthMonitorInventory::new(),
         };
 
         Sled {

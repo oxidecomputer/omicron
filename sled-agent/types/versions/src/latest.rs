@@ -107,11 +107,13 @@ pub mod inventory {
 
     pub use crate::v11::inventory::ConfigReconcilerInventory;
     pub use crate::v11::inventory::ConfigReconcilerInventoryStatus;
-    pub use crate::v11::inventory::Inventory;
     pub use crate::v11::inventory::OmicronSledConfig;
     pub use crate::v11::inventory::OmicronZoneConfig;
     pub use crate::v11::inventory::OmicronZoneType;
     pub use crate::v11::inventory::OmicronZonesConfig;
+
+    pub use crate::v12::inventory::HealthMonitorInventory;
+    pub use crate::v12::inventory::Inventory;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;

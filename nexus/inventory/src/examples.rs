@@ -41,6 +41,7 @@ use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
@@ -1040,5 +1041,9 @@ pub fn sled_agent(
         reconciler_status,
         last_reconciliation,
         zone_image_resolver,
+        // TODO-K: We'll want to have the functionality to add some services
+        // here in a future PR. This will be more useful when we add this
+        // information to the DB.
+        health_monitor: HealthMonitorInventory::new(),
     }
 }

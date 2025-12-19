@@ -5137,6 +5137,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "cfg-if",
+ "chrono",
  "crucible-smf",
  "debug-ignore",
  "dropshot",
@@ -5160,7 +5161,9 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-async",
  "slog-error-chain",
+ "slog-term",
  "smf 0.2.3",
  "thiserror 2.0.17",
  "tofino",
@@ -6958,6 +6961,7 @@ dependencies = [
  "gateway-types",
  "httpmock",
  "iddqd",
+ "illumos-utils",
  "itertools 0.14.0",
  "nexus-client",
  "nexus-types",
@@ -7079,6 +7083,7 @@ dependencies = [
  "http",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "iddqd",
+ "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
  "nexus-types",
@@ -8850,6 +8855,7 @@ dependencies = [
  "sled-agent-api",
  "sled-agent-client",
  "sled-agent-config-reconciler",
+ "sled-agent-health-monitor",
  "sled-agent-types",
  "sled-agent-types-versions",
  "sled-agent-zone-images",
@@ -13012,6 +13018,28 @@ dependencies = [
  "tufaceous-artifact",
  "xshell",
  "zone 0.3.1",
+]
+
+[[package]]
+name = "sled-agent-health-monitor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "derive_more 0.99.20",
+ "dropshot",
+ "futures",
+ "illumos-utils",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "serde",
+ "sled-agent-api",
+ "sled-agent-types",
+ "slog",
+ "slog-error-chain",
+ "thiserror 2.0.17",
+ "tokio",
 ]
 
 [[package]]
