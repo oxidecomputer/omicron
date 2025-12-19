@@ -173,6 +173,8 @@ use std::future::Future;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
+use std::os::unix::process::CommandExt;
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
 use tabled::Tabled;
@@ -351,6 +353,8 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Launch `cockroach-sql`
+    Sql,
     /// Print information about blueprints
     ///
     /// Most blueprint information is available via `omdb nexus`, not `omdb db`.
@@ -1155,10 +1159,21 @@ impl DbArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
+        if let DbCommands::Sql = &self.command {
+            let url = self.db_url_opts.resolve_pg_url(omdb, log).await?;
+            let url = url.url().split(',').next().unwrap_or(url.url());
+            let mut command =
+                Command::new("/opt/oxide/cockroachdb/bin/cockroach-sql");
+            let error = command.args(["--url", url]).exec();
+            return Err(error)
+                .with_context(|| format!("failed to exec {command:?}"));
+        }
+
         let fetch_opts = &self.fetch_opts;
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &self.command {
+                    DbCommands::Sql => unreachable!(),
                     DbCommands::Blueprints(args) => {
                         cmd_db_blueprints(&opctx, &datastore, &fetch_opts, &args).await
                     }

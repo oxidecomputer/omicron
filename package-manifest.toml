@@ -108,6 +108,7 @@ source.type = "composite"
 source.packages = [
   "omicron-nexus.tar.gz",
   "omicron-omdb.tar.gz",
+  "cockroachdb-sql.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz",
   "opte-interface-setup.tar.gz",
@@ -299,6 +300,17 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
+
+[package.cockroachdb-sql]
+service_name = "cockroachdb-sql"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+  { from = "out/downloads/cockroach/cockroach-sql", to = "/opt/oxide/cockroachdb/bin/cockroach-sql" },
+]
+output.type = "zone"
+output.intermediate_only = true
+setup_hint = "Run `cargo xtask download cockroach` to download the necessary binaries"
 
 [package.internal-dns-cli]
 service_name = "internal-dns-cli"
@@ -832,6 +844,7 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "xcvradm.tar.gz",
   "omicron-omdb.tar.gz",
+  "cockroachdb-sql.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
@@ -858,6 +871,7 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "sp-sim-stub.tar.gz",
   "omicron-omdb.tar.gz",
+  "cockroachdb-sql.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
@@ -884,6 +898,7 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "sp-sim-softnpu.tar.gz",
   "omicron-omdb.tar.gz",
+  "cockroachdb-sql.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
