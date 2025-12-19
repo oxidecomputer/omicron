@@ -1506,7 +1506,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk (
      */
     attach_instance_id UUID,
     state_generation INT NOT NULL,
-    slot INT2 CHECK (slot >= 0 AND slot < 8),
+    slot INT2 CHECK (slot >= 0 AND slot < 12),
     time_state_updated TIMESTAMPTZ NOT NULL,
 
     /* Disk configuration */
@@ -1883,9 +1883,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
     is_primary BOOL NOT NULL,
 
     /*
-     * A supplementary list of addresses/CIDR blocks which a NIC is
+     * A supplementary list of IPv4 addresses/CIDR blocks which a NIC is
      * *allowed* to send/receive traffic on, in addition to its
      * assigned address.
+     *
+     * NOTE: Despite the name, these are always IPv4 networks or addresses.
+     * We've kept the original name since renaming columns idempotently is difficult
+     * in CRDB right now.
      */
     transit_ips INET[] NOT NULL DEFAULT ARRAY[],
 
@@ -1895,11 +1899,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
      */
     ipv6 INET,
 
+    /*
+     * A supplementary list of IPv6 addresses/CIDR blocks which a NIC is
+     * *allowed* to send/receive traffic on, in addition to its
+     * assigned address.
+     */
+    transit_ips_v6 INET[] NOT NULL DEFAULT ARRAY[],
+
     /* Constraint ensuring we have at least one IP address from either family.
      * Both may be specified.
      */
     CONSTRAINT at_least_one_ip_address CHECK (
         ip IS NOT NULL OR ipv6 IS NOT NULL
+    ),
+
+    /* Constraint ensuring that if we have transit IPs of a specific version, we
+     * also have a corresponding IP address.
+     */
+    CONSTRAINT transit_ips_require_ip_address CHECK (
+        (array_length(transit_ips, 1) = 0 OR ip IS NOT NULL) AND
+        (array_length(transit_ips_v6, 1) = 0 OR ipv6 IS NOT NULL)
     )
 );
 
@@ -1923,7 +1942,8 @@ SELECT
     ipv6,
     slot,
     is_primary,
-    transit_ips
+    transit_ips as transit_ips_v4,
+    transit_ips_v6
 FROM
     omicron.public.network_interface
 WHERE
@@ -6842,6 +6862,74 @@ CREATE UNIQUE INDEX IF NOT EXISTS
     lookup_sitrep_version_by_id
 ON omicron.public.fm_sitrep_history (sitrep_id);
 
+
+CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
+    'power_shelf'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
+    -- Case UUID
+    id UUID NOT NULL,
+    -- UUID of the sitrep in which the case had this state.
+    sitrep_id UUID NOT NULL,
+
+    de omicron.public.diagnosis_engine NOT NULL,
+
+    -- UUID of the sitrep in which the case was created.
+    created_sitrep_id UUID NOT NULL,
+
+    -- UUID of the sitrep in which the case was closed. If this is not NULL,
+    -- then the case has been closed.
+    closed_sitrep_id UUID,
+
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_cases_for_sitrep
+ON omicron.public.fm_case (sitrep_id);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
+    -- ID of this association. When an ereport is assigned to a case, that
+    -- association is assigned a UUID. These are used primarily to aid in
+    -- paginating queries to this table, which would otherwise require a
+    -- three-column pagination utility in order to paginate by (case_id,
+    -- restart_id, ena).
+    id UUID NOT NULL,
+    --  The ereport's identity.
+    restart_id UUID NOT NULL,
+    ena INT8 NOT NULL,
+
+    -- UUID of the case the ereport is assigned to.
+    case_id UUID NOT NULL,
+
+    -- UUID of the sitrep in which this assignment exists.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the sitrep in which the ereport was initially assigned to this
+    -- case.
+    assigned_sitrep_id UUID NOT NULL,
+
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+-- The same ereport may not be assigned to the same case multiple times.
+CREATE UNIQUE INDEX IF NOT EXISTS
+    lookup_ereport_assignments_by_ereport
+ON omicron.public.fm_ereport_in_case (
+    sitrep_id,
+    case_id,
+    restart_id,
+    ena
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_ereports_assigned_to_fm_case
+ON omicron.public.fm_ereport_in_case (sitrep_id, case_id);
+
 /*
  * List of datasets available to be sliced up and passed to VMMs for instance
  * local storage.
@@ -7390,7 +7478,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '212.0.0', NULL)
+    (TRUE, NOW(), NOW(), '215.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

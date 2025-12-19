@@ -28,6 +28,7 @@ use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, RawDisksSender,
     TimeSyncConfig,
 };
+use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_types::zone_bundle::CleanupContext;
 use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
@@ -66,6 +67,10 @@ pub struct LongRunningTaskHandles {
     /// looks like one from the outside, and is convenient to put here. (If it
     /// had any async involved within it, it would be a task.)
     pub zone_image_resolver: ZoneImageSourceResolver,
+
+    /// A handle to the set of health checks managed by the health-check-monitor
+    /// system.
+    pub health_monitor: HealthMonitorHandle,
 
     /// A handle for interacting with the trust quorum
     pub trust_quorum: trust_quorum::NodeTaskHandle,
@@ -137,6 +142,7 @@ pub async fn spawn_all_longrunning_tasks(
 
     let zone_bundler = spawn_zone_bundler_tasks(log, &config_reconciler).await;
     let zone_image_resolver = ZoneImageSourceResolver::new(log, internal_disks);
+    let health_monitor = spawn_health_monitor_tasks(log).await;
 
     (
         LongRunningTaskHandles {
@@ -146,6 +152,7 @@ pub async fn spawn_all_longrunning_tasks(
             bootstore,
             zone_bundler,
             zone_image_resolver,
+            health_monitor,
             trust_quorum,
         },
         config_reconciler_spawn_token,
@@ -266,6 +273,12 @@ async fn spawn_bootstore_tasks(
     });
 
     node_handle
+}
+
+async fn spawn_health_monitor_tasks(log: &Logger) -> HealthMonitorHandle {
+    info!(log, "Starting health monitor");
+    let log = log.new(o!("component" => "HealthMonitor"));
+    HealthMonitorHandle::spawn(log)
 }
 
 // `ZoneBundler::new` spawns a periodic cleanup task that runs indefinitely

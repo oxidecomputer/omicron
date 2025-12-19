@@ -240,15 +240,16 @@ mod api_impl {
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::ConfigReconcilerInventory;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HealthMonitorInventory;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::Inventory;
+    use sled_agent_types::inventory::ManifestInventory;
     use sled_agent_types::inventory::MupdateOverrideInventory;
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
     use sled_agent_types::inventory::ZoneImageResolverInventory;
-    use sled_agent_types::inventory::ZoneManifestInventory;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::support_bundle::RangeRequestHeaders;
@@ -368,7 +369,7 @@ mod api_impl {
                     boot_partitions,
                 }),
                 zone_image_resolver: ZoneImageResolverInventory {
-                    zone_manifest: ZoneManifestInventory {
+                    zone_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
                         boot_inventory: Err(
                             "not implemented by HostPhase2SledAgentImpl"
@@ -385,6 +386,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
+                health_monitor: HealthMonitorInventory::new(),
             }))
         }
 

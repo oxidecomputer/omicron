@@ -5,7 +5,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::component::SpIdentifier;
+use crate::v1;
+use crate::v1::component::SpIdentifier;
 
 #[derive(
     Debug,
@@ -23,7 +24,7 @@ pub struct SpIgnitionInfo {
     pub details: SpIgnition,
 }
 
-impl From<SpIgnitionInfo> for crate::ignition::v1::SpIgnitionInfo {
+impl From<SpIgnitionInfo> for v1::ignition::SpIgnitionInfo {
     fn from(s: SpIgnitionInfo) -> Self {
         Self { id: s.id, details: s.details.into() }
     }
@@ -65,31 +66,7 @@ pub enum SpIgnition {
     },
 }
 
-impl From<gateway_messages::IgnitionState> for SpIgnition {
-    fn from(state: gateway_messages::IgnitionState) -> Self {
-        use gateway_messages::ignition::SystemPowerState;
-
-        if let Some(target_state) = state.target {
-            Self::Present {
-                id: target_state.system_type.into(),
-                power: matches!(
-                    target_state.power_state,
-                    SystemPowerState::On | SystemPowerState::PoweringOn
-                ),
-                ctrl_detect_0: target_state.controller0_present,
-                ctrl_detect_1: target_state.controller1_present,
-                flt_a3: target_state.faults.power_a3,
-                flt_a2: target_state.faults.power_a2,
-                flt_rot: target_state.faults.rot,
-                flt_sp: target_state.faults.sp,
-            }
-        } else {
-            Self::Absent
-        }
-    }
-}
-
-impl From<SpIgnition> for crate::ignition::v1::SpIgnition {
+impl From<SpIgnition> for v1::ignition::SpIgnition {
     fn from(state: SpIgnition) -> Self {
         match state {
             SpIgnition::Absent => Self::Absent,
@@ -137,20 +114,7 @@ pub enum SpIgnitionSystemType {
     Cosmo,
 }
 
-impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
-    fn from(st: gateway_messages::ignition::SystemType) -> Self {
-        use gateway_messages::ignition::SystemType;
-        match st {
-            SystemType::Gimlet => Self::Gimlet,
-            SystemType::Sidecar => Self::Sidecar,
-            SystemType::Psc => Self::Psc,
-            SystemType::Unknown(id) => Self::Unknown { id },
-            SystemType::Cosmo => Self::Cosmo,
-        }
-    }
-}
-
-impl From<SpIgnitionSystemType> for crate::ignition::v1::SpIgnitionSystemType {
+impl From<SpIgnitionSystemType> for v1::ignition::SpIgnitionSystemType {
     fn from(st: SpIgnitionSystemType) -> Self {
         match st {
             SpIgnitionSystemType::Gimlet => Self::Gimlet,

@@ -5,7 +5,6 @@
 //! Inventory types for Sled Agent API versions 1-3.
 
 use std::collections::BTreeMap;
-use std::fmt::{self, Write};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
@@ -15,7 +14,6 @@ use daft::Diffable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use indent_write::fmt::IndentWriter;
 use omicron_common::api::external::{ByteCount, Generation};
 use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
@@ -24,16 +22,15 @@ use omicron_common::disk::{
 };
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
-use omicron_common::update::{ArtifactId, OmicronZoneManifestSource};
+use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
-    DatasetUuid, InternalZpoolUuid, MupdateOverrideUuid, MupdateUuid,
-    OmicronZoneUuid, PhysicalDiskUuid, SledUuid, ZpoolUuid,
+    DatasetUuid, InternalZpoolUuid, MupdateOverrideUuid, OmicronZoneUuid,
+    PhysicalDiskUuid, SledUuid, ZpoolUuid,
 };
 use schemars::schema::{Schema, SchemaObject};
 use schemars::{JsonSchema, r#gen::SchemaGenerator};
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact::KnownArtifactKind;
 // Export these types for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
 pub use sled_hardware_types::{Baseboard, SledCpuFamily};
@@ -143,34 +140,12 @@ pub enum HostPhase2DesiredContents {
     Artifact { hash: ArtifactHash },
 }
 
-impl HostPhase2DesiredContents {
-    /// The artifact hash described by `self`, if it has one.
-    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
-        match self {
-            Self::CurrentContents => None,
-            Self::Artifact { hash } => Some(*hash),
-        }
-    }
-}
-
 /// Describes the desired contents for both host phase 2 slots.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct HostPhase2DesiredSlots {
     pub slot_a: HostPhase2DesiredContents,
     pub slot_b: HostPhase2DesiredContents,
-}
-
-impl HostPhase2DesiredSlots {
-    /// Return a `HostPhase2DesiredSlots` with both slots set to
-    /// [`HostPhase2DesiredContents::CurrentContents`]; i.e., "make no changes
-    /// to the current contents of either slot".
-    pub const fn current_contents() -> Self {
-        Self {
-            slot_a: HostPhase2DesiredContents::CurrentContents,
-            slot_b: HostPhase2DesiredContents::CurrentContents,
-        }
-    }
 }
 
 /// Describes a persistent ZFS dataset associated with an Omicron zone
@@ -206,48 +181,6 @@ pub struct BootPartitionContents {
         schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
     )]
     pub slot_b: Result<BootPartitionDetails, String>,
-}
-
-impl BootPartitionContents {
-    pub fn slot_details(
-        &self,
-        slot: M2Slot,
-    ) -> &Result<BootPartitionDetails, String> {
-        match slot {
-            M2Slot::A => &self.slot_a,
-            M2Slot::B => &self.slot_b,
-        }
-    }
-
-    pub fn debug_assume_success() -> Self {
-        Self {
-            boot_disk: Ok(M2Slot::A),
-            slot_a: Ok(BootPartitionDetails {
-                header: BootImageHeader {
-                    flags: 0,
-                    data_size: 1000,
-                    image_size: 1000,
-                    target_size: 1000,
-                    sha256: [0; 32],
-                    image_name: "fake from debug_assume_success()".to_string(),
-                },
-                artifact_hash: ArtifactHash([0x0a; 32]),
-                artifact_size: 1000,
-            }),
-            slot_b: Ok(BootPartitionDetails {
-                header: BootImageHeader {
-                    flags: 0,
-                    data_size: 1000,
-                    image_size: 1000,
-                    target_size: 1000,
-                    sha256: [1; 32],
-                    image_name: "fake from debug_assume_success()".to_string(),
-                },
-                artifact_hash: ArtifactHash([0x0b; 32]),
-                artifact_size: 1000,
-            }),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
@@ -341,63 +274,23 @@ impl From<Result<(), String>> for ConfigReconcilerInventoryResult {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct ZoneImageResolverInventory {
     /// The zone manifest status.
-    pub zone_manifest: ZoneManifestInventory,
+    pub zone_manifest: ManifestInventory,
 
     /// The mupdate override status.
     pub mupdate_override: MupdateOverrideInventory,
 }
 
-impl ZoneImageResolverInventory {
-    /// Returns a new, fake inventory for tests.
-    pub fn new_fake() -> Self {
-        Self {
-            zone_manifest: ZoneManifestInventory::new_fake(),
-            mupdate_override: MupdateOverrideInventory::new_fake(),
-        }
-    }
-
-    /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneImageResolverInventoryDisplay<'_> {
-        ZoneImageResolverInventoryDisplay { inner: self }
-    }
-}
-
-/// Displayer for a [`ZoneImageResolverInventory`]
-pub struct ZoneImageResolverInventoryDisplay<'a> {
-    inner: &'a ZoneImageResolverInventory,
-}
-
-impl fmt::Display for ZoneImageResolverInventoryDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ZoneImageResolverInventory { zone_manifest, mupdate_override } =
-            self.inner;
-
-        writeln!(f, "zone manifest:")?;
-        let mut indented = IndentWriter::new("    ", f);
-        // Use write! rather than writeln! because zone_manifest.display()
-        // always produces a newline at the end.
-        write!(indented, "{}", zone_manifest.display())?;
-        let f = indented.into_inner();
-
-        writeln!(f, "mupdate override:")?;
-        let mut indented = IndentWriter::new("    ", f);
-        // Use write! rather than writeln! because mupdate_override.display()
-        // always produces a newline at the end.
-        write!(indented, "{}", mupdate_override.display())?;
-
-        Ok(())
-    }
-}
-
-/// Inventory representation of a zone manifest.
+/// Inventory representation of a manifest.
 ///
 /// Part of [`ZoneImageResolverInventory`].
 ///
+/// A manifest is used for both zones and reference measurements.
 /// A zone manifest is a listing of all the zones present in a system's install
-/// dataset. This struct contains information about the install dataset gathered
-/// from a system.
+/// dataset. A measurement manifset is a listing of all the reference measurements
+/// present in a system's install dataset. This struct contains information
+/// about the install dataset gathered from a system.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-pub struct ZoneManifestInventory {
+pub struct ManifestInventory {
     /// The full path to the zone manifest file on the boot disk.
     #[schemars(schema_with = "path_schema")]
     pub boot_disk_path: Utf8PathBuf,
@@ -405,151 +298,34 @@ pub struct ZoneManifestInventory {
     /// The manifest read from the boot disk, and whether the manifest is valid.
     #[serde(with = "snake_case_result")]
     #[schemars(
-        schema_with = "SnakeCaseResult::<ZoneManifestBootInventory, String>::json_schema"
+        schema_with = "SnakeCaseResult::<ManifestBootInventory, String>::json_schema"
     )]
-    pub boot_inventory: Result<ZoneManifestBootInventory, String>,
+    pub boot_inventory: Result<ManifestBootInventory, String>,
 
     /// Information about the install dataset on non-boot disks.
-    pub non_boot_status: IdOrdMap<ZoneManifestNonBootInventory>,
-}
-
-impl ZoneManifestInventory {
-    /// Returns a new, empty inventory for tests.
-    pub fn new_fake() -> Self {
-        Self {
-            boot_disk_path: Utf8PathBuf::from("/fake/path/install/zones.json"),
-            boot_inventory: Ok(ZoneManifestBootInventory::new_fake()),
-            non_boot_status: IdOrdMap::new(),
-        }
-    }
-
-    /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneManifestInventoryDisplay<'_> {
-        ZoneManifestInventoryDisplay { inner: self }
-    }
-}
-
-/// Displayer for a [`ZoneManifestInventory`]
-#[derive(Clone, Debug)]
-pub struct ZoneManifestInventoryDisplay<'a> {
-    inner: &'a ZoneManifestInventory,
-}
-
-impl fmt::Display for ZoneManifestInventoryDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = f;
-
-        let ZoneManifestInventory {
-            boot_disk_path,
-            boot_inventory,
-            non_boot_status,
-        } = self.inner;
-        writeln!(f, "path on boot disk: {}", boot_disk_path)?;
-
-        match boot_inventory {
-            Ok(boot_inventory) => {
-                writeln!(f, "boot disk inventory:")?;
-                let mut indented = IndentWriter::new("    ", f);
-                // Use write! rather than writeln! because
-                // boot_inventory.display() always ends with a newline.
-                write!(indented, "{}", boot_inventory.display())?;
-                f = indented.into_inner();
-            }
-            Err(error) => {
-                writeln!(
-                    f,
-                    "error obtaining zone manifest on boot disk: {error}"
-                )?;
-            }
-        }
-
-        if non_boot_status.is_empty() {
-            writeln!(f, "no non-boot disks")?;
-        } else {
-            writeln!(f, "non-boot disk status:")?;
-            for non_boot in non_boot_status {
-                let mut indented = IndentWriter::new_skip_initial("    ", f);
-                writeln!(indented, "  - {}", non_boot.display())?;
-                f = indented.into_inner();
-            }
-        }
-
-        Ok(())
-    }
+    pub non_boot_status: IdOrdMap<ManifestNonBootInventory>,
 }
 
 /// Inventory representation of zone artifacts on the boot disk.
 ///
-/// Part of [`ZoneManifestInventory`].
+/// Part of [`ManifestInventory`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-pub struct ZoneManifestBootInventory {
+pub struct ManifestBootInventory {
     /// The manifest source.
     ///
-    /// In production this is [`OmicronZoneManifestSource::Installinator`], but
+    /// In production this is [`OmicronInstallManifestSource::Installinator`], but
     /// in some development and testing flows Sled Agent synthesizes zone
     /// manifests. In those cases, the source is
-    /// [`OmicronZoneManifestSource::SledAgent`].
-    pub source: OmicronZoneManifestSource,
+    /// [`OmicronInstallManifestSource::SledAgent`].
+    pub source: OmicronInstallManifestSource,
 
     /// The artifacts on disk.
     pub artifacts: IdOrdMap<ZoneArtifactInventory>,
 }
 
-impl ZoneManifestBootInventory {
-    /// Returns a new, empty inventory for tests.
-    ///
-    /// For a more representative selection of real zones, see `representative`
-    /// in `nexus-inventory`.
-    pub fn new_fake() -> Self {
-        Self {
-            source: OmicronZoneManifestSource::Installinator {
-                mupdate_id: MupdateUuid::nil(),
-            },
-            artifacts: IdOrdMap::new(),
-        }
-    }
-
-    /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneManifestBootInventoryDisplay<'_> {
-        ZoneManifestBootInventoryDisplay { inner: self }
-    }
-}
-
-/// Displayer for a [`ZoneManifestBootInventory`].
-#[derive(Clone, Debug)]
-pub struct ZoneManifestBootInventoryDisplay<'a> {
-    inner: &'a ZoneManifestBootInventory,
-}
-
-impl fmt::Display for ZoneManifestBootInventoryDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = f;
-
-        let ZoneManifestBootInventory { source, artifacts } = self.inner;
-        writeln!(f, "manifest generated by {}", source)?;
-        if artifacts.is_empty() {
-            writeln!(
-                f,
-                "no artifacts in install dataset \
-                 (this should only be seen in simulated systems)"
-            )?;
-        } else {
-            writeln!(f, "artifacts in install dataset:")?;
-
-            for artifact in artifacts {
-                let mut indented = IndentWriter::new_skip_initial("    ", f);
-                writeln!(indented, "  - {}", artifact.display())?;
-                f = indented.into_inner();
-            }
-        }
-
-        Ok(())
-    }
-}
-
 /// Inventory representation of a single zone artifact on a boot disk.
 ///
-/// Part of [`ZoneManifestBootInventory`].
+/// Part of [`ManifestBootInventory`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct ZoneArtifactInventory {
     /// The name of the zone file on disk, for example `nexus.tar.gz`. Zone
@@ -575,13 +351,6 @@ pub struct ZoneArtifactInventory {
     pub status: Result<(), String>,
 }
 
-impl ZoneArtifactInventory {
-    /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneArtifactInventoryDisplay<'_> {
-        ZoneArtifactInventoryDisplay { inner: self }
-    }
-}
-
 impl IdOrdItem for ZoneArtifactInventory {
     type Key<'a> = &'a str;
     fn key(&self) -> Self::Key<'_> {
@@ -591,44 +360,14 @@ impl IdOrdItem for ZoneArtifactInventory {
     id_upcast!();
 }
 
-/// Displayer for [`ZoneArtifactInventory`].
-#[derive(Clone, Debug)]
-pub struct ZoneArtifactInventoryDisplay<'a> {
-    inner: &'a ZoneArtifactInventory,
-}
-
-impl fmt::Display for ZoneArtifactInventoryDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ZoneArtifactInventory {
-            file_name,
-            // We don't show the path here because surrounding code typically
-            // displays the path. We could make this controllable in the future
-            // via a method on `ZoneArtifactInventoryDisplay`.
-            path: _,
-            expected_size,
-            expected_hash,
-            status,
-        } = self.inner;
-        write!(
-            f,
-            "{file_name} (expected {expected_size} bytes \
-             with hash {expected_hash}): ",
-        )?;
-        match status {
-            Ok(()) => write!(f, "ok"),
-            Err(message) => write!(f, "error: {message}"),
-        }
-    }
-}
-
 /// Inventory representation of a zone manifest on a non-boot disk.
 ///
-/// Unlike [`ZoneManifestBootInventory`] which is structured since
+/// Unlike [`ManifestBootInventory`] which is structured since
 /// Reconfigurator makes decisions based on it, information about non-boot disks
 /// is purely advisory. For simplicity, we store information in an unstructured
 /// format.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-pub struct ZoneManifestNonBootInventory {
+pub struct ManifestNonBootInventory {
     /// The ID of the non-boot zpool.
     pub zpool_id: InternalZpoolUuid,
 
@@ -650,42 +389,12 @@ pub struct ZoneManifestNonBootInventory {
     pub message: String,
 }
 
-impl ZoneManifestNonBootInventory {
-    /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneManifestNonBootInventoryDisplay<'_> {
-        ZoneManifestNonBootInventoryDisplay { inner: self }
-    }
-}
-
-impl IdOrdItem for ZoneManifestNonBootInventory {
+impl IdOrdItem for ManifestNonBootInventory {
     type Key<'a> = InternalZpoolUuid;
     fn key(&self) -> Self::Key<'_> {
         self.zpool_id
     }
     id_upcast!();
-}
-
-/// Displayer for a [`ZoneManifestNonBootInventory`].
-#[derive(Clone, Debug)]
-pub struct ZoneManifestNonBootInventoryDisplay<'a> {
-    inner: &'a ZoneManifestNonBootInventory,
-}
-
-impl fmt::Display for ZoneManifestNonBootInventoryDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ZoneManifestNonBootInventory {
-            // The zpool ID is part of the path, so displaying it is redundant.
-            zpool_id: _,
-            path,
-            is_valid,
-            message,
-        } = self.inner;
-        write!(
-            f,
-            "{path} ({}): {message}",
-            if *is_valid { "valid" } else { "invalid" },
-        )
-    }
 }
 
 /// Inventory representation of MUPdate override status.
@@ -713,72 +422,6 @@ pub struct MupdateOverrideInventory {
     pub non_boot_status: IdOrdMap<MupdateOverrideNonBootInventory>,
 }
 
-impl MupdateOverrideInventory {
-    /// Returns a new, empty inventory for tests.
-    pub fn new_fake() -> Self {
-        Self {
-            boot_disk_path: Utf8PathBuf::from(
-                "/fake/path/install/mupdate_override.json",
-            ),
-            boot_override: Ok(None),
-            non_boot_status: IdOrdMap::new(),
-        }
-    }
-
-    /// Returns a displayer for this inventory.
-    pub fn display(&self) -> MupdateOverrideInventoryDisplay<'_> {
-        MupdateOverrideInventoryDisplay { inner: self }
-    }
-}
-
-/// A displayer for [`MupdateOverrideInventory`].
-#[derive(Clone, Debug)]
-pub struct MupdateOverrideInventoryDisplay<'a> {
-    inner: &'a MupdateOverrideInventory,
-}
-
-impl fmt::Display for MupdateOverrideInventoryDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = f;
-
-        let MupdateOverrideInventory {
-            boot_disk_path,
-            boot_override,
-            non_boot_status,
-        } = self.inner;
-
-        writeln!(f, "path on boot disk: {boot_disk_path}")?;
-        match boot_override {
-            Ok(Some(boot_override)) => {
-                writeln!(
-                    f,
-                    "override on boot disk: {}",
-                    boot_override.display()
-                )?;
-            }
-            Ok(None) => {
-                writeln!(f, "no override on boot disk")?;
-            }
-            Err(error) => {
-                writeln!(f, "error obtaining override on boot disk: {error}")?;
-            }
-        }
-
-        if non_boot_status.is_empty() {
-            writeln!(f, "no non-boot disks")?;
-        } else {
-            writeln!(f, "non-boot disk status:")?;
-            for non_boot in non_boot_status {
-                let mut indented = IndentWriter::new_skip_initial("    ", f);
-                writeln!(indented, "  - {}", non_boot.display())?;
-                f = indented.into_inner();
-            }
-        }
-
-        Ok(())
-    }
-}
-
 /// Inventory representation of the MUPdate override on the boot disk.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct MupdateOverrideBootInventory {
@@ -788,25 +431,6 @@ pub struct MupdateOverrideBootInventory {
     /// During a MUPdate, each sled gets a MUPdate override ID. (The ID is
     /// shared across boot disks and non-boot disks, though.)
     pub mupdate_override_id: MupdateOverrideUuid,
-}
-
-impl MupdateOverrideBootInventory {
-    /// Returns a displayer for this inventory.
-    pub fn display(&self) -> MupdateOverrideBootInventoryDisplay<'_> {
-        MupdateOverrideBootInventoryDisplay { inner: self }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct MupdateOverrideBootInventoryDisplay<'a> {
-    inner: &'a MupdateOverrideBootInventory,
-}
-
-impl fmt::Display for MupdateOverrideBootInventoryDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let MupdateOverrideBootInventory { mupdate_override_id } = self.inner;
-        write!(f, "{}", mupdate_override_id)
-    }
 }
 
 /// Inventory representation of the MUPdate override on a non-boot disk.
@@ -839,42 +463,12 @@ pub struct MupdateOverrideNonBootInventory {
     pub message: String,
 }
 
-impl MupdateOverrideNonBootInventory {
-    /// Returns a displayer for this inventory.
-    pub fn display(&self) -> MupdateOverrideNonBootInventoryDisplay<'_> {
-        MupdateOverrideNonBootInventoryDisplay { inner: self }
-    }
-}
-
 impl IdOrdItem for MupdateOverrideNonBootInventory {
     type Key<'a> = InternalZpoolUuid;
     fn key(&self) -> Self::Key<'_> {
         self.zpool_id
     }
     id_upcast!();
-}
-
-/// Displayer for a [`MupdateOverrideNonBootInventory`].
-#[derive(Clone, Debug)]
-pub struct MupdateOverrideNonBootInventoryDisplay<'a> {
-    inner: &'a MupdateOverrideNonBootInventory,
-}
-
-impl fmt::Display for MupdateOverrideNonBootInventoryDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let MupdateOverrideNonBootInventory {
-            // The zpool ID is part of the path, so displaying it is redundant.
-            zpool_id: _,
-            path,
-            is_valid,
-            message,
-        } = self.inner;
-        write!(
-            f,
-            "{path} ({}): {message}",
-            if *is_valid { "valid" } else { "invalid" },
-        )
-    }
 }
 
 /// Where Sled Agent should get the image for a zone.
@@ -913,16 +507,6 @@ pub enum OmicronZoneImageSource {
 }
 
 impl OmicronZoneImageSource {
-    /// Return the artifact hash used for the zone image, if the zone's image
-    /// source is from the artifact store.
-    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
-        if let OmicronZoneImageSource::Artifact { hash } = self {
-            Some(*hash)
-        } else {
-            None
-        }
-    }
-
     // See `OmicronZoneConfig`. This is a separate function instead of being
     // `impl Default` because we don't want to accidentally use this default
     // outside of `serde(default)`.
@@ -960,6 +544,7 @@ impl OmicronZoneImageSource {
 /// the six representations if at all possible. If you must add a new one,
 /// please add it here rather than doing something ad-hoc in the calling code
 /// so it's more legible.
+
 #[derive(
     Debug,
     Clone,
@@ -990,187 +575,6 @@ pub enum ZoneKind {
     InternalNtp,
     Nexus,
     Oximeter,
-}
-
-impl ZoneKind {
-    /// The NTP prefix used for both BoundaryNtp and InternalNtp zones and
-    /// services.
-    pub const NTP_PREFIX: &'static str = "ntp";
-
-    /// Return a string that is used to construct **zone names**. This string
-    /// is guaranteed to be stable over time.
-    pub fn zone_prefix(self) -> &'static str {
-        match self {
-            // BoundaryNtp and InternalNtp both use "ntp".
-            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
-            ZoneKind::Clickhouse => "clickhouse",
-            ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
-            ZoneKind::ClickhouseServer => "clickhouse_server",
-            // Note "cockroachdb" for historical reasons.
-            ZoneKind::CockroachDb => "cockroachdb",
-            ZoneKind::Crucible => "crucible",
-            ZoneKind::CruciblePantry => "crucible_pantry",
-            ZoneKind::ExternalDns => "external_dns",
-            ZoneKind::InternalDns => "internal_dns",
-            ZoneKind::Nexus => "nexus",
-            ZoneKind::Oximeter => "oximeter",
-        }
-    }
-
-    /// Return a string that identifies **zone image filenames** in the install
-    /// dataset.
-    ///
-    /// This method is exactly equivalent to `format!("{}.tar.gz",
-    /// self.zone_prefix())`, but returns `&'static str`s. A unit test ensures
-    /// they stay consistent.
-    pub fn artifact_in_install_dataset(self) -> &'static str {
-        match self {
-            // BoundaryNtp and InternalNtp both use "ntp".
-            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp.tar.gz",
-            ZoneKind::Clickhouse => "clickhouse.tar.gz",
-            ZoneKind::ClickhouseKeeper => "clickhouse_keeper.tar.gz",
-            ZoneKind::ClickhouseServer => "clickhouse_server.tar.gz",
-            // Note "cockroachdb" for historical reasons.
-            ZoneKind::CockroachDb => "cockroachdb.tar.gz",
-            ZoneKind::Crucible => "crucible.tar.gz",
-            ZoneKind::CruciblePantry => "crucible_pantry.tar.gz",
-            ZoneKind::ExternalDns => "external_dns.tar.gz",
-            ZoneKind::InternalDns => "internal_dns.tar.gz",
-            ZoneKind::Nexus => "nexus.tar.gz",
-            ZoneKind::Oximeter => "oximeter.tar.gz",
-        }
-    }
-
-    /// Return a string that is used to construct **SMF service names**. This
-    /// string is guaranteed to be stable over time.
-    pub fn service_prefix(self) -> &'static str {
-        match self {
-            // BoundaryNtp and InternalNtp both use "ntp".
-            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
-            ZoneKind::Clickhouse => "clickhouse",
-            ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
-            ZoneKind::ClickhouseServer => "clickhouse_server",
-            // Note "cockroachdb" for historical reasons.
-            ZoneKind::CockroachDb => "cockroachdb",
-            ZoneKind::Crucible => "crucible",
-            // Note "crucible/pantry" for historical reasons.
-            ZoneKind::CruciblePantry => "crucible/pantry",
-            ZoneKind::ExternalDns => "external_dns",
-            ZoneKind::InternalDns => "internal_dns",
-            ZoneKind::Nexus => "nexus",
-            ZoneKind::Oximeter => "oximeter",
-        }
-    }
-
-    /// Return a string suitable for use **in `Name` instances**. This string
-    /// is guaranteed to be stable over time.
-    ///
-    /// This string uses dashes rather than underscores, as required by `Name`.
-    pub fn name_prefix(self) -> &'static str {
-        match self {
-            // BoundaryNtp and InternalNtp both use "ntp" here.
-            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
-            ZoneKind::Clickhouse => "clickhouse",
-            ZoneKind::ClickhouseKeeper => "clickhouse-keeper",
-            ZoneKind::ClickhouseServer => "clickhouse-server",
-            // Note "cockroach" for historical reasons.
-            ZoneKind::CockroachDb => "cockroach",
-            ZoneKind::Crucible => "crucible",
-            ZoneKind::CruciblePantry => "crucible-pantry",
-            ZoneKind::ExternalDns => "external-dns",
-            ZoneKind::InternalDns => "internal-dns",
-            ZoneKind::Nexus => "nexus",
-            ZoneKind::Oximeter => "oximeter",
-        }
-    }
-
-    /// Return a string that is used for reporting and error messages. This is
-    /// **not guaranteed** to be stable.
-    ///
-    /// If you're displaying a user-friendly message, prefer this method.
-    pub fn report_str(self) -> &'static str {
-        match self {
-            ZoneKind::BoundaryNtp => "boundary_ntp",
-            ZoneKind::Clickhouse => "clickhouse",
-            ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
-            ZoneKind::ClickhouseServer => "clickhouse_server",
-            ZoneKind::CockroachDb => "cockroach_db",
-            ZoneKind::Crucible => "crucible",
-            ZoneKind::CruciblePantry => "crucible_pantry",
-            ZoneKind::ExternalDns => "external_dns",
-            ZoneKind::InternalDns => "internal_dns",
-            ZoneKind::InternalNtp => "internal_ntp",
-            ZoneKind::Nexus => "nexus",
-            ZoneKind::Oximeter => "oximeter",
-        }
-    }
-
-    /// Return a string used as an artifact name for control-plane zones.
-    /// This is **not guaranteed** to be stable.
-    ///
-    /// These strings match the `ArtifactId::name`s Nexus constructs when
-    /// unpacking the composite control-plane artifact in a TUF repo. Currently,
-    /// these are chosen by reading the `pkg` value of the `oxide.json` object
-    /// inside each zone image tarball.
-    pub fn artifact_id_name(self) -> &'static str {
-        match self {
-            ZoneKind::BoundaryNtp => "ntp",
-            ZoneKind::Clickhouse => "clickhouse",
-            ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
-            ZoneKind::ClickhouseServer => "clickhouse_server",
-            ZoneKind::CockroachDb => "cockroachdb",
-            ZoneKind::Crucible => "crucible-zone",
-            ZoneKind::CruciblePantry => "crucible-pantry-zone",
-            ZoneKind::ExternalDns => "external-dns",
-            ZoneKind::InternalDns => "internal-dns",
-            ZoneKind::InternalNtp => "ntp",
-            ZoneKind::Nexus => "nexus",
-            ZoneKind::Oximeter => "oximeter",
-        }
-    }
-
-    /// Map an artifact ID name to the corresponding file name in the install
-    /// dataset.
-    ///
-    /// We don't allow mapping artifact ID names to `ZoneKind` because the map
-    /// isn't bijective -- both internal and boundary NTP zones use the same
-    /// `ntp` artifact. But the artifact ID name and the name in the install
-    /// dataset do form a bijective map.
-    pub fn artifact_id_name_to_install_dataset_file(
-        artifact_id_name: &str,
-    ) -> Option<&'static str> {
-        let zone_kind = match artifact_id_name {
-            // We arbitrarily select BoundaryNtp to perform the mapping with.
-            "ntp" => ZoneKind::BoundaryNtp,
-            "clickhouse" => ZoneKind::Clickhouse,
-            "clickhouse_keeper" => ZoneKind::ClickhouseKeeper,
-            "clickhouse_server" => ZoneKind::ClickhouseServer,
-            "cockroachdb" => ZoneKind::CockroachDb,
-            "crucible-zone" => ZoneKind::Crucible,
-            "crucible-pantry-zone" => ZoneKind::CruciblePantry,
-            "external-dns" => ZoneKind::ExternalDns,
-            "internal-dns" => ZoneKind::InternalDns,
-            "nexus" => ZoneKind::Nexus,
-            "oximeter" => ZoneKind::Oximeter,
-            _ => return None,
-        };
-
-        Some(zone_kind.artifact_in_install_dataset())
-    }
-
-    /// Return true if an artifact represents a control plane zone image
-    /// of this kind.
-    pub fn is_control_plane_zone_artifact(
-        self,
-        artifact_id: &ArtifactId,
-    ) -> bool {
-        artifact_id
-            .kind
-            .to_known()
-            .map(|kind| matches!(kind, KnownArtifactKind::Zone))
-            .unwrap_or(false)
-            && artifact_id.name == self.artifact_id_name()
-    }
 }
 
 // Used for schemars to be able to be used with camino:

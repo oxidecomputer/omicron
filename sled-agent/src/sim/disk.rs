@@ -115,7 +115,7 @@ mod producers {
         fn produce(
             &mut self,
         ) -> Result<
-            Box<(dyn Iterator<Item = Sample> + 'static)>,
+            Box<dyn Iterator<Item = Sample> + 'static>,
             oximeter::MetricsError,
         > {
             let samples = vec![

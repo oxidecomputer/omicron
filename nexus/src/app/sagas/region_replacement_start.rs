@@ -898,7 +898,7 @@ pub(crate) mod test {
     async fn test_find_only_new_region(cptestctx: &ControlPlaneTestContext) {
         let log = &cptestctx.logctx.log;
 
-        let datasets = vec![
+        let datasets = [
             CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 ZpoolUuid::new_v4(),
@@ -921,7 +921,7 @@ pub(crate) mod test {
             ),
         ];
 
-        let regions = vec![
+        let regions = [
             Region::new(
                 datasets[0].id(),
                 VolumeUuid::new_v4(),

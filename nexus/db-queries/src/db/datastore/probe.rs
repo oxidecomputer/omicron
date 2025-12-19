@@ -39,28 +39,8 @@ use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::ProbeUuid;
 use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use sled_agent_client::types::ProbeCreate;
 use uuid::Uuid;
-
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum IpKind {
-    Snat,
-    Floating,
-    Ephemeral,
-}
-
-impl From<nexus_db_model::IpKind> for IpKind {
-    fn from(value: nexus_db_model::IpKind) -> Self {
-        match value {
-            nexus_db_model::IpKind::SNat => Self::Snat,
-            nexus_db_model::IpKind::Ephemeral => Self::Ephemeral,
-            nexus_db_model::IpKind::Floating => Self::Floating,
-        }
-    }
-}
 
 impl super::DataStore {
     /// List the probes for the given project.
