@@ -12,7 +12,7 @@ use anyhow::Context;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use cockroach_admin_types::NodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
@@ -675,6 +675,7 @@ impl CollectionBuilder {
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
             zone_image_resolver: inventory.zone_image_resolver,
+            health_monitor: inventory.health_monitor,
         };
 
         self.sleds

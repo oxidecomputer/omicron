@@ -6,11 +6,12 @@ use crate::{ClickhouseCli, Clickward};
 
 use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
+use clickhouse_admin_types::config::GenerateConfigResult;
+use clickhouse_admin_types::keeper::KeeperConfigurableSettings;
+use clickhouse_admin_types::server::ServerConfigurableSettings;
 use clickhouse_admin_types::{
     CLICKHOUSE_KEEPER_CONFIG_DIR, CLICKHOUSE_KEEPER_CONFIG_FILE,
     CLICKHOUSE_SERVER_CONFIG_DIR, CLICKHOUSE_SERVER_CONFIG_FILE,
-    GenerateConfigResult, KeeperConfigurableSettings,
-    ServerConfigurableSettings,
 };
 use dropshot::{ClientErrorStatusCode, HttpError};
 use flume::{Receiver, Sender, TrySendError};

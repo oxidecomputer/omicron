@@ -1305,6 +1305,7 @@ mod tests {
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use oxnet::Ipv6Net;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HealthMonitorInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::ZoneImageResolverInventory;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
@@ -1527,6 +1528,7 @@ mod tests {
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                health_monitor: HealthMonitorInventory::new(),
             },
             is_scrimlet,
         )];

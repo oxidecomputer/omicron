@@ -22,6 +22,7 @@ diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_js
 hex.workspace = true
 iddqd.workspace = true
 ipnetwork.workspace = true
+itertools.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
 omicron-cockroach-metrics.workspace = true

@@ -95,7 +95,7 @@ declare_saga_actions! {
         + sis_list_local_storage
     }
 
-    ENSURE_LOCAL_STORAGE (0, 1, 2, 3, 4, 5, 6, 7) -> "ensure_local_storage" {
+    ENSURE_LOCAL_STORAGE (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) -> "ensure_local_storage" {
         + sis_ensure_local_storage
         // No undo action for this, that is handled in the disk delete saga!
     }
@@ -172,8 +172,8 @@ impl NexusSaga for SagaInstanceStart {
         builder.append(list_local_storage_action());
 
         // Changing MAX_DISKS_PER_INSTANCE requires changing this saga
-        static_assertions::const_assert!(MAX_DISKS_PER_INSTANCE == 8);
-        seq!(N in 0..8 {
+        static_assertions::const_assert!(MAX_DISKS_PER_INSTANCE == 12);
+        seq!(N in 0..12 {
             builder.append(paste!([<ensure_local_storage_ N _action>]()));
         });
 
@@ -693,7 +693,7 @@ async fn sis_ensure_local_storage(
     Ok(())
 }
 
-seq!(M in 0..8 {
+seq!(M in 0..12 {
     async fn sis_ensure_local_storage_~M(
         sagactx: NexusActionContext,
     ) -> Result<(), ActionError> {

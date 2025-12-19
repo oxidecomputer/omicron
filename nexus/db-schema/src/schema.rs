@@ -601,7 +601,9 @@ table! {
         ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
+        // NOTE: These are the IPv4 transit IPs specifically.
         transit_ips -> Array<Inet>,
+        transit_ips_v6 -> Array<Inet>,
     }
 }
 
@@ -621,7 +623,8 @@ table! {
         ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
-        transit_ips -> Array<Inet>,
+        transit_ips_v4 -> Array<Inet>,
+        transit_ips_v6 -> Array<Inet>,
     }
 }
 joinable!(instance_network_interface -> instance (instance_id));

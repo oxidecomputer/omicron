@@ -57,8 +57,9 @@ use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::Logger;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::collections::HashSet;
-use std::collections::VecDeque;
 use std::fmt;
 use strum::IntoEnumIterator;
 use thiserror::Error;
@@ -285,6 +286,335 @@ fn pick_sled_reservation_target(
         return Ok(target);
     }
     return Err(SledReservationError::NotFound);
+}
+
+/// A candidate dataset for a local storage allocation
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct CandidateDataset {
+    rendezvous_local_storage_dataset_id: DatasetUuid,
+    pool_id: ZpoolUuid,
+    sled_id: SledUuid,
+}
+
+/// For a given local storage disk that has not been allocated, store all the
+/// candidate datasets that could fulfill that allocation.
+#[derive(Clone, Debug)]
+struct PossibleAllocationsForRequest<'a> {
+    request: &'a LocalStorageDisk,
+    candidate_datasets: HashSet<CandidateDataset>,
+}
+
+/// Store the intermediate search state during the search for all possible
+/// pairings of requests for local storage to datasets. This is ordered by how
+/// many pairings have been made so far to prioritize quickly finding a complete
+/// allocation.
+struct IncompleteAllocationList {
+    /// Requests for a local storage allocation that have been paired with a
+    /// dataset
+    allocations: Vec<LocalStorageAllocation>,
+
+    /// Remaining candidate datasets for non-paired allocation requests
+    candidates_left: HashSet<CandidateDataset>,
+
+    /// Which allocation request to consider next
+    request_index: usize,
+}
+
+impl PartialOrd for IncompleteAllocationList {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for IncompleteAllocationList {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.allocations.len().cmp(&other.allocations.len())
+    }
+}
+
+impl PartialEq for IncompleteAllocationList {
+    fn eq(&self, other: &Self) -> bool {
+        self.allocations.len() == other.allocations.len()
+    }
+}
+
+impl Eq for IncompleteAllocationList {}
+
+/// Store all the state required to iterate through possible mappings of local
+/// storage allocation requests to datasets.
+///
+/// Yield complete allocation lists as they're found, where complete means all
+/// allocations have been performed, because computing all possibilities up
+/// front is expensive.
+struct CompleteLocalStorageAllocationLists<'a> {
+    log: Logger,
+
+    /// All allocations that need to be performed
+    allocations_to_perform: Vec<PossibleAllocationsForRequest<'a>>,
+
+    /// A queue of incomplete allocation lists to search through, where
+    /// incomplete means there are still local storage disk to dataset
+    /// allocations to be performed. These are sorted by the number of
+    /// allocations made so far to prioritize yielding a valid allocation.
+    queue: BinaryHeap<IncompleteAllocationList>,
+}
+
+impl<'a> CompleteLocalStorageAllocationLists<'a> {
+    fn new(
+        log: &Logger,
+        sled_target: SledUuid,
+        zpools_for_sled: NonEmpty<ZpoolGetForSledReservationResult>,
+        local_storage_disks: &'a [LocalStorageDisk],
+    ) -> Option<Self> {
+        let local_storage_allocation_required: Vec<&LocalStorageDisk> =
+            local_storage_disks
+                .iter()
+                .filter(|disk| disk.local_storage_dataset_allocation.is_none())
+                .collect();
+
+        // First, each request for local storage can possibly be satisfied by a
+        // number of zpools on the sled. Find this list of candidate zpools for
+        // each required local storage allocation.
+
+        // If there's an existing local storage allocation on a zpool, remove
+        // that from the list of candidates. Local storage for the same Instance
+        // should not share any zpools.
+        let local_storage_zpools_used: HashSet<ZpoolUuid> = local_storage_disks
+            .iter()
+            .filter_map(|disk| {
+                disk.local_storage_dataset_allocation.as_ref().map(
+                    |allocation| {
+                        ZpoolUuid::from_untyped_uuid(
+                            allocation.pool_id().into_untyped_uuid(),
+                        )
+                    },
+                )
+            })
+            .collect();
+
+        let zpools_for_sled: Vec<_> = zpools_for_sled
+            .into_iter()
+            .filter(|zpool_get_result| {
+                !local_storage_zpools_used.contains(&zpool_get_result.pool.id())
+            })
+            .collect();
+
+        if local_storage_allocation_required.len() > zpools_for_sled.len() {
+            // Not enough zpools to satisfy the number of allocations required.
+            // Find another sled!
+            info!(
+                &log,
+                "sled {sled_target} does not have enough zpools to satisfy \
+                local storage allocations";
+                "zpools" => zpools_for_sled.len(),
+                "allocations" => local_storage_allocation_required.len(),
+            );
+
+            return None;
+        }
+
+        info!(&log, "filtered zpools for sled: {zpools_for_sled:?}");
+
+        let mut allocations_to_perform =
+            Vec::with_capacity(local_storage_allocation_required.len());
+
+        for request in &local_storage_allocation_required {
+            // Find all the zpools that could satisfy this local storage
+            // request. These will be filtered later.
+            let candidate_datasets: HashSet<CandidateDataset> = zpools_for_sled
+                .iter()
+                .filter(|zpool_get_result| {
+                    let ZpoolGetForSledReservationResult {
+                        pool,
+                        last_inv_total_size,
+                        rendezvous_local_storage_dataset_id: _,
+                        crucible_dataset_usage,
+                        local_storage_usage,
+                    } = zpool_get_result;
+
+                    // The total request size for the local storage dataset
+                    // allocation is the disk size plus the required
+                    // overhead.
+                    let request_size: i64 = request.size().to_bytes() as i64
+                        + request.required_dataset_overhead().to_bytes() as i64;
+
+                    let new_size_used: i64 = crucible_dataset_usage
+                        + local_storage_usage
+                        + request_size;
+
+                    let control_plane_storage_buffer: i64 =
+                        pool.control_plane_storage_buffer().into();
+                    let adjusted_total: i64 =
+                        last_inv_total_size - control_plane_storage_buffer;
+
+                    // Any zpool that has space for this local storage
+                    // dataset allocation is considered a candidate.
+                    new_size_used < adjusted_total
+                })
+                .map(|zpool_get_result| CandidateDataset {
+                    rendezvous_local_storage_dataset_id: zpool_get_result
+                        .rendezvous_local_storage_dataset_id,
+                    pool_id: zpool_get_result.pool.id(),
+                    sled_id: zpool_get_result.pool.sled_id(),
+                })
+                .collect();
+
+            if candidate_datasets.is_empty() {
+                // if there's no local storage datasets on this sled for this
+                // request's size, then try another sled.
+                info!(
+                    &log,
+                    "sled {sled_target} does not have any candidate datasets \
+                    with available space to satisfy local storage allocation";
+                    "request" => ?request,
+                );
+
+                return None;
+            }
+
+            allocations_to_perform.push(PossibleAllocationsForRequest {
+                request,
+                candidate_datasets,
+            });
+        }
+
+        // From the list of allocations to perform, and all the candidate local
+        // storage datasets that could fit those allocations, find a list of all
+        // valid request -> zpool mappings.
+        //
+        // Start from no allocations made yet, a list of allocations to perform
+        // (stored in `requests`), and all of the available zpools on the sled.
+
+        let mut queue = BinaryHeap::new();
+
+        queue.push(IncompleteAllocationList {
+            allocations: vec![],
+            candidates_left: zpools_for_sled
+                .iter()
+                .map(|zpool_get_result| CandidateDataset {
+                    rendezvous_local_storage_dataset_id: zpool_get_result
+                        .rendezvous_local_storage_dataset_id,
+                    pool_id: zpool_get_result.pool.id(),
+                    sled_id: zpool_get_result.pool.sled_id(),
+                })
+                .collect(),
+            request_index: 0,
+        });
+
+        Some(Self { log: log.clone(), allocations_to_perform, queue })
+    }
+}
+
+impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
+    type Item = NonEmpty<LocalStorageAllocation>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // For each incomplete allocation list:
+        //
+        // - find the next request to allocate for
+        //
+        // - select a local storage dataset from the list of local storage
+        //   datasets that have not been used yet that could fulfill that
+        //   request
+        //
+        // - remove that selected local storage dataset from the list of
+        //   candidates
+        //
+        // - add that to the queue
+        //
+        // A list of allocations as complete if all requests have been matched
+        // with a local storage dataset.
+
+        while let Some(incomplete_allocation_list) = self.queue.pop() {
+            let IncompleteAllocationList {
+                allocations,
+                candidates_left,
+                request_index,
+            } = incomplete_allocation_list;
+
+            // If we have an allocation for each possible allocation, this one
+            // is complete.
+            if request_index == self.allocations_to_perform.len() {
+                let allocations_len = allocations.len();
+
+                match NonEmpty::from_vec(allocations) {
+                    Some(allocations) => {
+                        return Some(allocations);
+                    }
+
+                    None => {
+                        // There should be `request_index` entries in the
+                        // `allocations` vec, this is weird!
+                        error!(
+                            &self.log,
+                            "expected {request_index} in the \
+                            allocations vec, saw {allocations_len}",
+                        );
+                    }
+                }
+
+                continue;
+            }
+
+            // Try to allocate the Nth possible allocation
+            let request = &self.allocations_to_perform[request_index];
+
+            // Create a possible config based on the what datasets are
+            // left, and the candidate datasets for this request.
+            for candidate_dataset in &request.candidate_datasets {
+                if candidates_left.contains(candidate_dataset) {
+                    // This request could be satisfied by this dataset.
+                    // Select it and search further.
+
+                    let mut set_allocations = allocations.clone();
+                    set_allocations.push(LocalStorageAllocation {
+                        disk_id: request.request.id(),
+
+                        local_storage_dataset_allocation_id:
+                            DatasetUuid::new_v4(),
+
+                        required_dataset_size: {
+                            let request_size: i64 =
+                                request.request.size().to_bytes() as i64
+                                    + request
+                                        .request
+                                        .required_dataset_overhead()
+                                        .to_bytes()
+                                        as i64;
+                            request_size
+                        },
+
+                        local_storage_dataset_id: candidate_dataset
+                            .rendezvous_local_storage_dataset_id,
+
+                        pool_id: candidate_dataset.pool_id,
+
+                        sled_id: candidate_dataset.sled_id,
+                    });
+
+                    // Note by removing a candidate dataset from the list in
+                    // this way, this step mandates that a single local storage
+                    // dataset is not used for multiple local storage
+                    // allocations for a given instance.
+
+                    let mut set_candidates_left = candidates_left.clone();
+                    set_candidates_left.remove(candidate_dataset);
+
+                    self.queue.push(IncompleteAllocationList {
+                        allocations: set_allocations,
+                        candidates_left: set_candidates_left,
+                        request_index: request_index + 1,
+                    });
+                }
+
+                // Else there are no candidate datasets left for this request,
+                // and therefore the list of requests cannot be fulfilled by the
+                // current mapping of requests to datasets
+            }
+        }
+
+        None
+    }
 }
 
 impl DataStore {
@@ -695,16 +1025,14 @@ impl DataStore {
 
         info!(&log, "sled targets: {sled_targets:?}");
 
-        let local_storage_allocation_required: Vec<&LocalStorageDisk> =
-            local_storage_disks
-                .iter()
-                .filter(|disk| disk.local_storage_dataset_allocation.is_none())
-                .collect();
+        let local_storage_allocation_required = local_storage_disks
+            .iter()
+            .any(|disk| disk.local_storage_dataset_allocation.is_none());
 
         info!(
             &log,
             "local_storage_allocation_required: \
-                {local_storage_allocation_required:?}"
+                {local_storage_allocation_required}"
         );
 
         // We loop here because our attempts to INSERT may be violated by
@@ -713,7 +1041,7 @@ impl DataStore {
         //
         // In the uncontended case, however, we'll only iterate through this
         // loop once.
-        'outer: loop {
+        loop {
             // Pick a reservation target, given the constraints we previously
             // saw in the database.
             let sled_target = pick_sled_reservation_target(
@@ -736,7 +1064,7 @@ impl DataStore {
                 resources.clone(),
             );
 
-            if local_storage_allocation_required.is_empty() {
+            if !local_storage_allocation_required {
                 info!(
                     &log,
                     "attempting to insert sled resource record";
@@ -764,317 +1092,66 @@ impl DataStore {
             } else {
                 // If local storage allocation is required, match the requests
                 // with all the zpools of this sled that have available space.
-                // This routine finds all possible configurations that would
+                // This iterator finds all possible configurations that would
                 // satisfy the requests for local storage and tries them all.
-
-                // First, each request for local storage can possibly be
-                // satisfied by a number of zpools on the sled. Find this list
-                // of candidate zpools for each required local storage
-                // allocation.
-
-                #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-                struct CandidateDataset {
-                    rendezvous_local_storage_dataset_id: DatasetUuid,
-                    pool_id: ZpoolUuid,
-                    sled_id: SledUuid,
-                }
-
-                #[derive(Clone, Debug)]
-                struct PossibleAllocationsForRequest<'a> {
-                    request: &'a LocalStorageDisk,
-                    candidate_datasets: HashSet<CandidateDataset>,
-                }
 
                 let zpools_for_sled = self
                     .zpool_get_for_sled_reservation(&opctx, sled_target)
                     .await?;
 
-                // If there's an existing local storage allocation on a zpool,
-                // remove that from the list of candidates. Local storage for
-                // the same Instance should not share any zpools.
-                let local_storage_zpools_used: HashSet<ZpoolUuid> =
-                    local_storage_disks
-                        .iter()
-                        .filter_map(|disk| {
-                            disk.local_storage_dataset_allocation.as_ref().map(
-                                |allocation| {
-                                    ZpoolUuid::from_untyped_uuid(
-                                        allocation
-                                            .pool_id()
-                                            .into_untyped_uuid(),
-                                    )
-                                },
-                            )
-                        })
-                        .collect();
-
-                let zpools_for_sled: Vec<_> = zpools_for_sled
-                    .into_iter()
-                    .filter(|zpool_get_result| {
-                        !local_storage_zpools_used
-                            .contains(&zpool_get_result.pool.id())
-                    })
-                    .collect();
-
-                if local_storage_allocation_required.len()
-                    > zpools_for_sled.len()
+                let zpools_for_sled = match NonEmpty::from_vec(zpools_for_sled)
                 {
-                    // Not enough zpools to satisfy the number of allocations
-                    // required. Find another sled!
-                    info!(
-                        &log,
-                        "sled {sled_target} does not have enough zpools to \
-                        satisfy local storage allocations";
-                        "zpools" => zpools_for_sled.len(),
-                        "allocations" =>
-                            local_storage_allocation_required.len(),
-                    );
+                    Some(zpools_for_sled) => zpools_for_sled,
 
-                    sled_targets.remove(&sled_target);
-                    banned.remove(&sled_target);
-                    unpreferred.remove(&sled_target);
-                    preferred.remove(&sled_target);
-
-                    continue;
-                }
-
-                info!(&log, "filtered zpools for sled: {zpools_for_sled:?}");
-
-                let mut allocations_to_perform =
-                    Vec::with_capacity(local_storage_allocation_required.len());
-
-                for request in &local_storage_allocation_required {
-                    // Find all the zpools that could satisfy this local storage
-                    // request. These will be filtered later.
-                    let candidate_datasets: HashSet<CandidateDataset> =
-                        zpools_for_sled
-                            .iter()
-                            .filter(|zpool_get_result| {
-                                let ZpoolGetForSledReservationResult {
-                                    pool,
-                                    last_inv_total_size,
-                                    rendezvous_local_storage_dataset_id: _,
-                                    crucible_dataset_usage,
-                                    local_storage_usage,
-                                } = zpool_get_result;
-
-                                // The total request size for the local storage
-                                // dataset allocation is the disk size plus the
-                                // required overhead.
-                                let request_size: i64 =
-                                    request.size().to_bytes() as i64
-                                        + request
-                                            .required_dataset_overhead()
-                                            .to_bytes()
-                                            as i64;
-
-                                let new_size_used: i64 = crucible_dataset_usage
-                                    + local_storage_usage
-                                    + request_size;
-
-                                let control_plane_storage_buffer: i64 =
-                                    pool.control_plane_storage_buffer().into();
-                                let adjusted_total: i64 = last_inv_total_size
-                                    - control_plane_storage_buffer;
-
-                                // Any zpool that has space for this local
-                                // storage dataset allocation is considered a
-                                // candidate.
-                                new_size_used < adjusted_total
-                            })
-                            .map(|zpool_get_result| CandidateDataset {
-                                rendezvous_local_storage_dataset_id:
-                                    zpool_get_result
-                                        .rendezvous_local_storage_dataset_id,
-                                pool_id: zpool_get_result.pool.id(),
-                                sled_id: zpool_get_result.pool.sled_id(),
-                            })
-                            .collect();
-
-                    if candidate_datasets.is_empty() {
-                        // if there's no local storage datasets on this sled for
-                        // this request's size, then try another sled.
-                        info!(
-                            &log,
-                            "sled {sled_target} does not have any \
-                            candidate datasets with available space to \
-                            satisfy local storage allocation";
-                            "request" => ?request,
-                        );
+                    None => {
+                        warn!(&log, "no zpools for {sled_target:?}?");
 
                         sled_targets.remove(&sled_target);
                         banned.remove(&sled_target);
                         unpreferred.remove(&sled_target);
                         preferred.remove(&sled_target);
 
-                        continue 'outer;
-                    }
-
-                    allocations_to_perform.push(
-                        PossibleAllocationsForRequest {
-                            request,
-                            candidate_datasets,
-                        },
-                    );
-                }
-
-                // From the list of allocations to perform, and all the
-                // candidate local storage datasets that could fit those
-                // allocations, find a list of all valid request -> zpool
-                // mappings.
-
-                struct PossibleAllocations {
-                    allocations: Vec<LocalStorageAllocation>,
-                    candidates_left: HashSet<CandidateDataset>,
-                    request_index: usize,
-                }
-
-                struct ValidatedAllocations {
-                    allocations: NonEmpty<LocalStorageAllocation>,
-                }
-
-                let mut validated_allocations: Vec<ValidatedAllocations> =
-                    vec![];
-                let mut queue = VecDeque::new();
-
-                // Start from no allocations made yet, a list of allocations to
-                // perform (stored in `requests`), and all of the available
-                // zpools on the sled.
-
-                queue.push_back(PossibleAllocations {
-                    allocations: vec![],
-                    candidates_left: zpools_for_sled
-                        .iter()
-                        .map(|zpool_get_result| CandidateDataset {
-                            rendezvous_local_storage_dataset_id:
-                                zpool_get_result
-                                    .rendezvous_local_storage_dataset_id,
-                            pool_id: zpool_get_result.pool.id(),
-                            sled_id: zpool_get_result.pool.sled_id(),
-                        })
-                        .collect(),
-                    request_index: 0,
-                });
-
-                // Find each valid allocation by, for each request:
-                //
-                // - selecting a local storage dataset from the list of local
-                //   storage datasets that have not been used yet that could
-                //   fulfill that request
-                //
-                // - removing that selected local storage dataset from the list
-                //   of candidates
-                //
-                // - considering a set of allocations as "valid" if all requests
-                //   have been matched with a local storage dataset.
-
-                while let Some(possible_allocation) = queue.pop_front() {
-                    let PossibleAllocations {
-                        allocations,
-                        candidates_left,
-                        request_index,
-                    } = possible_allocation;
-
-                    // If we have an allocation for each possible allocation,
-                    // this one is valid. Add it to the list!
-                    if request_index == allocations_to_perform.len() {
-                        let allocations_len = allocations.len();
-
-                        match NonEmpty::from_vec(allocations) {
-                            Some(allocations) => {
-                                validated_allocations
-                                    .push(ValidatedAllocations { allocations });
-                            }
-
-                            None => {
-                                // There should be `request_index` entries in
-                                // the `allocations` vec, this is weird!
-                                error!(
-                                    &opctx.log,
-                                    "expected {request_index} in the \
-                                    allocations vec, saw {allocations_len}",
-                                );
-                            }
-                        }
-
                         continue;
                     }
+                };
 
-                    // Try to allocate the Nth possible allocation
-                    let request = &allocations_to_perform[request_index];
-
-                    // Create a possible config based on the what datasets are
-                    // left, and the candidate datasets for this request.
-                    for candidate_dataset in &request.candidate_datasets {
-                        if candidates_left.contains(candidate_dataset) {
-                            // This request could be satisfied by this dataset.
-                            // Select it and search further.
-
-                            let mut set_allocations = allocations.clone();
-                            set_allocations.push(LocalStorageAllocation {
-                                disk_id: request.request.id(),
-
-                                local_storage_dataset_allocation_id:
-                                    DatasetUuid::new_v4(),
-
-                                required_dataset_size: {
-                                    let request_size: i64 =
-                                        request.request.size().to_bytes()
-                                            as i64
-                                            + request
-                                                .request
-                                                .required_dataset_overhead()
-                                                .to_bytes()
-                                                as i64;
-                                    request_size
-                                },
-
-                                local_storage_dataset_id: candidate_dataset
-                                    .rendezvous_local_storage_dataset_id,
-
-                                pool_id: candidate_dataset.pool_id,
-
-                                sled_id: candidate_dataset.sled_id,
-                            });
-
-                            // Note by removing a candidate dataset from the
-                            // list in this way, this step mandates that a
-                            // single local storage dataset is not used for
-                            // multiple local storage allocations for a given
-                            // instance.
-
-                            let mut set_candidates_left =
-                                candidates_left.clone();
-                            set_candidates_left.remove(candidate_dataset);
-
-                            queue.push_back(PossibleAllocations {
-                                allocations: set_allocations,
-                                candidates_left: set_candidates_left,
-                                request_index: request_index + 1,
-                            });
+                let complete_allocation_lists =
+                    match CompleteLocalStorageAllocationLists::new(
+                        &log,
+                        sled_target,
+                        zpools_for_sled,
+                        &local_storage_disks,
+                    ) {
+                        Some(complete_allocation_lists) => {
+                            complete_allocation_lists
                         }
 
-                        // Else there are no candidate datasets left for this
-                        // request, and therefore the list of requests cannot be
-                        // fulfilled by the current mapping of requests to
-                        // datasets
-                    }
-                }
+                        None => {
+                            // Cannot use this sled, as no complete allocation
+                            // lists exist: `new` will have logged why, so try
+                            // another sled.
 
-                // Loop here over each possible set of local storage allocations
+                            sled_targets.remove(&sled_target);
+                            banned.remove(&sled_target);
+                            unpreferred.remove(&sled_target);
+                            preferred.remove(&sled_target);
+
+                            continue;
+                        }
+                    };
+
+                // Loop here over each complete set of local storage allocations
                 // required, and attempt the sled insert resource query with
                 // that particular allocation.
                 //
-                // If the `validated_allocations` list is empty, control will
-                // pass to the end of the loop marked with 'outer, which will
-                // then try the next possible sled target. In the case where
-                // there were existing local storage allocations there will
-                // _not_ be any more sleds to try and the user will see a
-                // capacity error.
+                // If the `complate_allocation_lists` iterator returns None,
+                // control will pass to the end of the loop marked with 'outer,
+                // which will then try the next possible sled target. In the
+                // case where there were pre-existing local storage allocations
+                // there will _not_ be any more sleds to try and the user will
+                // see a capacity error.
 
-                for valid_allocation in validated_allocations {
-                    let ValidatedAllocations { allocations } = valid_allocation;
-
+                for allocations in complete_allocation_lists {
                     info!(
                         &log,
                         "attempting to insert sled resource record";
@@ -1098,6 +1175,7 @@ impl DataStore {
                         info!(&log, "reservation succeeded!");
                         return Ok(resource);
                     }
+
                     info!(&log, "reservation failed");
                 }
             }
@@ -5249,10 +5327,12 @@ pub(in crate::db::datastore) mod test {
             instances: vec![],
         };
 
+        const MAX_U2_PER_INSTANCE: usize = 10;
+
         for i in 0..32 {
             let mut u2s = vec![];
 
-            for n in 0..MAX_DISKS_PER_INSTANCE {
+            for n in 0..MAX_U2_PER_INSTANCE {
                 u2s.push(LocalStorageTestSledU2 {
                     physical_disk_id: PhysicalDiskUuid::new_v4(),
                     physical_disk_serial: format!("phys_{i}_{n}"),
@@ -5266,7 +5346,7 @@ pub(in crate::db::datastore) mod test {
 
                     crucible_dataset_id: DatasetUuid::new_v4(),
                     crucible_dataset_addr: format!(
-                        "[fd00:1122:3344:{i}0{n}::1]:12345"
+                        "[fd00:1122:3344:{i}{n:02x}::1]:12345"
                     )
                     .parse()
                     .unwrap(),
@@ -5283,7 +5363,7 @@ pub(in crate::db::datastore) mod test {
 
             let mut disks = vec![];
 
-            for n in 0..MAX_DISKS_PER_INSTANCE {
+            for n in 0..MAX_U2_PER_INSTANCE {
                 disks.push(LocalStorageTestInstanceDisk {
                     id: Uuid::new_v4(),
                     name: external::Name::try_from(format!("local-{i}-{n}"))
