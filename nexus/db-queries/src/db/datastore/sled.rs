@@ -288,6 +288,7 @@ fn pick_sled_reservation_target(
     return Err(SledReservationError::NotFound);
 }
 
+/// A candidate dataset for a local storage allocation
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct CandidateDataset {
     rendezvous_local_storage_dataset_id: DatasetUuid,
@@ -295,54 +296,76 @@ struct CandidateDataset {
     sled_id: SledUuid,
 }
 
+/// For a given local storage disk that has not been allocated, store all the
+/// candidate datasets that could fulfill that allocation.
 #[derive(Clone, Debug)]
 struct PossibleAllocationsForRequest<'a> {
     request: &'a LocalStorageDisk,
     candidate_datasets: HashSet<CandidateDataset>,
 }
 
-struct PossibleAllocations {
+/// Store the intermediate search state during the search for all possible
+/// pairings of requests for local storage to datasets. This is ordered by how
+/// many pairings have been made so far to prioritize quickly finding a complete
+/// allocation.
+struct IncompleteAllocationList {
+    /// Requests for a local storage allocation that have been paired with a
+    /// dataset
     allocations: Vec<LocalStorageAllocation>,
+
+    /// Remaining candidate datasets for non-paired allocation requests
     candidates_left: HashSet<CandidateDataset>,
+
+    /// Which allocation request to consider next
     request_index: usize,
 }
 
-impl PartialOrd for PossibleAllocations {
+impl PartialOrd for IncompleteAllocationList {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for PossibleAllocations {
+impl Ord for IncompleteAllocationList {
     fn cmp(&self, other: &Self) -> Ordering {
         self.allocations.len().cmp(&other.allocations.len())
     }
 }
 
-impl PartialEq for PossibleAllocations {
+impl PartialEq for IncompleteAllocationList {
     fn eq(&self, other: &Self) -> bool {
         self.allocations.len() == other.allocations.len()
     }
 }
 
-impl Eq for PossibleAllocations {}
+impl Eq for IncompleteAllocationList {}
 
-/// Store all the state required to iterate through possible valid allocations
-/// for a list of local storage allocations to fulfill. Completing the complete
-/// set is expensive, so yield valid allocations as they're found.
-struct ValidLocalStorageAllocations<'a> {
+/// Store all the state required to iterate through possible mappings of local
+/// storage allocation requests to datasets.
+///
+/// Yield complete allocation lists as they're found, where complete means all
+/// allocations have been performed, because computing all possibilities up
+/// front is expensive.
+struct CompleteLocalStorageAllocationLists<'a> {
     log: Logger,
+
+    /// All allocations that need to be performed
     allocations_to_perform: Vec<PossibleAllocationsForRequest<'a>>,
-    queue: BinaryHeap<PossibleAllocations>,
+
+    /// A queue of incomplete allocation lists to search through, where
+    /// incomplete means there are still local storage disk to dataset
+    /// allocations to be performed. These are sorted by the number of
+    /// allocations made so far to prioritize yielding a valid allocation.
+    queue: BinaryHeap<IncompleteAllocationList>,
 }
 
-impl<'a> ValidLocalStorageAllocations<'a> {
+impl<'a> CompleteLocalStorageAllocationLists<'a> {
     fn new(
         log: &Logger,
         sled_target: SledUuid,
         zpools_for_sled: NonEmpty<ZpoolGetForSledReservationResult>,
         local_storage_disks: &'a [LocalStorageDisk],
-    ) -> Result<Self, ()> {
+    ) -> Option<Self> {
         let local_storage_allocation_required: Vec<&LocalStorageDisk> =
             local_storage_disks
                 .iter()
@@ -387,7 +410,7 @@ impl<'a> ValidLocalStorageAllocations<'a> {
                 "allocations" => local_storage_allocation_required.len(),
             );
 
-            return Err(());
+            return None;
         }
 
         info!(&log, "filtered zpools for sled: {zpools_for_sled:?}");
@@ -445,7 +468,8 @@ impl<'a> ValidLocalStorageAllocations<'a> {
                     with available space to satisfy local storage allocation";
                     "request" => ?request,
                 );
-                return Err(());
+
+                return None;
             }
 
             allocations_to_perform.push(PossibleAllocationsForRequest {
@@ -460,11 +484,10 @@ impl<'a> ValidLocalStorageAllocations<'a> {
         //
         // Start from no allocations made yet, a list of allocations to perform
         // (stored in `requests`), and all of the available zpools on the sled.
-        // Use a BinaryHeap to get a sorted list.
 
         let mut queue = BinaryHeap::new();
 
-        queue.push(PossibleAllocations {
+        queue.push(IncompleteAllocationList {
             allocations: vec![],
             candidates_left: zpools_for_sled
                 .iter()
@@ -478,35 +501,39 @@ impl<'a> ValidLocalStorageAllocations<'a> {
             request_index: 0,
         });
 
-        Ok(Self { log: log.clone(), allocations_to_perform, queue })
+        Some(Self { log: log.clone(), allocations_to_perform, queue })
     }
 }
 
-impl<'a> Iterator for ValidLocalStorageAllocations<'a> {
+impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
     type Item = NonEmpty<LocalStorageAllocation>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Find each valid allocation by, for each request:
+        // For each incomplete allocation list:
         //
-        // - selecting a local storage dataset from the list of local storage
+        // - find the next request to allocate for
+        //
+        // - select a local storage dataset from the list of local storage
         //   datasets that have not been used yet that could fulfill that
         //   request
         //
-        // - removing that selected local storage dataset from the list of
+        // - remove that selected local storage dataset from the list of
         //   candidates
         //
-        // - considering a set of allocations as "valid" if all requests have
-        //   been matched with a local storage dataset.
+        // - add that to the queue
+        //
+        // A list of allocations as complete if all requests have been matched
+        // with a local storage dataset.
 
-        while let Some(possible_allocation) = self.queue.pop() {
-            let PossibleAllocations {
+        while let Some(incomplete_allocation_list) = self.queue.pop() {
+            let IncompleteAllocationList {
                 allocations,
                 candidates_left,
                 request_index,
-            } = possible_allocation;
+            } = incomplete_allocation_list;
 
             // If we have an allocation for each possible allocation, this one
-            // is valid. Add it to the list!
+            // is complete.
             if request_index == self.allocations_to_perform.len() {
                 let allocations_len = allocations.len();
 
@@ -573,7 +600,7 @@ impl<'a> Iterator for ValidLocalStorageAllocations<'a> {
                     let mut set_candidates_left = candidates_left.clone();
                     set_candidates_left.remove(candidate_dataset);
 
-                    self.queue.push(PossibleAllocations {
+                    self.queue.push(IncompleteAllocationList {
                         allocations: set_allocations,
                         candidates_left: set_candidates_left,
                         request_index: request_index + 1,
@@ -1088,18 +1115,22 @@ impl DataStore {
                     }
                 };
 
-                let validated_allocations =
-                    match ValidLocalStorageAllocations::new(
+                let complete_allocation_lists =
+                    match CompleteLocalStorageAllocationLists::new(
                         &log,
                         sled_target,
                         zpools_for_sled,
                         &local_storage_disks,
                     ) {
-                        Ok(validated_allocations) => validated_allocations,
+                        Some(complete_allocation_lists) => {
+                            complete_allocation_lists
+                        }
 
-                        Err(()) => {
-                            // Cannot use this sled: `new` will have logged why,
-                            // so try another sled
+                        None => {
+                            // Cannot use this sled, as no complete allocation
+                            // lists exist: `new` will have logged why, so try
+                            // another sled.
+
                             sled_targets.remove(&sled_target);
                             banned.remove(&sled_target);
                             unpreferred.remove(&sled_target);
@@ -1109,18 +1140,18 @@ impl DataStore {
                         }
                     };
 
-                // Loop here over each possible set of local storage allocations
+                // Loop here over each complete set of local storage allocations
                 // required, and attempt the sled insert resource query with
                 // that particular allocation.
                 //
-                // If the `validated_allocations` iterator returns None, control
-                // will pass to the end of the loop marked with 'outer, which
-                // will then try the next possible sled target. In the case
-                // where there were existing local storage allocations there
-                // will _not_ be any more sleds to try and the user will see a
-                // capacity error.
+                // If the `complate_allocation_lists` iterator returns None,
+                // control will pass to the end of the loop marked with 'outer,
+                // which will then try the next possible sled target. In the
+                // case where there were pre-existing local storage allocations
+                // there will _not_ be any more sleds to try and the user will
+                // see a capacity error.
 
-                for allocations in validated_allocations {
+                for allocations in complete_allocation_lists {
                     info!(
                         &log,
                         "attempting to insert sled resource record";
