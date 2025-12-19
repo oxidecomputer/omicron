@@ -90,6 +90,42 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Return a `RackUuid` for each trust quorum along with its latest `Epoch`.
+    ///
+    /// For now, since we do not have multirack, and we aren't sure how big
+    /// those clusters are going to be we return all values and don't bother
+    /// paginating. The current `SQL_BATCH_SIZE` is also 1000, and it's unlikely
+    /// that there will ever be more than 1000 racks in a single fleet, sharing
+    /// a single CRDB cluster.
+    pub async fn tq_get_all_rack_id_and_latest_epoch(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<(RackUuid, Epoch)> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+
+        let values: Vec<(DbTypedUuid<RackKind>, i64)> =
+            dsl::trust_quorum_configuration
+                .select((dsl::rack_id, dsl::epoch))
+                .order_by((dsl::rack_id, dsl::epoch.desc()))
+                .distinct_on(dsl::rack_id)
+                .load_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+        let mut output = Vec::with_capacity(values.len());
+
+        for (rack_id, epoch) in values {
+            output.push((rack_id.into(), i64_to_epoch(epoch)?));
+        }
+
+        Ok(output)
+    }
+
     /// Get the latest trust quorum configuration from the database
     pub async fn tq_get_latest_config(
         &self,
@@ -1532,5 +1568,79 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_get_all_rack_id_and_latest_epoch() {
+        let logctx = test_setup_log("test_get_all_rack_id_and_latest_epoch");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let rack_id1 = RackUuid::new_v4();
+        let rack_id2 = RackUuid::new_v4();
+        let rack_id3 = RackUuid::new_v4();
+
+        // Create an initial config for 3 diff racks
+        for rack_id in [rack_id1, rack_id2, rack_id3] {
+            let hw_ids = insert_hw_baseboard_ids(&db).await;
+            let config = TrustQuorumConfig {
+                rack_id,
+                epoch: Epoch(1),
+                state: TrustQuorumConfigState::Preparing,
+                threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
+                commit_crash_tolerance: 2,
+                coordinator: hw_ids.first().unwrap().clone().into(),
+                encrypted_rack_secrets: None,
+                members: hw_ids
+                    .clone()
+                    .into_iter()
+                    .map(|m| (m.into(), TrustQuorumMemberData::new()))
+                    .collect(),
+            };
+
+            datastore
+                .tq_insert_latest_config(opctx, config.clone())
+                .await
+                .unwrap();
+        }
+
+        // Create a second rack config for rack 2
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let config = TrustQuorumConfig {
+            rack_id: rack_id2,
+            epoch: Epoch(2),
+            state: TrustQuorumConfigState::Preparing,
+            threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
+            commit_crash_tolerance: 2,
+            coordinator: hw_ids.first().unwrap().clone().into(),
+            encrypted_rack_secrets: None,
+            members: hw_ids
+                .clone()
+                .into_iter()
+                .map(|m| (m.into(), TrustQuorumMemberData::new()))
+                .collect(),
+        };
+
+        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
+
+        // Retreive the latest epochs per rack_id
+        let values =
+            datastore.tq_get_all_rack_id_and_latest_epoch(opctx).await.unwrap();
+
+        // We should have retrieved one epoch per rack_id
+        assert_eq!(values.len(), 3);
+        // Ensure all rack_ids are unique
+        let rack_ids: BTreeSet<_> =
+            values.iter().map(|(rack_id, _)| rack_id).collect();
+        assert_eq!(rack_ids.len(), 3);
+
+        // The epoch should be the latest that exists
+        for (rack_id, epoch) in values {
+            if rack_id == rack_id2 {
+                assert_eq!(epoch, Epoch(2));
+            } else {
+                assert_eq!(epoch, Epoch(1));
+            }
+        }
     }
 }
