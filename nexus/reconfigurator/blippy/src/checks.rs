@@ -858,7 +858,7 @@ mod tests {
         let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
 
         // Copy the subnet from one sled to another.
-        let sled0 = *blueprint.sleds.keys().nth(0).unwrap();
+        let sled0 = *blueprint.sleds.keys().next().unwrap();
         let sled1 = *blueprint.sleds.keys().nth(1).unwrap();
 
         let sled0_subnet = blueprint.sleds.get(&sled0).unwrap().subnet;
