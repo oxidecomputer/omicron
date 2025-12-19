@@ -15,5 +15,6 @@ omicron-workspace-hack.workspace = true
 tufaceous-artifact.workspace = true
 
 [dev-dependencies]
+ipnet.workspace = true
 nexus-reconfigurator-planning.workspace = true
 omicron-test-utils.workspace = true

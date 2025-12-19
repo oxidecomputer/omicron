@@ -235,6 +235,7 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
         StepOutcome, StepStatus,
@@ -285,6 +286,8 @@ mod test {
                     BlueprintSledConfig {
                         state: SledState::Active,
                         subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                        last_allocated_ip_subnet_offset:
+                            LastAllocatedSubnetIpOffset::initial(),
                         sled_agent_generation: Generation::new().next(),
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),

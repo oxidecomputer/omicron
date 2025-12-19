@@ -15,6 +15,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP:   fd00:1122:3344:103::2f
 
     host phase 2 contents:
     ------------------------
@@ -132,6 +133,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP:   fd00:1122:3344:102::2e
 
     host phase 2 contents:
     ------------------------
@@ -246,6 +248,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP:   fd00:1122:3344:101::2e
 
     host phase 2 contents:
     ------------------------
@@ -562,6 +565,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP:   fd00:1122:3344:103::2f
 
     host phase 2 contents:
     ------------------------
@@ -679,6 +683,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP:   fd00:1122:3344:102::2e
 
     host phase 2 contents:
     ------------------------
@@ -793,6 +798,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP:   fd00:1122:3344:101::2e
 
     host phase 2 contents:
     ------------------------
@@ -1134,6 +1140,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     state:::::::::::::   active
     config generation:   4
     subnet::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP:   fd00:1122:3344:103::30
 
     host phase 2 contents:
     ------------------------
@@ -1254,6 +1261,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP:   fd00:1122:3344:102::2e
 
     host phase 2 contents:
     ------------------------
@@ -1368,6 +1376,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP:   fd00:1122:3344:101::2e
 
     host phase 2 contents:
     ------------------------

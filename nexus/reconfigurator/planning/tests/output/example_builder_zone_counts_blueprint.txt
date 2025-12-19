@@ -5,6 +5,7 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:105::/64
+    last allocated IP:   fd00:1122:3344:105::31
 
     host phase 2 contents:
     ------------------------
@@ -127,6 +128,7 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:104::/64
+    last allocated IP:   fd00:1122:3344:104::2f
 
     host phase 2 contents:
     ------------------------
@@ -244,6 +246,7 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP:   fd00:1122:3344:102::2f
 
     host phase 2 contents:
     ------------------------
@@ -358,6 +361,7 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP:   fd00:1122:3344:103::2f
 
     host phase 2 contents:
     ------------------------
@@ -472,6 +476,7 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP:   fd00:1122:3344:101::2f
 
     host phase 2 contents:
     ------------------------

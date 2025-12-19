@@ -1556,6 +1556,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
+    last allocated IP:   ::20
 
     host phase 2 contents:
     ------------------------
@@ -1598,6 +1599,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
+    last allocated IP:   ::20
 
     host phase 2 contents:
     ------------------------
@@ -1686,6 +1688,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
+    last allocated IP:   ::20
 
     host phase 2 contents:
     ------------------------
@@ -1728,6 +1731,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
+    last allocated IP:   ::20
 
     host phase 2 contents:
     ------------------------
