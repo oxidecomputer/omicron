@@ -34,6 +34,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (12, DROPSHOT_API_MANAGER_0_3_0),
     (11, ADD_DUAL_STACK_EXTERNAL_IP_CONFIG),
     (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
     (9, DELEGATE_ZVOL_TO_PROPOLIS),
