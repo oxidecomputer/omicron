@@ -173,8 +173,14 @@ impl NexusSaga for SagaInstanceStart {
 
         // Changing MAX_DISKS_PER_INSTANCE requires changing this saga
         static_assertions::const_assert!(MAX_DISKS_PER_INSTANCE == 12);
+
+        // In parallel, ensure all local storage related to this instance.
         seq!(N in 0..12 {
-            builder.append(paste!([<ensure_local_storage_ N _action>]()));
+            builder.append_parallel(vec![
+                #(
+                paste!([<ensure_local_storage_ N _action>]()),
+                )*
+            ]);
         });
 
         builder.append(dpd_ensure_action());

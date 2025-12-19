@@ -34,6 +34,9 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
+use illumos_utils::zfs::DatasetVolumeDeleteArgs;
+use illumos_utils::zfs::DatasetVolumeEnsureArgs;
+use illumos_utils::zfs::EncryptionDetails;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
@@ -1283,10 +1286,11 @@ impl SledAgent {
             ),
             can_mount: CanMount::Off,
             zoned: false,
-            // encryption details not required, will inherit from parent
-            // "oxp_UUID/crypt/local_storage", which inherits from
-            // "oxp_UUID/crypt"
-            encryption_details: None,
+            // Ordinarily, we would want to inherit encryption details from the
+            // parent "oxp_UUID/crypt/local_storage" dataset, which inherits
+            // from "oxp_UUID/crypt". We're making raw zvols though, so set
+            // encryption explicitly off.
+            encryption_details: EncryptionDetails::Off,
             size_details: Some(SizeDetails {
                 quota: Some(dataset_size),
                 reservation: Some(dataset_size),
@@ -1298,13 +1302,20 @@ impl SledAgent {
         .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        Zfs::ensure_dataset_volume(
-            delegated_zvol.volume_name(),
-            volume_size,
-            delegated_zvol.volblocksize(),
-        )
+        Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs {
+            name: &delegated_zvol.volume_name(),
+            size: volume_size,
+            raw: true,
+            volblocksize: None,
+        })
         .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| {
+            if e.is_not_ready() {
+                HttpError::for_unavail(None, e.to_string())
+            } else {
+                HttpError::for_internal_error(e.to_string())
+            }
+        })?;
 
         Ok(())
     }
@@ -1338,6 +1349,19 @@ impl SledAgent {
 
         let delegated_zvol =
             DelegatedZvol::LocalStorage { zpool_id, dataset_id };
+
+        Zfs::delete_dataset_volume(DatasetVolumeDeleteArgs {
+            name: &delegated_zvol.volume_name(),
+            raw: true,
+        })
+        .await
+        .map_err(|e| {
+            if e.is_not_ready() {
+                HttpError::for_unavail(None, e.to_string())
+            } else {
+                HttpError::for_internal_error(e.to_string())
+            }
+        })?;
 
         Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name())
             .await

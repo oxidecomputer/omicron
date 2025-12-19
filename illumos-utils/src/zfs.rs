@@ -233,6 +233,12 @@ pub enum EnsureDatasetVolumeErrorInner {
 
     #[error("expected {value_name} to be {expected}, but saw {actual}")]
     ValueMismatch { value_name: String, expected: u64, actual: u64 },
+
+    #[error(transparent)]
+    RustixErrno(#[from] rustix::io::Errno),
+
+    #[error("created but not ready yet: {reason}")]
+    NotReady { reason: String },
 }
 
 /// Error returned by [`Zfs::ensure_dataset_volume`].
@@ -245,6 +251,10 @@ pub struct EnsureDatasetVolumeError {
 }
 
 impl EnsureDatasetVolumeError {
+    pub fn is_not_ready(&self) -> bool {
+        matches!(&self.err, EnsureDatasetVolumeErrorInner::NotReady { .. })
+    }
+
     pub fn execution(name: String, err: crate::ExecutionError) -> Self {
         EnsureDatasetVolumeError {
             name,
@@ -286,6 +296,86 @@ impl EnsureDatasetVolumeError {
                 expected,
                 actual,
             },
+        }
+    }
+
+    pub fn from_raw_zvol_open(name: String, e: rustix::io::Errno) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::RustixErrno(e),
+        }
+    }
+
+    pub fn from_raw_zvol_read(name: String, e: rustix::io::Errno) -> Self {
+        if e == rustix::io::Errno::INPROGRESS {
+            EnsureDatasetVolumeError {
+                name,
+                err: EnsureDatasetVolumeErrorInner::NotReady {
+                    reason: String::from("raw volume not done initializing"),
+                },
+            }
+        } else {
+            EnsureDatasetVolumeError {
+                name,
+                err: EnsureDatasetVolumeErrorInner::RustixErrno(e),
+            }
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum DeleteDatasetVolumeErrorInner {
+    #[error(transparent)]
+    Execution(#[from] crate::ExecutionError),
+
+    #[error(transparent)]
+    RustixErrno(#[from] rustix::io::Errno),
+
+    #[error("created but not ready yet: {reason}")]
+    NotReady { reason: String },
+}
+
+/// Error returned by [`Zfs::delete_dataset_volume`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to delete volume '{name}': {err}")]
+pub struct DeleteDatasetVolumeError {
+    name: String,
+    #[source]
+    err: DeleteDatasetVolumeErrorInner,
+}
+
+impl DeleteDatasetVolumeError {
+    pub fn is_not_ready(&self) -> bool {
+        matches!(&self.err, DeleteDatasetVolumeErrorInner::NotReady { .. })
+    }
+
+    pub fn execution(name: String, err: crate::ExecutionError) -> Self {
+        DeleteDatasetVolumeError {
+            name,
+            err: DeleteDatasetVolumeErrorInner::Execution(err),
+        }
+    }
+
+    pub fn from_raw_zvol_open(name: String, e: rustix::io::Errno) -> Self {
+        DeleteDatasetVolumeError {
+            name,
+            err: DeleteDatasetVolumeErrorInner::RustixErrno(e),
+        }
+    }
+
+    pub fn from_raw_zvol_read(name: String, e: rustix::io::Errno) -> Self {
+        if e == rustix::io::Errno::INPROGRESS {
+            DeleteDatasetVolumeError {
+                name,
+                err: DeleteDatasetVolumeErrorInner::NotReady {
+                    reason: String::from("raw volume not done initializing"),
+                },
+            }
+        } else {
+            DeleteDatasetVolumeError {
+                name,
+                err: DeleteDatasetVolumeErrorInner::RustixErrno(e),
+            }
         }
     }
 }
@@ -342,9 +432,20 @@ impl Keypath {
 }
 
 #[derive(Debug)]
-pub struct EncryptionDetails {
-    pub keypath: Keypath,
-    pub epoch: u64,
+pub enum EncryptionDetails {
+    /// Inherit the parent's encryption settings
+    Inherit,
+
+    /// Explicitly set encryption to off
+    Off,
+
+    /// Use a file based `keylocation` and configure `aes-256-gcm`
+    Aes256Gcm {
+        keypath: Keypath,
+
+        /// Used to set the `oxide:epoch` option for the dataset.
+        epoch: u64,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -623,7 +724,7 @@ pub struct DatasetEnsureArgs<'a> {
     /// root are implicitly encrypted. For existing filesystems, ensures that
     /// they are mounted (and that keys are loaded), but does not verify the
     /// input details.
-    pub encryption_details: Option<EncryptionDetails>,
+    pub encryption_details: EncryptionDetails,
 
     /// Optional properties that can be set for the dataset regarding
     /// space usage.
@@ -899,6 +1000,29 @@ impl DatasetMountInfo {
     }
 }
 
+/// Arguments to [Zfs::ensure_dataset_volume]
+pub struct DatasetVolumeEnsureArgs<'a> {
+    /// The full path of the volume
+    pub name: &'a str,
+
+    pub size: ByteCount,
+
+    /// Create a raw zvol instead of a regular one
+    pub raw: bool,
+
+    /// Optionally set the volblocksize
+    pub volblocksize: Option<u32>,
+}
+
+/// Arguments to [Zfs::delete_dataset_volume]
+pub struct DatasetVolumeDeleteArgs<'a> {
+    /// The full path of the volume
+    pub name: &'a str,
+
+    /// Additional actions are required when deleting a raw zvol.
+    pub raw: bool,
+}
+
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     ///
@@ -1122,19 +1246,27 @@ impl Zfs {
         if zoned {
             cmd.args(&["-o", "zoned=on"]);
         }
-        if let Some(details) = encryption_details {
-            let keyloc = format!("keylocation=file://{}", details.keypath);
-            let epoch = format!("oxide:epoch={}", details.epoch);
-            cmd.args(&[
-                "-o",
-                "encryption=aes-256-gcm",
-                "-o",
-                "keyformat=raw",
-                "-o",
-                &keyloc,
-                "-o",
-                &epoch,
-            ]);
+        match encryption_details {
+            EncryptionDetails::Inherit => {}
+
+            EncryptionDetails::Off => {
+                cmd.args(&["-o", "encryption=off"]);
+            }
+
+            EncryptionDetails::Aes256Gcm { keypath, epoch } => {
+                let keyloc = format!("keylocation=file://{keypath}");
+                let epoch = format!("oxide:epoch={epoch}");
+                cmd.args(&[
+                    "-o",
+                    "encryption=aes-256-gcm",
+                    "-o",
+                    "keyformat=raw",
+                    "-o",
+                    &keyloc,
+                    "-o",
+                    &epoch,
+                ]);
+            }
         }
 
         match can_mount {
@@ -1411,27 +1543,36 @@ impl Zfs {
     }
 
     pub async fn ensure_dataset_volume(
-        name: String,
-        size: ByteCount,
-        block_size: u32,
+        params: DatasetVolumeEnsureArgs<'_>,
     ) -> Result<(), EnsureDatasetVolumeError> {
         let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "create"]);
 
-        cmd.args(&[
-            "-V",
-            &size.to_bytes().to_string(),
-            "-o",
-            &format!("volblocksize={}", block_size),
-            &name,
-        ]);
+        let mut args: Vec<String> =
+            vec!["-V".to_string(), params.size.to_bytes().to_string()];
+
+        if params.raw {
+            args.push("-o".to_string());
+            args.push("rawvol=on".to_string());
+        }
+
+        if let Some(volblocksize) = &params.volblocksize {
+            args.push("-o".to_string());
+            args.push(format!("volblocksize={}", volblocksize));
+        }
+
+        args.push(params.name.to_string());
+
+        cmd.args(&args);
 
         // The command to create a dataset is not idempotent and will fail with
         // "dataset already exists" if the volume is created already. Eat this
         // and return Ok instead.
 
         match execute_async(cmd).await {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                // no-op
+            }
 
             Err(crate::ExecutionError::CommandFailure(info))
                 if info.stderr.contains("dataset already exists") =>
@@ -1440,55 +1581,143 @@ impl Zfs {
                 // being requested: these cannot be changed once the volume is
                 // created.
 
-                let [actual_size, actual_block_size] =
-                    Self::get_values(&name, &["volsize", "volblocksize"], None)
-                        .await
-                        .map_err(|err| {
-                            EnsureDatasetVolumeError::get_value(
-                                name.clone(),
-                                err,
-                            )
-                        })?;
+                let [actual_size, actual_volblocksize] = Self::get_values(
+                    params.name,
+                    &["volsize", "volblocksize"],
+                    None,
+                )
+                .await
+                .map_err(|err| {
+                    EnsureDatasetVolumeError::get_value(
+                        params.name.to_string(),
+                        err,
+                    )
+                })?;
 
                 let actual_size: u64 = actual_size.parse().map_err(|_| {
                     EnsureDatasetVolumeError::value_parse(
-                        name.clone(),
+                        params.name.to_string(),
                         String::from("volsize"),
                         actual_size,
                     )
                 })?;
 
-                let actual_block_size: u32 =
-                    actual_block_size.parse().map_err(|_| {
+                let actual_volblocksize: u32 =
+                    actual_volblocksize.parse().map_err(|_| {
                         EnsureDatasetVolumeError::value_parse(
-                            name.clone(),
+                            params.name.to_string(),
                             String::from("volblocksize"),
-                            actual_block_size,
+                            actual_volblocksize,
                         )
                     })?;
 
-                if actual_size != size.to_bytes() {
+                if actual_size != params.size.to_bytes() {
                     return Err(EnsureDatasetVolumeError::value_mismatch(
-                        name.clone(),
+                        params.name.to_string(),
                         String::from("volsize"),
-                        size.to_bytes(),
+                        params.size.to_bytes(),
                         actual_size,
                     ));
                 }
 
-                if actual_block_size != block_size {
-                    return Err(EnsureDatasetVolumeError::value_mismatch(
-                        name.clone(),
-                        String::from("volblocksize"),
-                        u64::from(block_size),
-                        u64::from(actual_block_size),
-                    ));
+                if let Some(volblocksize) = &params.volblocksize {
+                    if actual_volblocksize != *volblocksize {
+                        return Err(EnsureDatasetVolumeError::value_mismatch(
+                            params.name.to_string(),
+                            String::from("volblocksize"),
+                            u64::from(*volblocksize),
+                            u64::from(actual_volblocksize),
+                        ));
+                    }
                 }
+            }
 
+            Err(err) => {
+                return Err(EnsureDatasetVolumeError::execution(
+                    params.name.to_string(),
+                    err,
+                ));
+            }
+        }
+
+        if params.raw {
+            // Open the raw zvol and read from it. If EINPROGRESS is seen from
+            // the read, then it's not done initializing yet. We can't use it
+            // until it's fully done, so return the `NotReady` variant to signal
+            // upstack that it should poll.
+            let path = format!("/dev/zvol/rdsk/{}", params.name);
+
+            let fd = rustix::fs::open(
+                path,
+                rustix::fs::OFlags::RDONLY,
+                rustix::fs::Mode::empty(),
+            )
+            .map_err(|e| {
+                EnsureDatasetVolumeError::from_raw_zvol_open(
+                    params.name.to_string(),
+                    e,
+                )
+            })?;
+
+            let mut buf = [0u8; 64];
+            rustix::io::read(fd, &mut buf).map_err(|e| {
+                EnsureDatasetVolumeError::from_raw_zvol_read(
+                    params.name.to_string(),
+                    e,
+                )
+            })?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn delete_dataset_volume(
+        params: DatasetVolumeDeleteArgs<'_>,
+    ) -> Result<(), DeleteDatasetVolumeError> {
+        if params.raw {
+            // Open the raw zvol and read from it. If EINPROGRESS is seen from
+            // the read, then it's not done initializing yet. We can't delete it
+            // until it's fully done, so return the `NotReady` variant to signal
+            // upstack that it should poll.
+            let path = format!("/dev/zvol/rdsk/{}", params.name);
+
+            let fd = rustix::fs::open(
+                path,
+                rustix::fs::OFlags::RDONLY,
+                rustix::fs::Mode::empty(),
+            )
+            .map_err(|e| {
+                DeleteDatasetVolumeError::from_raw_zvol_open(
+                    params.name.to_string(),
+                    e,
+                )
+            })?;
+
+            let mut buf = [0u8; 64];
+            rustix::io::read(fd, &mut buf).map_err(|e| {
+                DeleteDatasetVolumeError::from_raw_zvol_read(
+                    params.name.to_string(),
+                    e,
+                )
+            })?;
+        }
+
+        let mut command = Command::new(PFEXEC);
+        let cmd = command.args(&[ZFS, "destroy", params.name]);
+
+        match execute_async(cmd).await {
+            Ok(_) => Ok(()),
+
+            Err(crate::ExecutionError::CommandFailure(info))
+                if info.stderr.contains("dataset does not exist") =>
+            {
                 Ok(())
             }
 
-            Err(err) => Err(EnsureDatasetVolumeError::execution(name, err)),
+            Err(err) => Err(DeleteDatasetVolumeError::execution(
+                params.name.to_string(),
+                err,
+            )),
         }
     }
 }

@@ -29,6 +29,7 @@ use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::zfs;
+use illumos_utils::zfs::EncryptionDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Api;
@@ -281,7 +282,7 @@ async fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
         )),
         can_mount: zfs::CanMount::On,
         zoned: false,
-        encryption_details: None,
+        encryption_details: EncryptionDetails::Inherit,
         size_details: None,
         id: None,
         additional_options: None,

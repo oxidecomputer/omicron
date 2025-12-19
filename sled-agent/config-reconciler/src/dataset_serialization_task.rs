@@ -23,6 +23,7 @@ use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
 use illumos_utils::zfs::DatasetProperties;
 use illumos_utils::zfs::DestroyDatasetError;
+use illumos_utils::zfs::EncryptionDetails;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
@@ -951,7 +952,7 @@ impl DatasetTask {
         // `crypt` dataset. Ensuring that dataset would require non-`None`
         // encryption details, but that's currently handled by `Disk::new()`
         // when we start managing external disks.
-        let encryption_details = None;
+        let encryption_details = EncryptionDetails::Inherit;
 
         let size_details = Some(illumos_utils::zfs::SizeDetails {
             quota: size_details.quota,
