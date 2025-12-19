@@ -855,6 +855,18 @@ impl DataStore {
                 .internal_context("failed to delete case ereport assignments")
         })?;
 
+        // Delete alert requests
+        let alert_requests_deleted = diesel::delete(
+            alert_req_dsl::fm_alert_request
+                .filter(alert_req_dsl::sitrep_id.eq_any(ids.clone())),
+        )
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server)
+                .internal_context("failed to delete alert requests")
+        })?;
+
         // Delete case metadata records.
         let cases_deleted = diesel::delete(
             case_dsl::fm_case.filter(case_dsl::sitrep_id.eq_any(ids.clone())),
@@ -885,11 +897,12 @@ impl DataStore {
 
         slog::debug!(
             &opctx.log,
-            "deleted {sitreps_deleted} of {} sitreps sitreps", ids.len();
+            "deleted {sitreps_deleted} of {} sitreps", ids.len();
             "ids" => ?ids,
             "sitreps_deleted" => sitreps_deleted,
             "cases_deleted" => cases_deleted,
             "case_ereports_deleted" => case_ereports_deleted,
+            "alert_requests_deleted" => alert_requests_deleted,
         );
 
         Ok(sitreps_deleted)
