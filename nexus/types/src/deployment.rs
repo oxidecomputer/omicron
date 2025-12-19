@@ -31,6 +31,7 @@ use iddqd::id_upcast;
 use ipnet::IpAdd;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::TufArtifactMeta;
@@ -1071,11 +1072,11 @@ pub struct BlueprintSledConfig {
     /// and taking that offset into `subnet`.
     ///
     /// Planning will fail if `last_allocated_ip_subnet_offset` reaches
-    /// `u16::MAX`. This is very unlikely given current rates of updates and IP
-    /// assignments, but is well within the realm of "possible". Giving
+    /// its maximal value. This is very unlikely given current rates of updates
+    /// and IP assignments, but is well within the realm of "possible". Giving
     /// Reconfigurator a larger chunk of IPs is tracked by
     /// <https://github.com/oxidecomputer/omicron/issues/9534>.
-    pub last_allocated_ip_subnet_offset: u16,
+    pub last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
 
     /// Generation number used when this type is converted into an
     /// `OmicronSledConfig` for use by sled-agent.
@@ -1097,10 +1098,7 @@ pub struct BlueprintSledConfig {
 
 impl BlueprintSledConfig {
     pub fn last_allocated_ip(&self) -> Ipv6Addr {
-        self.subnet
-            .net()
-            .prefix()
-            .saturating_add(u128::from(self.last_allocated_ip_subnet_offset))
+        self.last_allocated_ip_subnet_offset.to_ip(self.subnet)
     }
 
     /// Converts self into [`OmicronSledConfig`].
@@ -1173,6 +1171,49 @@ impl BlueprintSledConfig {
     /// `Expunged`, false otherwise.
     pub fn are_all_zones_expunged(&self) -> bool {
         self.zones.iter().all(|c| c.disposition.is_expunged())
+    }
+}
+
+/// Offset stored within [`BlueprintSledConfig`] indicating the last IP
+/// Reconfigurator has allocated within that sled's subnet.
+///
+/// The inner value has a minimum of [`SLED_RESERVED_ADDRESSES`]; we treat all
+/// of those as "already allocated".
+#[derive(
+    Debug, Clone, Copy, Eq, PartialEq, JsonSchema, Serialize, Diffable,
+)]
+#[serde(transparent)]
+pub struct LastAllocatedSubnetIpOffset(u16);
+
+impl LastAllocatedSubnetIpOffset {
+    pub fn initial() -> Self {
+        Self(SLED_RESERVED_ADDRESSES)
+    }
+
+    /// Construct a new offset, enforcing our lower bound of
+    /// [`SLED_RESERVED_ADDRESSES`].
+    pub fn new(offset: u16) -> Self {
+        let offset = u16::max(offset, SLED_RESERVED_ADDRESSES);
+        Self(offset)
+    }
+
+    /// Convert this offset into the `offset`'th IP in `subnet`.
+    pub fn to_ip(self, subnet: Ipv6Subnet<SLED_PREFIX>) -> Ipv6Addr {
+        subnet.net().prefix().saturating_add(u128::from(self.0))
+    }
+
+    pub fn into_u16(self) -> u16 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for LastAllocatedSubnetIpOffset {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let inner = u16::deserialize(deserializer)?;
+        Ok(LastAllocatedSubnetIpOffset::new(inner))
     }
 }
 

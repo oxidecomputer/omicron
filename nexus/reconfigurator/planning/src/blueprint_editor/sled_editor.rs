@@ -31,12 +31,12 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
-use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::M2Slot;
@@ -525,7 +525,7 @@ impl ActiveSledEditor {
         Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
                 subnet,
-                SLED_RESERVED_ADDRESSES,
+                LastAllocatedSubnetIpOffset::initial(),
             ),
             incoming_sled_agent_generation: Generation::new(),
             zones: ZonesEditor::empty(),

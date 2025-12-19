@@ -83,6 +83,7 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -262,6 +263,7 @@ impl DataStore {
                 subnet: Ipv6Network::from(sled.subnet).into(),
                 last_allocated_ip_subnet_offset: sled
                     .last_allocated_ip_subnet_offset
+                    .into_u16()
                     .into(),
             })
             .collect::<Vec<_>>();
@@ -799,12 +801,15 @@ impl DataStore {
                             &InlineErrorChain::new(&*e).to_string(),
                         )
                     })?;
+                    let last_allocated_ip_subnet_offset =
+                        LastAllocatedSubnetIpOffset::new(
+                            *s.last_allocated_ip_subnet_offset,
+                        );
                     let config = BlueprintSledConfig {
                         state: s.sled_state.into(),
                         subnet,
                         sled_agent_generation: *s.sled_agent_generation,
-                        last_allocated_ip_subnet_offset: *s
-                            .last_allocated_ip_subnet_offset,
+                        last_allocated_ip_subnet_offset,
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),
                         zones: IdOrdMap::new(),

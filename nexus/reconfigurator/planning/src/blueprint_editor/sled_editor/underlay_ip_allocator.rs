@@ -6,6 +6,7 @@
 
 use ipnet::IpAdd;
 use ipnet::IpSub;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -35,7 +36,7 @@ impl SledUnderlayIpAllocator {
     /// `last_allocated_ip_subnet_offset`.
     pub fn new(
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-        last_allocated_ip_subnet_offset: u16,
+        last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
     ) -> Self {
         let sled_subnet_addr = sled_subnet.net().prefix();
         let minimum = sled_subnet_addr
@@ -56,18 +57,8 @@ impl SledUnderlayIpAllocator {
         assert!(sled_subnet.net().contains(minimum));
         assert!(sled_subnet.net().contains(maximum));
 
-        // We ought to confirm that `last_allocated_ip_subnet_offset` isn't
-        // beyond `CP_SERVICES_RESERVED_ADDRESSES`, but that's guaranteed by the
-        // value of `CP_SERVICES_RESERVED_ADDRESSES`. Statically assert that
-        // this doesn't change; if it does, we should check that
-        // `last_allocated_ip_subnet_offset <= CP_SERVICES_RESERVED_ADDRESSES`.
-        static_assertions::const_assert_eq!(
-            CP_SERVICES_RESERVED_ADDRESSES,
-            u16::MAX
-        );
-
-        let last_allocated_ip = sled_subnet_addr
-            .saturating_add(u128::from(last_allocated_ip_subnet_offset));
+        let last_allocated_ip =
+            last_allocated_ip_subnet_offset.to_ip(sled_subnet);
         let last = Ipv6Addr::max(last_allocated_ip, minimum);
         let slf = Self { subnet: sled_subnet, last, maximum };
         assert!(minimum <= slf.last);
@@ -82,7 +73,9 @@ impl SledUnderlayIpAllocator {
     }
 
     /// Get the last allocated IP as an offset into the sled subnet.
-    pub fn last_allocated_ip_subnet_offset(&self) -> u16 {
+    pub fn last_allocated_ip_subnet_offset(
+        &self,
+    ) -> LastAllocatedSubnetIpOffset {
         let last_allocated_ip = self.last;
         let offset = self.last.saturating_sub(self.subnet.net().prefix());
 
@@ -99,15 +92,8 @@ impl SledUnderlayIpAllocator {
                 );
             }
         };
-        assert!(
-            offset >= SLED_RESERVED_ADDRESSES,
-            "offset unexpectedly inside reserved range: {offset}"
-        );
-        // We should also assert `offset <= CP_SERVICES_RESERVED_ADDRESSES`, but
-        // the latter is set to u16::MAX, so clippy (correctly) complains that
-        // we're asserting something that can never be false.
 
-        offset
+        LastAllocatedSubnetIpOffset::new(offset)
     }
 
     /// Mark an address as used.
@@ -146,9 +132,8 @@ impl SledUnderlayIpAllocator {
 
 #[cfg(test)]
 mod test {
-    use std::collections::BTreeSet;
-
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn test_basic() {
@@ -160,7 +145,10 @@ mod test {
         ];
         let reserved_ips = reserved.iter().copied().collect::<BTreeSet<_>>();
 
-        let mut allocator = SledUnderlayIpAllocator::new(sled_subnet, 0xd7);
+        let mut allocator = SledUnderlayIpAllocator::new(
+            sled_subnet,
+            LastAllocatedSubnetIpOffset::new(0xd7),
+        );
 
         let mut allocated = Vec::new();
         for _ in 0..16 {
