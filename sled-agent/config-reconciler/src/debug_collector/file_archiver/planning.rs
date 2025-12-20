@@ -266,9 +266,9 @@ impl ArchivePlan<'_> {
                             group.rule.include_file(&filename)
                         }
                     })
-                    .filter_map(|entry| match entry {
+                    .map(|entry| match entry {
                         // Errors are passed to the end of this pipeline.
-                        Err(error) => Some(Err(error)),
+                        Err(error) => Err(error),
 
                         // If we found a matching file, fetch its metadata and
                         // grab the mtime.  This is used for naming the archived
@@ -276,11 +276,9 @@ impl ArchivePlan<'_> {
                         Ok((group, filename)) => {
                             let input_path =
                                 group.input_directory().join(filename.as_ref());
-                            Some(
-                                lister
-                                    .file_mtime(&input_path)
-                                    .map(|mtime| (group, input_path, mtime)),
-                            )
+                            lister
+                                .file_mtime(&input_path)
+                                .map(|mtime| (group, input_path, mtime))
                         }
                     })
                     .map(|entry| match entry {
@@ -298,7 +296,7 @@ impl ArchivePlan<'_> {
                                 input_path,
                                 mtime,
                                 output_directory,
-                                namer: &*group.rule.naming,
+                                namer: group.rule.naming,
                                 delete_original: group.rule.delete_original,
                                 #[cfg(test)]
                                 rule: group.rule.label,
@@ -314,7 +312,7 @@ impl ArchivePlan<'_> {
         let groups = self.groups;
         let debug_dir = self.debug_dir;
         let lister = self.lister;
-        for step in Self::to_steps_generic(log, &groups, &debug_dir, &*lister) {
+        for step in Self::to_steps_generic(log, &groups, &debug_dir, lister) {
             let result = match step {
                 Err(error) => Err(error),
                 Ok(step) => execute_archive_step(log, step, lister).await,

@@ -269,7 +269,6 @@ impl NamingRule for NameLiveLogFile {
         lister: &dyn FileLister,
         output_directory: &Utf8Path,
     ) -> Result<Filename, anyhow::Error> {
-        // XXX-dap follow-up
         NameRotatedLogFile.archived_file_name(
             source_file_name,
             source_file_mtime,
@@ -284,7 +283,6 @@ impl NamingRule for NameLiveLogFile {
 /// This includes kernel crash dumps, process core dumps, etc.  This behavior is
 /// historical.  It does not account for cases where the output filename already
 /// exists, which means those files may be overwritten.
-// XXX-dap follow up
 struct NameIdentity;
 impl NamingRule for NameIdentity {
     fn archived_file_name(
