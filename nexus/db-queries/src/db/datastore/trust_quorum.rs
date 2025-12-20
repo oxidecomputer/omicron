@@ -1637,5 +1637,8 @@ mod tests {
                 assert_eq!(epoch, Epoch(1));
             }
         }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }
