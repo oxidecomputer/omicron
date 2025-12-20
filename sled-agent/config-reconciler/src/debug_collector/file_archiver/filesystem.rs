@@ -110,3 +110,21 @@ impl FileLister for FilesystemLister {
             .with_context(|| format!("checking existence of {path:?}"))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::Filename;
+
+    #[test]
+    fn test_filename() {
+        assert_eq!(
+            Filename::try_from(String::from("foo")).unwrap().as_ref(),
+            "foo"
+        );
+        assert!(Filename::try_from(String::from(".")).is_err());
+        assert!(Filename::try_from(String::from("..")).is_err());
+        assert!(Filename::try_from(String::from("foo/bar")).is_err());
+        assert!(Filename::try_from(String::from("foo/")).is_err());
+        assert!(Filename::try_from(String::from("/bar")).is_err());
+    }
+}
