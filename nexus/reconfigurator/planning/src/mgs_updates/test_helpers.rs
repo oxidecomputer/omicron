@@ -1302,6 +1302,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     zones: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: Vec::new(),
                 };
 
                 // The only sled-agent fields that matter for the purposes of
@@ -1351,6 +1352,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                     datasets: BTreeMap::new(),
                                     orphaned_datasets: IdOrdMap::new(),
                                     zones: BTreeMap::new(),
+                                    measurements: IdOrdMap::new(),
                                     boot_partitions,
                                     remove_mupdate_override: None,
                                 },
