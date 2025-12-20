@@ -186,8 +186,8 @@
 //! the _live_ log files are also archived, since they will not have a chance
 //! to get rotated and so would otherwise be lost.
 
+use super::file_archiver::ArchiveKind;
 use super::file_archiver::ArchivePlanner;
-use super::file_archiver::ArchiveWhat;
 use super::helpers::CoreDumpAdmInvoker;
 use super::helpers::ZFS_PROP_AVAILABLE;
 use super::helpers::ZFS_PROP_USED;
@@ -897,7 +897,7 @@ impl DebugCollectorWorker {
         info!(&log, "Archiving files");
         let mut archiver = ArchivePlanner::new(
             log,
-            ArchiveWhat::ImmutableOnly,
+            ArchiveKind::Periodic,
             &debug_dir.as_ref(),
         );
         if self.known_core_dirs.is_empty() {
@@ -954,7 +954,7 @@ impl DebugCollectorWorker {
             .ok_or(ArchiveLogsError::NoDebugDirYet)?;
         let mut archiver = ArchivePlanner::new(
             &self.log,
-            ArchiveWhat::Everything,
+            ArchiveKind::Final,
             &debug_dir.as_ref(),
         );
         archiver.include_zone(zone_name, zone_root);

@@ -20,6 +20,7 @@ use rules::ALL_RULES;
 use rules::NamingRule;
 use rules::Rule;
 use rules::RuleScope;
+use rules::Source;
 use slog::Logger;
 use slog::debug;
 use slog::o;
@@ -35,7 +36,7 @@ struct ErrorAccumulator {
 
 pub struct ArchivePlanner<'a> {
     log: Logger,
-    what: ArchiveWhat,
+    what: ArchiveKind,
     debug_dir: Utf8PathBuf,
     groups: Vec<ArchiveGroup<'static>>,
     lister: &'a (dyn FileLister + Send + Sync),
@@ -45,7 +46,7 @@ pub struct ArchivePlanner<'a> {
 impl ArchivePlanner<'static> {
     pub fn new(
         log: &Logger,
-        what: ArchiveWhat,
+        what: ArchiveKind,
         debug_dir: &Utf8Path,
     ) -> ArchivePlanner<'static> {
         Self::new_with_lister(log, what, debug_dir, &FilesystemLister)
@@ -55,7 +56,7 @@ impl ArchivePlanner<'static> {
 impl<'a> ArchivePlanner<'a> {
     fn new_with_lister(
         log: &Logger,
-        what: ArchiveWhat,
+        what: ArchiveKind,
         debug_dir: &Utf8Path,
         lister: &'a (dyn FileLister + Send + Sync),
     ) -> ArchivePlanner<'a> {
@@ -92,8 +93,8 @@ impl<'a> ArchivePlanner<'a> {
         let rules =
             ALL_RULES.iter().filter(|r| match (&r.rule_scope, &self.what) {
                 (RuleScope::ZoneAlways, _) => true,
-                (RuleScope::ZoneMutable, ArchiveWhat::Everything) => true,
-                (RuleScope::ZoneMutable, ArchiveWhat::ImmutableOnly) => false,
+                (RuleScope::ZoneMutable, ArchiveKind::Final) => true,
+                (RuleScope::ZoneMutable, ArchiveKind::Periodic) => false,
                 (RuleScope::CoresDirectory, _) => false,
             });
 
@@ -143,21 +144,28 @@ impl<'a> ArchivePlanner<'a> {
     }
 }
 
-/// Describes what to archive in this path
+/// Describes what kind of archive operation this is, which affects what debug
+/// data to collect
 #[derive(Debug, Clone, Copy)]
-pub enum ArchiveWhat {
-    /// Archive only immutable files
+pub enum ArchiveKind {
+    /// Periodic archive
     ///
-    /// This includes core files and rotated log files, but ignores live log
-    /// files, since they are still being written-to.
-    ImmutableOnly,
+    /// Periodic archives include immutable files like core files and rotated
+    /// log files, but they ignore live log files since they're still being
+    /// written-to.  Those will get picked up in a subsequent periodic archive
+    /// (once rotated) or a final archive for this source.
+    Periodic,
 
-    /// Archive everything, including live log files that may still be written
-    /// to
-    Everything,
+    /// Final archive for this source
+    ///
+    /// The final archive for a given source is our last chance to archive debug
+    /// data from it.  It is also generally at rest (or close to it).  So this
+    /// includes everything that a periodic archive includes *plus* live log
+    /// files.
+    Final,
 }
 
-pub async fn archive_one(
+async fn archive_one(
     source: &Utf8Path,
     dest: &Utf8Path,
     delete_original: bool,
@@ -177,12 +185,6 @@ pub async fn archive_one(
     }
 
     Ok(())
-}
-
-#[derive(Clone)]
-struct Source {
-    input_prefix: Utf8PathBuf,
-    output_prefix: Utf8PathBuf,
 }
 
 struct ArchiveGroup<'a> {
@@ -512,10 +514,10 @@ impl ArchiveFile<'_> {
 #[cfg(test)]
 mod test {
     use super::ArchiveFile;
+    use super::ArchiveKind;
     use super::ArchivePlan;
     use super::ArchivePlanner;
     use super::ArchiveStep;
-    use super::ArchiveWhat;
     use super::FileLister;
     use super::Filename;
     use super::rules::ALL_RULES;
@@ -802,7 +804,7 @@ mod test {
                     bail!("injected error for {fail_path:?}");
                 }
             }
-            // XXX-dap will need to be overridable
+
             Ok(Some("2025-12-12T16:51:00-07:00".parse().unwrap()))
         }
 
@@ -840,7 +842,7 @@ mod test {
         log: &Logger,
         files: &IdOrdMap<TestFile>,
         output_dir: &Utf8Path,
-        what: ArchiveWhat,
+        what: ArchiveKind,
         lister: &'a TestLister,
     ) -> ArchivePlan<'a> {
         // Construct sources that correspond with the test data.
@@ -892,7 +894,7 @@ mod test {
             log,
             &files,
             fake_output_dir,
-            ArchiveWhat::Everything,
+            ArchiveKind::Final,
             &lister,
         );
 
@@ -1040,7 +1042,7 @@ mod test {
             log,
             &files,
             fake_output_dir,
-            ArchiveWhat::ImmutableOnly,
+            ArchiveKind::Periodic,
             &lister,
         );
 
@@ -1130,7 +1132,7 @@ mod test {
             log,
             &files,
             fake_output_dir,
-            ArchiveWhat::Everything,
+            ArchiveKind::Final,
             &lister,
         );
 
@@ -1199,7 +1201,7 @@ mod test {
             log,
             &files,
             fake_output_dir,
-            ArchiveWhat::Everything,
+            ArchiveKind::Final,
             &lister,
         );
 
@@ -1305,7 +1307,7 @@ mod test {
             log,
             &files,
             fake_output_dir,
-            ArchiveWhat::Everything,
+            ArchiveKind::Final,
             &lister,
         );
 
@@ -1543,8 +1545,7 @@ mod test {
 
         // Run a complete archive.
         std::fs::create_dir(&outdir).unwrap();
-        let mut planner =
-            ArchivePlanner::new(log, ArchiveWhat::Everything, &outdir);
+        let mut planner = ArchivePlanner::new(log, ArchiveKind::Final, &outdir);
         planner.include_cores_directory(&coredir);
         planner.include_zone(zone_name, &zone_root);
         let () = planner.execute().await.expect("successful execution");
@@ -1606,8 +1607,7 @@ mod test {
         populate_input("second");
 
         // Run another archive.
-        let mut planner =
-            ArchivePlanner::new(log, ArchiveWhat::Everything, &outdir);
+        let mut planner = ArchivePlanner::new(log, ArchiveKind::Final, &outdir);
         planner.include_cores_directory(&coredir);
         planner.include_zone(zone_name, &zone_root);
         let () = planner.execute().await.expect("successful execution");

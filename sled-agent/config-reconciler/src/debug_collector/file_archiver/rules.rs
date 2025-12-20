@@ -16,6 +16,19 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use std::sync::LazyLock;
 
+/// Describes a source of debug data
+///
+/// In practice, this corresponds to either:
+///
+/// * the root filesystem of an illumos **zone**
+/// * a **cores** (also called **crash**) dataset where user process core dumps
+///   and kernel crash dumps are initially stored
+#[derive(Clone)]
+pub(crate) struct Source {
+    pub(crate) input_prefix: Utf8PathBuf,
+    pub(crate) output_prefix: Utf8PathBuf,
+}
+
 /// Describes debug data to be archived from within some `Source`.
 ///
 /// Rules specify a path within the source where the files are found (e.g.,
