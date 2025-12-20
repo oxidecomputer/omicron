@@ -910,8 +910,21 @@ impl DebugCollectorWorker {
         match self.zone_invoker.get_zones().await {
             Ok(zones) => {
                 for zone in zones {
-                    // XXX-dap unwrap
-                    let zone_path: &Utf8Path = zone.path().try_into().unwrap();
+                    let zone_path: &Utf8Path = match zone.path().try_into() {
+                        Ok(zone_path) => zone_path,
+                        Err(error) => {
+                            // This should be impossible in practice.
+                            let error = InlineErrorChain::new(&error);
+                            error!(
+                                log,
+                                "Cannot archive zone because its path is \
+                                 not UTF-8";
+                                "zone_name" => zone.name(),
+                                error
+                            );
+                            continue;
+                        }
+                    };
                     let zone_root = if zone.global() {
                         zone_path.to_owned()
                     } else {
@@ -1131,7 +1144,6 @@ pub enum ArchiveLogsError {
         "No debug dir into which we should archive logs has yet been chosen"
     )]
     NoDebugDirYet,
-    // XXX-dap
     #[error("Archive error")]
     Archiver(#[source] anyhow::Error),
 }
