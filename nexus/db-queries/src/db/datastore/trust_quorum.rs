@@ -26,7 +26,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::bail_unless;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
 use sled_agent_types::sled::BaseboardId;
@@ -392,9 +391,10 @@ impl DataStore {
                 let acked_prepares = acked_prepares.clone();
                 async move {
                     // First, retrieve our configuration if there is one.
-                    let latest = Self::tq_get_latest_config_conn(opctx, &c, rack_id)
-                        .await
-                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let latest =
+                        Self::tq_get_latest_config_conn(opctx, &c, rack_id)
+                            .await
+                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     let Some(db_config) = latest else {
                         bail_txn!(
@@ -437,26 +437,16 @@ impl DataStore {
 
                     // Then get any members associated with the configuration
                     let db_members = Self::tq_get_members_conn(
-                            opctx,
-                            &c,
-                            rack_id,
-                            db_config.epoch,
-                        )
-                        .await
-                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
-
-                    // We only update the configuration in the database if:
-                    //  1. This is the first time we have seen encrypted rack secrets
-                    //  2. We are transitioning from preparing to committed state.
-                    let should_write_secrets =
-                        db_config.encrypted_rack_secrets_salt.is_none()
-                            && config.encrypted_rack_secrets.is_some();
+                        opctx,
+                        &c,
+                        rack_id,
+                        db_config.epoch,
+                    )
+                    .await
+                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     let mut total_acks = 0;
                     for (mut member, hw_id) in db_members {
-                        let mut update_share_digest = false;
-                        let mut update_prepared = false;
-
                         let baseboard_id: BaseboardId = hw_id.into();
 
                         // Set the share digest for the member if we just learned it
@@ -471,99 +461,68 @@ impl DataStore {
                                     baseboard_id
                                 );
                             };
-                           member.share_digest = Some(hex::encode(digest.0));
-                           update_share_digest = true;
+                            member.share_digest = Some(hex::encode(digest.0));
+                            Self::update_tq_member_share_digest_in_txn(
+                                opctx,
+                                conn,
+                                member.clone(),
+                            )
+                            .await
+                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
                         }
 
                         // Set the state of this member
                         if acked_prepares.contains(&baseboard_id)
                             && member.state == DbTrustQuorumMemberState::Unacked
                         {
-                            update_prepared = true;
                             total_acks += 1;
+                            Self::update_tq_member_state_prepared_in_txn(
+                                opctx,
+                                conn,
+                                member.clone(),
+                            )
+                            .await
+                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
                         }
 
                         if member.state == DbTrustQuorumMemberState::Prepared {
                             total_acks += 1;
                         }
-
-                        // Write each member that has been modified
-                        match (update_share_digest, update_prepared) {
-                            (true, true) => {
-                                Self::update_tq_member_share_digest_and_state_prepared_in_txn(
-                                    opctx,
-                                    conn,
-                                    member
-                                )
-                                .await
-                                .map_err(|txn_error| txn_error.into_diesel(&err))?;
-                            }
-                            (true, false) => {
-                                Self::update_tq_member_share_digest_in_txn(
-                                    opctx,
-                                    conn,
-                                    member
-                                )
-                                .await
-                                .map_err(|txn_error| txn_error.into_diesel(&err))?;
-                            }
-                            (false, true) => {
-                                Self::update_tq_member_state_prepared_in_txn(
-                                    opctx,
-                                    conn,
-                                    member
-                                )
-                                .await
-                                .map_err(|txn_error| txn_error.into_diesel(&err))?;
-                            }
-                            (false, false) => {
-                                // Nothing to do
-                            }
-                        }
                     }
 
+                    // We only update the configuration in the database if:
+                    //  1. This is the first time we have seen encrypted rack secrets
+                    //  2. We are transitioning from preparing to committed state.
+
+                    // Should we write secrets?
+                    if db_config.encrypted_rack_secrets_salt.is_none()
+                        && config.encrypted_rack_secrets.is_some()
+                    {
+                        Self::update_tq_encrypted_rack_secrets_in_txn(
+                            opctx,
+                            conn,
+                            db_config.rack_id,
+                            db_config.epoch,
+                            config.encrypted_rack_secrets.unwrap(),
+                        )
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    }
 
                     // Do we have enough acks to commit?
-                    let should_commit = total_acks
+                    if total_acks
                         >= (db_config.threshold.0
                             + db_config.commit_crash_tolerance.0)
-                            as usize;
-
-                    match (should_write_secrets, should_commit) {
-                        (true, true) => {
-                            Self::update_tq_encrypted_rack_secrets_and_commit_in_txn(
-                                opctx,
-                                conn,
-                                db_config.rack_id,
-                                db_config.epoch,
-                                config.encrypted_rack_secrets.unwrap(),
-                            )
-                            .await
-                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
-                        }
-                        (true, false) => {
-                            Self::update_tq_encrypted_rack_secrets_in_txn(
-                                opctx,
-                                conn,
-                                db_config.rack_id,
-                                db_config.epoch,
-                                config.encrypted_rack_secrets.unwrap(),
-                            )
-                            .await
-                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
-                        }
-                        (false, true) => {
-                            Self::update_tq_commit_state_in_txn(
-                                opctx,
-                                conn,
-                                db_config.rack_id,
-                                db_config.epoch)
-                            .await
-                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
-                        }
-                        (false, false) => {
-                            // Nothing to do
-                        }
+                            as usize
+                    {
+                        Self::update_tq_state_committing_in_txn(
+                            opctx,
+                            conn,
+                            db_config.rack_id,
+                            db_config.epoch,
+                        )
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
                     }
 
                     Ok(())
@@ -821,30 +780,6 @@ impl DataStore {
         Ok(())
     }
 
-    async fn update_tq_member_share_digest_and_state_prepared_in_txn(
-        opctx: &OpContext,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        member: DbTrustQuorumMember,
-    ) -> Result<(), TransactionError<Error>> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        use nexus_db_schema::schema::trust_quorum_member::dsl;
-
-        diesel::update(dsl::trust_quorum_member)
-            .filter(dsl::rack_id.eq(member.rack_id))
-            .filter(dsl::epoch.eq(member.epoch))
-            .filter(dsl::hw_baseboard_id.eq(member.hw_baseboard_id))
-            .filter(dsl::share_digest.is_null())
-            .filter(dsl::state.eq(DbTrustQuorumMemberState::Unacked))
-            .set((
-                dsl::share_digest.eq(member.share_digest),
-                dsl::state.eq(DbTrustQuorumMemberState::Prepared),
-            ))
-            .execute_async(conn)
-            .await?;
-
-        Ok(())
-    }
-
     async fn update_tq_members_state_commit_in_txn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -950,41 +885,8 @@ impl DataStore {
         Ok(())
     }
 
-    async fn update_tq_encrypted_rack_secrets_and_commit_in_txn(
-        opctx: &OpContext,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        rack_id: DbTypedUuid<RackKind>,
-        epoch: i64,
-        encrypted_rack_secrets: EncryptedRackSecrets,
-    ) -> Result<(), TransactionError<Error>> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let salt = Some(hex::encode(encrypted_rack_secrets.salt.0));
-        let secrets: Option<Vec<u8>> = Some(encrypted_rack_secrets.data.into());
-
-        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
-
-        diesel::update(dsl::trust_quorum_configuration)
-            .filter(dsl::rack_id.eq(rack_id))
-            .filter(dsl::epoch.eq(epoch))
-            .filter(dsl::encrypted_rack_secrets_salt.is_null())
-            .filter(dsl::encrypted_rack_secrets.is_null())
-            .filter(dsl::state.eq_any(vec![
-                DbTrustQuorumConfigurationState::Preparing,
-                DbTrustQuorumConfigurationState::PreparingLrtqUpgrade,
-            ]))
-            .set((
-                dsl::encrypted_rack_secrets_salt.eq(salt),
-                dsl::encrypted_rack_secrets.eq(secrets),
-                dsl::state.eq(DbTrustQuorumConfigurationState::Committing),
-            ))
-            .execute_async(conn)
-            .await?;
-
-        Ok(())
-    }
-
     /// Returns the number of rows update
-    async fn update_tq_commit_state_in_txn(
+    async fn update_tq_state_committing_in_txn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
@@ -1060,7 +962,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
         let Some(latest_epoch) = dsl::trust_quorum_configuration
-            .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+            .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
             .order_by(dsl::epoch.desc())
             .select(dsl::epoch)
             .first_async::<i64>(conn)
@@ -1083,7 +985,7 @@ impl DataStore {
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
 
         let latest = dsl::trust_quorum_configuration
-            .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+            .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
             .order_by(dsl::epoch.desc())
             .first_async::<DbTrustQuorumConfiguration>(conn)
             .await
@@ -1107,7 +1009,7 @@ impl DataStore {
         use nexus_db_schema::schema::trust_quorum_member::dsl;
 
         let members = dsl::trust_quorum_member
-            .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+            .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
             .filter(dsl::epoch.eq(epoch))
             .inner_join(
                 hw_baseboard_id_dsl::hw_baseboard_id
@@ -1549,14 +1451,15 @@ mod tests {
         // (This is not directly callable from a public API).
         {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let num_rows_updated = DataStore::update_tq_commit_state_in_txn(
-                opctx,
-                &conn,
-                config.rack_id.into(),
-                config.epoch.0 as i64,
-            )
-            .await
-            .unwrap();
+            let num_rows_updated =
+                DataStore::update_tq_state_committing_in_txn(
+                    opctx,
+                    &conn,
+                    config.rack_id.into(),
+                    config.epoch.0 as i64,
+                )
+                .await
+                .unwrap();
             assert_eq!(num_rows_updated, 0);
         }
 
