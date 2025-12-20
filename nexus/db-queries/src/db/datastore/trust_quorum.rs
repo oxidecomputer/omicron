@@ -606,6 +606,31 @@ impl DataStore {
                     .await
                     .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
+                    // Then get any members associated with the configuration
+                    let db_members = Self::tq_get_members_conn(
+                        opctx,
+                        &c,
+                        rack_id,
+                        db_config.epoch,
+                    )
+                    .await
+                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                    // If all members have acked their commits then mark the
+                    // configuration as committed.
+                    if db_members.iter().all(|(m, _)| {
+                        m.state == DbTrustQuorumMemberState::Committed
+                    }) {
+                        Self::update_tq_state_committed_in_txn(
+                            opctx,
+                            conn,
+                            db_config.rack_id,
+                            db_config.epoch,
+                        )
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    }
+
                     Ok(())
                 }
             })
@@ -903,6 +928,27 @@ impl DataStore {
                 DbTrustQuorumConfigurationState::PreparingLrtqUpgrade,
             ]))
             .set(dsl::state.eq(DbTrustQuorumConfigurationState::Committing))
+            .execute_async(conn)
+            .await?;
+
+        Ok(num_rows_updated)
+    }
+
+    /// Returns the number of rows update
+    async fn update_tq_state_committed_in_txn(
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: DbTypedUuid<RackKind>,
+        epoch: i64,
+    ) -> Result<usize, TransactionError<Error>> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+
+        let num_rows_updated = diesel::update(dsl::trust_quorum_configuration)
+            .filter(dsl::rack_id.eq(rack_id))
+            .filter(dsl::epoch.eq(epoch))
+            .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Committing))
+            .set(dsl::state.eq(DbTrustQuorumConfigurationState::Committed))
             .execute_async(conn)
             .await?;
 
@@ -1321,7 +1367,7 @@ mod tests {
             .expect("no error")
             .expect("returned config");
 
-        // We've acked enough nodes and should have committed
+        // We've acked enough nodes and should have written our status to the DB
         assert_eq!(read_config.epoch, config.epoch);
         assert_eq!(read_config.state, TrustQuorumConfigState::Committing);
         assert!(read_config.encrypted_rack_secrets.is_none());
@@ -1369,33 +1415,9 @@ mod tests {
             .expect("returned config");
 
         assert_eq!(read_config.epoch, config.epoch);
-        assert_eq!(read_config.state, TrustQuorumConfigState::Committing);
-        assert!(read_config.encrypted_rack_secrets.is_none());
-        assert!(
-            read_config.members.iter().all(
-                |(_, info)| info.state == TrustQuorumMemberState::Committed
-            )
-        );
-
-        // Repeating the same update and read succeeds
-        datastore
-            .tq_update_commit_status(
-                opctx,
-                rack_id,
-                config.epoch,
-                coordinator_config.members.keys().cloned().collect(),
-            )
-            .await
-            .unwrap();
-
-        let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
-            .await
-            .expect("no error")
-            .expect("returned config");
-
-        assert_eq!(read_config.epoch, config.epoch);
-        assert_eq!(read_config.state, TrustQuorumConfigState::Committing);
+        // Now that all nodes have committed, we should see the config state
+        // change from `Committing` to Committed.
+        assert_eq!(read_config.state, TrustQuorumConfigState::Committed);
         assert!(read_config.encrypted_rack_secrets.is_none());
         assert!(
             read_config.members.iter().all(
