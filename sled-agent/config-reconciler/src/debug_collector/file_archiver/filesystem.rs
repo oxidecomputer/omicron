@@ -3,24 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::Filename;
-use super::rules::ALL_RULES;
-use super::rules::NamingRule;
-use super::rules::Rule;
-use super::rules::RuleScope;
-use super::rules::Source;
 use anyhow::Context;
 use anyhow::anyhow;
 use camino::Utf8Path;
-use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::Utc;
-use derive_more::AsRef;
-use slog::Logger;
-use slog::debug;
-use slog::o;
-use slog::warn;
-use slog_error_chain::InlineErrorChain;
-use thiserror::Error;
 
 /// Helper trait used to swap out basic filesystem functionality for testing
 pub(crate) trait FileLister {

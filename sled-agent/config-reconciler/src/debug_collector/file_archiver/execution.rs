@@ -9,24 +9,9 @@
 
 use super::filesystem::FileLister;
 use super::planning::ArchiveStep;
-use super::rules::ALL_RULES;
-use super::rules::NamingRule;
-use super::rules::Rule;
-use super::rules::RuleScope;
-use super::rules::Source;
 use anyhow::Context;
-use anyhow::anyhow;
 use camino::Utf8Path;
-use camino::Utf8PathBuf;
-use chrono::DateTime;
-use chrono::Utc;
-use derive_more::AsRef;
-use slog::Logger;
 use slog::debug;
-use slog::o;
-use slog::warn;
-use slog_error_chain::InlineErrorChain;
-use thiserror::Error;
 
 pub(crate) async fn execute_archive_step<'a>(
     log: &slog::Logger,

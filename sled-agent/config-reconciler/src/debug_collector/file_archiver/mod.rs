@@ -11,23 +11,7 @@
 // - clean up XXX-daps
 // - self-review and clean up
 
-use anyhow::Context;
-use anyhow::anyhow;
-use camino::Utf8Path;
-use camino::Utf8PathBuf;
-use chrono::DateTime;
-use chrono::Utc;
 use derive_more::AsRef;
-use rules::ALL_RULES;
-use rules::NamingRule;
-use rules::Rule;
-use rules::RuleScope;
-use rules::Source;
-use slog::Logger;
-use slog::debug;
-use slog::o;
-use slog::warn;
-use slog_error_chain::InlineErrorChain;
 use thiserror::Error;
 
 mod execution;
