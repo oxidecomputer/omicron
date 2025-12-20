@@ -18,9 +18,9 @@ use crate::v1::inventory::InventoryZpool;
 use crate::v1::inventory::SledRole;
 use crate::v1::inventory::ZoneImageResolverInventory;
 use crate::v11;
-use crate::v11::inventory::ConfigReconcilerInventory;
-use crate::v11::inventory::ConfigReconcilerInventoryStatus;
-use crate::v11::inventory::OmicronSledConfig;
+pub use crate::v11::inventory::ConfigReconcilerInventory;
+pub use crate::v11::inventory::ConfigReconcilerInventoryStatus;
+pub use crate::v11::inventory::OmicronSledConfig;
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
