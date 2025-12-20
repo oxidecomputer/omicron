@@ -977,6 +977,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     zones,
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: Vec::new(),
                 })
                 .await
                 .expect("Failed to configure sled agent {sled_id} with zones");

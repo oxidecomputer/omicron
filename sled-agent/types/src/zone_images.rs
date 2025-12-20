@@ -63,8 +63,8 @@ impl ResolverStatus {
     pub fn to_inventory(&self) -> ZoneImageResolverInventory {
         ZoneImageResolverInventory {
             zone_manifest: self.zone_manifest.to_inventory(),
+            measurement_manifest: self.measurement_manifest.to_inventory(),
             mupdate_override: self.mupdate_override.to_inventory(),
-            // Adding the measurement to inventory will come later
         }
     }
 }
