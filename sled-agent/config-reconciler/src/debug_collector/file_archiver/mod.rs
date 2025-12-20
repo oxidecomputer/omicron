@@ -6,7 +6,6 @@
 //! (e.g., log files)
 
 // XXX-dap current status:
-// - review visibility of everything
 // - clean up XXX-daps
 // - self-review and clean up
 

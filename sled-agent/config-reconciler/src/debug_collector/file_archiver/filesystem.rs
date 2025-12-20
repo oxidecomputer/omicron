@@ -13,9 +13,11 @@ use thiserror::Error;
 /// Describes the final component of a path name (that has no `/` in it)
 #[derive(AsRef, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct Filename(String);
+
 #[derive(Debug, Error)]
 #[error("string is not a valid filename (has slashes or is '.' or '..')")]
 pub(crate) struct BadFilename;
+
 impl TryFrom<String> for Filename {
     type Error = BadFilename;
     fn try_from(value: String) -> Result<Self, Self::Error> {

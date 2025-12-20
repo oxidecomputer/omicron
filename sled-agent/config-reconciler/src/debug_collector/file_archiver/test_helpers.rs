@@ -32,7 +32,7 @@ use strum::IntoDiscriminant;
 use strum::IntoEnumIterator;
 
 /// Loads the filenames in the test data
-pub fn load_test_files() -> anyhow::Result<IdOrdMap<TestFile>> {
+pub(crate) fn load_test_files() -> anyhow::Result<IdOrdMap<TestFile>> {
     load_test_data_paths()?
         .into_iter()
         .map(|path| {
@@ -85,7 +85,7 @@ fn test_test_data() {
 }
 
 /// Plan an archive operation based on the testing data
-pub fn test_archive<'a>(
+pub(crate) fn test_archive<'a>(
     log: &Logger,
     test_files: &IdOrdMap<TestFile>,
     output_dir: &Utf8Path,
@@ -126,7 +126,7 @@ pub fn test_archive<'a>(
 
 /// Describes one file path in the testing data
 #[derive(Clone)]
-pub struct TestFile {
+pub(crate) struct TestFile {
     /// path to the file
     pub path: Utf8PathBuf,
     /// what kind of file we determined it to be, based on its path
@@ -146,7 +146,7 @@ impl IdOrdItem for TestFile {
 /// Describes what kind of file we're looking at and what source it's in
 #[derive(Clone, Debug, Display, EnumIter, EnumDiscriminants)]
 #[strum_discriminants(derive(EnumIter, Ord, PartialOrd))]
-pub enum TestFileKind {
+pub(crate) enum TestFileKind {
     KernelCrashDump {
         cores_directory: String,
     },
@@ -281,7 +281,7 @@ impl TryFrom<&Utf8Path> for TestFileKind {
 }
 
 /// Implementation of `FileLister` built atop the testing data
-pub struct TestLister<'a> {
+pub(crate) struct TestLister<'a> {
     /// files in our fake filesystem
     files: BTreeSet<&'a Utf8Path>,
     /// describes the last path listed (used in tests to verify behavior)
