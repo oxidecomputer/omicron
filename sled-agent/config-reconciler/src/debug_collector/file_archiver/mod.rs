@@ -5,10 +5,6 @@
 //! Configuration and implementation for archiving ordinary files as debug data
 //! (e.g., log files)
 
-// XXX-dap current status:
-// - clean up XXX-daps
-// - self-review and clean up
-
 mod execution;
 mod filesystem;
 mod planning;
