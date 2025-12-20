@@ -4,8 +4,8 @@
 
 //! Rules used for determining what debug data to collect
 
-use super::Filename;
 use super::filesystem::FileLister;
+use super::filesystem::Filename;
 use anyhow::anyhow;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;

@@ -6,13 +6,9 @@
 //! (e.g., log files)
 
 // XXX-dap current status:
-// - fix up imports
 // - try to move tests into submodules and fix up visibility
 // - clean up XXX-daps
 // - self-review and clean up
-
-use derive_more::AsRef;
-use thiserror::Error;
 
 mod execution;
 mod filesystem;
@@ -28,27 +24,11 @@ struct ErrorAccumulator {
     errors: Vec<anyhow::Error>,
 }
 
-#[derive(AsRef, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct Filename(String);
-#[derive(Debug, Error)]
-#[error("string is not a valid filename (has slashes or is '.' or '..')")]
-struct BadFilename;
-impl TryFrom<String> for Filename {
-    type Error = BadFilename;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value == "." || value == ".." || value.contains('/') {
-            Err(BadFilename)
-        } else {
-            Ok(Filename(value))
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::test_helpers::*;
 
-    use super::Filename;
+    use super::filesystem::Filename;
     use super::planning::ArchiveFile;
     use super::planning::ArchiveKind;
     use super::planning::ArchivePlanner;

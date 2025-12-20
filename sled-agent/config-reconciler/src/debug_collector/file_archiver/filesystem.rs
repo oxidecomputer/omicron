@@ -2,12 +2,30 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::Filename;
 use anyhow::Context;
 use anyhow::anyhow;
 use camino::Utf8Path;
 use chrono::DateTime;
 use chrono::Utc;
+use derive_more::AsRef;
+use thiserror::Error;
+
+/// Describes the final component of a path name (that has no `/` in it)
+#[derive(AsRef, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct Filename(String);
+#[derive(Debug, Error)]
+#[error("string is not a valid filename (has slashes or is '.' or '..')")]
+pub(crate) struct BadFilename;
+impl TryFrom<String> for Filename {
+    type Error = BadFilename;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value == "." || value == ".." || value.contains('/') {
+            Err(BadFilename)
+        } else {
+            Ok(Filename(value))
+        }
+    }
+}
 
 /// Helper trait used to swap out basic filesystem functionality for testing
 pub(crate) trait FileLister {

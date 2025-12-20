@@ -11,9 +11,9 @@
 //! plan-execute pattern).
 
 use super::ErrorAccumulator;
-use super::Filename;
 use super::execution::execute_archive_step;
 use super::filesystem::FileLister;
+use super::filesystem::Filename;
 use super::filesystem::FilesystemLister;
 use super::rules::ALL_RULES;
 use super::rules::ArchiveGroup;

@@ -4,8 +4,8 @@
 
 //! Helpers for working with the testing data used in the test suite
 
-use super::Filename;
 use super::filesystem::FileLister;
+use super::filesystem::Filename;
 use super::planning::ArchiveKind;
 use super::planning::ArchivePlan;
 use super::planning::ArchivePlanner;
