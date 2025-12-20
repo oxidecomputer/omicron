@@ -4,8 +4,8 @@
 
 //! Rules used for determining what debug data to collect
 
-use super::FileLister;
 use super::Filename;
+use super::filesystem::FileLister;
 use anyhow::anyhow;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -170,6 +170,27 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
 
     rv
 });
+
+/// Describes a combination of `source` and `rule`
+///
+/// This essentially takes a `Rule` and applies it to a specific source.  For
+/// example, a rule might say how to find the log files within a given zone.  A
+/// specific zone will be its own `Source`.  An `ArchiveGroup` puts these
+/// together to represent collection of log files from a specific zone.
+pub(crate) struct ArchiveGroup<'a> {
+    pub(crate) source: Source,
+    pub(crate) rule: &'a Rule,
+}
+
+impl<'a> ArchiveGroup<'a> {
+    pub(crate) fn input_directory(&self) -> Utf8PathBuf {
+        self.source.input_prefix.join(&self.rule.directory)
+    }
+
+    pub(crate) fn output_directory(&self, debug_dir: &Utf8Path) -> Utf8PathBuf {
+        debug_dir.join(&self.source.output_prefix)
+    }
+}
 
 /// Describes how to construct an archived file's final name based on its
 /// original name and mtime
