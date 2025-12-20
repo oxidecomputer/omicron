@@ -67,8 +67,7 @@ pub(crate) struct Rule {
     /// files are not.
     pub delete_original: bool,
     /// Describes how to construct the name of a file that's being archived
-    // XXX-dap these are all static -- maybe use &'static dyn NamingRule?
-    pub naming: Box<dyn NamingRule + Send + Sync>,
+    pub naming: &'static (dyn NamingRule + Send + Sync),
 }
 
 impl Rule {
@@ -121,7 +120,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             directory: ".".parse().unwrap(),
             glob_pattern: "*".parse().unwrap(),
             delete_original: true,
-            naming: Box::new(NameIdentity),
+            naming: &NameIdentity,
         },
         Rule {
             label: "live SMF log files",
@@ -129,7 +128,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             directory: VAR_SVC_LOG.parse().unwrap(),
             glob_pattern: "*.log".parse().unwrap(),
             delete_original: false,
-            naming: Box::new(NameLiveLogFile),
+            naming: &NameLiveLogFile,
         },
         Rule {
             label: "live syslog files",
@@ -137,7 +136,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             directory: VAR_ADM.parse().unwrap(),
             glob_pattern: "messages".parse().unwrap(),
             delete_original: false,
-            naming: Box::new(NameLiveLogFile),
+            naming: &NameLiveLogFile,
         },
         Rule {
             label: "rotated SMF log files",
@@ -145,7 +144,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             directory: VAR_SVC_LOG.parse().unwrap(),
             glob_pattern: "*.log.*".parse().unwrap(), // XXX-dap digits
             delete_original: true,
-            naming: Box::new(NameRotatedLogFile),
+            naming: &NameRotatedLogFile,
         },
         Rule {
             label: "rotated syslog files",
@@ -153,7 +152,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             directory: VAR_ADM.parse().unwrap(),
             glob_pattern: "messages.*".parse().unwrap(), // XXX-dap digits
             delete_original: true,
-            naming: Box::new(NameRotatedLogFile),
+            naming: &NameRotatedLogFile,
         },
     ];
 
