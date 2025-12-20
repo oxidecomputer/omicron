@@ -876,6 +876,7 @@ mod tests {
             zones: IdOrdMap::default(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: BTreeSet::new(),
         }
     }
 
@@ -1078,6 +1079,7 @@ mod tests {
             .collect(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: BTreeSet::new(),
         };
 
         // The ledger task should reject this config due to a missing artifact.
