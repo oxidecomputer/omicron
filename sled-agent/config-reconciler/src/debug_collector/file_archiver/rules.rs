@@ -14,6 +14,7 @@ use chrono::Utc;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use regex::Regex;
 use std::sync::LazyLock;
 
 /// Describes a source of debug data
@@ -59,7 +60,7 @@ pub(crate) struct Rule {
     /// that contains the data described by this rule
     pub directory: Utf8PathBuf,
     /// describes which files within `directory` are identified by this rule
-    glob_pattern: glob::Pattern, // XXX-dap consider regex?
+    regex: Regex,
     /// configures whether the original files associated with this rule should
     /// be deleted once they're archived
     ///
@@ -74,7 +75,7 @@ impl Rule {
     /// Returns true if this rule specifies that the given `filename` should be
     /// archived
     pub(crate) fn include_file(&self, filename: &Filename) -> bool {
-        self.glob_pattern.matches(filename.as_ref())
+        self.regex.is_match(filename.as_ref())
     }
 }
 
@@ -118,7 +119,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             label: "process core files and kernel crash dumps",
             rule_scope: RuleScope::CoresDirectory,
             directory: ".".parse().unwrap(),
-            glob_pattern: "*".parse().unwrap(),
+            regex: "^.*$".parse().unwrap(),
             delete_original: true,
             naming: &NameIdentity,
         },
@@ -126,7 +127,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             label: "live SMF log files",
             rule_scope: RuleScope::ZoneMutable,
             directory: VAR_SVC_LOG.parse().unwrap(),
-            glob_pattern: "*.log".parse().unwrap(),
+            regex: "^.*\\.log$".parse().unwrap(),
             delete_original: false,
             naming: &NameLiveLogFile,
         },
@@ -134,7 +135,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             label: "live syslog files",
             rule_scope: RuleScope::ZoneMutable,
             directory: VAR_ADM.parse().unwrap(),
-            glob_pattern: "messages".parse().unwrap(),
+            regex: "^messages$".parse().unwrap(),
             delete_original: false,
             naming: &NameLiveLogFile,
         },
@@ -142,7 +143,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             label: "rotated SMF log files",
             rule_scope: RuleScope::ZoneAlways,
             directory: VAR_SVC_LOG.parse().unwrap(),
-            glob_pattern: "*.log.*".parse().unwrap(), // XXX-dap digits
+            regex: "^.*\\.log.[0-9]+$".parse().unwrap(),
             delete_original: true,
             naming: &NameRotatedLogFile,
         },
@@ -150,7 +151,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             label: "rotated syslog files",
             rule_scope: RuleScope::ZoneAlways,
             directory: VAR_ADM.parse().unwrap(),
-            glob_pattern: "messages.*".parse().unwrap(), // XXX-dap digits
+            regex: "^messages\\.[0-9]+$".parse().unwrap(),
             delete_original: true,
             naming: &NameRotatedLogFile,
         },
