@@ -16,16 +16,18 @@ use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::Utc;
 use derive_more::AsRef;
-use iddqd::IdOrdItem;
-use iddqd::IdOrdMap;
-use iddqd::id_upcast;
+use rules::ALL_RULES;
+use rules::NamingRule;
+use rules::Rule;
+use rules::RuleScope;
 use slog::Logger;
 use slog::debug;
 use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
-use std::sync::LazyLock;
 use thiserror::Error;
+
+mod rules;
 
 struct ErrorAccumulator {
     errors: Vec<anyhow::Error>,
@@ -183,51 +185,6 @@ struct Source {
     output_prefix: Utf8PathBuf,
 }
 
-struct Rule {
-    label: &'static str,
-    rule_scope: RuleScope,
-    directory: Utf8PathBuf,
-    glob_pattern: glob::Pattern, // XXX-dap consider regex?
-    delete_original: bool,
-    // XXX-dap these are all static -- maybe use &'static dyn NamingRule?
-    naming: Box<dyn NamingRule + Send + Sync>,
-}
-
-impl Rule {
-    fn include_file(&self, filename: &Filename) -> bool {
-        self.glob_pattern.matches(filename.as_ref())
-    }
-}
-
-impl IdOrdItem for Rule {
-    type Key<'a> = &'static str;
-    fn key(&self) -> Self::Key<'_> {
-        self.label
-    }
-    id_upcast!();
-}
-
-enum RuleScope {
-    // this rule applies to all cores directories
-    CoresDirectory,
-    // this rule applies to zone roots for "everything" collections, but not
-    // "immutable" ones
-    ZoneMutable,
-    // this rule applies to zone roots always, regardless of whether or not
-    // we're collecting immutable data only
-    ZoneAlways,
-}
-
-trait NamingRule {
-    fn archived_file_name(
-        &self,
-        source_file_name: &Filename,
-        source_file_mtime: Option<DateTime<Utc>>,
-        lister: &dyn FileLister,
-        output_directory: &Utf8Path,
-    ) -> Result<Filename, anyhow::Error>;
-}
-
 struct ArchiveGroup<'a> {
     source: Source,
     rule: &'a Rule,
@@ -256,133 +213,6 @@ impl<'a> ArchiveGroup<'a> {
 
     fn output_directory(&self, debug_dir: &Utf8Path) -> Utf8PathBuf {
         debug_dir.join(&self.source.output_prefix)
-    }
-}
-
-static VAR_SVC_LOG: &str = "var/svc/log";
-static VAR_ADM: &str = "var/adm";
-
-static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
-    let rules = [
-        Rule {
-            label: "process core files and kernel crash dumps",
-            rule_scope: RuleScope::CoresDirectory,
-            directory: ".".parse().unwrap(),
-            glob_pattern: "*".parse().unwrap(),
-            delete_original: true,
-            naming: Box::new(NameIdentity),
-        },
-        Rule {
-            label: "live SMF log files",
-            rule_scope: RuleScope::ZoneMutable,
-            directory: VAR_SVC_LOG.parse().unwrap(),
-            glob_pattern: "*.log".parse().unwrap(),
-            delete_original: false,
-            naming: Box::new(NameLiveLogFile),
-        },
-        Rule {
-            label: "live syslog files",
-            rule_scope: RuleScope::ZoneMutable,
-            directory: VAR_ADM.parse().unwrap(),
-            glob_pattern: "messages".parse().unwrap(),
-            delete_original: false,
-            naming: Box::new(NameLiveLogFile),
-        },
-        Rule {
-            label: "rotated SMF log files",
-            rule_scope: RuleScope::ZoneAlways,
-            directory: VAR_SVC_LOG.parse().unwrap(),
-            glob_pattern: "*.log.*".parse().unwrap(), // XXX-dap digits
-            delete_original: true,
-            naming: Box::new(NameRotatedLogFile),
-        },
-        Rule {
-            label: "rotated syslog files",
-            rule_scope: RuleScope::ZoneAlways,
-            directory: VAR_ADM.parse().unwrap(),
-            glob_pattern: "messages.*".parse().unwrap(), // XXX-dap digits
-            delete_original: true,
-            naming: Box::new(NameRotatedLogFile),
-        },
-    ];
-
-    // We could do this more concisely with a `collect()` or `IdOrdMap::from`,
-    // but those would silently discard duplicates.  We want to detect these and
-    // provide a clear error message.
-    let mut rv = IdOrdMap::new();
-    for rule in rules {
-        let label = rule.label;
-        if let Err(_) = rv.insert_unique(rule) {
-            panic!("found multiple rules with the same label: {:?}", label);
-        }
-    }
-
-    rv
-});
-
-const MAX_COLLIDING_FILENAMES: u16 = 30;
-struct NameRotatedLogFile;
-impl NamingRule for NameRotatedLogFile {
-    fn archived_file_name(
-        &self,
-        source_file_name: &Filename,
-        source_file_mtime: Option<DateTime<Utc>>,
-        lister: &dyn FileLister,
-        output_directory: &Utf8Path,
-    ) -> Result<Filename, anyhow::Error> {
-        // XXX-dap TODO-doc
-        let filename_base = match source_file_name.as_ref().rsplit_once('.') {
-            Some((base, _extension)) => base,
-            None => source_file_name.as_ref(),
-        };
-
-        let mtime_as_seconds =
-            source_file_mtime.unwrap_or_else(|| Utc::now()).timestamp();
-        for i in 0..MAX_COLLIDING_FILENAMES {
-            let rv =
-                format!("{filename_base}.{}", mtime_as_seconds + i64::from(i));
-            let dest = output_directory.join(&rv);
-            if !lister.file_exists(&dest)? {
-                // unwrap(): we started with a valid `Filename` and did not add
-                // any slashes here.
-                return Ok(Filename::try_from(rv).unwrap());
-            }
-        }
-
-        // XXX-dap better message
-        Err(anyhow!("too many files with colliding names"))
-    }
-}
-
-struct NameLiveLogFile;
-impl NamingRule for NameLiveLogFile {
-    fn archived_file_name(
-        &self,
-        source_file_name: &Filename,
-        source_file_mtime: Option<DateTime<Utc>>,
-        lister: &dyn FileLister,
-        output_directory: &Utf8Path,
-    ) -> Result<Filename, anyhow::Error> {
-        // XXX-dap should work better
-        NameRotatedLogFile.archived_file_name(
-            source_file_name,
-            source_file_mtime,
-            lister,
-            output_directory,
-        )
-    }
-}
-
-struct NameIdentity;
-impl NamingRule for NameIdentity {
-    fn archived_file_name(
-        &self,
-        source_file_name: &Filename,
-        _source_file_mtime: Option<DateTime<Utc>>,
-        _lister: &dyn FileLister,
-        _output_directory: &Utf8Path,
-    ) -> Result<Filename, anyhow::Error> {
-        Ok(source_file_name.clone())
     }
 }
 
@@ -681,7 +511,6 @@ impl ArchiveFile<'_> {
 
 #[cfg(test)]
 mod test {
-    use super::ALL_RULES;
     use super::ArchiveFile;
     use super::ArchivePlan;
     use super::ArchivePlanner;
@@ -689,8 +518,9 @@ mod test {
     use super::ArchiveWhat;
     use super::FileLister;
     use super::Filename;
-    use super::MAX_COLLIDING_FILENAMES;
-    use super::NameRotatedLogFile;
+    use super::rules::ALL_RULES;
+    use super::rules::MAX_COLLIDING_FILENAMES;
+    use super::rules::NameRotatedLogFile;
     use anyhow::Context;
     use anyhow::anyhow;
     use anyhow::bail;
