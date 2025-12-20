@@ -20,6 +20,7 @@ use nexus_db_model::DbTypedUuid;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
+use nexus_types::trust_quorum::TrustQuorumConfigState;
 use nexus_types::trust_quorum::{TrustQuorumConfig, TrustQuorumMemberData};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -75,7 +76,7 @@ impl DataStore {
     pub async fn tq_get_all_rack_id_and_latest_epoch(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<(RackUuid, Epoch)> {
+    ) -> Result<BTreeMap<RackUuid, Epoch>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
@@ -92,10 +93,9 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-        let mut output = Vec::with_capacity(values.len());
-
+        let mut output = BTreeMap::new();
         for (rack_id, epoch) in values {
-            output.push((rack_id.into(), i64_to_epoch(epoch)?));
+            output.insert(rack_id.into(), i64_to_epoch(epoch)?);
         }
 
         Ok(output)
@@ -274,14 +274,71 @@ impl DataStore {
                     .await
                     .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
+                    // Some light sanity checking
+                    match config.state {
+                        TrustQuorumConfigState::Preparing
+                        | TrustQuorumConfigState::PreparingLrtqUpgrade => {}
+                        TrustQuorumConfigState::Committing
+                        | TrustQuorumConfigState::Committed
+                        | TrustQuorumConfigState::Aborted => {
+                            let state = config.state;
+                            bail_txn!(
+                                err,
+                                "Cannot insert configuration in state={:?}",
+                                state
+                            );
+                        }
+                    }
+
                     let is_insertable = if let Some(epoch) = current {
                         // Only insert if what is in the DB is immediately prior to
                         // this configuration.
                         Some(epoch) == config.epoch.previous()
                     } else {
-                        // Unconditional update is fine here, since a config
-                        // doesn't exist TODO: Should we ensure that epoch == 1
-                        // || epoch == 2 ?
+                        // We perform an unconditional insert here since
+                        // no existing configuration exists. However, the
+                        // configuration to be inserted is still subject to
+                        // some constraints.
+                        //
+                        // If there is no existing configuration, then the epoch
+                        // to be inserted must be either 1 or 2. It will be 1 if
+                        // this is a new initialization and 2 if this is an LRTQ
+                        // upgrade. Let's check both conditions here and return
+                        // an error if unmet.
+                        match config.state {
+                            TrustQuorumConfigState::Preparing => {
+                                let actual = config.epoch;
+                                let expected = Epoch(1);
+                                if actual != expected {
+                                    bail_txn!(
+                                        err,
+                                        "Failed to insert first TQ
+                                        configuration: invalid epoch for \
+                                        state=preparing: Expected {}, Got {}",
+                                        expected,
+                                        actual
+                                    );
+                                }
+                            }
+                            TrustQuorumConfigState::PreparingLrtqUpgrade => {
+                                let actual = config.epoch;
+                                let expected = Epoch(2);
+                                if actual != expected {
+                                    bail_txn!(
+                                        err,
+                                        "Failed to insert first TQ
+                                        configuration: invalid epoch for \
+                                        state=preparing-lrtq-upgrade: \
+                                        Expected {}, Got {}",
+                                        expected,
+                                        actual
+                                    );
+                                }
+                            }
+                            _ => {
+                                // Already checked abbove
+                            }
+                        }
                         true
                     };
 
@@ -1127,6 +1184,40 @@ mod tests {
                 .collect(),
         };
 
+        // Create a couple of invalid configs andd try to insert them.
+        // They should return distinct errors.
+        let bad_config =
+            TrustQuorumConfig { epoch: Epoch(2), ..config.clone() };
+        let e1 = datastore
+            .tq_insert_latest_config(opctx, bad_config)
+            .await
+            .unwrap_err();
+
+        let bad_config = TrustQuorumConfig {
+            epoch: Epoch(3),
+            state: TrustQuorumConfigState::PreparingLrtqUpgrade,
+            ..config.clone()
+        };
+        let e2 = datastore
+            .tq_insert_latest_config(opctx, bad_config)
+            .await
+            .unwrap_err();
+
+        let bad_config = TrustQuorumConfig {
+            state: TrustQuorumConfigState::Committing,
+            ..config.clone()
+        };
+        let e3 = datastore
+            .tq_insert_latest_config(opctx, bad_config)
+            .await
+            .unwrap_err();
+
+        assert_ne!(e1, e2);
+        assert_ne!(e1, e3);
+        assert_ne!(e2, e3);
+
+        // Insert a valid config and watch it succeed
+
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
         let read_config = datastore
@@ -1612,10 +1703,6 @@ mod tests {
 
         // We should have retrieved one epoch per rack_id
         assert_eq!(values.len(), 3);
-        // Ensure all rack_ids are unique
-        let rack_ids: BTreeSet<_> =
-            values.iter().map(|(rack_id, _)| rack_id).collect();
-        assert_eq!(rack_ids.len(), 3);
 
         // The epoch should be the latest that exists
         for (rack_id, epoch) in values {
