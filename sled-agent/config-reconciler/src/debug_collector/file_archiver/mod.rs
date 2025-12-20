@@ -18,7 +18,3 @@ mod test_helpers;
 
 pub use planning::ArchiveKind;
 pub use planning::ArchivePlanner;
-
-struct ErrorAccumulator {
-    errors: Vec<anyhow::Error>,
-}

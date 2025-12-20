@@ -10,7 +10,6 @@
 //! injection.  See also [https://mmapped.blog/posts/29-plan-execute](the
 //! plan-execute pattern).
 
-use super::ErrorAccumulator;
 use super::execution::execute_archive_step;
 use super::filesystem::FileLister;
 use super::filesystem::Filename;
@@ -60,7 +59,6 @@ pub struct ArchivePlanner<'a> {
     debug_dir: Utf8PathBuf,
     groups: Vec<ArchiveGroup<'static>>,
     lister: &'a (dyn FileLister + Send + Sync),
-    errors: ErrorAccumulator,
 }
 
 impl ArchivePlanner<'static> {
@@ -95,7 +93,6 @@ impl<'a> ArchivePlanner<'a> {
             debug_dir: debug_dir.to_owned(),
             groups: Vec::new(),
             lister,
-            errors: ErrorAccumulator { errors: Vec::new() },
         }
     }
 
@@ -159,7 +156,6 @@ impl<'a> ArchivePlanner<'a> {
             groups: self.groups,
             debug_dir: self.debug_dir,
             lister: self.lister,
-            errors: self.errors,
         }
     }
 
@@ -187,7 +183,6 @@ pub(crate) struct ArchivePlan<'a> {
     debug_dir: Utf8PathBuf,
     groups: Vec<ArchiveGroup<'static>>,
     lister: &'a (dyn FileLister + Send + Sync),
-    errors: ErrorAccumulator, // XXX-dap why is this stored
 }
 
 impl ArchivePlan<'_> {
@@ -314,7 +309,7 @@ impl ArchivePlan<'_> {
     }
 
     pub(crate) async fn execute(self) -> Vec<anyhow::Error> {
-        let mut errors = self.errors;
+        let mut errors = Vec::new();
         let log = &self.log;
         let groups = self.groups;
         let debug_dir = self.debug_dir;
@@ -331,11 +326,11 @@ impl ArchivePlan<'_> {
                     "error during archival";
                     InlineErrorChain::new(&*error)
                 );
-                errors.errors.push(error);
+                errors.push(error);
             }
         }
 
-        errors.errors
+        errors
     }
 }
 
