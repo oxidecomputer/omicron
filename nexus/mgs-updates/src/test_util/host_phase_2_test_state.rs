@@ -936,5 +936,62 @@ mod api_impl {
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
+
+        async fn trust_quorum_reconfigure(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::TrustQuorumReconfigureRequest,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_upgrade_from_lrtq(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::TrustQuorumLrtqUpgradeRequest,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::TrustQuorumCommitRequest,
+            >,
+        ) -> Result<
+            HttpResponseOk<
+                sled_agent_types::trust_quorum::TrustQuorumCommitResponse,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_coordinator_status(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<
+                Option<sled_agent_types::trust_quorum::TrustQuorumCoordinatorStatus>,
+            >,
+            HttpError,
+        >{
+            unimplemented!()
+        }
+
+        async fn trust_quorum_prepare_and_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::TrustQuorumPrepareAndCommitRequest,
+            >,
+        ) -> Result<
+            HttpResponseOk<
+                sled_agent_types::trust_quorum::TrustQuorumCommitResponse,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
     }
 }
