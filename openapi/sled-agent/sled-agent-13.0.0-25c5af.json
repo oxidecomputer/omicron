@@ -1639,6 +1639,108 @@
         }
       }
     },
+    "/trust-quorum/proxy/commit": {
+      "post": {
+        "summary": "Proxy a commit operation to another trust quorum node",
+        "operationId": "trust_quorum_proxy_commit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrustQuorumProxyCommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustQuorumCommitResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/trust-quorum/proxy/prepare-and-commit": {
+      "post": {
+        "summary": "Proxy a prepare-and-commit operation to another trust quorum node",
+        "operationId": "trust_quorum_proxy_prepare_and_commit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrustQuorumProxyPrepareAndCommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustQuorumCommitResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/trust-quorum/proxy/status": {
+      "post": {
+        "summary": "Proxy a status request to another trust quorum node",
+        "operationId": "trust_quorum_proxy_status",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrustQuorumProxyStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustQuorumNodeStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/trust-quorum/reconfigure": {
       "post": {
         "summary": "Initiate a trust quorum reconfiguration",
@@ -8689,6 +8791,169 @@
           "uplinks"
         ]
       },
+      "TrustQuorumAlarm": {
+        "description": "An alarm indicating a protocol invariant violation in trust quorum.",
+        "oneOf": [
+          {
+            "description": "Different configurations found for the same epoch.",
+            "type": "object",
+            "properties": {
+              "mismatched_configurations": {
+                "type": "object",
+                "properties": {
+                  "config1": {
+                    "description": "The first configuration.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/TrustQuorumConfiguration"
+                      }
+                    ]
+                  },
+                  "config2": {
+                    "description": "The second (mismatched) configuration.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/TrustQuorumConfiguration"
+                      }
+                    ]
+                  },
+                  "from": {
+                    "description": "The source of the mismatch (either a baseboard ID or \"Nexus\").",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "config1",
+                  "config2",
+                  "from"
+                ]
+              }
+            },
+            "required": [
+              "mismatched_configurations"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "The key share computer could not compute this node's share.",
+            "type": "object",
+            "properties": {
+              "share_computation_failed": {
+                "type": "object",
+                "properties": {
+                  "epoch": {
+                    "description": "The epoch for which share computation failed.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  },
+                  "error": {
+                    "description": "The error message.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "epoch",
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "share_computation_failed"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "We started collecting shares for a committed configuration, but we no longer have that configuration in our persistent state.",
+            "type": "object",
+            "properties": {
+              "committed_configuration_lost": {
+                "type": "object",
+                "properties": {
+                  "collecting_epoch": {
+                    "description": "The epoch we were collecting shares for.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  },
+                  "latest_committed_epoch": {
+                    "description": "The latest committed epoch.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "collecting_epoch",
+                  "latest_committed_epoch"
+                ]
+              }
+            },
+            "required": [
+              "committed_configuration_lost"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Decrypting the encrypted rack secrets failed when presented with a valid rack secret.",
+            "type": "object",
+            "properties": {
+              "rack_secret_decryption_failed": {
+                "type": "object",
+                "properties": {
+                  "epoch": {
+                    "description": "The epoch for which decryption failed.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  },
+                  "error": {
+                    "description": "The error message.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "epoch",
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "rack_secret_decryption_failed"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Reconstructing the rack secret failed when presented with valid shares.",
+            "type": "object",
+            "properties": {
+              "rack_secret_reconstruction_failed": {
+                "type": "object",
+                "properties": {
+                  "epoch": {
+                    "description": "The epoch for which reconstruction failed.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  },
+                  "error": {
+                    "description": "The error message.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "epoch",
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "rack_secret_reconstruction_failed"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "TrustQuorumCommitRequest": {
         "description": "Request to commit a trust quorum configuration at a given epoch.",
         "type": "object",
@@ -8745,7 +9010,7 @@
             "minimum": 0
           },
           "members": {
-            "description": "All members of the configuration and the hex-encoded SHA3-256 hash of their key shares.",
+            "description": "All members of the configuration and the SHA3-256 hash of their key shares.",
             "type": "object",
             "additionalProperties": {
               "type": "string"
@@ -8805,11 +9070,11 @@
         "type": "object",
         "properties": {
           "data": {
-            "description": "Hex-encoded encrypted data.",
+            "description": "Encrypted data.",
             "type": "string"
           },
           "salt": {
-            "description": "Hex-encoded 32-byte salt used to derive the encryption key.",
+            "description": "32-byte salt used to derive the encryption key.",
             "type": "string"
           }
         },
@@ -8850,6 +9115,98 @@
           "threshold"
         ]
       },
+      "TrustQuorumNodeStatus": {
+        "description": "Status of a trust quorum node, returned from a proxied status request.",
+        "type": "object",
+        "properties": {
+          "alarms": {
+            "description": "Any alarms raised by this node.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustQuorumAlarm"
+            }
+          },
+          "connected_peers": {
+            "description": "The peers this node is connected to.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          },
+          "persistent_state": {
+            "description": "Summary of the node's persistent state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TrustQuorumPersistentStateSummary"
+              }
+            ]
+          },
+          "proxied_requests": {
+            "description": "Number of proxied requests currently in flight.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "alarms",
+          "connected_peers",
+          "persistent_state",
+          "proxied_requests"
+        ]
+      },
+      "TrustQuorumPersistentStateSummary": {
+        "description": "Summary of a trust quorum node's persistent state.",
+        "type": "object",
+        "properties": {
+          "commits": {
+            "description": "Epochs that have been committed.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          },
+          "configs": {
+            "description": "Epochs for which configurations have been prepared.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          },
+          "expunged": {
+            "description": "Whether this node has been expunged from the quorum.",
+            "type": "boolean"
+          },
+          "has_lrtq_share": {
+            "description": "Whether the node has an LRTQ (legacy) share.",
+            "type": "boolean"
+          },
+          "shares": {
+            "description": "Epochs for which key shares exist.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "commits",
+          "configs",
+          "expunged",
+          "has_lrtq_share",
+          "shares"
+        ]
+      },
       "TrustQuorumPrepareAndCommitRequest": {
         "description": "Request to prepare and commit a trust quorum configuration.",
         "type": "object",
@@ -8878,7 +9235,7 @@
             "minimum": 0
           },
           "members": {
-            "description": "All members of the configuration and the hex-encoded SHA3-256 hash of their key shares.",
+            "description": "All members of the configuration and the SHA3-256 hash of their key shares.",
             "type": "object",
             "additionalProperties": {
               "type": "string"
@@ -8905,6 +9262,122 @@
           "members",
           "rack_id",
           "threshold"
+        ]
+      },
+      "TrustQuorumProxyCommitRequest": {
+        "description": "Request to proxy a commit operation to another trust quorum node.",
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "The target node to proxy the request to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "epoch": {
+            "description": "The epoch to commit.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rack_id": {
+            "description": "Unique ID of the rack.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "destination",
+          "epoch",
+          "rack_id"
+        ]
+      },
+      "TrustQuorumProxyPrepareAndCommitRequest": {
+        "description": "Request to proxy a prepare-and-commit operation to another trust quorum node.",
+        "type": "object",
+        "properties": {
+          "coordinator": {
+            "description": "The coordinator of this reconfiguration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "destination": {
+            "description": "The target node to proxy the request to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "encrypted_rack_secrets": {
+            "nullable": true,
+            "description": "Encrypted rack secrets from prior configurations, if any.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TrustQuorumEncryptedRackSecrets"
+              }
+            ]
+          },
+          "epoch": {
+            "description": "Unique, monotonically increasing identifier for a configuration.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "members": {
+            "description": "All members of the configuration and the SHA3-256 hash of their key shares.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "rack_id": {
+            "description": "Unique ID of the rack.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackUuid"
+              }
+            ]
+          },
+          "threshold": {
+            "description": "The number of sleds required to reconstruct the rack secret.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "coordinator",
+          "destination",
+          "epoch",
+          "members",
+          "rack_id",
+          "threshold"
+        ]
+      },
+      "TrustQuorumProxyStatusRequest": {
+        "description": "Request to proxy a status request to another trust quorum node.",
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "The target node to get the status from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "destination"
         ]
       },
       "TrustQuorumReconfigureRequest": {

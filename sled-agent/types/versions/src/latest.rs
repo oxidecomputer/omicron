@@ -156,13 +156,19 @@ pub mod support_bundle {
 }
 
 pub mod trust_quorum {
+    pub use crate::v13::trust_quorum::TrustQuorumAlarm;
     pub use crate::v13::trust_quorum::TrustQuorumCommitRequest;
     pub use crate::v13::trust_quorum::TrustQuorumCommitResponse;
     pub use crate::v13::trust_quorum::TrustQuorumConfiguration;
     pub use crate::v13::trust_quorum::TrustQuorumCoordinatorStatus;
     pub use crate::v13::trust_quorum::TrustQuorumEncryptedRackSecrets;
     pub use crate::v13::trust_quorum::TrustQuorumLrtqUpgradeRequest;
+    pub use crate::v13::trust_quorum::TrustQuorumNodeStatus;
+    pub use crate::v13::trust_quorum::TrustQuorumPersistentStateSummary;
     pub use crate::v13::trust_quorum::TrustQuorumPrepareAndCommitRequest;
+    pub use crate::v13::trust_quorum::TrustQuorumProxyCommitRequest;
+    pub use crate::v13::trust_quorum::TrustQuorumProxyPrepareAndCommitRequest;
+    pub use crate::v13::trust_quorum::TrustQuorumProxyStatusRequest;
     pub use crate::v13::trust_quorum::TrustQuorumReconfigureRequest;
 }
 
