@@ -55,6 +55,12 @@ use sled_agent_types::support_bundle::{
     SupportBundleMetadata, SupportBundlePathParam,
     SupportBundleTransferQueryParams,
 };
+use sled_agent_types::trust_quorum::{
+    TrustQuorumCommitRequest, TrustQuorumCommitResponse,
+    TrustQuorumConfiguration, TrustQuorumCoordinatorStatus,
+    TrustQuorumLrtqUpgradeRequest, TrustQuorumPrepareAndCommitRequest,
+    TrustQuorumReconfigureRequest,
+};
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     CleanupPeriod, StorageLimit, ZoneBundleFilter, ZoneBundleId,
@@ -1177,5 +1183,185 @@ impl SledAgentApi for SledAgentImpl {
         .await?;
 
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_reconfigure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<TrustQuorumReconfigureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let msg = trust_quorum_protocol::ReconfigureMsg {
+            rack_id: request.rack_id,
+            epoch: trust_quorum_protocol::Epoch(request.epoch),
+            last_committed_epoch: request
+                .last_committed_epoch
+                .map(trust_quorum_protocol::Epoch),
+            members: request.members,
+            threshold: trust_quorum_protocol::Threshold(request.threshold),
+        };
+
+        sa.trust_quorum()
+            .reconfigure(msg)
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_upgrade_from_lrtq(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<TrustQuorumLrtqUpgradeRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let msg = trust_quorum_protocol::LrtqUpgradeMsg {
+            rack_id: request.rack_id,
+            epoch: trust_quorum_protocol::Epoch(request.epoch),
+            members: request.members,
+            threshold: trust_quorum_protocol::Threshold(request.threshold),
+        };
+
+        sa.trust_quorum()
+            .upgrade_from_lrtq(msg)
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<TrustQuorumCommitRequest>,
+    ) -> Result<HttpResponseOk<TrustQuorumCommitResponse>, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let status = sa
+            .trust_quorum()
+            .commit(
+                request.rack_id,
+                trust_quorum_protocol::Epoch(request.epoch),
+            )
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        let response = match status {
+            trust_quorum::CommitStatus::Committed => {
+                TrustQuorumCommitResponse::Committed
+            }
+            trust_quorum::CommitStatus::Pending => {
+                TrustQuorumCommitResponse::Pending
+            }
+        };
+
+        Ok(HttpResponseOk(response))
+    }
+
+    async fn trust_quorum_coordinator_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumCoordinatorStatus>>, HttpError>
+    {
+        let sa = request_context.context();
+
+        let status = sa
+            .trust_quorum()
+            .coordinator_status()
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        let response = status.map(|s| TrustQuorumCoordinatorStatus {
+            config: TrustQuorumConfiguration {
+                rack_id: s.config.rack_id,
+                epoch: s.config.epoch.0,
+                coordinator: s.config.coordinator,
+                members: s
+                    .config
+                    .members
+                    .into_iter()
+                    .map(|(id, digest)| (id, hex::encode(digest.0)))
+                    .collect(),
+                threshold: s.config.threshold.0,
+            },
+            acked_prepares: s.acked_prepares,
+        });
+
+        Ok(HttpResponseOk(response))
+    }
+
+    async fn trust_quorum_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<TrustQuorumPrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<TrustQuorumCommitResponse>, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let bad_request = |msg: String| HttpError::for_bad_request(None, msg);
+
+        let parse_digest = |hex: &str| -> Result<[u8; 32], HttpError> {
+            let bytes = hex::decode(hex)
+                .map_err(|e| bad_request(format!("invalid hex: {e}")))?;
+            bytes.try_into().map_err(|v: Vec<u8>| {
+                bad_request(format!("digest must be 32 bytes, got {}", v.len()))
+            })
+        };
+
+        let members = request
+            .members
+            .into_iter()
+            .map(|(id, hex)| {
+                Ok((
+                    id,
+                    trust_quorum_protocol::Sha3_256Digest(parse_digest(&hex)?),
+                ))
+            })
+            .collect::<Result<_, HttpError>>()?;
+
+        let encrypted_rack_secrets = request
+            .encrypted_rack_secrets
+            .map(
+                |ers| -> Result<
+                    trust_quorum_protocol::EncryptedRackSecrets,
+                    HttpError,
+                > {
+                    let salt = parse_digest(&ers.salt)?;
+                    let data = hex::decode(&ers.data).map_err(|e| {
+                        bad_request(format!("invalid hex data: {e}"))
+                    })?;
+                    Ok(trust_quorum_protocol::EncryptedRackSecrets::new(
+                        trust_quorum_protocol::Salt(salt),
+                        data.into_boxed_slice(),
+                    ))
+                },
+            )
+            .transpose()?;
+
+        let config = trust_quorum_protocol::Configuration {
+            rack_id: request.rack_id,
+            epoch: trust_quorum_protocol::Epoch(request.epoch),
+            coordinator: request.coordinator,
+            members,
+            threshold: trust_quorum_protocol::Threshold(request.threshold),
+            encrypted_rack_secrets,
+        };
+
+        let status = sa
+            .trust_quorum()
+            .prepare_and_commit(config)
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        let response = match status {
+            trust_quorum::CommitStatus::Committed => {
+                TrustQuorumCommitResponse::Committed
+            }
+            trust_quorum::CommitStatus::Pending => {
+                TrustQuorumCommitResponse::Pending
+            }
+        };
+
+        Ok(HttpResponseOk(response))
     }
 }

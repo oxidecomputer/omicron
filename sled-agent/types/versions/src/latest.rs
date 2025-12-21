@@ -155,6 +155,17 @@ pub mod support_bundle {
     pub use crate::v1::support_bundle::SupportBundleTransferQueryParams;
 }
 
+pub mod trust_quorum {
+    pub use crate::v13::trust_quorum::TrustQuorumCommitRequest;
+    pub use crate::v13::trust_quorum::TrustQuorumCommitResponse;
+    pub use crate::v13::trust_quorum::TrustQuorumConfiguration;
+    pub use crate::v13::trust_quorum::TrustQuorumCoordinatorStatus;
+    pub use crate::v13::trust_quorum::TrustQuorumEncryptedRackSecrets;
+    pub use crate::v13::trust_quorum::TrustQuorumLrtqUpgradeRequest;
+    pub use crate::v13::trust_quorum::TrustQuorumPrepareAndCommitRequest;
+    pub use crate::v13::trust_quorum::TrustQuorumReconfigureRequest;
+}
+
 pub mod zone_bundle {
     pub use crate::v1::zone_bundle::BundleUtilization;
     pub use crate::v1::zone_bundle::CleanupContext;

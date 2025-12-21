@@ -34,6 +34,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (13, ADD_TRUST_QUORUM),
     (12, ADD_SMF_SERVICES_HEALTH_CHECK),
     (11, ADD_DUAL_STACK_EXTERNAL_IP_CONFIG),
     (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
@@ -1065,4 +1066,71 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         path_params: Path<latest::dataset::LocalStoragePathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate a trust quorum reconfiguration
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/reconfigure",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_reconfigure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::TrustQuorumReconfigureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate an upgrade from LRTQ
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/upgrade-from-lrtq",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_upgrade_from_lrtq(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::TrustQuorumLrtqUpgradeRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Commit a trust quorum configuration
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::TrustQuorumCommitRequest>,
+    ) -> Result<
+        HttpResponseOk<latest::trust_quorum::TrustQuorumCommitResponse>,
+        HttpError,
+    >;
+
+    /// Get the coordinator status if this node is coordinating a reconfiguration
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/coordinator-status",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_coordinator_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<
+            Option<latest::trust_quorum::TrustQuorumCoordinatorStatus>,
+        >,
+        HttpError,
+    >;
+
+    /// Attempt to prepare and commit a trust quorum configuration
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/prepare-and-commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<
+            latest::trust_quorum::TrustQuorumPrepareAndCommitRequest,
+        >,
+    ) -> Result<
+        HttpResponseOk<latest::trust_quorum::TrustQuorumCommitResponse>,
+        HttpError,
+    >;
 }
