@@ -55,11 +55,7 @@ pub(crate) fn perform_all_blueprint_only_checks(blippy: &mut Blippy<'_>) {
 fn check_underlay_ips(blippy: &mut Blippy<'_>) {
     let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
         BTreeMap::new();
-    let mut inferred_sled_subnets_by_sled: BTreeMap<
-        SledUuid,
-        (Ipv6Subnet<SLED_PREFIX>, &BlueprintZoneConfig),
-    > = BTreeMap::new();
-    let mut inferred_sled_subnets_by_subnet: BTreeMap<
+    let mut sled_subnets_by_subnet: BTreeMap<
         Ipv6Subnet<SLED_PREFIX>,
         SledUuid,
     > = BTreeMap::new();
@@ -103,10 +99,10 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                 );
             }
         } else {
-            let subnet = Ipv6Subnet::new(ip);
+            let subnet = blippy.blueprint().sleds.get(&sled_id).unwrap().subnet;
 
             // Any given subnet should be used by at most one sled.
-            match inferred_sled_subnets_by_subnet.entry(subnet) {
+            match sled_subnets_by_subnet.entry(subnet) {
                 Entry::Vacant(slot) => {
                     slot.insert(sled_id);
                 }
@@ -124,27 +120,18 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                 }
             }
 
-            // Any given sled should have IPs within at most one subnet.
-            //
-            // The blueprint doesn't store sled subnets explicitly, so we can't
-            // check that each sled is using the subnet it's supposed to. The
-            // best we can do is check that the sleds are internally consistent.
-            match inferred_sled_subnets_by_sled.entry(sled_id) {
-                Entry::Vacant(slot) => {
-                    slot.insert((subnet, zone));
-                }
-                Entry::Occupied(prev) => {
-                    if prev.get().0 != subnet {
-                        blippy.push_sled_note(
-                            sled_id,
-                            Severity::Fatal,
-                            SledKind::SledWithMixedUnderlaySubnets {
-                                zone1: prev.get().1.clone(),
-                                zone2: zone.clone(),
-                            },
-                        );
-                    }
-                }
+            // Any underlay IP (other than internal DNS, which we check above)
+            // from this sled should be within the sled's subnet.
+            let inferred_subnet = Ipv6Subnet::new(ip);
+            if subnet != inferred_subnet {
+                blippy.push_sled_note(
+                    sled_id,
+                    Severity::Fatal,
+                    SledKind::UnderlayIpOnWrongSubnet {
+                        zone: zone.clone(),
+                        subnet,
+                    },
+                );
             }
         }
     }
@@ -811,33 +798,23 @@ mod tests {
         assert_ne!(nexus0_sled_id, nexus1_sled_id);
 
         let dup_ip = nexus0.underlay_ip();
+        let correct_nexus_ip;
         match &mut nexus1.zone_type {
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
                 ..
             }) => {
+                correct_nexus_ip = *internal_address.ip();
                 internal_address.set_ip(dup_ip);
             }
             _ => unreachable!("this is a Nexus zone"),
         };
 
-        // This illegal modification should result in at least three notes: a
-        // duplicate underlay IP, duplicate sled subnets, and sled1 having mixed
-        // underlay subnets (the details of which depend on the ordering of
-        // zones, so we'll sort that out here).
+        // This illegal modification should result in at least two notes: a
+        // duplicate underlay IP and sled1 having a zone with an underlay IP
+        // outside its subnet.
         let nexus0 = nexus0.into_ref().clone();
         let nexus1 = nexus1.into_ref().clone();
-        let (mixed_underlay_zone1, mixed_underlay_zone2) = {
-            let mut sled1_zones =
-                blueprint.sleds.get(&nexus1_sled_id).unwrap().zones.iter();
-            let sled1_zone1 = sled1_zones.next().expect("at least one zone");
-            let sled1_zone2 = sled1_zones.next().expect("at least two zones");
-            if sled1_zone1.id == nexus1.id {
-                (nexus1.clone(), sled1_zone2.clone())
-            } else {
-                (sled1_zone1.clone(), nexus1.clone())
-            }
-        };
         let expected_notes = [
             Note {
                 severity: Severity::Fatal,
@@ -853,23 +830,54 @@ mod tests {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: nexus1_sled_id,
-                    kind: Box::new(SledKind::SledWithMixedUnderlaySubnets {
-                        zone1: mixed_underlay_zone1,
-                        zone2: mixed_underlay_zone2,
-                    }),
-                },
-            },
-            Note {
-                severity: Severity::Fatal,
-                kind: Kind::Sled {
-                    sled_id: nexus1_sled_id,
-                    kind: Box::new(SledKind::ConflictingSledSubnets {
-                        other_sled: nexus0_sled_id,
-                        subnet: Ipv6Subnet::new(dup_ip),
+                    kind: Box::new(SledKind::UnderlayIpOnWrongSubnet {
+                        zone: nexus1.clone(),
+                        subnet: Ipv6Subnet::new(correct_nexus_ip),
                     }),
                 },
             },
         ];
+
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_duplicate_sled_subnet() {
+        static TEST_NAME: &str = "test_duplicate_sled_subnet";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Copy the subnet from one sled to another.
+        let sled0 = *blueprint.sleds.keys().next().unwrap();
+        let sled1 = *blueprint.sleds.keys().nth(1).unwrap();
+
+        let sled0_subnet = blueprint.sleds.get(&sled0).unwrap().subnet;
+        blueprint.sleds.get_mut(&sled1).unwrap().subnet = sled0_subnet;
+
+        // This illegal modification should result in at least one note: a
+        // conflicting sled subnet. (There should also be notes about all
+        // sled1's underlay IPs being outside its subnet, but we check for that
+        // in another test.)
+        let expected_notes = [Note {
+            severity: Severity::Fatal,
+            kind: Kind::Sled {
+                sled_id: sled1,
+                kind: Box::new(SledKind::ConflictingSledSubnets {
+                    other_sled: sled0,
+                    subnet: sled0_subnet,
+                }),
+            },
+        }];
 
         let report = Blippy::new_blueprint_only(&blueprint)
             .into_report(BlippyReportSortKey::Kind);
