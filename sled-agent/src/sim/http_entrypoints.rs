@@ -70,7 +70,9 @@ use sled_agent_types::support_bundle::{
 use sled_agent_types::trust_quorum::{
     TrustQuorumCommitRequest, TrustQuorumCommitResponse,
     TrustQuorumCoordinatorStatus, TrustQuorumLrtqUpgradeRequest,
-    TrustQuorumPrepareAndCommitRequest, TrustQuorumReconfigureRequest,
+    TrustQuorumNodeStatus, TrustQuorumPrepareAndCommitRequest,
+    TrustQuorumProxyCommitRequest, TrustQuorumProxyPrepareAndCommitRequest,
+    TrustQuorumProxyStatusRequest, TrustQuorumReconfigureRequest,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -960,6 +962,27 @@ impl SledAgentApi for SledAgentSimImpl {
         _request_context: RequestContext<Self::Context>,
         _body: TypedBody<TrustQuorumPrepareAndCommitRequest>,
     ) -> Result<HttpResponseOk<TrustQuorumCommitResponse>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumProxyCommitRequest>,
+    ) -> Result<HttpResponseOk<TrustQuorumCommitResponse>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_prepare_and_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumProxyPrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<TrustQuorumCommitResponse>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_status(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumProxyStatusRequest>,
+    ) -> Result<HttpResponseOk<TrustQuorumNodeStatus>, HttpError> {
         method_unimplemented()
     }
 }

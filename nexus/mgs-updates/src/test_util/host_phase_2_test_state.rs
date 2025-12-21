@@ -993,5 +993,47 @@ mod api_impl {
         > {
             unimplemented!()
         }
+
+        async fn trust_quorum_proxy_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::TrustQuorumProxyCommitRequest,
+            >,
+        ) -> Result<
+            HttpResponseOk<
+                sled_agent_types::trust_quorum::TrustQuorumCommitResponse,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_proxy_prepare_and_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::TrustQuorumProxyPrepareAndCommitRequest,
+            >,
+        ) -> Result<
+            HttpResponseOk<
+                sled_agent_types::trust_quorum::TrustQuorumCommitResponse,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_proxy_status(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::TrustQuorumProxyStatusRequest,
+            >,
+        ) -> Result<
+            HttpResponseOk<
+                sled_agent_types::trust_quorum::TrustQuorumNodeStatus,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
     }
 }

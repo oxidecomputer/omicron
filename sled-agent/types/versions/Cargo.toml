@@ -26,6 +26,7 @@ propolis_api_types.workspace = true
 proptest = { workspace = true, optional = true }
 schemars.workspace = true
 serde.workspace = true
+serde_with = { workspace = true, features = ["hex", "schemars_0_8"] }
 serde_json.workspace = true
 sha3.workspace = true
 sled-hardware-types.workspace = true

@@ -1133,4 +1133,48 @@ pub trait SledAgentApi {
         HttpResponseOk<latest::trust_quorum::TrustQuorumCommitResponse>,
         HttpError,
     >;
+
+    /// Proxy a commit operation to another trust quorum node
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/proxy/commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_proxy_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::TrustQuorumProxyCommitRequest>,
+    ) -> Result<
+        HttpResponseOk<latest::trust_quorum::TrustQuorumCommitResponse>,
+        HttpError,
+    >;
+
+    /// Proxy a prepare-and-commit operation to another trust quorum node
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/proxy/prepare-and-commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_proxy_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<
+            latest::trust_quorum::TrustQuorumProxyPrepareAndCommitRequest,
+        >,
+    ) -> Result<
+        HttpResponseOk<latest::trust_quorum::TrustQuorumCommitResponse>,
+        HttpError,
+    >;
+
+    /// Proxy a status request to another trust quorum node
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/proxy/status",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_proxy_status(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::TrustQuorumProxyStatusRequest>,
+    ) -> Result<
+        HttpResponseOk<latest::trust_quorum::TrustQuorumNodeStatus>,
+        HttpError,
+    >;
 }
