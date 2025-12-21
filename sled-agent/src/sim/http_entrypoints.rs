@@ -67,6 +67,11 @@ use sled_agent_types::support_bundle::{
     SupportBundleMetadata, SupportBundlePathParam,
     SupportBundleTransferQueryParams,
 };
+use sled_agent_types::trust_quorum::{
+    TrustQuorumCommitRequest, TrustQuorumCommitResponse,
+    TrustQuorumCoordinatorStatus, TrustQuorumLrtqUpgradeRequest,
+    TrustQuorumPrepareAndCommitRequest, TrustQuorumReconfigureRequest,
+};
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
@@ -921,6 +926,41 @@ impl SledAgentApi for SledAgentSimImpl {
         _body: TypedBody<ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_reconfigure(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumReconfigureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_upgrade_from_lrtq(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumLrtqUpgradeRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumCommitRequest>,
+    ) -> Result<HttpResponseOk<TrustQuorumCommitResponse>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_coordinator_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumCoordinatorStatus>>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_prepare_and_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumPrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<TrustQuorumCommitResponse>, HttpError> {
+        method_unimplemented()
     }
 }
 
