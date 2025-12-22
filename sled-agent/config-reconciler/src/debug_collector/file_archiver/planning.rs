@@ -7,8 +7,8 @@
 //!
 //! This system is designed so that as much possible is incorporated into the
 //! plan so that it can be tested in simulation without extensive dependency
-//! injection.  See also [https://mmapped.blog/posts/29-plan-execute](the
-//! plan-execute pattern).
+//! injection.  See also [the plan-execute
+//! pattern](https://mmapped.blog/posts/29-plan-execute).
 
 use super::execution::execute_archive_step;
 use super::filesystem::FileLister;
