@@ -1,0 +1,46 @@
+format_version = 1
+
+[target]
+name = "sled_cpu"
+description = "CPU metrics for a compute sled"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial" ] },
+]
+
+[fields.cpu_id]
+type = "u32"
+description = "The CPU core identifier"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID for the CPU's rack"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID for the CPU's sled"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the sled"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled"
+
+[fields.state]
+type = "string"
+description = "The CPU microstate (idle, user, kernel, dtrace, intr)"
+
+[[metrics]]
+name = "cpu_nsec"
+description = "Cumulative nanoseconds spent in a CPU microstate"
+units = "nanoseconds"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "cpu_id", "state" ] }
+]
