@@ -8069,7 +8069,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .silo_groups_list(&opctx, &pagparams)
                 .await?
                 .into_iter()
-                .map(|i| i.into())
+                .map(|g| g.into())
                 .collect();
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
@@ -8215,14 +8215,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
-            let groups = nexus
+            let groups: Vec<views::Group> = nexus
                 .silo_user_fetch_groups_for_self(
                     &opctx,
                     &data_page_params_for(&rqctx, &query)?,
                 )
                 .await?
                 .into_iter()
-                .map(|d| d.into())
+                .map(|g| g.into())
                 .collect();
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
