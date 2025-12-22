@@ -188,9 +188,7 @@ impl super::Nexus {
             ImageLookup::ProjectImage(lookup) => {
                 let (authz_silo, _, authz_project_image, project_image) =
                     lookup.fetch_for(authz::Action::Modify).await?;
-                opctx
-                    .authorize(authz::Action::CreateChild, &authz_silo)
-                    .await?;
+
                 self.db_datastore
                     .project_image_promote(
                         opctx,
@@ -217,8 +215,11 @@ impl super::Nexus {
             ImageLookup::SiloImage(lookup) => {
                 let (_, authz_silo_image, silo_image) =
                     lookup.fetch_for(authz::Action::Modify).await?;
-                let (_, authz_project) =
-                    project_lookup.lookup_for(authz::Action::Modify).await?;
+                // Check CreateChild on the project since we're creating a ProjectImage.
+                // This allows limited-collaborators to demote images.
+                let (_, authz_project) = project_lookup
+                    .lookup_for(authz::Action::CreateChild)
+                    .await?;
                 self.db_datastore
                     .silo_image_demote(
                         opctx,
