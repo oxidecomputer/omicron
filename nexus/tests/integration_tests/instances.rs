@@ -16,11 +16,13 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::resource_helpers::DiskTestBuilder;
 use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
@@ -131,6 +133,18 @@ fn get_instance_stop_url(instance_name: &str) -> String {
 
 fn get_disks_url() -> String {
     format!("/v1/disks?{}", get_project_selector())
+}
+
+async fn get_instance_disks(
+    client: &ClientTestContext,
+    name: &str,
+) -> Vec<Disk> {
+    let url = format!("/v1/instances/{name}/disks?project={PROJECT_NAME}");
+
+    NexusRequest::iter_collection_authn(client, &url, "", None)
+        .await
+        .expect("failed to list disks for instance")
+        .all_items
 }
 
 fn anti_affinity_groups_url() -> String {
@@ -4352,34 +4366,41 @@ async fn test_attach_eight_disks_to_instance(
 
 // Test that disk attach limit is enforced
 #[nexus_test]
-async fn test_cannot_attach_nine_disks_to_instance(
-    cptestctx: &ControlPlaneTestContext,
-) {
+async fn test_disk_attach_limit(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let project_name = "bit-barrel";
 
-    // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
+    // Each 1 GB Crucible disk requires 1.25 GB overhead. With the default size
+    // for DiskTest of 16 GB disks, this means 12 regions can be allocated on
+    // each zpool. This means 4 disks per pool.
+    //
+    // This test creates 13 1 GB disks, so we need 4 pools.
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(4)
+        .build()
+        .await;
+
     create_project(client, project_name).await;
 
-    // Make 9 disks
-    for i in 0..9 {
-        create_disk(&client, project_name, &format!("probablydata{}", i,))
-            .await;
+    // Make 13 disks
+    for i in 0..13 {
+        create_disk(&client, project_name, &format!("probablydata{}", i)).await;
     }
 
-    let disks_url = format!("/v1/disks?project={}", project_name,);
+    let disks_url = format!("/v1/disks?project={}", project_name);
 
-    // Assert we created 9 disks
+    // Assert we created 13 disks
     let disks: Vec<Disk> =
         NexusRequest::iter_collection_authn(client, &disks_url, "", None)
             .await
             .expect("failed to list disks")
             .all_items;
-    assert_eq!(disks.len(), 9);
+    assert_eq!(disks.len(), 13);
 
-    // Try to boot an instance that has 9 disks attached
+    // Try to boot an instance that has 13 disks attached
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nfs")).unwrap(),
@@ -4397,7 +4418,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
             },
         )),
-        disks: (1..9)
+        disks: (0..13)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -4433,7 +4454,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
             .await
             .expect("failed to list disks")
             .all_items;
-    assert_eq!(disks.len(), 9);
+    assert_eq!(disks.len(), 13);
 
     for disk in disks {
         assert_eq!(disk.state, DiskState::Detached);
@@ -8516,4 +8537,106 @@ async fn instance_simulate_migration_source(
         },
     )
     .await;
+}
+
+#[nexus_test(extra_sled_agents = 3)]
+async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+
+    // Create ten zpools, each with one dataset, on all the sleds. Each 1 GB
+    // Crucible disk requires 1.25 GB due to overhead. With 16 GB disks, 12
+    // regions can be allocated on each zpool. Without the requirement to use
+    // distinct sleds for Crucible disks, that means 4 disks can be allocated
+    // per zpool. With 4 sleds, this is enough for 16 disks. At the time this
+    // test was written, MAX_DISKS_PER_INSTANCE == 12, so this was enough.
+    // These numbers will have to be changed if the constants change!
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(10)
+        .build()
+        .await;
+
+    create_project_and_pool(&client).await;
+
+    let disks_url = get_disks_url();
+
+    for n in 0..MAX_DISKS_PER_INSTANCE {
+        let new_disk = params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: format!("disk{n:02}").parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+            },
+            size: ByteCount::from_gibibytes_u32(1),
+        };
+
+        NexusRequest::new(
+            RequestBuilder::new(client, Method::POST, &disks_url)
+                .body(Some(&new_disk))
+                .expect_status(Some(StatusCode::CREATED)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    let create_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "lots-of-disks".parse().unwrap(),
+            description: "alan hates descriptions".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data:
+            b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                .to_vec(),
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+        external_ips: vec![],
+        disks: (0..MAX_DISKS_PER_INSTANCE)
+            .map(|n| {
+                params::InstanceDiskAttachment::Attach(
+                    params::InstanceDiskAttach {
+                        name: format!("disk{n:02}").parse().unwrap(),
+                    },
+                )
+            })
+            .collect(),
+        boot_disk: None,
+        cpu_platform: None,
+        start: false,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+    };
+
+    let instance: Instance =
+        object_create(client, &get_instances_url(), &create_params).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+
+    // Start the instance.
+    let name = instance.identity.name.as_str();
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    let instance_url = get_instance_url(name);
+    let instance = instance_post(&client, name, InstanceOp::Start).await;
+
+    // Now, simulate completion of instance boot and check the state reported.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    identity_eq(&instance.identity, &instance_next.identity);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    // Ensure that each disk attached ok
+    let disks = get_instance_disks(&client, name).await;
+    assert_eq!(disks.len(), MAX_DISKS_PER_INSTANCE as usize);
 }

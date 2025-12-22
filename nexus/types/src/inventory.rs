@@ -39,6 +39,7 @@ use serde_with::serde_as;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types_versions::latest::inventory::HealthMonitorInventory;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
@@ -175,7 +176,7 @@ pub struct Collection {
 
     /// The status of our cockroachdb cluster, keyed by node identifier
     pub cockroach_status:
-        BTreeMap<cockroach_admin_types::NodeId, CockroachStatus>,
+        BTreeMap<cockroach_admin_types::node::InternalNodeId, CockroachStatus>,
 
     /// The status of time synchronization
     pub ntp_timesync: IdOrdMap<TimeSync>,
@@ -704,6 +705,7 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
+    pub health_monitor: HealthMonitorInventory,
 }
 
 impl IdOrdItem for SledAgent {

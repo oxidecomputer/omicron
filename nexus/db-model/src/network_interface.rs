@@ -12,7 +12,8 @@ use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
 use diesel::AsChangeset;
-use ipnetwork::IpNetwork;
+use itertools::Either;
+use itertools::Itertools;
 use nexus_db_schema::schema::instance_network_interface;
 use nexus_db_schema::schema::network_interface;
 use nexus_db_schema::schema::service_network_interface;
@@ -98,9 +99,13 @@ pub struct NetworkInterface {
     /// True if this is the instance's primary interface.
     #[diesel(column_name = is_primary)]
     pub primary: bool,
-    /// List of additional networks on which the instance is allowed to send /
-    /// receive traffic.
-    pub transit_ips: Vec<IpNetwork>,
+    /// List of additional IPv4 networks on which the instance is allowed to
+    /// send / receive traffic.
+    #[diesel(column_name = transit_ips)]
+    pub transit_ips_v4: Vec<crate::Ipv4Net>,
+    /// List of additional IPv6 networks on which the instance is allowed to
+    /// send / receive traffic.
+    pub transit_ips_v6: Vec<crate::Ipv6Net>,
 }
 
 impl NetworkInterface {
@@ -119,21 +124,12 @@ impl NetworkInterface {
                 )));
             }
             (None, Some(ip)) => {
-                // Check that all transit IPs are IPv6.
                 let transit_ips = self
-                    .transit_ips
+                    .transit_ips_v6
                     .iter()
-                    .map(|net| {
-                        let IpNetwork::V6(net) = net else {
-                            return Err(Error::internal_error(&format!(
-                                "NIC with ID '{}' is IPv6-only, but has \
-                                IPv4 transit IPs",
-                                self.id(),
-                            )));
-                        };
-                        Ok(Ipv6Net::from(*net))
-                    })
-                    .collect::<Result<_, _>>()?;
+                    .copied()
+                    .map(Into::into)
+                    .collect();
                 PrivateIpConfig::V6(PrivateIpv6Config::new_with_transit_ips(
                     *ip,
                     ipv6_subnet,
@@ -141,21 +137,12 @@ impl NetworkInterface {
                 )?)
             }
             (Some(ip), None) => {
-                // Check that all transit IPs are IPv4.
                 let transit_ips = self
-                    .transit_ips
+                    .transit_ips_v4
                     .iter()
-                    .map(|net| {
-                        let IpNetwork::V4(net) = net else {
-                            return Err(Error::internal_error(&format!(
-                                "NIC with ID '{}' is IPv4-only, but has \
-                                IPv6 transit IPs",
-                                self.id(),
-                            )));
-                        };
-                        Ok(Ipv4Net::from(*net))
-                    })
-                    .collect::<Result<_, _>>()?;
+                    .copied()
+                    .map(Into::into)
+                    .collect();
                 PrivateIpConfig::V4(PrivateIpv4Config::new_with_transit_ips(
                     *ip,
                     ipv4_subnet,
@@ -164,20 +151,16 @@ impl NetworkInterface {
             }
             (Some(ipv4), Some(ipv6)) => {
                 let ipv4_transit_ips = self
-                    .transit_ips
+                    .transit_ips_v4
                     .iter()
-                    .filter_map(|net| match net {
-                        IpNetwork::V4(net) => Some(Ipv4Net::from(*net)),
-                        IpNetwork::V6(_) => None,
-                    })
+                    .copied()
+                    .map(Into::into)
                     .collect();
                 let ipv6_transit_ips = self
-                    .transit_ips
+                    .transit_ips_v6
                     .iter()
-                    .filter_map(|net| match net {
-                        IpNetwork::V6(net) => Some(Ipv6Net::from(*net)),
-                        IpNetwork::V4(_) => None,
-                    })
+                    .copied()
+                    .map(Into::into)
                     .collect();
                 let v4 = PrivateIpv4Config::new_with_transit_ips(
                     *ipv4,
@@ -241,7 +224,8 @@ pub struct InstanceNetworkInterface {
     pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
-    pub transit_ips: Vec<IpNetwork>,
+    pub transit_ips_v4: Vec<crate::Ipv4Net>,
+    pub transit_ips_v6: Vec<crate::Ipv6Net>,
 }
 
 /// Service Network Interface DB model.
@@ -353,7 +337,8 @@ impl NetworkInterface {
             ipv6: self.ipv6,
             slot: self.slot,
             primary: self.primary,
-            transit_ips: self.transit_ips,
+            transit_ips_v4: self.transit_ips_v4,
+            transit_ips_v6: self.transit_ips_v6,
         }
     }
 
@@ -404,7 +389,8 @@ impl From<InstanceNetworkInterface> for NetworkInterface {
             ipv6: iface.ipv6,
             slot: iface.slot,
             primary: iface.primary,
-            transit_ips: iface.transit_ips,
+            transit_ips_v4: iface.transit_ips_v4,
+            transit_ips_v6: iface.transit_ips_v6,
         }
     }
 }
@@ -429,7 +415,8 @@ impl From<ServiceNetworkInterface> for NetworkInterface {
             ipv6: iface.ipv6,
             slot: iface.slot,
             primary: iface.primary,
-            transit_ips: vec![],
+            transit_ips_v4: vec![],
+            transit_ips_v6: vec![],
         }
     }
 }
@@ -513,13 +500,17 @@ impl IpConfig {
         IpConfig::V4(Ipv4Config::default())
     }
 
+    /// Return the IPv4 configuration, if it exists.
+    pub fn ipv4_config(&self) -> Option<&Ipv4Config> {
+        match self {
+            IpConfig::V4(v4) | IpConfig::DualStack { v4, .. } => Some(v4),
+            IpConfig::V6(_) => None,
+        }
+    }
+
     /// Return the IPv4 address assignment.
     pub fn ipv4_assignment(&self) -> Option<&Ipv4Assignment> {
-        match self {
-            IpConfig::V4(Ipv4Config { ip, .. }) => Some(ip),
-            IpConfig::V6(_) => None,
-            IpConfig::DualStack { v4: Ipv4Config { ip, .. }, .. } => Some(ip),
-        }
+        self.ipv4_config().map(|v4| &v4.ip)
     }
 
     /// Return the IPv4 address explicitly requested, if one exists.
@@ -528,6 +519,11 @@ impl IpConfig {
             IpAssignment::Auto => None,
             IpAssignment::Explicit(addr) => Some(addr),
         })
+    }
+
+    /// Return the IPv4 transit IPs, if any.
+    pub fn ipv4_transit_ips(&self) -> Option<Vec<Ipv4Net>> {
+        self.ipv4_config().map(|v4| v4.transit_ips.clone())
     }
 
     /// Construct an IPv6 configuration with no transit IPs.
@@ -543,13 +539,17 @@ impl IpConfig {
         IpConfig::V6(Ipv6Config::default())
     }
 
+    /// Return the IPv6 configuration, if it exists.
+    pub fn ipv6_config(&self) -> Option<&Ipv6Config> {
+        match self {
+            IpConfig::V6(v6) | IpConfig::DualStack { v6, .. } => Some(v6),
+            IpConfig::V4(_) => None,
+        }
+    }
+
     /// Return the IPv6 address assignment.
     pub fn ipv6_assignment(&self) -> Option<&Ipv6Assignment> {
-        match self {
-            IpConfig::V6(Ipv6Config { ip, .. }) => Some(ip),
-            IpConfig::V4(_) => None,
-            IpConfig::DualStack { v6: Ipv6Config { ip, .. }, .. } => Some(ip),
-        }
+        self.ipv6_config().map(|v6| &v6.ip)
     }
 
     /// Return the IPv6 address explicitly requested, if one exists.
@@ -560,25 +560,24 @@ impl IpConfig {
         })
     }
 
+    /// Return the IPv6 transit IPs, if any.
+    pub fn ipv6_transit_ips(&self) -> Option<Vec<Ipv6Net>> {
+        self.ipv6_config().map(|v6| v6.transit_ips.clone())
+    }
+
     /// Return the transit IPs requested in this configuration.
     pub fn transit_ips(&self) -> Vec<IpNet> {
-        match self {
-            IpConfig::V4(Ipv4Config { transit_ips, .. }) => {
-                transit_ips.iter().copied().map(Into::into).collect()
-            }
-            IpConfig::V6(Ipv6Config { transit_ips, .. }) => {
-                transit_ips.iter().copied().map(Into::into).collect()
-            }
-            IpConfig::DualStack {
-                v4: Ipv4Config { transit_ips: ipv4_addrs, .. },
-                v6: Ipv6Config { transit_ips: ipv6_addrs, .. },
-            } => ipv4_addrs
-                .iter()
-                .copied()
-                .map(Into::into)
-                .chain(ipv6_addrs.iter().copied().map(Into::into))
-                .collect(),
-        }
+        self.ipv4_transit_ips()
+            .unwrap_or_default()
+            .into_iter()
+            .map(Into::into)
+            .chain(
+                self.ipv6_transit_ips()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(Into::into),
+            )
+            .collect()
     }
 
     /// Construct a dual-stack IP configuration with explicit IP addresses.
@@ -775,7 +774,9 @@ pub struct NetworkInterfaceUpdate {
     pub time_modified: DateTime<Utc>,
     #[diesel(column_name = is_primary)]
     pub primary: Option<bool>,
-    pub transit_ips: Vec<IpNetwork>,
+    #[diesel(column_name = transit_ips)]
+    pub transit_ips_v4: Vec<crate::Ipv4Net>,
+    pub transit_ips_v6: Vec<crate::Ipv6Net>,
 }
 
 impl From<InstanceNetworkInterface> for external::InstanceNetworkInterface {
@@ -791,10 +792,13 @@ impl From<InstanceNetworkInterface> for external::InstanceNetworkInterface {
             ip,
             mac: *iface.mac,
             primary: iface.primary,
+            // https://github.com/oxidecomputer/omicron/issues/9248 Separate
+            // these into IP versions.
             transit_ips: iface
-                .transit_ips
+                .transit_ips_v4
                 .into_iter()
-                .map(Into::into)
+                .map(|v4| v4.0.into())
+                .chain(iface.transit_ips_v6.into_iter().map(|v6| v6.0.into()))
                 .collect(),
         }
     }
@@ -803,16 +807,18 @@ impl From<InstanceNetworkInterface> for external::InstanceNetworkInterface {
 impl From<params::InstanceNetworkInterfaceUpdate> for NetworkInterfaceUpdate {
     fn from(params: params::InstanceNetworkInterfaceUpdate) -> Self {
         let primary = if params.primary { Some(true) } else { None };
+        let (transit_ips_v4, transit_ips_v6): (Vec<_>, Vec<_>) =
+            params.transit_ips.into_iter().partition_map(|net| match net {
+                IpNet::V4(v4) => Either::Left(crate::Ipv4Net::from(v4)),
+                IpNet::V6(v6) => Either::Right(crate::Ipv6Net::from(v6)),
+            });
         Self {
             name: params.identity.name.map(|n| n.into()),
             description: params.identity.description,
             time_modified: Utc::now(),
             primary,
-            transit_ips: params
-                .transit_ips
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            transit_ips_v4,
+            transit_ips_v6,
         }
     }
 }

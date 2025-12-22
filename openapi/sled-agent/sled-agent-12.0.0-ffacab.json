@@ -4887,6 +4887,54 @@
         "format": "uint8",
         "minimum": 0
       },
+      "HealthMonitorInventory": {
+        "description": "Fields of sled-agent inventory reported by the health monitor subsystem.",
+        "type": "object",
+        "properties": {
+          "smf_services_in_maintenance": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SvcsInMaintenanceResult"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/SvcsInMaintenanceResult"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "smf_services_in_maintenance"
+        ]
+      },
       "HostIdentifier": {
         "description": "A `HostIdentifier` represents either an IP host or network (v4 or v6), or an entire VPC (identified by its VNI). It is used in firewall rule host filters.",
         "oneOf": [
@@ -5438,6 +5486,9 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
+          "health_monitor": {
+            "$ref": "#/components/schemas/HealthMonitorInventory"
+          },
           "last_reconciliation": {
             "nullable": true,
             "allOf": [
@@ -5492,6 +5543,7 @@
           "cpu_family",
           "datasets",
           "disks",
+          "health_monitor",
           "reconciler_status",
           "reservoir_size",
           "sled_agent_address",
@@ -8404,6 +8456,49 @@
         },
         "type": "string",
         "format": "uuid"
+      },
+      "SvcInMaintenance": {
+        "description": "Information about an SMF service that is enabled but not running",
+        "type": "object",
+        "properties": {
+          "fmri": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fmri",
+          "zone"
+        ]
+      },
+      "SvcsInMaintenanceResult": {
+        "description": "Lists services in maintenance status if any, and the time the health check for SMF services ran",
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SvcInMaintenance"
+            }
+          },
+          "time_of_status": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "errors",
+          "services"
+        ]
       },
       "SwitchLocation": {
         "description": "Identifies switch physical location",
