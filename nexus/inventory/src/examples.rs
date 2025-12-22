@@ -673,7 +673,7 @@ pub fn representative() -> Representative {
     );
 
     builder.found_cockroach_metrics(
-        cockroach_admin_types::NodeId::new("1".to_string()),
+        cockroach_admin_types::node::InternalNodeId::new("1".to_string()),
         PrometheusMetrics {
             metrics: BTreeMap::from([(
                 "ranges_underreplicated".to_string(),

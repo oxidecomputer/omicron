@@ -1676,16 +1676,13 @@ checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 name = "cockroach-admin-api"
 version = "0.1.0"
 dependencies = [
- "cockroach-admin-types",
+ "cockroach-admin-types-versions",
  "dropshot",
  "dropshot-api-manager-types",
  "http",
  "omicron-common",
- "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
  "semver 1.0.27",
- "serde",
 ]
 
 [[package]]
@@ -1706,9 +1703,18 @@ dependencies = [
 name = "cockroach-admin-types"
 version = "0.1.0"
 dependencies = [
+ "cockroach-admin-types-versions",
+ "omicron-workspace-hack",
+ "serde",
+]
+
+[[package]]
+name = "cockroach-admin-types-versions"
+version = "0.1.0"
+dependencies = [
  "chrono",
  "csv",
- "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
  "schemars 0.8.22",
@@ -7974,6 +7980,7 @@ dependencies = [
  "clap",
  "cockroach-admin-api",
  "cockroach-admin-types",
+ "cockroach-admin-types-versions",
  "csv",
  "dropshot",
  "expectorate",

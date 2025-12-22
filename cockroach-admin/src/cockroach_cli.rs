@@ -3,9 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use cockroach_admin_types::NodeDecommission;
-use cockroach_admin_types::NodeStatus;
-use cockroach_admin_types::ParseError;
+use cockroach_admin_types::node::{NodeDecommission, NodeStatus, ParseError};
 use dropshot::HttpError;
 use illumos_utils::ExecutionError;
 use illumos_utils::output_to_exec_error;
@@ -362,7 +360,7 @@ mod tests {
     use super::*;
     use camino_tempfile::Utf8TempDir;
     use chrono::Utc;
-    use cockroach_admin_types::NodeMembership;
+    use cockroach_admin_types::node::NodeMembership;
     use nexus_test_utils::db::TestDatabase;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll;

@@ -13,7 +13,7 @@ use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
-use cockroach_admin_types::NodeId;
+use cockroach_admin_types::node::InternalNodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use iddqd::IdOrdMap;
@@ -128,7 +128,7 @@ pub struct CollectionBuilder {
     sleds: IdOrdMap<SledAgent>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
-    cockroach_status: BTreeMap<NodeId, CockroachStatus>,
+    cockroach_status: BTreeMap<InternalNodeId, CockroachStatus>,
     ntp_timesync: IdOrdMap<TimeSync>,
     internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
@@ -709,7 +709,7 @@ impl CollectionBuilder {
     /// Record metrics from a CockroachDB node
     pub fn found_cockroach_metrics(
         &mut self,
-        node_id: NodeId,
+        node_id: InternalNodeId,
         metrics: PrometheusMetrics,
     ) {
         let mut status = CockroachStatus::default();

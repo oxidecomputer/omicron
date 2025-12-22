@@ -176,7 +176,7 @@ pub struct Collection {
 
     /// The status of our cockroachdb cluster, keyed by node identifier
     pub cockroach_status:
-        BTreeMap<cockroach_admin_types::NodeId, CockroachStatus>,
+        BTreeMap<cockroach_admin_types::node::InternalNodeId, CockroachStatus>,
 
     /// The status of time synchronization
     pub ntp_timesync: IdOrdMap<TimeSync>,
