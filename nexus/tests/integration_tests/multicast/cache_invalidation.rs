@@ -11,6 +11,8 @@
 //! - Cache TTL refresh: Verifies caches are refreshed when TTL expires
 //! - Backplane cache expiry: Tests that stale backplane mappings are cleaned up
 
+use std::time::Duration;
+
 use gateway_client::types::{PowerState, RotState, SpState};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::resource_helpers::{
@@ -57,7 +59,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
     )
     .await;
 
-    // Create instance (no multicast groups at creation - implicit model)
+    // Create instance (no multicast groups at creation, implicit model)
     let instance = instance_for_multicast_groups(
         cptestctx,
         PROJECT_NAME,
@@ -279,20 +281,25 @@ async fn test_cache_ttl_driven_refresh() {
     const GROUP_NAME: &str = "ttl-test-group";
     const INSTANCE_NAME: &str = "ttl-test-instance";
 
+    // Test cache TTL values
+    const SLED_CACHE_TTL: Duration = Duration::from_millis(500);
+    const BACKPLANE_CACHE_TTL: Duration = Duration::from_millis(250);
+    // Buffer to ensure TTL has definitely expired
+    const TTL_EXPIRY_BUFFER: Duration = Duration::from_millis(100);
+
     // Start test server with custom config
     let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
         "test_cache_ttl_driven_refresh",
     )
     .customize_nexus_config(&|config| {
-        // Set short cache TTLs for testing (2 seconds for sled cache)
+        // Set short cache TTLs for testing
         config.pkg.background_tasks.multicast_reconciler.sled_cache_ttl_secs =
-            chrono::TimeDelta::seconds(2).to_std().unwrap();
+            SLED_CACHE_TTL;
         config
             .pkg
             .background_tasks
             .multicast_reconciler
-            .backplane_cache_ttl_secs =
-            chrono::TimeDelta::seconds(1).to_std().unwrap();
+            .backplane_cache_ttl_secs = BACKPLANE_CACHE_TTL;
 
         // Ensure multicast is enabled
         config.pkg.multicast.enabled = true;
@@ -318,7 +325,7 @@ async fn test_cache_ttl_driven_refresh() {
     )
     .await;
 
-    // Create instance (no multicast groups at creation - implicit model)
+    // Create instance (no multicast groups at creation, implicit model)
     let instance = instance_for_multicast_groups(
         &cptestctx,
         PROJECT_NAME,
@@ -435,9 +442,8 @@ async fn test_cache_ttl_driven_refresh() {
         .await
         .expect("Should insert new inventory collection");
 
-    // Wait for cache TTL to expire (sled_cache_ttl = 1 second)
-    // Sleep for 1.5 seconds to ensure TTL has expired
-    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    // Wait for cache TTL to expire
+    tokio::time::sleep(SLED_CACHE_TTL + TTL_EXPIRY_BUFFER).await;
 
     wait_for_condition_with_reconciler(
         &cptestctx.lockstep_client,
@@ -458,7 +464,7 @@ async fn test_cache_ttl_driven_refresh() {
             }
         },
         &POLL_INTERVAL,
-        &MULTICAST_OPERATION_TIMEOUT,
+        &MEDIUM_TIMEOUT, // DPD update requires reconciler processing
     )
     .await
     .expect("DPD should update with new rear port after TTL expiry");
@@ -483,23 +489,26 @@ async fn test_backplane_cache_ttl_expiry() {
     const GROUP_NAME: &str = "backplane-ttl-group";
     const INSTANCE_NAME: &str = "backplane-ttl-instance";
 
+    // Cache TTL values: backplane shorter than sled to test them independently
+    const BACKPLANE_CACHE_TTL: Duration = Duration::from_millis(250);
+    const SLED_CACHE_TTL: Duration = Duration::from_secs(2);
+    // Buffer to ensure TTL has definitely expired (20% margin)
+    const TTL_EXPIRY_BUFFER: Duration = Duration::from_millis(50);
+
     let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
         "test_backplane_cache_ttl_expiry",
     )
     .customize_nexus_config(&|config| {
-        // Set backplane cache TTL to 1 second (shorter than sled cache to test
-        // independently)
+        // Set backplane cache TTL shorter than sled cache to test independently
         config
             .pkg
             .background_tasks
             .multicast_reconciler
-            .backplane_cache_ttl_secs =
-            chrono::TimeDelta::seconds(1).to_std().unwrap();
+            .backplane_cache_ttl_secs = BACKPLANE_CACHE_TTL;
 
-        // Keep sled cache TTL longer to ensure we're testing backplane cache
-        // expiry
+        // Keep sled cache TTL longer to ensure we're testing backplane cache expiry
         config.pkg.background_tasks.multicast_reconciler.sled_cache_ttl_secs =
-            chrono::TimeDelta::seconds(10).to_std().unwrap();
+            SLED_CACHE_TTL;
 
         // Ensure multicast is enabled
         config.pkg.multicast.enabled = true;
@@ -519,7 +528,7 @@ async fn test_backplane_cache_ttl_expiry() {
     )
     .await;
 
-    // Create instance (no multicast groups at creation - implicit model)
+    // Create instance (no multicast groups at creation, implicit model)
     let instance = instance_for_multicast_groups(
         &cptestctx,
         PROJECT_NAME,
@@ -550,9 +559,8 @@ async fn test_backplane_cache_ttl_expiry() {
         .await
         .expect("Should verify initial port mapping");
 
-    // Wait for backplane cache TTL to expire (500ms) but not sled cache (5 seconds)
-    // Sleep for 1 second to ensure backplane TTL has expired
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    // Wait for backplane cache TTL to expire but not sled cache
+    tokio::time::sleep(BACKPLANE_CACHE_TTL + TTL_EXPIRY_BUFFER).await;
 
     // Force cache access by triggering reconciler
     // This will cause the reconciler to check backplane cache, find it expired,
