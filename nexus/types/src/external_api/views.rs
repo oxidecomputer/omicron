@@ -256,10 +256,10 @@ pub struct Image {
     /// Hash of the image contents, if applicable
     pub digest: Option<Digest>,
 
-    /// Size of blocks in bytes.
+    /// Size of blocks in bytes
     pub block_size: ByteCount,
 
-    /// Total size in bytes.
+    /// Total size in bytes
     pub size: ByteCount,
 }
 
@@ -296,10 +296,10 @@ pub struct Vpc {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// id for the project containing this VPC
+    /// ID for the project containing this VPC
     pub project_id: Uuid,
 
-    /// id for the system router where subnet default routes are registered
+    /// ID for the system router where subnet default routes are registered
     pub system_router_id: Uuid,
 
     /// The unique local IPv6 address range for subnets in this VPC
@@ -314,7 +314,7 @@ pub struct Vpc {
 /// them, within an IPv4 subnetwork or optionally an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
@@ -342,7 +342,7 @@ pub enum VpcRouterKind {
 /// should be sent depending on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouter {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 

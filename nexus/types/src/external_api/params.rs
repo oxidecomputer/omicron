@@ -242,7 +242,7 @@ pub struct SamlIdentityProviderSelector {
 
 // The shape of this selector is slightly different than the others given that
 // silos users can only be specified via ID and are automatically provided by
-// the environment the user is authetnicated in
+// the environment the user is authenticated in
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SshKeySelector {
     /// ID of the silo user
@@ -693,9 +693,9 @@ pub struct SiloAuthSettingsUpdate {
 /// Create-time parameters for a `User`
 #[derive(Clone, Deserialize, JsonSchema)]
 pub struct UserCreate {
-    /// username used to log in
+    /// Username used to log in
     pub external_id: UserId,
-    /// how to set the user's login password
+    /// How to set the user's login password
     pub password: UserPassword,
 }
 
@@ -792,11 +792,11 @@ pub struct UsernamePasswordCredentials {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DerEncodedKeyPair {
-    /// request signing public certificate (base64 encoded der file)
+    /// Request signing public certificate (base64 encoded DER file)
     #[serde(deserialize_with = "x509_cert_from_base64_encoded_der")]
     pub public_cert: String,
 
-    /// request signing RSA private key in PKCS#1 format (base64 encoded der file)
+    /// Request signing RSA private key in PKCS#1 format (base64 encoded DER file)
     #[serde(deserialize_with = "key_from_base64_encoded_der")]
     pub private_key: String,
 }
@@ -916,25 +916,25 @@ pub struct SamlIdentityProviderCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// the source of an identity provider metadata descriptor
+    /// The source of an identity provider metadata descriptor
     pub idp_metadata_source: IdpMetadataSource,
 
-    /// idp's entity id
+    /// IdP's entity ID
     pub idp_entity_id: String,
 
-    /// sp's client id
+    /// SP's client ID
     pub sp_client_id: String,
 
-    /// service provider endpoint where the response will be sent
+    /// Service provider endpoint where the response will be sent
     pub acs_url: String,
 
-    /// service provider endpoint where the idp should send log out requests
+    /// Service provider endpoint where the IdP should send log out requests
     pub slo_url: String,
 
-    /// customer's technical contact for saml configuration
+    /// Customer's technical contact for SAML configuration
     pub technical_contact_email: String,
 
-    /// request signing key pair
+    /// Request signing key pair
     #[serde(default)]
     #[serde(deserialize_with = "validate_key_pair")]
     pub signing_keypair: Option<DerEncodedKeyPair>,
@@ -1398,7 +1398,7 @@ impl PrivateIpStackCreate {
 /// Create-time parameters for a `Certificate`
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 pub struct CertificateCreate {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
     /// PEM-formatted string containing public certificate chain
@@ -1946,7 +1946,7 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 
-    /// Anti-Affinity groups which this instance should be added.
+    /// Anti-affinity groups to which this instance should be added.
     #[serde(default)]
     pub anti_affinity_groups: Vec<NameOrId>,
 
@@ -2317,7 +2317,7 @@ impl JsonSchema for BlockSize {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
                 id: None,
-                title: Some("disk block size in bytes".to_string()),
+                title: Some("Disk block size in bytes".to_string()),
                 ..Default::default()
             })),
             instance_type: Some(schemars::schema::InstanceType::Integer.into()),
@@ -2356,7 +2356,7 @@ impl From<DiskVariant> for PhysicalDiskKind {
 pub enum DiskSource {
     /// Create a blank disk
     Blank {
-        /// size of blocks for this Disk. valid values are: 512, 2048, or 4096
+        /// Size of blocks for this disk. Valid values are: 512, 2048, or 4096.
         block_size: BlockSize,
     },
 
@@ -2450,7 +2450,7 @@ pub struct AddressLotCreate {
     pub blocks: Vec<AddressLotBlockCreate>,
 }
 
-/// Parameters for creating an address lot block. Fist and last addresses are
+/// Parameters for creating an address lot block. First and last addresses are
 /// inclusive.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddressLotBlockCreate {
@@ -2482,6 +2482,7 @@ pub struct LoopbackAddressCreate {
     pub mask: u8,
 
     /// Address is an anycast address.
+    ///
     /// This allows the address to be assigned to multiple locations simultaneously.
     pub anycast: bool,
 }
@@ -2831,7 +2832,7 @@ pub struct BgpAnnouncementCreate {
     pub network: IpNet,
 }
 
-/// Parameters for creating a BGP configuration. This includes and autonomous
+/// Parameters for creating a BGP configuration. This includes an autonomous
 /// system number (ASN) and a virtual routing and forwarding (VRF) identifier.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpConfigCreate {
@@ -3011,7 +3012,7 @@ pub struct Distribution {
 /// Create-time parameters for an `Image`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ImageCreate {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
@@ -3030,7 +3031,7 @@ pub struct ImageCreate {
 /// Create-time parameters for a `Snapshot`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SnapshotCreate {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
