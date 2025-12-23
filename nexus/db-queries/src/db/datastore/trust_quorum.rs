@@ -23,7 +23,6 @@ use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
 use nexus_types::trust_quorum::TrustQuorumConfigState;
 use nexus_types::trust_quorum::{TrustQuorumConfig, TrustQuorumMemberData};
 use omicron_common::api::external::Error;
-use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::RackKind;
@@ -65,41 +64,6 @@ fn epoch_to_i64(epoch: Epoch) -> Result<i64, Error> {
 }
 
 impl DataStore {
-    /// Return a `RackUuid` for each trust quorum along with its latest `Epoch`.
-    ///
-    /// For now, since we do not have multirack, and we aren't sure how big
-    /// those clusters are going to be we return all values and don't bother
-    /// paginating. The current `SQL_BATCH_SIZE` is also 1000, and it's unlikely
-    /// that there will ever be more than 1000 racks in a single fleet, sharing
-    /// a single CRDB cluster.
-    pub async fn tq_get_all_rack_id_and_latest_epoch(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<BTreeMap<RackUuid, Epoch>, Error> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        let conn = &*self.pool_connection_authorized(opctx).await?;
-
-        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
-
-        let values: Vec<(DbTypedUuid<RackKind>, i64)> =
-            dsl::trust_quorum_configuration
-                .select((dsl::rack_id, dsl::epoch))
-                .order_by((dsl::rack_id, dsl::epoch.desc()))
-                .distinct_on(dsl::rack_id)
-                .load_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-
-        let mut output = BTreeMap::new();
-        for (rack_id, epoch) in values {
-            output.insert(rack_id.into(), i64_to_epoch(epoch)?);
-        }
-
-        Ok(output)
-    }
-
     /// Return any active `RackUuid` for each trust quorum along with its latest
     /// `Epoch`.
     ///
@@ -115,7 +79,7 @@ impl DataStore {
     pub async fn tq_get_all_active_rack_id_and_latest_epoch(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<(RackUuid, Epoch)> {
+    ) -> Result<BTreeMap<RackUuid, Epoch>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
@@ -136,10 +100,9 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-        let mut output = Vec::with_capacity(values.len());
-
+        let mut output = BTreeMap::new();
         for (rack_id, epoch) in values {
-            output.push((rack_id.into(), i64_to_epoch(epoch)?));
+            output.insert(rack_id.into(), i64_to_epoch(epoch)?);
         }
 
         Ok(output)
@@ -154,11 +117,19 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
+        Self::tq_get_latest_config_with_members_conn(opctx, conn, rack_id)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())
+    }
+
+    async fn tq_get_latest_config_with_members_conn(
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+    ) -> Result<Option<TrustQuorumConfig>, TransactionError<Error>> {
         // First, retrieve our configuration if there is one.
         let Some(latest) =
-            Self::tq_get_latest_config_conn(opctx, conn, rack_id)
-                .await
-                .map_err(|err| err.into_public_ignore_retries())?
+            Self::tq_get_latest_config_conn(opctx, conn, rack_id).await?
         else {
             return Ok(None);
         };
@@ -166,8 +137,7 @@ impl DataStore {
         // Then get any members associated with the configuration
         let members =
             Self::tq_get_members_conn(opctx, conn, rack_id, latest.epoch)
-                .await
-                .map_err(|err| err.into_public_ignore_retries())?;
+                .await?;
 
         let mut tq_members: BTreeMap<BaseboardId, TrustQuorumMemberData> =
             BTreeMap::new();
@@ -220,7 +190,8 @@ impl DataStore {
                     "Salt exists, but secrets do not for trust quorum config: \
                     rack_id: {}, epoch: {}",
                     latest.rack_id, latest.epoch
-                )));
+                ))
+                .into());
             };
             Some(EncryptedRackSecrets::new(salt, secrets.into_boxed_slice()))
         } else {
@@ -232,7 +203,8 @@ impl DataStore {
                 "Failed to find coordinator for hw_baseboard_id: {} \
                 in trust quorum config.",
                 latest.coordinator
-            )));
+            ))
+            .into());
         };
 
         Ok(Some(TrustQuorumConfig {
@@ -249,6 +221,20 @@ impl DataStore {
 
     /// Insert a new trust quorum configuration, but only if it is equivalent
     /// to the highest epoch of the last configuration + 1.
+    //
+    // TODO: Check all invariants. We must ensure that at least a few nodes have
+    // acked commits before we allow a new configuration to be inserted. We must
+    // also ensure that we aren't preparing. This should probably be a helper
+    // method similar to the validators in trust quorum proper.
+    //
+    // We could also do this validation in the request itself, outside of the
+    // db layer. In that case we read the latest then do the check. Then we can
+    // reject it outright. We would indeed only have to check the epoch here, if
+    // we trusted to always do that, but it seems much less safe then doing it
+    // inside the transaction.
+    //
+    // Doing it here also makes sense because the user API isn't going to be
+    // trust quorum specific. It's going to be "add" and "remove" a node.
     pub async fn tq_insert_latest_config(
         &self,
         opctx: &OpContext,
@@ -265,7 +251,7 @@ impl DataStore {
                 let config = config.clone();
 
                 async move {
-                    let current = Self::tq_get_latest_epoch_in_txn(
+                    let current = Self::tq_get_latest_config_conn(
                         opctx,
                         &c,
                         config.rack_id,
@@ -289,10 +275,27 @@ impl DataStore {
                         }
                     }
 
-                    let is_insertable = if let Some(epoch) = current {
-                        // Only insert if what is in the DB is immediately prior to
-                        // this configuration.
-                        Some(epoch) == config.epoch.previous()
+                    if let Some(current) = current {
+                        let current_epoch = match i64_to_epoch(current.epoch) {
+                            Ok(epoch) => epoch,
+                            Err(e) => {
+                                return Err(err.bail(e.into()));
+                            }
+                        };
+
+                        if Some(current_epoch) != config.epoch.previous() {
+                            return Err(err.bail(
+                                TransactionError::CustomError(Error::conflict(
+                                    format!(
+                                        "expected current TQ epoch for rack_id \
+                                {} to be {:?}, found {:?}",
+                                        config.rack_id,
+                                        config.epoch.previous(),
+                                        current_epoch
+                                    ),
+                                )),
+                            ));
+                        }
                     } else {
                         // We perform an unconditional insert here since
                         // no existing configuration exists. However, the
@@ -338,20 +341,10 @@ impl DataStore {
                                 // Already checked abbove
                             }
                         }
-                        true
-                    };
-
-                    if !is_insertable {
-                        return Err(err.bail(TransactionError::CustomError(
-                            Error::conflict(format!(
-                                "expected current TQ epoch for rack_id \
-                                {} to be {:?}, found {:?}",
-                                config.rack_id,
-                                config.epoch.previous(),
-                                current
-                            )),
-                        )));
                     }
+
+                    // Mark the old configuration as committed-partially or aborted
+                    // if it has not already `committed-or-aborted`
 
                     Self::insert_tq_config_in_txn(opctx, conn, config)
                         .await
@@ -1000,27 +993,6 @@ impl DataStore {
             .map_err(TransactionError::Database)
     }
 
-    async fn tq_get_latest_epoch_in_txn(
-        opctx: &OpContext,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        rack_id: RackUuid,
-    ) -> Result<Option<Epoch>, TransactionError<Error>> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
-        let Some(latest_epoch) = dsl::trust_quorum_configuration
-            .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
-            .order_by(dsl::epoch.desc())
-            .select(dsl::epoch)
-            .first_async::<i64>(conn)
-            .await
-            .optional()?
-        else {
-            return Ok(None);
-        };
-        let latest_epoch = i64_to_epoch(latest_epoch)?;
-        Ok(Some(latest_epoch))
-    }
-
     async fn tq_get_latest_config_conn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -1089,13 +1061,21 @@ mod tests {
         let (_, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         use nexus_db_schema::schema::hw_baseboard_id::dsl;
-        let hw_baseboard_ids: Vec<_> = (0..10)
-            .map(|i| HwBaseboardId {
+        let mut hw_baseboard_ids: Vec<_> = (0..10)
+            .map(|_| HwBaseboardId {
                 id: Uuid::new_v4(),
                 part_number: "test-part".to_string(),
-                serial_number: i.to_string(),
+                serial_number: Uuid::new_v4().to_string(),
             })
             .collect();
+
+        // Sort like a `BaseboardId` would be sorted in a `BTreeSet`. This
+        // allows us to use the coordinator as first entry in the set for our
+        // tests.
+        hw_baseboard_ids.sort_by(|a, b| {
+            (&a.part_number, &a.serial_number)
+                .cmp(&(&b.part_number, &b.serial_number))
+        });
 
         diesel::insert_into(dsl::hw_baseboard_id)
             .values(hw_baseboard_ids.clone())
@@ -1570,8 +1550,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_all_rack_id_and_latest_epoch() {
-        let logctx = test_setup_log("test_get_all_rack_id_and_latest_epoch");
+    async fn test_tq_get_all_active_rack_id_and_latest_epoch() {
+        let logctx =
+            test_setup_log("test_get_all_active_rack_id_and_latest_epoch");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -1623,8 +1604,10 @@ mod tests {
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
         // Retreive the latest epochs per rack_id
-        let values =
-            datastore.tq_get_all_rack_id_and_latest_epoch(opctx).await.unwrap();
+        let values = datastore
+            .tq_get_all_active_rack_id_and_latest_epoch(opctx)
+            .await
+            .unwrap();
 
         // We should have retrieved one epoch per rack_id
         assert_eq!(values.len(), 3);
