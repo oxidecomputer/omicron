@@ -208,6 +208,12 @@ impl RunAllArgs {
                     dendrite.port, location,
                 );
             }
+            for (location, lldpd) in &cptestctx.lldpd {
+                println!(
+                    "omicron-dev: lldp:                   http://[::1]:{} ({})",
+                    lldpd.port, location,
+                );
+            }
             for (location, mgd) in &cptestctx.mgd {
                 println!(
                     "omicron-dev: maghemite:              http://[::1]:{} ({})",

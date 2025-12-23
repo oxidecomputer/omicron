@@ -161,6 +161,7 @@ pub fn blueprint_internal_dns_config(
             overrides.dendrite_port(scrimlet.id()),
             overrides.mgs_port(scrimlet.id()),
             overrides.mgd_port(scrimlet.id()),
+            overrides.lldpd_port(scrimlet.id()),
         )?;
     }
 

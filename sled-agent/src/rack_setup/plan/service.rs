@@ -26,6 +26,7 @@ use nexus_types::deployment::{
     blueprint_zone_type,
 };
 use nexus_types::external_api::views::SledState;
+use omicron_common::address::LLDP_PORT;
 use omicron_common::address::{
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT,
     NEXUS_INTERNAL_PORT, NEXUS_LOCKSTEP_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
@@ -333,6 +334,7 @@ impl Plan {
                     DENDRITE_PORT,
                     MGS_PORT,
                     MGD_PORT,
+                    LLDP_PORT,
                 )
                 .unwrap();
         }

@@ -74,6 +74,9 @@ enum Target {
 
     /// Transceiver Control binary
     TransceiverControl,
+
+    /// LLDP binary
+    LLDP,
 }
 
 #[derive(Parser)]
@@ -136,6 +139,7 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     Target::Cockroach => downloader.download_cockroach().await,
                     Target::Console => downloader.download_console().await,
                     Target::DendriteStub => downloader.download_dendrite_stub().await,
+                    Target::LLDP => downloader.download_lldp().await,
                     Target::MaghemiteMgd => downloader.download_maghemite_mgd().await,
                     Target::Softnpu => downloader.download_softnpu().await,
                     Target::TransceiverControl => {
@@ -865,6 +869,82 @@ impl Downloader<'_> {
                     set_permissions(&dest, 0o755).await?;
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    async fn download_lldp(&self) -> std::result::Result<(), anyhow::Error> {
+        let download_dir = self.output_dir.join("downloads");
+        tokio::fs::create_dir_all(&download_dir).await?;
+
+        let checksums_path = self.versions_dir.join("lldp_checksums");
+        let [lldp_sha2, lldp_linux_sha2] = get_values_from_file(
+            ["CIDL_SHA256", "LINUX_SHA256"],
+            &checksums_path,
+        )
+        .await?;
+        let commit_path =
+            self.versions_dir.join("lldp_openapi_version");
+        let [commit] = get_values_from_file(["COMMIT"], &commit_path).await?;
+
+        let repo = "oxidecomputer/lldp";
+        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
+
+        let filename = "lldp.tar.gz";
+        let tarball_path = download_dir.join(filename);
+        download_file_and_verify(
+            &self.log,
+            &tarball_path,
+            &format!("{base_url}/{filename}"),
+            ChecksumAlgorithm::Sha2,
+            &lldp_sha2,
+        )
+        .await?;
+        unpack_tarball(&self.log, &tarball_path, &download_dir).await?;
+
+        let destination_dir = self.output_dir.join("lldp");
+        let _ = tokio::fs::remove_dir_all(&destination_dir).await;
+        tokio::fs::create_dir_all(&destination_dir).await?;
+        copy_dir_all(
+            &download_dir.join("root"),
+            &destination_dir.join("root"),
+        )?;
+
+        let binary_dir = destination_dir.join("root/opt/oxide/lldp/bin");
+
+        match os_name()? {
+            Os::Linux => {
+                let filename = "lldp";
+                let path = download_dir.join(filename);
+                download_file_and_verify(
+                    &self.log,
+                    &path,
+                    &format!(
+                        "{BUILDOMAT_URL}/{repo}/linux/{commit}/{filename}"
+                    ),
+                    ChecksumAlgorithm::Sha2,
+                    &lldp_linux_sha2,
+                )
+                .await?;
+                set_permissions(&path, 0o755).await?;
+                tokio::fs::copy(path, binary_dir.join(filename)).await?;
+            }
+            Os::Mac => {
+                info!(self.log, "Building lldp from source for macOS");
+
+                let binaries = [("lldp", &["--no-default-features"][..])];
+
+                let built_binaries = self
+                    .build_from_git("lldp", &commit, &binaries)
+                    .await?;
+
+                // Copy built binary to binary_dir
+                let dest = binary_dir.join("lldp");
+                tokio::fs::copy(&built_binaries[0], &dest).await?;
+                set_permissions(&dest, 0o755).await?;
+            }
+            Os::Illumos => (),
         }
 
         Ok(())

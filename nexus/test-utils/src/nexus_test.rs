@@ -115,6 +115,7 @@ pub struct ControlPlaneTestContext<N> {
     pub gateway: BTreeMap<SwitchLocation, GatewayTestContext>,
     pub dendrite:
         RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
+    pub lldpd: HashMap<SwitchLocation, dev::lldp::LldpdInstance>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
