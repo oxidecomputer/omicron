@@ -6,3 +6,6 @@
 
 pub mod builder;
 pub use builder::{CaseBuilder, SitrepBuilder};
+
+#[cfg(any(test, feature = "testing"))]
+pub mod test_util;
