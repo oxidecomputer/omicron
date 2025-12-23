@@ -1424,6 +1424,7 @@ mod tests {
                 | ServiceName::Dendrite
                 | ServiceName::Tfport
                 | ServiceName::BoundaryNtp
+                | ServiceName::Lldpd
                 | ServiceName::Mgd => {
                     out.insert(service, Err(QueryError::NoRecordsFound));
                 }
