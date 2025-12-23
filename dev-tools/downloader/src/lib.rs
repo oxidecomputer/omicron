@@ -884,8 +884,7 @@ impl Downloader<'_> {
             &checksums_path,
         )
         .await?;
-        let commit_path =
-            self.versions_dir.join("lldp_openapi_version");
+        let commit_path = self.versions_dir.join("lldp_openapi_version");
         let [commit] = get_values_from_file(["COMMIT"], &commit_path).await?;
 
         let repo = "oxidecomputer/lldp";
@@ -935,9 +934,8 @@ impl Downloader<'_> {
 
                 let binaries = [("lldp", &["--no-default-features"][..])];
 
-                let built_binaries = self
-                    .build_from_git("lldp", &commit, &binaries)
-                    .await?;
+                let built_binaries =
+                    self.build_from_git("lldp", &commit, &binaries).await?;
 
                 // Copy built binary to binary_dir
                 let dest = binary_dir.join("lldp");

@@ -42,7 +42,8 @@ impl LldpdInstance {
         mgs_address: Option<SocketAddr>,
     ) -> Result<Self, anyhow::Error> {
         let temp_dir = TempDir::new()?;
-        let listen_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
+        let listen_addr =
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
 
         let mut args = vec![
             "run".to_string(),
@@ -60,8 +61,14 @@ impl LldpdInstance {
         let child = tokio::process::Command::new("lldpd")
             .args(&args)
             .stdin(Stdio::null())
-            .stdout(Stdio::from(redirect_file(temp_dir.path(), "lldpd_stdout")?))
-            .stderr(Stdio::from(redirect_file(temp_dir.path(), "lldpd_stderr")?))
+            .stdout(Stdio::from(redirect_file(
+                temp_dir.path(),
+                "lldpd_stdout",
+            )?))
+            .stderr(Stdio::from(redirect_file(
+                temp_dir.path(),
+                "lldpd_stderr",
+            )?))
             .spawn()
             .with_context(|| {
                 format!("failed to spawn `lldpd` (with args: {:?})", &args)

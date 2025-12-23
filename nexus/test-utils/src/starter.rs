@@ -25,8 +25,8 @@ use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
 use nexus_config::Database;
 use nexus_config::DpdConfig;
-use nexus_config::LldpdConfig;
 use nexus_config::InternalDns;
+use nexus_config::LldpdConfig;
 use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
@@ -451,16 +451,14 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let mgs_addr =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
-        let dpd_port = self.dendrite.read().unwrap().get(&switch_location).unwrap().port;
+        let dpd_port =
+            self.dendrite.read().unwrap().get(&switch_location).unwrap().port;
 
         // Set up an instance of lldpd
-        let lldpd = dev::lldp::LldpdInstance::start(
-            0,
-            dpd_port,
-            Some(mgs_addr),
-        )
-        .await
-        .unwrap();
+        let lldpd =
+            dev::lldp::LldpdInstance::start(0, dpd_port, Some(mgs_addr))
+                .await
+                .unwrap();
 
         let port = lldpd.port;
         self.lldpd.insert(switch_location, lldpd);
