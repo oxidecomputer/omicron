@@ -25,7 +25,7 @@ pub struct FmTest {
 impl FmTest {
     pub fn new_with_logxtx(test_name: &str) -> (Self, dev::LogContext) {
         let logctx = dev::test_setup_log(test_name);
-        (Self::new(test_name, logctx.log), logxtx)
+        (Self::new(test_name, &logctx.log), logxtx)
     }
 
     pub fn new(test_name: &str, log: &slog::Logger) -> Self {
