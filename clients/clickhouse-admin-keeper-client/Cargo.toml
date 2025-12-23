@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 chrono.workspace = true
-clickhouse-admin-types.workspace = true
+clickhouse-admin-types-versions.workspace = true
 omicron-uuid-kinds.workspace = true
 progenitor.workspace = true
 reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
