@@ -20,6 +20,7 @@ use nexus_db_model::DbTypedUuid;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
+use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
 use nexus_types::trust_quorum::TrustQuorumConfigState;
 use nexus_types::trust_quorum::{TrustQuorumConfig, TrustQuorumMemberData};
 use omicron_common::api::external::Error;
@@ -251,7 +252,7 @@ impl DataStore {
                 let config = config.clone();
 
                 async move {
-                    let current = Self::tq_get_latest_config_conn(
+                    let current = Self::tq_get_latest_config_with_members_conn(
                         opctx,
                         &c,
                         config.rack_id,
@@ -356,6 +357,80 @@ impl DataStore {
                 Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
+    }
+
+    async fn validate_new_config_conn(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackKind,
+        proposed: ProposedTrustQuorumConfig,
+    ) -> Result<TrustQuorumConfig, TransactionError<Error>> {
+        // Return errors if any of the following checks fails
+
+        //
+        // Check validity of members in proposed config
+        //
+
+        // Check membership size
+        bail_unless!(
+            proposed.members.len() >= 3 && proposed.members.len() <= 32,
+            "Invalid membership size ({}): must be between 3 and 32 nodes",
+            proposed.members.len()
+        );
+
+        // Ensure all baseboards actually exist
+        let hw_baseboard_ids = Self::lookup_hw_baseboard_ids_conn(
+            opctx,
+            conn,
+            proposed.members.iter().cloned(),
+        )
+        .await?;
+
+        // Check that if a sled is commissioned with a matching baseboard that
+        // it's for this `rack_id`.
+        for member in &proposed.members {
+            if let Some(db_rack_id) =
+                self.sled_get_rack_id_if_commissioned_conn(conn, member)
+            {
+                bail_unless!(
+                    rack_id == db_rack_id,
+                    "Sled {} already commissioned for another rack. \
+                    Expected rack_id {}, Got {}",
+                    member,
+                    rack_id,
+                    db_rack_id
+                );
+            }
+        }
+
+        // Check that there is not an in progress reconfiguration:
+        // This entails two checks:
+        //   * If the configuration is being prepared than it must be aborted
+        //   * If the configuration is `Committing` then we must wait for at
+        //     least N-Z nodes to have acked commits. If for some reason this isn't occurring,
+        //     then we need a support call.
+
+        // If the latest configuration was aborted then load the last committed
+        // configuration.
+        //  * If there was no last committed configuration then proceed to check
+        //    the proposed configuration alone.
+        //  * Othewise, start checking the proposed configuration with respect
+        //    to the last committed configuration.
+
+        // Load the last committed config if it isn't the latest config
+        // Ensure the last committed configuration is actually `committed` or
+        // `committed-partially`
+
+        // Pick a coordinator:
+        //   * A coordinator must have acked commit in the last committed
+        //     configuration if there is one.
+        //   * A coordinator's sled-agent should be up as reported in inventory
+        //   * A coordinator must be a member of the new configuration
+
+        // Convert proposal to a new `TrustQuorumConfig`
+
+        todo!()
     }
 
     /// If this configuration is in the `Preparing` state, then update any
