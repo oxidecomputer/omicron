@@ -276,22 +276,7 @@ impl DataStore {
             .map_err(|err| err.into_public_ignore_retries())
     }
 
-    /// Insert a new trust quorum configuration, but only if it is equivalent
-    /// to the highest epoch of the last configuration + 1.
-    //
-    // TODO: Check all invariants. We must ensure that at least a few nodes have
-    // acked commits before we allow a new configuration to be inserted. We must
-    // also ensure that we aren't preparing. This should probably be a helper
-    // method similar to the validators in trust quorum proper.
-    //
-    // We could also do this validation in the request itself, outside of the
-    // db layer. In that case we read the latest then do the check. Then we can
-    // reject it outright. We would indeed only have to check the epoch here, if
-    // we trusted to always do that, but it seems much less safe then doing it
-    // inside the transaction.
-    //
-    // Doing it here also makes sense because the user API isn't going to be
-    // trust quorum specific. It's going to be "add" and "remove" a node.
+    /// Insert a new trust quorum configuration, ensuring it is a valid configuration
     pub async fn tq_insert_latest_config(
         &self,
         opctx: &OpContext,
@@ -429,7 +414,8 @@ impl DataStore {
         // Check membership size
         bail_unless!(
             proposed.members.len() >= 3 && proposed.members.len() <= 32,
-            "Invalid membership size ({}): must be between 3 and 32 nodes",
+            "Invalid Trust Quorum membership size ({}): \
+            must be between 3 and 32 nodes",
             proposed.members.len()
         );
 
@@ -440,6 +426,12 @@ impl DataStore {
             proposed.members.iter().cloned(),
         )
         .await?;
+
+        bail_unless!(
+            hw_baseboard_ids.len() == proposed.members.len(),
+            "Trust Quorum proposed configuration missing hw_baseboard_ids \n
+            in database. Do all physical sleds exist in this rack?"
+        );
 
         // Check that if a sled is commissioned with a matching baseboard that
         // it's for this `rack_id`.
@@ -533,7 +525,7 @@ impl DataStore {
 
         // The latest config was aborted or there wasn't one
         if last_committed_config.is_none() {
-            // Do we need to load one?
+            // Do we need to load the last committed config?
             if let Some(epoch) = proposed.last_committed_epoch() {
                 let config = Self::tq_get_config_with_members_from_epoch_conn(
                     opctx, conn, rack_id, epoch,
