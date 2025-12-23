@@ -3070,13 +3070,22 @@ mod tests {
             inserted.mac, kind,
         );
         assert_eq!(
-            inserted.transit_ips,
-            incomplete
-                .ip_config
-                .transit_ips()
-                .into_iter()
-                .map(ipnetwork::IpNetwork::from)
-                .collect::<Vec<_>>()
+            incomplete.ip_config.ipv4_transit_ips().unwrap_or_default(),
+            inserted
+                .transit_ips_v4
+                .iter()
+                .copied()
+                .map(|v4| v4.0)
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            incomplete.ip_config.ipv6_transit_ips().unwrap_or_default(),
+            inserted
+                .transit_ips_v6
+                .iter()
+                .copied()
+                .map(|v6| v6.0)
+                .collect::<Vec<_>>(),
         );
     }
 

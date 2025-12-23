@@ -73,16 +73,6 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 // just want "latest".
 pub use internal_dns_types_versions::latest::config::*;
 
-/// Error code used when a record type cannot be represented in an older API
-/// version (e.g., NS records in v1).
-pub const ERROR_CODE_INCOMPATIBLE_RECORD: &str = "IncompatibleRecord";
-
-/// Error code used when an update is already in progress.
-pub const ERROR_CODE_UPDATE_IN_PROGRESS: &str = "UpdateInProgress";
-
-/// Error code used when the provided generation number is stale.
-pub const ERROR_CODE_BAD_UPDATE_GENERATION: &str = "BadUpdateGeneration";
-
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Host {

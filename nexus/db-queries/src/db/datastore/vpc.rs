@@ -438,7 +438,7 @@ impl DataStore {
                 }
                 Err(e) => return Err(e),
                 Ok(None) => {
-                    crate::probes::vni__search__range__empty!(|| (&id));
+                    crate::probes::vni__search__range__empty!(|| &id);
                     debug!(
                         opctx.log,
                         "No VNIs available within current search range, retrying";

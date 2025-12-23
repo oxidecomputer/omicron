@@ -10,4 +10,8 @@ pub mod config {
     pub use crate::v2::config::DnsConfigZone;
     pub use crate::v2::config::DnsRecord;
     pub use crate::v2::config::Srv;
+
+    pub use crate::impls::config::ERROR_CODE_BAD_UPDATE_GENERATION;
+    pub use crate::impls::config::ERROR_CODE_INCOMPATIBLE_RECORD;
+    pub use crate::impls::config::ERROR_CODE_UPDATE_IN_PROGRESS;
 }

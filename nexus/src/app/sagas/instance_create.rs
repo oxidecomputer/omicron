@@ -2,7 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ACTION_GENERATE_ID, NexusActionContext, NexusSaga, SagaInitError};
+use super::ACTION_GENERATE_ID;
+use super::NexusActionContext;
+use super::NexusSaga;
+use super::SagaInitError;
+use super::subsaga_append;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
 use crate::app::{
@@ -25,8 +29,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::{
-    AffinityGroupUuid, AntiAffinityGroupUuid, GenericUuid, InstanceUuid,
-    MulticastGroupUuid,
+    AntiAffinityGroupUuid, GenericUuid, InstanceUuid, MulticastGroupUuid,
 };
 use ref_cast::RefCast;
 use serde::Deserialize;
@@ -50,6 +53,7 @@ pub(crate) struct Params {
     pub create_params: params::InstanceCreate,
     pub boundary_switches: HashSet<SwitchLocation>,
 }
+
 // Several nodes in this saga are wrapped in their own subsaga so that they can
 // have a parameter that denotes which node they are (e.g., which NIC or which
 // external IP).  They also need the outer saga's parameters.
@@ -62,25 +66,10 @@ struct NetParams {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct AffinityParams {
-    serialized_authn: authn::saga::Serialized,
-    instance_id: InstanceUuid,
-    group: AffinityGroupUuid,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 struct AntiAffinityParams {
     serialized_authn: authn::saga::Serialized,
     instance_id: InstanceUuid,
     group: AntiAffinityGroupUuid,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct NetworkConfigParams {
-    saga_params: Params,
-    instance_id: InstanceUuid,
-    which: usize,
-    switch_location: SwitchLocation,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -167,34 +156,6 @@ impl NexusSaga for SagaInstanceCreate {
         builder.append(create_instance_record_action());
 
         builder.append(associate_ssh_keys_action());
-
-        // Helper function for appending subsagas to our parent saga.
-        fn subsaga_append<S: Serialize>(
-            node_basename: String,
-            subsaga_dag: steno::Dag,
-            parent_builder: &mut steno::DagBuilder,
-            params: S,
-            which: usize,
-        ) -> Result<(), SagaInitError> {
-            // The "parameter" node is a constant node that goes into the outer
-            // saga.  Its value becomes the parameters for the one-node subsaga
-            // (defined below) that actually creates each resource.
-            let params_node_name = format!("{}_params{}", node_basename, which);
-            parent_builder.append(Node::constant(
-                &params_node_name,
-                serde_json::to_value(&params).map_err(|e| {
-                    SagaInitError::SerializeError(params_node_name.clone(), e)
-                })?,
-            ));
-
-            let output_name = format!("{}{}", node_basename, which);
-            parent_builder.append(Node::subsaga(
-                output_name.as_str(),
-                subsaga_dag,
-                params_node_name,
-            ));
-            Ok(())
-        }
 
         for (i, group) in
             params.create_params.anti_affinity_groups.iter().enumerate()

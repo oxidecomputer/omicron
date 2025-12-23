@@ -91,8 +91,10 @@
 
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
 use dropshot_api_manager_types::api_versions;
-use internal_dns_types::config::ERROR_CODE_INCOMPATIBLE_RECORD;
-use internal_dns_types_versions::{latest, v1, v2};
+use internal_dns_types_versions::{
+    latest::{self, config::ERROR_CODE_INCOMPATIBLE_RECORD},
+    v1, v2,
+};
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):

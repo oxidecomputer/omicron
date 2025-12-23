@@ -6,6 +6,7 @@ members = [
     "clickhouse-admin",
     "clickhouse-admin/api",
     "clickhouse-admin/test-utils",
+    "clickhouse-admin/types/versions",
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
@@ -26,6 +27,7 @@ members = [
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
+    "cockroach-admin/types/versions",
     "cockroach-metrics",
     "common",
     "dev-tools/cert-dev",
@@ -60,9 +62,11 @@ members = [
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
+    "gateway-types/versions",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
+    "installinator-common/versions",
     "installinator",
     "internal-dns/cli",
     "internal-dns/resolver",
@@ -108,6 +112,7 @@ members = [
     "ntp-admin",
     "ntp-admin/api",
     "ntp-admin/types",
+    "ntp-admin/types/versions",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -120,6 +125,7 @@ members = [
     "oximeter/test-utils",
     "oximeter/timeseries-macro",
     "oximeter/types",
+    "oximeter/types/versions",
     "package",
     "parallel-task-set",
     "passwords",
@@ -129,6 +135,7 @@ members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
     "sled-agent/config-reconciler",
+    "sled-agent/health-monitor",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
@@ -166,6 +173,7 @@ default-members = [
     "clickhouse-admin",
     "clickhouse-admin/api",
     "clickhouse-admin/types",
+    "clickhouse-admin/types/versions",
     "clickhouse-admin/test-utils",
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
@@ -187,6 +195,7 @@ default-members = [
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
+    "cockroach-admin/types/versions",
     "cockroach-metrics",
     "common",
     "dev-tools/cert-dev",
@@ -223,9 +232,11 @@ default-members = [
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
+    "gateway-types/versions",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
+    "installinator-common/versions",
     "installinator",
     "internal-dns/cli",
     "internal-dns/resolver",
@@ -271,6 +282,7 @@ default-members = [
     "ntp-admin",
     "ntp-admin/api",
     "ntp-admin/types",
+    "ntp-admin/types/versions",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -283,6 +295,7 @@ default-members = [
     "oximeter/test-utils",
     "oximeter/timeseries-macro",
     "oximeter/types",
+    "oximeter/types/versions",
     "package",
     "parallel-task-set",
     "passwords",
@@ -292,6 +305,7 @@ default-members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
     "sled-agent/config-reconciler",
+    "sled-agent/health-monitor",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
@@ -405,11 +419,13 @@ clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-clien
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
 clickhouse-admin-single-client = { path = "clients/clickhouse-admin-single-client" }
 clickhouse-admin-types = { path = "clickhouse-admin/types" }
+clickhouse-admin-types-versions = { path = "clickhouse-admin/types/versions" }
 clickhouse-admin-test-utils = { path = "clickhouse-admin/test-utils" }
 clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "e3d9a1c35cf3cd04f9cb2e997b0ad88324d30737" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 cockroach-admin-types = { path = "cockroach-admin/types" }
+cockroach-admin-types-versions = { path = "cockroach-admin/types/versions" }
 colored = "2.1"
 const_format = "0.2.34"
 cookie = "0.18"
@@ -442,7 +458,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "ab30fa91227fd478bfe0e023310ca83dec0bc22b" }
 dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.2.4"
 dropshot-api-manager-types = "0.2.4"
@@ -474,6 +490,7 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
+gateway-types-versions = { path = "gateway-types/versions" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
 trust-quorum = { path = "trust-quorum" }
@@ -515,6 +532,7 @@ installinator = { path = "installinator" }
 installinator-api = { path = "installinator-api" }
 installinator-client = { path = "clients/installinator-client" }
 installinator-common = { path = "installinator-common" }
+installinator-common-versions = { path = "installinator-common/versions" }
 internal-dns-resolver = { path = "internal-dns/resolver" }
 internal-dns-types = { path = "internal-dns/types" }
 internal-dns-types-versions = { path = "internal-dns/types/versions" }
@@ -541,6 +559,7 @@ newtype_derive = "0.1.6"
 ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
+ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
 multimap = "0.10.1"
@@ -577,6 +596,7 @@ nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 nix = { version = "0.30", features = ["fs", "net"] }
 nom = "7.1.3"
+nonempty = "0.12.0"
 num-integer = "0.1.46"
 num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
 omicron-clickhouse-admin = { path = "clickhouse-admin" }
@@ -624,6 +644,7 @@ oximeter-schema = { path = "oximeter/schema" }
 oximeter-test-utils = { path = "oximeter/test-utils" }
 oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 oximeter-types = { path = "oximeter/types" }
+oximeter-types-versions = { path = "oximeter/types/versions" }
 oxql-types = { path = "oximeter/oxql-types" }
 p256 = "0.13"
 parallel-task-set = { path = "parallel-task-set" }
@@ -691,6 +712,7 @@ schemars = "0.8.22"
 scopeguard = "1.2.0"
 secrecy = "0.10.3"
 semver = { version = "1.0.26", features = ["std", "serde"] }
+seq-macro = "0.3.6"
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
@@ -715,6 +737,7 @@ sled = "=0.34.7"
 sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
+sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-types-versions = { path = "sled-agent/types/versions" }
 sled-agent-zone-images = { path = "sled-agent/zone-images" }

@@ -6,6 +6,16 @@ use crate::latest::config::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv};
 use anyhow::ensure;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
+/// Error code used when a record type cannot be represented in an older API
+/// version (e.g., NS records in v1).
+pub const ERROR_CODE_INCOMPATIBLE_RECORD: &str = "IncompatibleRecord";
+
+/// Error code used when an update is already in progress.
+pub const ERROR_CODE_UPDATE_IN_PROGRESS: &str = "UpdateInProgress";
+
+/// Error code used when the provided generation number is stale.
+pub const ERROR_CODE_BAD_UPDATE_GENERATION: &str = "BadUpdateGeneration";
+
 impl DnsConfigParams {
     /// Given a high-level DNS configuration, return a reference to its sole
     /// DNS zone.

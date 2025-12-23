@@ -4,4 +4,4 @@
 
 //! Functional code for the latest versions of types.
 
-mod config;
+pub(crate) mod config;

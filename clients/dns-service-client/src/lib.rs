@@ -18,15 +18,15 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     replace = {
-        DnsConfig = internal_dns_types::config::DnsConfig,
-        DnsConfigParams = internal_dns_types::config::DnsConfigParams,
-        DnsConfigZone = internal_dns_types::config::DnsConfigZone,
-        DnsRecord = internal_dns_types::config::DnsRecord,
-        Srv = internal_dns_types::config::Srv,
+        DnsConfig = internal_dns_types_versions::latest::config::DnsConfig,
+        DnsConfigParams = internal_dns_types_versions::latest::config::DnsConfigParams,
+        DnsConfigZone = internal_dns_types_versions::latest::config::DnsConfigZone,
+        DnsRecord = internal_dns_types_versions::latest::config::DnsRecord,
+        Srv = internal_dns_types_versions::latest::config::Srv,
     }
 );
 
-pub use internal_dns_types::config::{
+pub use internal_dns_types_versions::latest::config::{
     ERROR_CODE_BAD_UPDATE_GENERATION, ERROR_CODE_UPDATE_IN_PROGRESS,
 };
 
