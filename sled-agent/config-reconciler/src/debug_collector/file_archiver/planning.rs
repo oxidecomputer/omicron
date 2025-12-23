@@ -27,6 +27,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use slog::Logger;
 use slog::debug;
+use slog::info;
 use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -99,7 +100,7 @@ impl<'a> ArchivePlanner<'a> {
     /// Configure this archive operation to include debug data from the given
     /// illumos zone zone
     pub fn include_zone(&mut self, zone_name: &str, zone_root: &Utf8Path) {
-        debug!(
+        info!(
             &self.log,
             "archiving debug data from zone";
             "zonename" => zone_name,
@@ -127,7 +128,7 @@ impl<'a> ArchivePlanner<'a> {
     /// Configure this archive operation to include debug data from the given
     /// cores directory
     pub fn include_cores_directory(&mut self, cores_dir: &Utf8Path) {
-        debug!(
+        info!(
             &self.log,
             "archiving debug data from cores directory";
             "cores_dir" => %cores_dir,
