@@ -91,12 +91,13 @@ pub struct SiloQuotas {
 /// View of the current silo's resource utilization and capacity
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Utilization {
-    /// Accounts for resources allocated to running instances or storage allocated via disks or snapshots
+    /// Accounts for resources allocated to running instances or storage allocated via disks or snapshots.
+    ///
     /// Note that CPU and memory resources associated with a stopped instances are not counted here
-    /// whereas associated disks will still be counted
+    /// whereas associated disks will still be counted.
     pub provisioned: VirtualResourceCounts,
-    /// The total amount of resources that can be provisioned in this silo
-    /// Actions that would exceed this limit will fail
+    /// The total amount of resources that can be provisioned in this silo.
+    /// Actions that would exceed this limit will fail.
     pub capacity: VirtualResourceCounts,
 }
 
@@ -106,8 +107,9 @@ pub struct Utilization {
 pub struct SiloUtilization {
     pub silo_id: Uuid,
     pub silo_name: Name,
-    /// Accounts for resources allocated by in silos like CPU or memory for running instances and storage for disks and snapshots
-    /// Note that CPU and memory resources associated with a stopped instances are not counted here
+    /// Accounts for resources allocated by in silos like CPU or memory for running instances and storage for disks and snapshots.
+    ///
+    /// Note that CPU and memory resources associated with a stopped instances are not counted here.
     pub provisioned: VirtualResourceCounts,
     /// Accounts for the total amount of resources reserved for silos via their quotas
     pub allocated: VirtualResourceCounts,
