@@ -718,15 +718,15 @@ impl DataStore {
 
     // Return the rack id of a commissioned sled if it exists, given its
     // `BaseboardId`.
-    pub async fn sled_get_rack_id_if_commissioned(
+    pub async fn sled_get_rack_id_if_commissioned_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         baseboard_id: &BaseboardId,
     ) -> Result<Option<RackUuid>, TransactionError<Error>> {
         use nexus_db_schema::schema::sled::dsl;
         let rack_id = dsl::sled
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::part_number.eq(baseboard_id.part_number))
-            .filter(dsl::serial_number.eq(baseboard_id.serial_number))
+            .filter(dsl::part_number.eq(baseboard_id.part_number.clone()))
+            .filter(dsl::serial_number.eq(baseboard_id.serial_number.clone()))
             .sled_filter(SledFilter::Commissioned)
             .select(dsl::rack_id)
             .get_result_async::<DbTypedUuid<RackKind>>(conn)

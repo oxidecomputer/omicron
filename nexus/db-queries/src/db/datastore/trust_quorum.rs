@@ -363,7 +363,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        rack_id: RackKind,
+        rack_id: RackUuid,
         proposed: ProposedTrustQuorumConfig,
     ) -> Result<TrustQuorumConfig, TransactionError<Error>> {
         // Return errors if any of the following checks fails
@@ -391,7 +391,8 @@ impl DataStore {
         // it's for this `rack_id`.
         for member in &proposed.members {
             if let Some(db_rack_id) =
-                self.sled_get_rack_id_if_commissioned_conn(conn, member)
+                Self::sled_get_rack_id_if_commissioned_conn(conn, member)
+                    .await?
             {
                 bail_unless!(
                     rack_id == db_rack_id,
