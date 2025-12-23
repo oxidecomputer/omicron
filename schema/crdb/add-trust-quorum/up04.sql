@@ -20,5 +20,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     -- Hex formatted string
     share_digest STRING(64),
 
-    PRIMARY KEY (rack_id, epoch, hw_baseboard_id)
+    -- For debugging only
+    time_prepared TIMESTAMPTZ,
+    time_committed TIMESTAMPTZ,
+
+    CONSTRAINT time_committed_and_committed CHECK (
+        (time_committed IS NULL AND state != 'committed')
+        OR
+        (time_committed IS NOT NULL AND state = 'committed')
+    ),
+
+    PRIMARY KEY (rack_id, epoch DESC, hw_baseboard_id)
 );

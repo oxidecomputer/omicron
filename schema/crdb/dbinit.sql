@@ -7483,6 +7483,12 @@ CREATE TYPE IF NOT EXISTS omicron.public.trust_quorum_configuration_state AS ENU
     -- All nodes in the trust quorum have committed the configuration and nexus
     -- has no more work to do.
     'committed',
+    -- Only some nodes have acknowledged commitment, but a new configuration
+    -- was inserted.
+    --
+    -- We set this value so that we can tell that nexus is done trying to commit
+    -- that old configuration.
+    'committed-partially',
     -- The configuration has aborted and will not commit. The epoch can be
     -- skipped.
     'aborted'
@@ -7495,6 +7501,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
 
     -- Monotonically increasing version per rack_id
     epoch INT8 NOT NULL,
+
+    -- The last committed epoch that this configuration was validated against
+    --
+    -- Optional because initial configs don't have a last committed epoch
+    last_committed_epoch INT8,
 
     -- The current state of this configuration
     state omicron.public.trust_quorum_configuration_state NOT NULL,
@@ -7531,6 +7542,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     encrypted_rack_secrets_salt STRING(64),
     encrypted_rack_secrets BYTES,
 
+    -- metadata for debugging only
+    time_created TIMESTAMPTZ NOT NULL,
+    time_committing TIMESTAMPTZ,
+    time_committed TIMESTAMPTZ,
+    time_aborted TIMESTAMPTZ,
+    abort_reason TEXT,
+
     CONSTRAINT encrypted_rack_secrets_both_or_neither_null CHECK (
         (encrypted_rack_secrets_salt IS NULL
             AND encrypted_rack_secrets IS NULL)
@@ -7539,9 +7557,41 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
             AND encrypted_rack_secrets IS NOT NULL)
     ),
 
+    CONSTRAINT time_committing_and_time_committed CHECK (
+       (time_committing IS NULL AND time_committed IS NULL)
+       OR
+       (time_committing IS NOT NULL AND time_committed IS NULL)
+       OR
+       (time_committing IS NOT NULL AND time_committed IS NOT NULL)
+    ),
+
+    CONSTRAINT time_committing_or_abort_mutually_exlusive CHECK (
+       (time_committing IS NULL AND time_aborted IS NULL)
+       OR
+       (time_committing IS NOT NULL AND time_aborted IS NULL)
+       OR
+       (time_committing IS NULL AND time_aborted is NOT NULL)
+    ),
+
+    CONSTRAINT abort CHECK (
+       (time_aborted IS NULL AND abort_reason IS NULL AND state != 'aborted')
+       OR
+       (time_aborted IS NOT NULL AND abort_reason IS NOT NULL AND state = 'aborted')
+    ),
+
     -- Each rack has its own trust quorum
-    PRIMARY KEY (rack_id, epoch)
+    PRIMARY KEY (rack_id, epoch DESC)
 );
+
+-- A partial index to retrieve all "active" trust quorum configurations.
+--
+-- These are configurations that are either still preparing or committing and
+-- therefore require work from Nexus.
+CREATE UNIQUE INDEX IF NOT EXISTS trust_quorum_active_configurations
+    on omicron.public.trust_quorum_configuration(rack_id, epoch DESC)
+    WHERE state = 'preparing'
+        OR state = 'preparing-lrtq-upgrade'
+        OR state = 'committing';
 
 -- Whether a node has prepared or committed yet
 CREATE TYPE IF NOT EXISTS omicron.public.trust_quorum_member_state AS ENUM (
@@ -7576,7 +7626,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     -- Hex formatted string
     share_digest STRING(64),
 
-    PRIMARY KEY (rack_id, epoch, hw_baseboard_id)
+    -- For debugging only
+    time_prepared TIMESTAMPTZ,
+    time_committed TIMESTAMPTZ,
+
+    CONSTRAINT time_committed_and_committed CHECK (
+        (time_committed IS NULL AND state != 'committed')
+        OR
+        (time_committed IS NOT NULL AND state = 'committed')
+    ),
+
+    PRIMARY KEY (rack_id, epoch DESC, hw_baseboard_id)
 );
 
 

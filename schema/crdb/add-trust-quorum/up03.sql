@@ -6,6 +6,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     -- Monotonically increasing version per rack_id
     epoch INT8 NOT NULL,
 
+    -- The last committed epoch that this configuration was validated against
+    --
+    -- Optional because initial configs don't have a last committed epoch
+    last_committed_epoch INT8,
+
     -- The current state of this configuration
     state omicron.public.trust_quorum_configuration_state NOT NULL,
 
@@ -40,6 +45,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     encrypted_rack_secrets_salt String(64),
     encrypted_rack_secrets BYTES,
 
+    -- metadata for debugging only
+    time_created TIMESTAMPTZ NOT NULL,
+    time_committing TIMESTAMPTZ,
+    time_committed TIMESTAMPTZ,
+    time_aborted TIMESTAMPTZ,
+    abort_reason TEXT,
+
     CONSTRAINT encrypted_rack_secrets_both_or_neither_null CHECK (
         (encrypted_rack_secrets_salt IS NULL
             AND encrypted_rack_secrets IS NULL)
@@ -48,6 +60,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
             AND encrypted_rack_secrets IS NOT NULL)
     ),
 
+    CONSTRAINT time_committing_and_time_committed CHECK (
+       (time_committing IS NULL AND time_committed IS NULL)
+       OR
+       (time_committing IS NOT NULL AND time_committed IS NULL)
+       OR
+       (time_committing IS NOT NULL AND time_committed IS NOT NULL)
+    ),
+
+    CONSTRAINT time_committing_or_abort_mutually_exlusive CHECK (
+       (time_committing IS NULL AND time_aborted IS NULL)
+       OR
+       (time_committing IS NOT NULL AND time_aborted IS NULL)
+       OR
+       (time_committing IS NULL AND time_aborted is NOT NULL)
+    ),
+
+    CONSTRAINT abort CHECK (
+       (time_aborted IS NULL AND abort_reason IS NULL AND state != 'aborted')
+       OR
+       (time_aborted IS NOT NULL AND abort_reason IS NOT NULL AND state = 'aborted')
+    ),
+
     -- Each rack has its own trust quorum
-    PRIMARY KEY (rack_id, epoch)
+    PRIMARY KEY (rack_id, epoch DESC)
 );

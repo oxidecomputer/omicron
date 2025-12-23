@@ -7,6 +7,7 @@
 use super::impl_enum_type;
 use crate::SqlU8;
 use crate::typed_uuid::DbTypedUuid;
+use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{
     trust_quorum_configuration, trust_quorum_member,
 };
@@ -28,6 +29,7 @@ impl_enum_type!(
     PreparingLrtqUpgrade => b"preparing-lrtq-upgrade"
     Committing => b"committing"
     Committed => b"committed"
+    CommittedPartially => b"committed-partially"
     Aborted => b"aborted"
 );
 
@@ -40,6 +42,9 @@ impl From<DbTrustQuorumConfigurationState> for TrustQuorumConfigState {
             }
             DbTrustQuorumConfigurationState::Committing => Self::Committing,
             DbTrustQuorumConfigurationState::Committed => Self::Committed,
+            DbTrustQuorumConfigurationState::CommittedPartially => {
+                Self::CommittedPartially
+            }
             DbTrustQuorumConfigurationState::Aborted => Self::Aborted,
         }
     }
@@ -54,6 +59,9 @@ impl From<TrustQuorumConfigState> for DbTrustQuorumConfigurationState {
             }
             TrustQuorumConfigState::Committing => Self::Committing,
             TrustQuorumConfigState::Committed => Self::Committed,
+            TrustQuorumConfigState::CommittedPartially => {
+                Self::CommittedPartially
+            }
             TrustQuorumConfigState::Aborted => Self::Aborted,
         }
     }
@@ -96,12 +104,18 @@ impl From<TrustQuorumMemberState> for DbTrustQuorumMemberState {
 pub struct TrustQuorumConfiguration {
     pub rack_id: DbTypedUuid<RackKind>,
     pub epoch: i64,
+    pub last_committed_epoch: Option<i64>,
     pub state: DbTrustQuorumConfigurationState,
     pub threshold: SqlU8,
     pub commit_crash_tolerance: SqlU8,
     pub coordinator: Uuid,
     pub encrypted_rack_secrets_salt: Option<String>,
     pub encrypted_rack_secrets: Option<Vec<u8>>,
+    pub time_created: DateTime<Utc>,
+    pub time_committing: Option<DateTime<Utc>>,
+    pub time_committed: Option<DateTime<Utc>>,
+    pub time_aborted: Option<DateTime<Utc>>,
+    pub abort_reason: Option<String>,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -112,4 +126,6 @@ pub struct TrustQuorumMember {
     pub hw_baseboard_id: Uuid,
     pub state: DbTrustQuorumMemberState,
     pub share_digest: Option<String>,
+    pub time_prepared: Option<DateTime<Utc>>,
+    pub time_committed: Option<DateTime<Utc>>,
 }
