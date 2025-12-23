@@ -109,6 +109,32 @@ impl DataStore {
         Ok(output)
     }
 
+    /// This is a special method called during `rack_initialize that inserts a
+    /// configuration  with all nodes acked. It specifically does no validation
+    /// and is only expected to be called once during the lifetime of a rack.
+    ///
+    /// For reconfiguration and lrtq upgrade we always call
+    /// `tq_insert_latest_config`.
+    pub async fn insert_rss_config_after_handoff(
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+        initial_members: BTreeSet<BaseboardId>,
+        coordinator: BaseboardId,
+    ) {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let initial_config = TrustQuorumConfig::new_rss_committed_config(
+            rack_id,
+            initial_members,
+            coordinator,
+        );
+
+        Self::insert_tq_config_conn(opctx, conn, config)
+            .await
+            .map_err(|txn_error| txn_error.into_diesel(&err))
+    }
+
     /// Get the latest trust quorum configuration from the database
     pub async fn tq_get_latest_config(
         &self,
@@ -377,7 +403,7 @@ impl DataStore {
                     // Mark the old configuration as committed-partially or aborted
                     // if it has not already `committed-or-aborted`
 
-                    Self::insert_tq_config_in_txn(opctx, conn, config)
+                    Self::insert_tq_config_conn(opctx, conn, config)
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))
                 }
@@ -930,8 +956,8 @@ impl DataStore {
             })
     }
 
-    // Unconditional insert that should only run inside a transaction
-    async fn insert_tq_config_in_txn(
+    // Unconditional insert
+    async fn insert_tq_config_conn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         config: TrustQuorumConfig,

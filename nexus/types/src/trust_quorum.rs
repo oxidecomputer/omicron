@@ -111,6 +111,38 @@ impl TrustQuorumConfig {
         }
     }
 
+    pub fn new_rss_committed_config(
+        rack_id: RackUuid,
+        initial_members: BTreeSet<BaseboardId>,
+        coordinator: BaseboardId,
+    ) -> TrustQuorumConfig {
+        let num_members = u8::try_from(initial_members.len()).unwrap();
+        assert!(num_members >= 3);
+        assert!(num_members <= 32);
+        TrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(1),
+            last_committed_epoch: None,
+            state: TrustQuorumConfigState::Committed,
+            threshold: Self::threshold(num_members),
+            commit_crash_tolerance: Self::commit_crash_tolerance(num_members),
+            coordinator,
+            encrypted_rack_secrets: None,
+            members: initial_members
+                .into_iter()
+                .map(|id| {
+                    (
+                        id,
+                        TrustQuorumMemberData {
+                            state: TrustQuorumMemberState::Committed,
+                            digest: None,
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
     pub fn acked_commits(&self) -> usize {
         self.members
             .values()
