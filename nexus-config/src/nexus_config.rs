@@ -1224,6 +1224,8 @@ mod test {
             type = "from_dns"
             [dendrite.switch0]
             address = "[::1]:12224"
+            [lldpd.switch0]
+            address = "[::1]:12230"
             [mgd.switch0]
             address = "[::1]:4676"
             [initial_reconfigurator_config]
