@@ -135,6 +135,17 @@ impl DataStore {
             return Ok(None);
         };
 
+        // Then fill in our members
+        Self::tq_get_config_with_members_conn(opctx, conn, rack_id, latest)
+            .await
+    }
+
+    async fn tq_get_config_with_members_conn(
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+        config: DbTrustQuorumConfiguration,
+    ) -> Result<Option<TrustQuorumConfig>, TransactionError<Error>> {
         // Then get any members associated with the configuration
         let members =
             Self::tq_get_members_conn(opctx, conn, rack_id, latest.epoch)
@@ -218,6 +229,25 @@ impl DataStore {
             encrypted_rack_secrets,
             members: tq_members,
         }))
+    }
+
+    async fn tq_get_config_with_members_from_epoch_conn(
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> Result<Option<TrustQuorumConfig>, TransactionError<Error>> {
+        // First, retrieve our configuration if there is one.
+        let Some(latest) =
+            Self::tq_get_config_conn(opctx, conn, rack_id, epoch).await?
+        else {
+            return Ok(None);
+        };
+
+        // Then fill in our members
+        Self::tq_get_config_with_members_conn(opctx, conn, rack_id, latest)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())
     }
 
     /// Insert a new trust quorum configuration, but only if it is equivalent
@@ -420,6 +450,11 @@ impl DataStore {
             proposed.epoch
         );
 
+        // Some helpers that we may want to use if we have a `latest_config`
+        // and enter the following if.
+        let mut should_commit_partially = false;
+        let mut last_committed_config: Option<TrustQuorumConfig> = None;
+
         // Is there actually a latest configuration?
         if let Some(latest_config) = latest_config {
             // If the configuration is being prepared then it must be aborted
@@ -433,8 +468,7 @@ impl DataStore {
 
             // If the configuration is still committting then we must ensure
             // that enough nodes have acked commits before a reconfiguration can occur.
-            let should_commit_partially = if latest_config.state.is_committing()
-            {
+            if latest_config.state.is_committing() {
                 let acked = latest_config.acked_commits();
                 // N - Z
                 let minimum = latest_config.members.len()
@@ -448,15 +482,14 @@ impl DataStore {
                     min,
                     acked
                 );
-                true
-            } else {
-                false
-            };
+                should_commit_partially = true;
+                last_committed_config = Some(latest_config);
+            }
 
             // If the latest configuration is committed, then the proposed
             // configuration must have the last committed configuration set to
             // match this.
-            let last_committed_config = if latest_config.state.is_committed() {
+            if latest_config.state.is_committed() {
                 bail_unless!(
                     Some(latest_config.epoch)
                         == proposed.last_committed_epoch(),
@@ -467,21 +500,44 @@ impl DataStore {
                     latest_config.epoch,
                     proposed.last_committed_epoch()
                 );
-            }
 
-            if latest_config.state.is_aborted() {}
+                last_committed_config = Some(latest_config);
+            }
         }
 
-        // If the latest configuration was aborted then load the last committed
-        // configuration.
-        //  * If there was no last committed configuration then proceed to check
-        //    the proposed configuration alone.
-        //  * Othewise, start checking the proposed configuration with respect
-        //    to the last committed configuration.
+        // The latest config was aborted or there wasn't one
+        if last_committed_config.is_none() {
+            // Do we need to load one?
+            if let Some(epoch) = proposed.last_committed_epoch() {
+                let config = Self::tq_get_config_with_members_from_epoch_conn(
+                    opctx, conn, rack_id, epoch,
+                )
+                .await?;
 
-        // Load the last committed config if it isn't the latest config
-        // Ensure the last committed configuration is actually `committed` or
-        // `committed-partially`
+                bail_unless!(
+                    config.is_some(),
+                    "Trust Quorum proposed configuration contains a last \
+                    committed epoch ({}) for a configuration that does \
+                    not exist.",
+                    epoch
+                );
+
+                last_committed_config = config;
+            }
+        }
+
+        // At this point we have either loaded the proposed last committed
+        // configuration or there is not one.
+        if let Some(last_committed_config) = last_committed_config {
+            bail_unless!(
+                config.is_committed(),
+                "Trust Quorum proposed configuration contains a last \
+                committed epoch ({}) for a configuration that is not \
+                committed",
+                last_committed_config.epoch
+            );
+        } else {
+        }
 
         // Pick a coordinator:
         //   * A coordinator must have acked commit in the last committed
@@ -1142,6 +1198,30 @@ impl DataStore {
             .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
             .order_by(dsl::epoch.desc())
             .first_async::<DbTrustQuorumConfiguration>(conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(latest)
+    }
+
+    async fn tq_get_config_conn(
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> Result<Option<DbTrustQuorumConfiguration>, TransactionError<Error>>
+    {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+
+        let epoch = epoch_to_i64(config.epoch)
+            .map_err(|e| TransactionError::from(e))?;
+
+        let latest = dsl::trust_quorum_configuration
+            .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
+            .filter(dsl::epoch.eq(epoch))
+            .load_async::<DbTrustQuorumConfiguration>(conn)
             .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
