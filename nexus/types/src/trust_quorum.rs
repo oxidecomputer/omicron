@@ -12,13 +12,32 @@ use trust_quorum_protocol::{
     EncryptedRackSecrets, Epoch, Sha3_256Digest, Threshold,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustQuorumConfigState {
     Preparing,
     PreparingLrtqUpgrade,
     Committing,
     Committed,
+    CommittedPartially,
     Aborted,
+}
+
+impl TrustQuorumConfigState {
+    pub fn is_preparing(&self) -> bool {
+        *self == Self::Preparing || *self == Self::PreparingLrtqUpgrade
+    }
+
+    pub fn is_committed(&self) -> bool {
+        *self == Self::Committed || *self == Self::CommittedPartially
+    }
+
+    pub fn is_aborted(&self) -> bool {
+        *self == Self::Aborted
+    }
+
+    pub fn is_committing(&self) -> bool {
+        *self == Self::Committing
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +109,13 @@ impl TrustQuorumConfig {
                 })
                 .collect(),
         }
+    }
+
+    pub fn acked_commits(&self) -> usize {
+        self.members
+            .values()
+            .filter(|m| m.state == TrustQuorumMemberState::Committed)
+            .count()
     }
 
     fn threshold(num_members: u8) -> Threshold {

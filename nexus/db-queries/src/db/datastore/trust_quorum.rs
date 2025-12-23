@@ -366,8 +366,6 @@ impl DataStore {
         rack_id: RackUuid,
         proposed: ProposedTrustQuorumConfig,
     ) -> Result<TrustQuorumConfig, TransactionError<Error>> {
-        // Return errors if any of the following checks fails
-
         //
         // Check validity of members in proposed config
         //
@@ -405,12 +403,74 @@ impl DataStore {
             }
         }
 
+        //
         // Check that there is not an in progress reconfiguration:
-        // This entails two checks:
-        //   * If the configuration is being prepared than it must be aborted
-        //   * If the configuration is `Committing` then we must wait for at
-        //     least N-Z nodes to have acked commits. If for some reason this isn't occurring,
-        //     then we need a support call.
+        //
+        let latest_config =
+            Self::tq_get_latest_config_with_members_conn(opctx, conn, rack_id)
+                .await?;
+
+        // Ensure that epochs are sequential
+        let latest_epoch = latest_config.as_ref().map(|c| c.epoch);
+        bail_unless!(
+            latest_epoch == proposed.epoch.previous(),
+            "Epochs for trust quorum configurations must be sequential. \
+            Current epoch = {:?}, Proposed Epoch = {:?}",
+            latest_epoch,
+            proposed.epoch
+        );
+
+        // Is there actually a latest configuration?
+        if let Some(latest_config) = latest_config {
+            // If the configuration is being prepared then it must be aborted
+            // before a reconfiguration can occur.
+            bail_unless!(
+                !latest_config.state.is_preparing(),
+                "Trust Quorum reconfiguration in progress: still preparing \
+                in epoch {}. Configuration must be aborted to reconfigure.",
+                latest_config.epoch
+            );
+
+            // If the configuration is still committting then we must ensure
+            // that enough nodes have acked commits before a reconfiguration can occur.
+            let should_commit_partially = if latest_config.state.is_committing()
+            {
+                let acked = latest_config.acked_commits();
+                // N - Z
+                let minimum = latest_config.members.len()
+                    - latest_config.commit_crash_tolerance;
+                bail_unless!(
+                    acked >= min,
+                    "Trust quorum reconfiguration in progress: not enough nodes \
+                    have acked commit in epoch {}. Expected at least {} acks, \
+                    Got {} acks. If this persists please contact Oxide support.",
+                    latest_config.epoch,
+                    min,
+                    acked
+                );
+                true
+            } else {
+                false
+            };
+
+            // If the latest configuration is committed, then the proposed
+            // configuration must have the last committed configuration set to
+            // match this.
+            let last_committed_config = if latest_config.state.is_committed() {
+                bail_unless!(
+                    Some(latest_config.epoch)
+                        == proposed.last_committed_epoch(),
+                    "Trust Quorum proposed configuration does not match \
+                    the last committed epoch. Committed configurations must \
+                    build upon each other sequentially. Expected epoch \
+                    {}, Got {:?}",
+                    latest_config.epoch,
+                    proposed.last_committed_epoch()
+                );
+            }
+
+            if latest_config.state.is_aborted() {}
+        }
 
         // If the latest configuration was aborted then load the last committed
         // configuration.
