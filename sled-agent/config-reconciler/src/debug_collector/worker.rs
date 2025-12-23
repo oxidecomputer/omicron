@@ -334,13 +334,13 @@ trait GetMountpoint: AsRef<ZpoolName> {
 /// These are sent from different places.
 #[derive(Debug)]
 pub(super) enum DebugCollectorCmd {
-    /// Archive logs and other debug data from directory `zone_root`, which
-    /// corresponds to the root of a previously-running zone called `zone_name`.
-    /// Reply on `completion_tx` when finished.
+    /// Archive logs and other debug data from directory `zone_path`, which
+    /// corresponds to the path for a previously-running zone called
+    /// `zone_name`.  Reply on `completion_tx` when finished.
     ///
     /// This message is sent from the DebugCollectorTask (outside this module).
     ArchiveFormerZoneRoot {
-        zone_root: Utf8PathBuf,
+        zone_path: Utf8PathBuf,
         zone_name: String,
         completion_tx: oneshot::Sender<()>,
     },
@@ -481,13 +481,13 @@ impl DebugCollectorWorker {
                     );
                 }
                 Ok(Some(DebugCollectorCmd::ArchiveFormerZoneRoot {
-                    zone_root,
+                    zone_path,
                     zone_name,
                     completion_tx,
                 })) => {
                     match self
                         .do_archive_former_zone_root(
-                            &zone_root,
+                            &zone_path,
                             &zone_name,
                             completion_tx,
                         )
@@ -496,15 +496,15 @@ impl DebugCollectorWorker {
                         Ok(()) => {
                             info!(
                                 self.log,
-                                "Archived logs from former zone root";
-                                "zone_root" => %zone_root
+                                "Archived logs from former zone path";
+                                "zone_path" => %zone_path
                             );
                         }
                         Err(error) => {
                             error!(
                                 self.log,
                                 "Failed to archive former zone root";
-                                "zone_root" => %zone_root,
+                                "zone_path" => %zone_path,
                                 InlineErrorChain::new(&error),
                             );
                         }
@@ -944,7 +944,7 @@ impl DebugCollectorWorker {
 
     async fn do_archive_former_zone_root(
         &self,
-        zone_root: &Utf8Path,
+        zone_path: &Utf8Path,
         zone_name: &str,
         completion_tx: oneshot::Sender<()>,
     ) -> Result<(), ArchiveLogsError> {
@@ -957,7 +957,11 @@ impl DebugCollectorWorker {
             ArchiveKind::Final,
             &debug_dir.as_ref(),
         );
-        archiver.include_zone(zone_name, zone_root);
+        // For non-global zones (and we're always archiving a former non-global
+        // zone), the zone's root filesystem is in "root" relative to the zone
+        // path.
+        let zone_root = zone_path.join("root");
+        archiver.include_zone(zone_name, &zone_root);
         archiver.execute().await.map_err(ArchiveLogsError::Archiver)?;
         if let Err(()) = completion_tx.send(()) {
             // In practice, it would be surprising for our caller to have

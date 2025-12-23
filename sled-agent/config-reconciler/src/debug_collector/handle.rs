@@ -162,10 +162,7 @@ impl DebugCollector {
         zone_path: &Utf8Path,
         completion_tx: oneshot::Sender<()>,
     ) {
-        // The root filesystem for non-global zones is in "root" within the
-        // zone_path.
-        let zone_root = zone_path.join("root");
-        let log = self.log.new(o!("zone_root" => zone_root.to_string()));
+        let log = self.log.new(o!("zone_path" => zone_path.to_string()));
 
         // Validate the path that we were given.  We're only ever given zone
         // root filesystems, whose basename is always a zonename, and we always
@@ -191,9 +188,10 @@ impl DebugCollector {
         }
 
         info!(log, "requesting archive of former zone root");
+        let zone_path = zone_path.to_owned();
         let zone_name = file_name.to_string();
         let cmd = DebugCollectorCmd::ArchiveFormerZoneRoot {
-            zone_root,
+            zone_path,
             zone_name,
             completion_tx,
         };
