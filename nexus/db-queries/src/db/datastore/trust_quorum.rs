@@ -528,20 +528,35 @@ impl DataStore {
 
         // At this point we have either loaded the proposed last committed
         // configuration or there is not one.
-        if let Some(last_committed_config) = last_committed_config {
-            bail_unless!(
-                config.is_committed(),
-                "Trust Quorum proposed configuration contains a last \
-                committed epoch ({}) for a configuration that is not \
-                committed",
-                last_committed_config.epoch
-            );
-        } else {
-        }
+        let possible_coordinators: BTreeSet<BaseboardId> =
+            if let Some(last_committed_config) = last_committed_config {
+                bail_unless!(
+                    config.is_committed(),
+                    "Trust Quorum proposed configuration contains a last \
+                    committed epoch ({}) for a configuration that is not \
+                    committed",
+                    last_committed_config.epoch
+                );
 
-        // Pick a coordinator:
-        //   * A coordinator must have acked commit in the last committed
-        //     configuration if there is one.
+                // A coordinator must have acked a commit in the prior configuration
+                // if it's to be a candidate.
+                let committed_members: BTreeSet<BaseboardId> =
+                    last_committed_config
+                        .members
+                        .filter_map(|(id, data)| {
+                            if data.state == TrustQuorumMemberState::Committed {
+                                Some(id.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                proposed.members.intersection(&committed_members).collect()
+            } else {
+                proposed.members.clone()
+            };
+
+        // Pick a coordinator from our set of possibilities:
         //   * A coordinator's sled-agent should be up as reported in inventory
         //   * A coordinator must be a member of the new configuration
 
