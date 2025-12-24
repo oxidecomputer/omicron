@@ -11,7 +11,7 @@ workspace = true
 chrono.workspace = true
 expectorate.workspace = true
 http.workspace = true
-internal-dns-types.workspace = true
+internal-dns-types-versions.workspace = true
 progenitor.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
 schemars.workspace = true
