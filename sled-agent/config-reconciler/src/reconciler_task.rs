@@ -4,6 +4,7 @@
 
 //! The primary task for sled config reconciliation.
 
+use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::Utc;
 use either::Either;
@@ -22,6 +23,7 @@ use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::ReconciledSingleMeasurement;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::LOCAL_STORAGE_DATASET;
@@ -51,6 +53,7 @@ use crate::sled_agent_facilities::SledAgentFacilities;
 mod datasets;
 mod external_disks;
 mod zones;
+//mod measurements;
 
 use self::datasets::OmicronDatasets;
 use self::external_disks::ExternalDisks;
@@ -107,7 +110,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
 }
 
 #[derive(Debug)]
-pub(crate) struct ReconcilerResult {
+pub struct ReconcilerResult {
     mount_config: Arc<MountConfig>,
     status: ReconcilerTaskStatus,
     latest_result: Option<LatestReconciliationResult>,
@@ -151,6 +154,18 @@ impl ReconcilerResult {
         &self,
     ) -> impl Iterator<Item = PathInPool> + '_ {
         self.all_mounted_datasets_of_kind(DatasetKind::TransientZoneRoot)
+    }
+
+    pub(crate) fn all_current_measurements(
+        &self,
+    ) -> Either<
+        impl Iterator<Item = Utf8PathBuf> + '_,
+        impl Iterator<Item = Utf8PathBuf> + '_,
+    > {
+        let Some(latest_result) = &self.latest_result else {
+            return Either::Left(std::iter::empty());
+        };
+        Either::Right(latest_result.all_measurements())
     }
 
     pub(crate) fn to_inventory(
@@ -224,6 +239,7 @@ struct LatestReconciliationResult {
     timesync_status: TimeSyncStatus,
     boot_partitions: BootPartitionContentsInventory,
     remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
+    measurements: IdOrdMap<ReconciledSingleMeasurement>,
 }
 
 impl LatestReconciliationResult {
@@ -236,9 +252,17 @@ impl LatestReconciliationResult {
             zones: self.zones_inventory.clone(),
             boot_partitions: self.boot_partitions.clone(),
             remove_mupdate_override: self.remove_mupdate_override.clone(),
-            // TODO: this will come in another PR
-            measurements: IdOrdMap::new(),
+            measurements: self.measurements.clone(),
         }
+    }
+
+    fn all_measurements<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = Utf8PathBuf> + 'a {
+        self.measurements.iter().filter_map(|entry| match &entry.result {
+            ConfigReconcilerInventoryResult::Ok => Some(entry.path.clone()),
+            ConfigReconcilerInventoryResult::Err { .. } => None,
+        })
     }
 
     fn all_mounted_datasets<'a>(
@@ -487,6 +511,15 @@ impl ReconcilerTask {
             )
             .await;
 
+        // Reconcile our measurements
+        let measurements = crate::measurements::reconcile_measurements(
+            &resolver_status,
+            &internal_disks,
+            &sled_config.measurements,
+            &self.log,
+        )
+        .await;
+
         // ---
         // We go through the removal process first: shut down zones, then stop
         // managing disks, then remove any orphaned datasets.
@@ -614,6 +647,7 @@ impl ReconcilerTask {
             boot_partitions: boot_partitions.into_inventory(),
             remove_mupdate_override: remove_mupdate_override
                 .map(|v| v.to_inventory()),
+            measurements: measurements.clone(),
         };
         self.reconciler_result_tx.send_modify(|r| {
             r.status = ReconcilerTaskStatus::Idle {
