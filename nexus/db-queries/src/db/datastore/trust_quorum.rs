@@ -21,8 +21,9 @@ use nexus_db_model::HwBaseboardId;
 use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
 use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
-use nexus_types::trust_quorum::TrustQuorumConfigState;
-use nexus_types::trust_quorum::{TrustQuorumConfig, TrustQuorumMemberData};
+use nexus_types::trust_quorum::{
+    TrustQuorumConfig, TrustQuorumMemberData, TrustQuorumMemberState,
+};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::bail_unless;
@@ -64,6 +65,15 @@ fn epoch_to_i64(epoch: Epoch) -> Result<i64, Error> {
             into database: {epoch}"
         ))
     })
+}
+
+// A configuration returned from `validate_new_config_conn` that is safe to
+// be inserted into the database inside a transaction.
+struct ValidatedConfig {
+    config: TrustQuorumConfig,
+    // The last committed configuration should have its state changed from
+    // committing to committed-partially.
+    commit_partially: bool,
 }
 
 impl DataStore {
@@ -123,7 +133,7 @@ impl DataStore {
         rack_id: RackUuid,
         initial_members: BTreeSet<BaseboardId>,
         coordinator: BaseboardId,
-    ) {
+    ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         let initial_config = TrustQuorumConfig::new_rss_committed_config(
@@ -132,9 +142,9 @@ impl DataStore {
             coordinator,
         );
 
-        Self::insert_tq_config_conn(opctx, conn, config)
+        Self::insert_tq_config_conn(opctx, conn, initial_config)
             .await
-            .map_err(|txn_error| txn_error.into_diesel(&err))
+            .map_err(|err| err.into_public_ignore_retries())
     }
 
     /// Get the latest trust quorum configuration from the database
@@ -176,7 +186,7 @@ impl DataStore {
     ) -> Result<Option<TrustQuorumConfig>, TransactionError<Error>> {
         // Then get any members associated with the configuration
         let members =
-            Self::tq_get_members_conn(opctx, conn, rack_id, latest.epoch)
+            Self::tq_get_members_conn(opctx, conn, rack_id, config.epoch)
                 .await?;
 
         let mut tq_members: BTreeMap<BaseboardId, TrustQuorumMemberData> =
@@ -200,7 +210,7 @@ impl DataStore {
 
             // The coordinator is always a member of the group
             // We pull out its `BaseboardId` here.
-            if latest.coordinator == hw_baseboard_id.id {
+            if config.coordinator == hw_baseboard_id.id {
                 coordinator = Some(hw_baseboard_id.clone().into());
             }
             tq_members.insert(
@@ -209,13 +219,13 @@ impl DataStore {
             );
         }
 
-        let salt = if let Some(salt_str) = latest.encrypted_rack_secrets_salt {
+        let salt = if let Some(salt_str) = config.encrypted_rack_secrets_salt {
             let mut data = [0u8; 32];
             hex::decode_to_slice(&salt_str, &mut data).map_err(|e| {
                 Error::internal_error(&format!(
                     "Failed to decode salt for trust quorum config: \
                     rack_id: {}, epoch: {}: {e}",
-                    latest.rack_id, latest.epoch
+                    config.rack_id, config.epoch
                 ))
             })?;
             Some(Salt(data))
@@ -224,12 +234,12 @@ impl DataStore {
         };
 
         let encrypted_rack_secrets = if let Some(salt) = salt {
-            let Some(secrets) = latest.encrypted_rack_secrets else {
+            let Some(secrets) = config.encrypted_rack_secrets else {
                 // This should never happend due to constraint checks
                 return Err(Error::internal_error(&format!(
                     "Salt exists, but secrets do not for trust quorum config: \
                     rack_id: {}, epoch: {}",
-                    latest.rack_id, latest.epoch
+                    config.rack_id, config.epoch
                 ))
                 .into());
             };
@@ -242,17 +252,25 @@ impl DataStore {
             return Err(Error::internal_error(&format!(
                 "Failed to find coordinator for hw_baseboard_id: {} \
                 in trust quorum config.",
-                latest.coordinator
+                config.coordinator
             ))
             .into());
         };
 
+        let last_committed_epoch =
+            if let Some(epoch) = config.last_committed_epoch {
+                Some(i64_to_epoch(epoch)?)
+            } else {
+                None
+            };
+
         Ok(Some(TrustQuorumConfig {
-            rack_id: latest.rack_id.into(),
-            epoch: i64_to_epoch(latest.epoch)?,
-            state: latest.state.into(),
-            threshold: Threshold(latest.threshold.into()),
-            commit_crash_tolerance: latest.commit_crash_tolerance.into(),
+            rack_id: config.rack_id.into(),
+            epoch: i64_to_epoch(config.epoch)?,
+            last_committed_epoch,
+            state: config.state.into(),
+            threshold: Threshold(config.threshold.into()),
+            commit_crash_tolerance: config.commit_crash_tolerance.into(),
             coordinator,
             encrypted_rack_secrets,
             members: tq_members,
@@ -275,14 +293,14 @@ impl DataStore {
         // Then fill in our members
         Self::tq_get_config_with_members_conn(opctx, conn, rack_id, latest)
             .await
-            .map_err(|err| err.into_public_ignore_retries())
     }
 
-    /// Insert a new trust quorum configuration, ensuring it is a valid configuration
+    /// Insert a new trust quorum configuration, if the proposed configuration
+    /// validates.
     pub async fn tq_insert_latest_config(
         &self,
         opctx: &OpContext,
-        config: TrustQuorumConfig,
+        proposed: ProposedTrustQuorumConfig,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
@@ -292,105 +310,31 @@ impl DataStore {
         self.transaction_retry_wrapper("tq_insert_latest_config")
             .transaction(&conn, |c| {
                 let err = err.clone();
-                let config = config.clone();
+                let proposed = proposed.clone();
 
                 async move {
-                    let current = Self::tq_get_latest_config_with_members_conn(
-                        opctx,
-                        &c,
-                        config.rack_id,
-                    )
-                    .await
-                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let validated =
+                        Self::validate_new_config_conn(opctx, &c, proposed)
+                            .await
+                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
-                    // Some light sanity checking
-                    match config.state {
-                        TrustQuorumConfigState::Preparing
-                        | TrustQuorumConfigState::PreparingLrtqUpgrade => {}
-                        TrustQuorumConfigState::Committing
-                        | TrustQuorumConfigState::Committed
-                        | TrustQuorumConfigState::Aborted => {
-                            let state = config.state;
-                            bail_txn!(
-                                err,
-                                "Cannot insert configuration in state={:?}",
-                                state
-                            );
-                        }
+                    // Mark the old configuration as committed-partially
+                    //
+                    // Safe to unwrap because we validated that there is a last
+                    // committed configuration and that it needs to be committed
+                    // partially.
+                    if validated.commit_partially {
+                        Self::updated_tq_state_committed_partially_conn(
+                            &c,
+                            validated.config.rack_id,
+                            validated.config.last_committed_epoch.unwrap(),
+                        )
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
                     }
 
-                    if let Some(current) = current {
-                        let current_epoch = match i64_to_epoch(current.epoch) {
-                            Ok(epoch) => epoch,
-                            Err(e) => {
-                                return Err(err.bail(e.into()));
-                            }
-                        };
-
-                        if Some(current_epoch) != config.epoch.previous() {
-                            return Err(err.bail(
-                                TransactionError::CustomError(Error::conflict(
-                                    format!(
-                                        "expected current TQ epoch for rack_id \
-                                {} to be {:?}, found {:?}",
-                                        config.rack_id,
-                                        config.epoch.previous(),
-                                        current_epoch
-                                    ),
-                                )),
-                            ));
-                        }
-                    } else {
-                        // We perform an unconditional insert here since
-                        // no existing configuration exists. However, the
-                        // configuration to be inserted is still subject to
-                        // some constraints.
-                        //
-                        // If there is no existing configuration, then the epoch
-                        // to be inserted must be either 1 or 2. It will be 1 if
-                        // this is a new initialization and 2 if this is an LRTQ
-                        // upgrade. Let's check both conditions here and return
-                        // an error if unmet.
-                        match config.state {
-                            TrustQuorumConfigState::Preparing => {
-                                let actual = config.epoch;
-                                let expected = Epoch(1);
-                                if actual != expected {
-                                    bail_txn!(
-                                        err,
-                                        "Failed to insert first TQ
-                                        configuration: invalid epoch for \
-                                        state=preparing: Expected {}, Got {}",
-                                        expected,
-                                        actual
-                                    );
-                                }
-                            }
-                            TrustQuorumConfigState::PreparingLrtqUpgrade => {
-                                let actual = config.epoch;
-                                let expected = Epoch(2);
-                                if actual != expected {
-                                    bail_txn!(
-                                        err,
-                                        "Failed to insert first TQ
-                                        configuration: invalid epoch for \
-                                        state=preparing-lrtq-upgrade: \
-                                        Expected {}, Got {}",
-                                        expected,
-                                        actual
-                                    );
-                                }
-                            }
-                            _ => {
-                                // Already checked abbove
-                            }
-                        }
-                    }
-
-                    // Mark the old configuration as committed-partially or aborted
-                    // if it has not already `committed-or-aborted`
-
-                    Self::insert_tq_config_conn(opctx, conn, config)
+                    // Save the new config
+                    Self::insert_tq_config_conn(opctx, &c, validated.config)
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))
                 }
@@ -402,20 +346,9 @@ impl DataStore {
             })
     }
 
-    // A configuration returned from `validate_new_config_conn` that is safe to
-    // be inserted into the database inside a transaction.
-    struct ValidatedConfig {
-        config: TrustQuorumConfig,
-        // The last committed configuration should have its state changed from
-        // committing to committed-partially.
-        commit_partially: bool
-    }
-
     async fn validate_new_config_conn(
-        &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        rack_id: RackUuid,
         proposed: ProposedTrustQuorumConfig,
     ) -> Result<ValidatedConfig, TransactionError<Error>> {
         //
@@ -452,11 +385,11 @@ impl DataStore {
                     .await?
             {
                 bail_unless!(
-                    rack_id == db_rack_id,
+                    proposed.rack_id == db_rack_id,
                     "Sled {} already commissioned for another rack. \
                     Expected rack_id {}, Got {}",
                     member,
-                    rack_id,
+                    proposed.rack_id,
                     db_rack_id
                 );
             }
@@ -465,9 +398,12 @@ impl DataStore {
         //
         // Check that there is not an in progress reconfiguration:
         //
-        let latest_config =
-            Self::tq_get_latest_config_with_members_conn(opctx, conn, rack_id)
-                .await?;
+        let latest_config = Self::tq_get_latest_config_with_members_conn(
+            opctx,
+            conn,
+            proposed.rack_id,
+        )
+        .await?;
 
         // Ensure that epochs are sequential
         let latest_epoch = latest_config.as_ref().map(|c| c.epoch);
@@ -494,17 +430,12 @@ impl DataStore {
                 latest_config.epoch
             );
 
-            // If the configuration is still committting then we must ensure
-            // that enough nodes have acked commits before a reconfiguration
-            // can occur.
-            if latest_config.state.is_committing() {
-                last_committed_config = Some(latest_config);
-            }
-
             // If the latest configuration is committed, then the proposed
             // configuration must have the last committed configuration set to
             // match this.
-            if latest_config.state.is_committed() {
+            if latest_config.state.is_committed()
+                || latest_config.state.is_committing()
+            {
                 bail_unless!(
                     Some(latest_config.epoch)
                         == proposed.last_committed_epoch(),
@@ -525,7 +456,10 @@ impl DataStore {
             // Do we need to load the last committed config?
             if let Some(epoch) = proposed.last_committed_epoch() {
                 let config = Self::tq_get_config_with_members_from_epoch_conn(
-                    opctx, conn, rack_id, epoch,
+                    opctx,
+                    conn,
+                    proposed.rack_id,
+                    epoch,
                 )
                 .await?;
 
@@ -555,23 +489,24 @@ impl DataStore {
             last_committed_config
         {
             bail_unless!(
-                config.is_committed() || config.is_committing(),
+                last_committed_config.state.is_committed()
+                    || last_committed_config.state.is_committing(),
                 "Trust Quorum proposed configuration contains a last \
                 committed epoch ({}) for a configuration that is not \
                 committed",
                 last_committed_config.epoch
             );
 
-            let acked = latest_config.acked_commits();
+            let acked = last_committed_config.acked_commits();
             // N - Z
-            let minimum = latest_config.members.len()
-                - latest_config.commit_crash_tolerance;
+            let min = last_committed_config.members.len()
+                - last_committed_config.commit_crash_tolerance as usize;
             bail_unless!(
                 acked >= min,
                 "Trust quorum reconfiguration in progress: not enough nodes \
                 have acked commit in epoch {}. Expected at least {} acks, \
                 Got {} acks. If this persists please contact Oxide support.",
-                latest_config.epoch,
+                last_committed_config.epoch,
                 min,
                 acked
             );
@@ -582,6 +517,7 @@ impl DataStore {
             let committed_members: BTreeSet<BaseboardId> =
                 last_committed_config
                     .members
+                    .iter()
                     .filter_map(|(id, data)| {
                         if data.state == TrustQuorumMemberState::Committed {
                             Some(id.clone())
@@ -590,7 +526,7 @@ impl DataStore {
                         }
                     })
                     .collect();
-            proposed.members.intersection(&committed_members).collect()
+            proposed.members.intersection(&committed_members).cloned().collect()
         } else {
             proposed.members.clone()
         };
@@ -602,15 +538,16 @@ impl DataStore {
             proposed.epoch
         );
         // Pick a random coordinator from our set of possibilities.
-        let coordinator = possible_coordinators.into_iter().choose(&mut rng());
+        //
+        // Safe to unwrap, as we check for emptiness above
+        let coordinator =
+            possible_coordinators.into_iter().choose(&mut rng()).unwrap();
 
         // Convert proposal to a new `TrustQuorumConfig`
         Ok(ValidatedConfig {
             config: TrustQuorumConfig::new(proposed, coordinator),
-            commit_partially: should_commit_partially
+            commit_partially: should_commit_partially,
         })
-            
-        
     }
 
     /// If this configuration is in the `Preparing` state, then update any
@@ -710,9 +647,9 @@ impl DataStore {
                                 );
                             };
                             member.share_digest = Some(hex::encode(digest.0));
-                            Self::update_tq_member_share_digest_in_txn(
+                            Self::update_tq_member_share_digest_conn(
                                 opctx,
-                                conn,
+                                &c,
                                 member.clone(),
                             )
                             .await
@@ -724,9 +661,9 @@ impl DataStore {
                             && member.state == DbTrustQuorumMemberState::Unacked
                         {
                             total_acks += 1;
-                            Self::update_tq_member_state_prepared_in_txn(
+                            Self::update_tq_member_state_prepared_conn(
                                 opctx,
-                                conn,
+                                &c,
                                 member.clone(),
                             )
                             .await
@@ -746,9 +683,9 @@ impl DataStore {
                     if db_config.encrypted_rack_secrets_salt.is_none()
                         && config.encrypted_rack_secrets.is_some()
                     {
-                        Self::update_tq_encrypted_rack_secrets_in_txn(
+                        Self::update_tq_encrypted_rack_secrets_conn(
                             opctx,
-                            conn,
+                            &c,
                             db_config.rack_id,
                             db_config.epoch,
                             config.encrypted_rack_secrets.unwrap(),
@@ -763,9 +700,9 @@ impl DataStore {
                             + db_config.commit_crash_tolerance.0)
                             as usize
                     {
-                        Self::update_tq_state_committing_in_txn(
+                        Self::update_tq_state_committing_conn(
                             opctx,
-                            conn,
+                            &c,
                             db_config.rack_id,
                             db_config.epoch,
                         )
@@ -844,9 +781,9 @@ impl DataStore {
                         );
                     }
 
-                    Self::update_tq_members_state_commit_in_txn(
+                    Self::update_tq_members_state_commit_conn(
                         opctx,
-                        conn,
+                        &c,
                         rack_id.into(),
                         epoch,
                         acked_commits,
@@ -869,9 +806,9 @@ impl DataStore {
                     if db_members.iter().all(|(m, _)| {
                         m.state == DbTrustQuorumMemberState::Committed
                     }) {
-                        Self::update_tq_state_committed_in_txn(
+                        Self::update_tq_state_committed_conn(
                             opctx,
-                            conn,
+                            &c,
                             db_config.rack_id,
                             db_config.epoch,
                         )
@@ -959,9 +896,9 @@ impl DataStore {
                         );
                     }
 
-                    Self::update_tq_abort_state_in_txn(
+                    Self::update_tq_abort_state_conn(
                         opctx,
-                        conn,
+                        &c,
                         db_config.rack_id,
                         db_config.epoch,
                     )
@@ -1016,12 +953,23 @@ impl DataStore {
         let epoch = epoch_to_i64(config.epoch)
             .map_err(|e| TransactionError::from(e))?;
 
+        let last_committed_epoch =
+            if let Some(lc_epoch) = config.last_committed_epoch {
+                Some(
+                    epoch_to_i64(lc_epoch)
+                        .map_err(|e| TransactionError::from(e))?,
+                )
+            } else {
+                None
+            };
+
         // Insert the configuration
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
-        diesel::insert_into(dsl::trust_quorum_configuration)
+        let rows_updated = diesel::insert_into(dsl::trust_quorum_configuration)
             .values(DbTrustQuorumConfiguration {
                 rack_id: config.rack_id.into(),
                 epoch,
+                last_committed_epoch,
                 state: config.state.into(),
                 threshold: config.threshold.0.into(),
                 commit_crash_tolerance: config.commit_crash_tolerance.into(),
@@ -1031,6 +979,13 @@ impl DataStore {
             })
             .execute_async(conn)
             .await?;
+
+        bail_unless!(
+            rows_updated == 1,
+            "Failed to insert trust quorum config for rack_id {}, epoch {}",
+            config.rack_id,
+            epoch
+        );
 
         // Insert the members
         let members: Vec<_> = members
@@ -1044,16 +999,27 @@ impl DataStore {
             })
             .collect();
 
+        let num_members = members.len();
+
         use nexus_db_schema::schema::trust_quorum_member::dsl as members_dsl;
-        diesel::insert_into(members_dsl::trust_quorum_member)
-            .values(members)
-            .execute_async(conn)
-            .await?;
+        let rows_updated =
+            diesel::insert_into(members_dsl::trust_quorum_member)
+                .values(members)
+                .execute_async(conn)
+                .await?;
+
+        bail_unless!(
+            rows_updated == num_members,
+            "Failed to insert all trust quorum members for config for \
+            rack_id {}, epoch {}",
+            config.rack_id,
+            epoch
+        );
 
         Ok(())
     }
 
-    async fn update_tq_members_state_commit_in_txn(
+    async fn update_tq_members_state_commit_conn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
@@ -1073,7 +1039,9 @@ impl DataStore {
         .map(|hw| hw.id)
         .collect();
 
-        diesel::update(dsl::trust_quorum_member)
+        let num_members = hw_baseboard_ids.len();
+
+        let rows_updated = diesel::update(dsl::trust_quorum_member)
             .filter(dsl::rack_id.eq(rack_id))
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::hw_baseboard_id.eq_any(hw_baseboard_ids))
@@ -1085,10 +1053,19 @@ impl DataStore {
             .set(dsl::state.eq(DbTrustQuorumMemberState::Committed))
             .execute_async(conn)
             .await?;
+
+        bail_unless!(
+            rows_updated == num_members,
+            "Failed to set commit state for all acked trust quorum members for \
+            config for rack_id {}, epoch {}",
+            rack_id,
+            epoch
+        );
+
         Ok(())
     }
 
-    async fn update_tq_member_share_digest_in_txn(
+    async fn update_tq_member_share_digest_conn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         member: DbTrustQuorumMember,
@@ -1096,7 +1073,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_member::dsl;
 
-        diesel::update(dsl::trust_quorum_member)
+        let rows_updated = diesel::update(dsl::trust_quorum_member)
             .filter(dsl::rack_id.eq(member.rack_id))
             .filter(dsl::epoch.eq(member.epoch))
             .filter(dsl::hw_baseboard_id.eq(member.hw_baseboard_id))
@@ -1106,10 +1083,19 @@ impl DataStore {
             .execute_async(conn)
             .await?;
 
+        bail_unless!(
+            rows_updated == 1,
+            "Failed to set share digest for trust quorum member {} for \
+            config for rack_id {}, epoch {}",
+            member.hw_baseboard_id,
+            member.rack_id,
+            member.epoch
+        );
+
         Ok(())
     }
 
-    async fn update_tq_member_state_prepared_in_txn(
+    async fn update_tq_member_state_prepared_conn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         member: DbTrustQuorumMember,
@@ -1117,7 +1103,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_member::dsl;
 
-        diesel::update(dsl::trust_quorum_member)
+        let rows_updated = diesel::update(dsl::trust_quorum_member)
             .filter(dsl::rack_id.eq(member.rack_id))
             .filter(dsl::epoch.eq(member.epoch))
             .filter(dsl::hw_baseboard_id.eq(member.hw_baseboard_id))
@@ -1127,10 +1113,19 @@ impl DataStore {
             .execute_async(conn)
             .await?;
 
+        bail_unless!(
+            rows_updated == 1,
+            "Failed to update trust quorum member state to prepared for \
+            member {}, rack_id {}, epoch {}",
+            member.hw_baseboard_id,
+            member.rack_id,
+            member.epoch
+        );
+
         Ok(())
     }
 
-    async fn update_tq_encrypted_rack_secrets_in_txn(
+    async fn update_tq_encrypted_rack_secrets_conn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
@@ -1143,7 +1138,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
 
-        diesel::update(dsl::trust_quorum_configuration)
+        let rows_updated = diesel::update(dsl::trust_quorum_configuration)
             .filter(dsl::rack_id.eq(rack_id))
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::encrypted_rack_secrets_salt.is_null())
@@ -1155,20 +1150,28 @@ impl DataStore {
             .execute_async(conn)
             .await?;
 
+        bail_unless!(
+            rows_updated == 1,
+            "Failed to set encrypted rack secrets in trust quorum config for \
+            rack_id {}, epoch {}",
+            rack_id,
+            epoch
+        );
+
         Ok(())
     }
 
     /// Returns the number of rows update
-    async fn update_tq_state_committing_in_txn(
+    async fn update_tq_state_committing_conn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
         epoch: i64,
-    ) -> Result<usize, TransactionError<Error>> {
+    ) -> Result<(), TransactionError<Error>> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
 
-        let num_rows_updated = diesel::update(dsl::trust_quorum_configuration)
+        let rows_updated = diesel::update(dsl::trust_quorum_configuration)
             .filter(dsl::rack_id.eq(rack_id))
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::state.eq_any(vec![
@@ -1179,31 +1182,19 @@ impl DataStore {
             .execute_async(conn)
             .await?;
 
-        Ok(num_rows_updated)
+        bail_unless!(
+            rows_updated == 1,
+            "Failed to update trust quorum config state to committing for \
+            rack_id {}, epoch {}",
+            rack_id,
+            epoch
+        );
+
+        Ok(())
     }
 
     /// Returns the number of rows update
-    async fn update_tq_state_committed_in_txn(
-        opctx: &OpContext,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        rack_id: DbTypedUuid<RackKind>,
-        epoch: i64,
-    ) -> Result<usize, TransactionError<Error>> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
-
-        let num_rows_updated = diesel::update(dsl::trust_quorum_configuration)
-            .filter(dsl::rack_id.eq(rack_id))
-            .filter(dsl::epoch.eq(epoch))
-            .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Committing))
-            .set(dsl::state.eq(DbTrustQuorumConfigurationState::Committed))
-            .execute_async(conn)
-            .await?;
-
-        Ok(num_rows_updated)
-    }
-
-    async fn update_tq_abort_state_in_txn(
+    async fn update_tq_state_committed_conn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
@@ -1212,7 +1203,67 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
 
-        diesel::update(dsl::trust_quorum_configuration)
+        let rows_updated = diesel::update(dsl::trust_quorum_configuration)
+            .filter(dsl::rack_id.eq(rack_id))
+            .filter(dsl::epoch.eq(epoch))
+            .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Committing))
+            .set(dsl::state.eq(DbTrustQuorumConfigurationState::Committed))
+            .execute_async(conn)
+            .await?;
+
+        bail_unless!(
+            rows_updated == 1,
+            "Failed to update trust quorum config state to committed for \
+            rack_id {}, epoch {}",
+            rack_id,
+            epoch
+        );
+
+        Ok(())
+    }
+
+    async fn updated_tq_state_committed_partially_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> Result<(), TransactionError<Error>> {
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+
+        let epoch =
+            epoch_to_i64(epoch).map_err(|e| TransactionError::from(e))?;
+
+        let rows_updated = diesel::update(dsl::trust_quorum_configuration)
+            .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
+            .filter(dsl::epoch.eq(epoch))
+            .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Committing))
+            .set(
+                dsl::state
+                    .eq(DbTrustQuorumConfigurationState::CommittedPartially),
+            )
+            .execute_async(conn)
+            .await?;
+
+        bail_unless!(
+            rows_updated == 1,
+            "Failed to update trust quorum config state to committed-partially \
+            for rack_id {}, epoch {}",
+            rack_id,
+            epoch
+        );
+
+        Ok(())
+    }
+
+    async fn update_tq_abort_state_conn(
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: DbTypedUuid<RackKind>,
+        epoch: i64,
+    ) -> Result<(), TransactionError<Error>> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+
+        let rows_updated = diesel::update(dsl::trust_quorum_configuration)
             .filter(dsl::rack_id.eq(rack_id))
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::state.eq_any([
@@ -1222,6 +1273,14 @@ impl DataStore {
             .set(dsl::state.eq(DbTrustQuorumConfigurationState::Aborted))
             .execute_async(conn)
             .await?;
+
+        bail_unless!(
+            rows_updated == 1,
+            "Failed to update trust quorum config state to aborted \
+            for rack_id {}, epoch {}",
+            rack_id,
+            epoch
+        );
 
         Ok(())
     }
@@ -1278,13 +1337,13 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
 
-        let epoch = epoch_to_i64(config.epoch)
-            .map_err(|e| TransactionError::from(e))?;
+        let epoch =
+            epoch_to_i64(epoch).map_err(|e| TransactionError::from(e))?;
 
         let latest = dsl::trust_quorum_configuration
             .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
             .filter(dsl::epoch.eq(epoch))
-            .load_async::<DbTrustQuorumConfiguration>(conn)
+            .get_result_async::<DbTrustQuorumConfiguration>(conn)
             .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -1379,6 +1438,7 @@ mod tests {
         let mut config = TrustQuorumConfig {
             rack_id,
             epoch: Epoch(1),
+            last_committed_epoch: None,
             state: TrustQuorumConfigState::Preparing,
             threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
             commit_crash_tolerance: 2,
@@ -1503,6 +1563,7 @@ mod tests {
         let config = TrustQuorumConfig {
             rack_id,
             epoch: Epoch(1),
+            last_committed_epoch: None,
             state: TrustQuorumConfigState::Preparing,
             threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
             commit_crash_tolerance: 2,
@@ -1702,6 +1763,7 @@ mod tests {
         let config = TrustQuorumConfig {
             rack_id,
             epoch: Epoch(1),
+            last_committed_epoch: None,
             state: TrustQuorumConfigState::Preparing,
             threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
             commit_crash_tolerance: 2,
@@ -1732,15 +1794,14 @@ mod tests {
         // (This is not directly callable from a public API).
         {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let num_rows_updated =
-                DataStore::update_tq_state_committing_in_txn(
-                    opctx,
-                    &conn,
-                    config.rack_id.into(),
-                    config.epoch.0 as i64,
-                )
-                .await
-                .unwrap();
+            let num_rows_updated = DataStore::update_tq_state_committing_conn(
+                opctx,
+                &conn,
+                config.rack_id.into(),
+                config.epoch.0 as i64,
+            )
+            .await
+            .unwrap();
             assert_eq!(num_rows_updated, 0);
         }
 
@@ -1845,6 +1906,7 @@ mod tests {
             let config = TrustQuorumConfig {
                 rack_id,
                 epoch: Epoch(1),
+                last_committed_epoch: None,
                 state: TrustQuorumConfigState::Preparing,
                 threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
                 commit_crash_tolerance: 2,
@@ -1868,6 +1930,7 @@ mod tests {
         let config = TrustQuorumConfig {
             rack_id: rack_id2,
             epoch: Epoch(2),
+            last_committed_epoch: Some(Epoch(1)),
             state: TrustQuorumConfigState::Preparing,
             threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
             commit_crash_tolerance: 2,

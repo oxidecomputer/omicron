@@ -28,6 +28,7 @@ impl_enum_type!(
     PreparingLrtqUpgrade => b"preparing-lrtq-upgrade"
     Committing => b"committing"
     Committed => b"committed"
+    CommittedPartially => b"committed-partially"
     Aborted => b"aborted"
 );
 
@@ -40,6 +41,9 @@ impl From<DbTrustQuorumConfigurationState> for TrustQuorumConfigState {
             }
             DbTrustQuorumConfigurationState::Committing => Self::Committing,
             DbTrustQuorumConfigurationState::Committed => Self::Committed,
+            DbTrustQuorumConfigurationState::CommittedPartially => {
+                Self::CommittedPartially
+            }
             DbTrustQuorumConfigurationState::Aborted => Self::Aborted,
         }
     }
@@ -54,6 +58,9 @@ impl From<TrustQuorumConfigState> for DbTrustQuorumConfigurationState {
             }
             TrustQuorumConfigState::Committing => Self::Committing,
             TrustQuorumConfigState::Committed => Self::Committed,
+            TrustQuorumConfigState::CommittedPartially => {
+                Self::CommittedPartially
+            }
             TrustQuorumConfigState::Aborted => Self::Aborted,
         }
     }
@@ -96,6 +103,7 @@ impl From<TrustQuorumMemberState> for DbTrustQuorumMemberState {
 pub struct TrustQuorumConfiguration {
     pub rack_id: DbTypedUuid<RackKind>,
     pub epoch: i64,
+    pub last_committed_epoch: Option<i64>,
     pub state: DbTrustQuorumConfigurationState,
     pub threshold: SqlU8,
     pub commit_crash_tolerance: SqlU8,

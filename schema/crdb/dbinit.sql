@@ -7502,6 +7502,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     -- Monotonically increasing version per rack_id
     epoch INT8 NOT NULL,
 
+    -- The last committed epoch that this configuration was validated against
+    --
+    -- Optional because initial configs don't have a last committed epoch
+    last_committed_epoch INT8,
+
     -- The current state of this configuration
     state omicron.public.trust_quorum_configuration_state NOT NULL,
 

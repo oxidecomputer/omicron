@@ -2994,6 +2994,7 @@ table! {
     trust_quorum_configuration (rack_id, epoch) {
         rack_id -> Uuid,
         epoch -> Int8,
+        last_committed_epoch -> Nullable<Int8>,
         state -> crate::enums::TrustQuorumConfigurationStateEnum,
         threshold -> Int2,
         commit_crash_tolerance -> Int2,
