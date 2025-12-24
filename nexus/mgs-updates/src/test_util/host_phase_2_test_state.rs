@@ -940,7 +940,7 @@ mod api_impl {
         async fn trust_quorum_reconfigure(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<
-                sled_agent_types::trust_quorum::ReconfigureRequest,
+                sled_agent_types::trust_quorum::ReconfigureMsg,
             >,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
@@ -949,7 +949,7 @@ mod api_impl {
         async fn trust_quorum_upgrade_from_lrtq(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<
-                sled_agent_types::trust_quorum::LrtqUpgradeRequest,
+                sled_agent_types::trust_quorum::LrtqUpgradeMsg,
             >,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
