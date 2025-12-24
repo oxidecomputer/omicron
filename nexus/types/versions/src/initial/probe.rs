@@ -6,7 +6,9 @@
 
 use std::net::IpAddr;
 
-use omicron_common::api::external::{IdentityMetadataCreateParams, Name, NameOrId};
+use omicron_common::api::external::{
+    IdentityMetadataCreateParams, Name, NameOrId,
+};
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface as NetworkInterfaceV1;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;

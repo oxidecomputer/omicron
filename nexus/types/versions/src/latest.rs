@@ -352,9 +352,9 @@ pub mod update {
     pub use crate::v2025112000::update::TufRepoUpload;
     pub use crate::v2025112000::update::TufRepoUploadStatus;
     pub use crate::v2025112000::update::TufSignedRootRole;
+    pub use crate::v2025112000::update::UpdateStatus;
     pub use crate::v2025112000::update::UpdatesGetRepositoryParams;
     pub use crate::v2025112000::update::UpdatesPutRepositoryParams;
-    pub use crate::v2025112000::update::UpdateStatus;
     pub use crate::v2025112000::update::UpdatesTrustRoot;
 }
 

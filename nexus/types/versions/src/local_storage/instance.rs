@@ -12,11 +12,11 @@ use omicron_common::api::external::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::disk::DiskCreate;
 use crate::v2025112000;
 use crate::v2025112000::instance::{
     ExternalIpCreate, InstanceNetworkInterfaceAttachment, UserData, bool_true,
 };
-use super::disk::DiskCreate;
 
 /// During instance creation, attach this disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

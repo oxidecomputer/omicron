@@ -11,8 +11,8 @@ use diesel::{deserialize::FromSql, serialize::ToSql};
 use nexus_db_schema::schema::{
     tuf_artifact, tuf_repo, tuf_repo_artifact, tuf_trust_root,
 };
-use nexus_types::external_api::update::TufSignedRootRole;
 use nexus_types::external_api::update as update_types;
+use nexus_types::external_api::update::TufSignedRootRole;
 use omicron_common::{api::external, update::ArtifactId};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufArtifactKind;
