@@ -24,7 +24,8 @@ use nexus_types::{
 };
 use omicron_common::{api::external::Generation, disk::M2Slot};
 use omicron_uuid_kinds::{
-    BlueprintUuid, CollectionUuid, ReconfiguratorSimStateUuid, SledUuid,
+    BlueprintUuid, CollectionUuid, ReconfiguratorSimOpUuid,
+    ReconfiguratorSimStateUuid, SledUuid,
 };
 use strum::IntoEnumIterator as _;
 
@@ -680,6 +681,16 @@ pub enum ReconfiguratorSimId {
     Id(ReconfiguratorSimStateUuid),
 
     /// The specified state by UUID prefix.
+    Prefix(String),
+}
+
+/// An identifier for a reconfigurator sim operation.
+#[derive(Clone, Debug)]
+pub enum ReconfiguratorSimOpId {
+    /// The specified operation by full UUID.
+    Id(ReconfiguratorSimOpUuid),
+
+    /// The specified operation by UUID prefix.
     Prefix(String),
 }
 

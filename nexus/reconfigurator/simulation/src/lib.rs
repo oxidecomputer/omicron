@@ -39,16 +39,18 @@
 //!
 //! Mutating states is done by calling [`SimState::to_mut`], which returns a
 //! [`SimStateBuilder`]. Once changes are made, the state can be committed back
-//! to the system with [`SimStateBuilder::commit`].
+//! to the system with [`SimStateBuilder::commit_and_bump`].
 //!
 //! ## Determinism
 //!
-//! `nexus-reconfigurator-simulation` is structured to be fully deterministic,
-//! so that simulations can be replayed. Internally, it uses a seeded RNG, and
-//! the only source of non-determinism is the seed for the RNG.
+//! `nexus-reconfigurator-simulation` is structured to be fully deterministic
+//! (other than timestamps), so that simulations can be replayed. Internally, it
+//! uses a seeded RNG, and the only source of non-determinism is the seed for
+//! the RNG.
 
 mod config;
 pub mod errors;
+mod operation;
 mod render_graph;
 mod rng;
 mod sim;
@@ -58,9 +60,11 @@ mod utils;
 mod zone_images;
 
 pub use config::*;
+pub use operation::*;
 pub use render_graph::*;
 pub use rng::*;
 pub use sim::*;
 pub use state::*;
 pub use system::*;
+pub use utils::*;
 pub use zone_images::*;

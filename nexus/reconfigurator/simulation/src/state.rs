@@ -183,7 +183,7 @@ impl SimState {
 ///
 /// `SimStateBuilder` is ephemeral, so it can be freely mutated without
 /// affecting anything else about the system. To store it into a system, call
-/// [`Self::commit`].
+/// [`Self::commit_and_bump`].
 #[derive(Clone, Debug)]
 pub struct SimStateBuilder {
     // Used to check that the simulator is the same as the one that created
@@ -262,20 +262,15 @@ impl SimStateBuilder {
         })
     }
 
-    /// Commit the current state to the simulator, returning the new state's
-    /// UUID.
+    /// Commit the current state to the simulator, and update the current
+    /// pointer.
     ///
     /// # Panics
     ///
     /// Panics if `sim` is not the same simulator that created this state.
     /// This should ordinarily never happen and always indicates a
     /// programming error.
-    #[must_use = "callers should update their pointers with the returned UUID"]
-    pub fn commit(
-        self,
-        description: String,
-        sim: &mut Simulator,
-    ) -> ReconfiguratorSimStateUuid {
+    pub fn commit_and_bump(self, description: String, sim: &mut Simulator) {
         // Check for unrelated histories.
         if !std::ptr::eq(sim.root_state(), self.root_state.inner()) {
             panic!(
@@ -305,7 +300,6 @@ impl SimStateBuilder {
             log,
         };
         sim.add_state(Arc::new(state));
-        id
     }
 
     // TODO: should probably enforce that RNG is set, maybe by hiding the
