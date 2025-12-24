@@ -57,9 +57,9 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    CommitRequest, CommitStatus, CoordinatorStatus, LrtqUpgradeRequest,
-    NodeStatus, PrepareAndCommitRequest, ProxyCommitRequest,
-    ProxyPrepareAndCommitRequest, ReconfigureRequest,
+    CommitRequest, CommitStatus, CoordinatorStatus, LrtqUpgradeMsg, NodeStatus,
+    PrepareAndCommitRequest, ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    ReconfigureMsg,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -1187,18 +1187,10 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_reconfigure(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<ReconfigureRequest>,
+        body: TypedBody<ReconfigureMsg>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
-        let request = body.into_inner();
-
-        let msg = trust_quorum_protocol::ReconfigureMsg {
-            rack_id: request.rack_id,
-            epoch: request.epoch,
-            last_committed_epoch: request.last_committed_epoch,
-            members: request.members,
-            threshold: request.threshold,
-        };
+        let msg = body.into_inner();
 
         sa.trust_quorum()
             .reconfigure(msg)
@@ -1210,17 +1202,10 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_upgrade_from_lrtq(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<LrtqUpgradeRequest>,
+        body: TypedBody<LrtqUpgradeMsg>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
-        let request = body.into_inner();
-
-        let msg = trust_quorum_protocol::LrtqUpgradeMsg {
-            rack_id: request.rack_id,
-            epoch: request.epoch,
-            members: request.members,
-            threshold: request.threshold,
-        };
+        let msg = body.into_inner();
 
         sa.trust_quorum()
             .upgrade_from_lrtq(msg)
@@ -1293,7 +1278,11 @@ impl SledAgentApi for SledAgentImpl {
         let status = sa
             .trust_quorum()
             .proxy()
-            .commit(request.destination, request.rack_id, request.epoch)
+            .commit(
+                request.destination,
+                request.request.rack_id,
+                request.request.epoch,
+            )
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
@@ -1317,7 +1306,7 @@ impl SledAgentApi for SledAgentImpl {
         let status = sa
             .trust_quorum()
             .proxy()
-            .prepare_and_commit(request.destination, request.config)
+            .prepare_and_commit(request.destination, request.request.config)
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 

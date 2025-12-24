@@ -69,9 +69,9 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    CommitRequest, CommitStatus, CoordinatorStatus, LrtqUpgradeRequest,
-    NodeStatus, PrepareAndCommitRequest, ProxyCommitRequest,
-    ProxyPrepareAndCommitRequest, ReconfigureRequest,
+    CommitRequest, CommitStatus, CoordinatorStatus, LrtqUpgradeMsg, NodeStatus,
+    PrepareAndCommitRequest, ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    ReconfigureMsg,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -931,14 +931,14 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn trust_quorum_reconfigure(
         _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<ReconfigureRequest>,
+        _body: TypedBody<ReconfigureMsg>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
 
     async fn trust_quorum_upgrade_from_lrtq(
         _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<LrtqUpgradeRequest>,
+        _body: TypedBody<LrtqUpgradeMsg>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }

@@ -9,6 +9,7 @@
 pub mod alarm;
 pub mod configuration;
 pub mod crypto;
+pub mod messages;
 pub mod persistent_state;
 pub mod status;
 pub mod types;

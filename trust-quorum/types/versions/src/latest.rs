@@ -28,6 +28,13 @@ pub mod crypto {
     pub use crate::v1::crypto::Sha3_256Digest;
 }
 
+pub mod messages {
+    pub use crate::v1::messages::CommitRequest;
+    pub use crate::v1::messages::LrtqUpgradeMsg;
+    pub use crate::v1::messages::PrepareAndCommitRequest;
+    pub use crate::v1::messages::ReconfigureMsg;
+}
+
 pub mod persistent_state {
     pub use crate::v1::persistent_state::ExpungedMetadata;
     pub use crate::v1::persistent_state::PersistentStateSummary;

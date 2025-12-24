@@ -7,36 +7,17 @@
 #[cfg(feature = "testing")]
 use crate::configuration::configurations_equal_except_for_crypto_data;
 use crate::crypto::LrtqShare;
-use crate::{BaseboardId, Configuration, Epoch, Threshold};
+use crate::{Configuration, Epoch};
 use gfss::shamir::Share;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 
-/// A request from nexus informing a node to start coordinating a
-/// reconfiguration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReconfigureMsg {
-    pub rack_id: RackUuid,
-    pub epoch: Epoch,
-    pub last_committed_epoch: Option<Epoch>,
-    pub members: BTreeSet<BaseboardId>,
-    pub threshold: Threshold,
-}
-
-/// A request from nexus informing a node to start coordinating an upgrade from
-/// LRTQ
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LrtqUpgradeMsg {
-    pub rack_id: RackUuid,
-    pub epoch: Epoch,
-    // The members of the LRTQ cluster must be the same as the members of the
-    // upgraded trust quorum cluster. This is implicit, as the membership of the
-    // LRTQ cluster is computed based on the existing control plane sleds known
-    // to Nexus.
-    pub members: BTreeSet<BaseboardId>,
-    pub threshold: Threshold,
-}
+// Re-export message types from trust-quorum-types for backward compatibility.
+// These types were previously defined here but have been moved to support
+// API versioning per RFD 619.
+pub use trust_quorum_types::messages::{
+    CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
+};
 
 /// Messages sent between trust quorum members over a sprockets channel
 #[derive(Debug, Clone, Serialize, Deserialize)]
