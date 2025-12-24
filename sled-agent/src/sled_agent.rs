@@ -40,9 +40,6 @@ use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use itertools::Itertools as _;
-use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, SledRole,
-};
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
 };
@@ -68,12 +65,15 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
+use sled_agent_health_monitor::handle::HealthMonitorHandle;
+use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
+use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::zone_bundle::{
@@ -372,6 +372,9 @@ struct SledAgentInner {
 
     // A handle to the hardware monitor.
     hardware_monitor: HardwareMonitorHandle,
+
+    // A handle to the health monitor.
+    health_monitor: HealthMonitorHandle,
 
     // Object handling production of metrics for oximeter.
     _metrics_manager: MetricsManager,
@@ -682,6 +685,9 @@ impl SledAgent {
                 bootstore: long_running_task_handles.bootstore.clone(),
                 hardware_monitor: long_running_task_handles
                     .hardware_monitor
+                    .clone(),
+                health_monitor: long_running_task_handles
+                    .health_monitor
                     .clone(),
                 _metrics_manager: metrics_manager,
                 repo_depot,
@@ -1129,6 +1135,8 @@ impl SledAgent {
         let zone_image_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
+        let health_monitor = self.inner.health_monitor.to_inventory();
+
         let ReconcilerInventory {
             disks,
             zpools,
@@ -1154,6 +1162,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
+            health_monitor,
         })
     }
 
@@ -1226,7 +1235,7 @@ impl SledAgent {
         &self,
         zpool_id: ExternalZpoolUuid,
         dataset_id: DatasetUuid,
-        request: sled_agent_api::LocalStorageDatasetEnsureRequest,
+        request: LocalStorageDatasetEnsureRequest,
     ) -> Result<(), HttpError> {
         // Ensure that the local storage dataset we want to use is still present
         let present = self
@@ -1253,10 +1262,8 @@ impl SledAgent {
         let delegated_zvol =
             DelegatedZvol::LocalStorage { zpool_id, dataset_id };
 
-        let sled_agent_api::LocalStorageDatasetEnsureRequest {
-            dataset_size,
-            volume_size,
-        } = request;
+        let LocalStorageDatasetEnsureRequest { dataset_size, volume_size } =
+            request;
 
         Zfs::ensure_dataset(DatasetEnsureArgs {
             name: &delegated_zvol.parent_dataset_name(),

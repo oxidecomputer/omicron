@@ -24,7 +24,7 @@ use diesel::sql_types::{self, Nullable};
 use ipnetwork::Ipv4Network;
 use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use nexus_db_errors::{ErrorHandler, public_error_from_diesel, retryable};
+use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{Ip, IpAssignment, Ipv4Addr, SqlU8};
 use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
@@ -117,8 +117,6 @@ pub enum InsertError {
     InstanceMustBeStopped(Uuid),
     /// The instance does not exist at all, or is in the destroyed state.
     InstanceNotFound(Uuid),
-    /// The operation occurred within a transaction, and is retryable
-    Retryable(DieselError),
     /// Any other error
     External(external::Error),
 }
@@ -226,9 +224,6 @@ impl InsertError {
                     &id,
                 )
             }
-            InsertError::Retryable(err) => {
-                public_error_from_diesel(err, ErrorHandler::Server)
-            }
             InsertError::External(e) => e,
         }
     }
@@ -318,10 +313,6 @@ fn decode_database_error(
         r#"could not parse "non-unique-subnets" as type uuid: "#,
         r#"uuid: incorrect UUID length: non-unique-subnets"#,
     );
-
-    if retryable(&err) {
-        return InsertError::Retryable(err);
-    }
 
     match err {
         // If the address allocation subquery fails, we'll attempt to insert
@@ -3079,13 +3070,22 @@ mod tests {
             inserted.mac, kind,
         );
         assert_eq!(
-            inserted.transit_ips,
-            incomplete
-                .ip_config
-                .transit_ips()
-                .into_iter()
-                .map(ipnetwork::IpNetwork::from)
-                .collect::<Vec<_>>()
+            incomplete.ip_config.ipv4_transit_ips().unwrap_or_default(),
+            inserted
+                .transit_ips_v4
+                .iter()
+                .copied()
+                .map(|v4| v4.0)
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            incomplete.ip_config.ipv6_transit_ips().unwrap_or_default(),
+            inserted
+                .transit_ips_v6
+                .iter()
+                .copied()
+                .map(|v6| v6.0)
+                .collect::<Vec<_>>(),
         );
     }
 

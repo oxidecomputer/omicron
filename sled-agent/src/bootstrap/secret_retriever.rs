@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Key retrieval mechanisms for use by [`key-manager::KeyManager`]
+//! Key retrieval mechanisms for use by [`key_manager::KeyManager`]
 
 use async_trait::async_trait;
 use bootstore::schemes::v0::NodeHandle;
@@ -87,7 +87,7 @@ impl LrtqOrHardcodedSecretRetriever {
     }
 }
 
-/// A [`key-manager::SecretRetriever`] for use before trust quorum is production
+/// A [`key_manager::SecretRetriever`] for use before trust quorum is production
 /// ready
 ///
 /// The local retriever only returns keys for epoch 0
@@ -116,7 +116,7 @@ impl SecretRetriever for HardcodedSecretRetriever {
     }
 }
 
-/// A [`key-manager::SecretRetriever`] for use with LRTQ
+/// A [`key_manager::SecretRetriever`] for use with LRTQ
 ///
 /// The LRTQ retriever only returns keys for epoch 1
 #[derive(Debug)]

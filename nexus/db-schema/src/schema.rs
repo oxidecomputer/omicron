@@ -39,7 +39,12 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(disk, disk_type_crucible);
+allow_tables_to_appear_in_same_query!(
+    disk,
+    disk_type_crucible,
+    disk_type_local_storage,
+);
+
 allow_tables_to_appear_in_same_query!(volume, disk_type_crucible);
 allow_tables_to_appear_in_same_query!(
     disk_type_crucible,
@@ -596,7 +601,9 @@ table! {
         ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
+        // NOTE: These are the IPv4 transit IPs specifically.
         transit_ips -> Array<Inet>,
+        transit_ips_v6 -> Array<Inet>,
     }
 }
 
@@ -616,7 +623,8 @@ table! {
         ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
-        transit_ips -> Array<Inet>,
+        transit_ips_v4 -> Array<Inet>,
+        transit_ips_v6 -> Array<Inet>,
     }
 }
 joinable!(instance_network_interface -> instance (instance_id));
@@ -1845,6 +1853,9 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(zpool, inv_zpool);
+allow_tables_to_appear_in_same_query!(inv_zpool, physical_disk);
+
 table! {
     inv_dataset (inv_collection_id, sled_id, name) {
         inv_collection_id -> Uuid,
@@ -2914,3 +2925,67 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);
+
+table! {
+    disk_type_local_storage (disk_id) {
+        disk_id -> Uuid,
+
+        required_dataset_overhead -> Int8,
+
+        local_storage_dataset_allocation_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    local_storage_dataset_allocation (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        local_storage_dataset_id -> Uuid,
+        pool_id -> Uuid,
+        sled_id -> Uuid,
+
+        dataset_size -> Int8,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    disk_type_local_storage,
+    local_storage_dataset_allocation
+);
+
+allow_tables_to_appear_in_same_query!(
+    rendezvous_local_storage_dataset,
+    local_storage_dataset_allocation
+);
+
+table! {
+    fm_case (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        de -> crate::enums::DiagnosisEngineEnum,
+
+        created_sitrep_id -> Uuid,
+        closed_sitrep_id -> Nullable<Uuid>,
+
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_ereport_in_case (sitrep_id, id) {
+        id -> Uuid,
+        restart_id -> Uuid,
+        ena -> Int8,
+        case_id -> Uuid,
+        sitrep_id -> Uuid,
+        assigned_sitrep_id -> Uuid,
+
+        comment -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);

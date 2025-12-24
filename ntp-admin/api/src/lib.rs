@@ -4,6 +4,7 @@
 
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
 use dropshot_api_manager_types::api_versions;
+use ntp_admin_types_versions::latest;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -43,5 +44,5 @@ pub trait NtpAdminApi {
     }]
     async fn timesync(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ntp_admin_types::TimeSync>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::timesync::TimeSync>, HttpError>;
 }

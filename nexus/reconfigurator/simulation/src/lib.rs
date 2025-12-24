@@ -43,9 +43,10 @@
 //!
 //! ## Determinism
 //!
-//! `nexus-reconfigurator-simulation` is structured to be fully deterministic,
-//! so that simulations can be replayed. Internally, it uses a seeded RNG, and
-//! the only source of non-determinism is the seed for the RNG.
+//! `nexus-reconfigurator-simulation` is structured to be fully deterministic
+//! (other than timestamps), so that simulations can be replayed. Internally, it
+//! uses a seeded RNG, and the only source of non-determinism is the seed for
+//! the RNG.
 
 mod config;
 pub mod errors;

@@ -22,7 +22,7 @@ use uuid::Uuid;
 /// For durable objects which do not require soft-deletion or descriptions,
 /// consider the [`Asset`] trait instead.
 ///
-/// May be derived from [`macro@db-macros::Resource`].
+/// May be derived from `db-macros::Resource`.
 pub trait Resource {
     type IdType: GenericUuid;
 
@@ -61,7 +61,7 @@ pub struct AssetIdentityMetadata {
 /// These are objects similar to [`Resource`], but without
 /// names, descriptions, or soft deletions.
 ///
-/// May be derived from [`macro@db-macros::Asset`].
+/// May be derived from `db-macros::Asset`.
 pub trait Asset {
     type IdType: GenericUuid;
 

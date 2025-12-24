@@ -12,10 +12,10 @@ use omicron_uuid_kinds::{CollectionUuid, ReconfiguratorSimStateUuid};
 use sync_ptr::SyncConstPtr;
 
 use crate::{
-    LoadSerializedConfigResult, LoadSerializedSystemResult, SimConfigBuilder,
-    SimConfigLogEntry, SimRng, SimRngBuilder, SimRngLogEntry, SimSystem,
-    SimSystemBuilder, SimSystemLogEntry, Simulator, config::SimConfig,
-    errors::NonEmptySystemError,
+    BlueprintId, LoadSerializedConfigResult, LoadSerializedSystemResult,
+    SimConfigBuilder, SimConfigLogEntry, SimRng, SimRngBuilder, SimRngLogEntry,
+    SimSystem, SimSystemBuilder, SimSystemLogEntry, Simulator,
+    config::SimConfig, errors::NonEmptySystemError,
 };
 
 /// A top-level, versioned snapshot of reconfigurator state.
@@ -132,10 +132,14 @@ impl SimState {
     pub fn to_serializable(
         &self,
     ) -> anyhow::Result<UnstableReconfiguratorState> {
+        let parent_blueprint = self
+            .system()
+            .resolve_and_get_blueprint(BlueprintId::Target)
+            .expect("target blueprint is always present");
         let planning_input = self
             .system()
             .description()
-            .to_planning_input_builder()
+            .to_planning_input_builder(Arc::clone(parent_blueprint))
             .context("creating planning input builder")?
             .build();
 

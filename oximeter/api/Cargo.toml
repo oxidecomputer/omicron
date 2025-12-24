@@ -7,12 +7,9 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-chrono.workspace = true
 dropshot.workspace = true
 dropshot-api-manager-types.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
-schemars.workspace = true
+oximeter-types-versions.workspace = true
 semver.workspace = true
-serde.workspace = true
-uuid.workspace = true

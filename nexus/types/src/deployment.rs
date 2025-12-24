@@ -15,7 +15,7 @@
 use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
-pub use crate::inventory::SourceNatConfig;
+pub use crate::inventory::SourceNatConfigGeneric;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
@@ -28,12 +28,6 @@ use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use iddqd::id_ord_map::RefMut;
 use iddqd::id_upcast;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
@@ -57,11 +51,18 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types_versions::latest::inventory::HostPhase2DesiredContents;
+use sled_agent_types_versions::latest::inventory::HostPhase2DesiredSlots;
+use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
+use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
+use sled_agent_types_versions::latest::inventory::OmicronZoneImageSource;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fmt::Display;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -384,11 +385,13 @@ impl Blueprint {
     /// Iterate over the sled configs of all active (not decommissioned) sleds.
     pub fn active_sled_configs(
         &self,
-    ) -> impl Iterator<Item = &BlueprintSledConfig> {
-        self.sleds.values().filter(|sled_config| match sled_config.state {
-            SledState::Active => true,
-            SledState::Decommissioned => false,
-        })
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintSledConfig)> {
+        self.sleds.iter().filter_map(
+            |(&sled_id, sled_config)| match sled_config.state {
+                SledState::Active => Some((sled_id, sled_config)),
+                SledState::Decommissioned => None,
+            },
+        )
     }
 
     /// Summarize the difference between two blueprints.
@@ -478,6 +481,128 @@ impl Blueprint {
             nexus_id, self.id,
         )))
     }
+
+    /// Return the configuration of upstream NTP settings (needed to configure
+    /// boundary NTP zones).
+    ///
+    /// This information should be operator-configurable, but currently is not:
+    /// we carry it forward from rack setup time onward from blueprint to
+    /// blueprint. Fixing this is
+    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
+    ///
+    /// Returns `None` if this blueprint contains no boundary NTP zones from
+    /// which we can infer the upstream configuration. (This should only be the
+    /// case for test blueprints - real systems always deploy at least one
+    /// boundary NTP zone).
+    pub fn upstream_ntp_config(&self) -> Option<UpstreamNtpConfig<'_>> {
+        // The upstream NTP config can't be changed, so it's fine to use
+        // `find()` here and include searching both in-service and expunged
+        // zones. (Real racks will always have at least one in-service boundary
+        // NTP zone, but some test or test systems may have 0 if they have only
+        // a single sled and that sled's boundary NTP zone is being upgraded.)
+        self.all_omicron_zones(BlueprintZoneDisposition::any).find_map(
+            |(_sled_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::BoundaryNtp(ntp_config) => {
+                    Some(UpstreamNtpConfig {
+                        ntp_servers: &ntp_config.ntp_servers,
+                        dns_servers: &ntp_config.dns_servers,
+                        domain: ntp_config.domain.as_deref(),
+                    })
+                }
+                _ => None,
+            },
+        )
+    }
+
+    /// Return the operator-specified configuration of Nexus.
+    ///
+    /// This information should be operator-configurable, but currently is not:
+    /// we carry it forward from rack setup time onward from blueprint to
+    /// blueprint. Fixing this is
+    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
+    ///
+    /// Returns `None` if this blueprint contains no Nexus zones from which we
+    /// can infer the configuration. (This should only be the case for test
+    /// blueprints - real systems always deploy at least one Nexus zone).
+    pub fn operator_nexus_config(&self) -> Option<OperatorNexusConfig<'_>> {
+        // The Nexus config can't be changed, so it's fine to use
+        // `find()` here and include searching both in-service and expunged
+        // zones. (Real racks will always have at least one in-service Nexus
+        // zone - the one calling this code - but some tests create blueprints
+        // without any.)
+        self.all_omicron_zones(BlueprintZoneDisposition::any).find_map(
+            |(_sled_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::Nexus(nexus_config) => {
+                    Some(OperatorNexusConfig {
+                        external_tls: nexus_config.external_tls,
+                        external_dns_servers: &nexus_config
+                            .external_dns_servers,
+                    })
+                }
+                _ => None,
+            },
+        )
+    }
+
+    /// Returns the complete set of external IP addresses assigned to external
+    /// DNS servers described by this blueprint, including both in-service and
+    /// expunged external DNS zones.
+    ///
+    /// This information should be operator-configurable, but currently is not:
+    /// we carry it forward from rack setup time onward from blueprint to
+    /// blueprint. Fixing this is
+    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
+    ///
+    /// Returns an empty set if this blueprint contains no external DNS zones.
+    /// (This should only be the case for test blueprints - real systems always
+    /// deploy at least one external DNS zone).
+    pub fn all_external_dns_external_ips(&self) -> BTreeSet<IpAddr> {
+        // We must look for both expunged and in-service zones here: if we've
+        // expunged an external DNS zone on a given IP, the planner needs to
+        // start a new one on that same IP, and today the only way for it to
+        // know that IP is if we look for expunged zones. This also affects the
+        // planner's pruning logic: one condition on pruning external DNS zones
+        // is that the expunged zone's IP must be in use by an in-service zone.
+        //
+        // It's also important we return a set of IPs (as opposed to an iterator
+        // or a vec): we _expect_ to get some number of duplicates here, for a
+        // couple reasons:
+        //
+        // 1. Until we implement "pruning expunged zones from the blueprint",
+        //    we'll have many previously-expunged external DNS zones all using
+        //    the same IP - one for each time an external DNS zone has been
+        //    expunged and then replaced.
+        // 2. Even once we implement pruning, during an upgrade it will be
+        //    common to (a) expunge a zone, (b) add a new one reusing that
+        //    zone's IP, then (c) prune the expunged zone. In between (b) and
+        //    (c), the IP would show up twice.
+        //
+        // We never expect to get duplicates among the in-service zones, but we
+        // don't check for that here. That would be an illegal blueprint; blippy
+        // would complain, and attempting to execute it would fail due to
+        // database constraints on external IP uniqueness.
+        self.all_omicron_zones(BlueprintZoneDisposition::any)
+            .filter_map(|(_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::ExternalDns(dns) => {
+                    Some(dns.dns_address.addr.ip())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UpstreamNtpConfig<'a> {
+    pub ntp_servers: &'a [String],
+    pub dns_servers: &'a [IpAddr],
+    pub domain: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OperatorNexusConfig<'a> {
+    pub external_tls: bool,
+    pub external_dns_servers: &'a [IpAddr],
 }
 
 /// Description of the source of a blueprint.

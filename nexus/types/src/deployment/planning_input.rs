@@ -6,6 +6,7 @@
 //! blueprints.
 
 use super::AddNetworkResourceError;
+use super::Blueprint;
 use super::BlueprintZoneImageSource;
 use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
@@ -23,7 +24,6 @@ use chrono::Utc;
 use clap::ValueEnum;
 use daft::Diffable;
 use ipnetwork::IpNetwork;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
@@ -42,12 +42,14 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;
 use std::error;
 use std::fmt;
 use std::net::IpAddr;
+use std::sync::Arc;
 use strum::Display;
 use strum::IntoEnumIterator;
 
@@ -95,6 +97,9 @@ const MGS_UPDATE_SETTLE_TIMEOUT: TimeDelta = TimeDelta::minutes(5);
 ///   zone.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningInput {
+    /// current target blueprint, used as the parent in the next planning run
+    parent_blueprint: Arc<Blueprint>,
+
     /// fleet-wide policy
     policy: Policy,
 
@@ -143,6 +148,11 @@ pub struct PlanningInput {
 }
 
 impl PlanningInput {
+    /// parent blueprint
+    pub fn parent_blueprint(&self) -> &Arc<Blueprint> {
+        &self.parent_blueprint
+    }
+
     /// current internal DNS version
     pub fn internal_dns_version(&self) -> Generation {
         self.internal_dns_version
@@ -337,6 +347,7 @@ impl PlanningInput {
     /// [`PlanningInput`].
     pub fn into_builder(self) -> PlanningInputBuilder {
         PlanningInputBuilder {
+            parent_blueprint: self.parent_blueprint,
             policy: self.policy,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
@@ -1577,6 +1588,7 @@ pub enum PlanningInputBuildError {
 /// Constructor for [`PlanningInput`].
 #[derive(Clone, Debug)]
 pub struct PlanningInputBuilder {
+    parent_blueprint: Arc<Blueprint>,
     policy: Policy,
     internal_dns_version: Generation,
     external_dns_version: Generation,
@@ -1589,43 +1601,15 @@ pub struct PlanningInputBuilder {
 }
 
 impl PlanningInputBuilder {
-    pub fn empty_input() -> PlanningInput {
-        // This empty input is known to be valid.
-        PlanningInput {
-            policy: Policy {
-                external_ips: ExternalIpPolicy::empty(),
-                target_boundary_ntp_zone_count: 0,
-                target_nexus_zone_count: 0,
-                target_internal_dns_zone_count: 0,
-                target_oximeter_zone_count: 0,
-                target_cockroachdb_zone_count: 0,
-                target_cockroachdb_cluster_version:
-                    CockroachDbClusterVersion::POLICY,
-                target_crucible_pantry_zone_count: 0,
-                clickhouse_policy: None,
-                oximeter_read_policy: OximeterReadPolicy::new(1),
-                tuf_repo: TufRepoPolicy::initial(),
-                old_repo: TufRepoPolicy::initial(),
-                planner_config: PlannerConfig::default(),
-            },
-            internal_dns_version: Generation::new(),
-            external_dns_version: Generation::new(),
-            cockroachdb_settings: CockroachDbSettings::empty(),
-            sleds: BTreeMap::new(),
-            network_resources: OmicronZoneNetworkResources::new(),
-            ignore_impossible_mgs_updates_since: Utc::now(),
-            active_nexus_zones: BTreeSet::new(),
-            not_yet_nexus_zones: BTreeSet::new(),
-        }
-    }
-
     pub fn new(
+        parent_blueprint: Arc<Blueprint>,
         policy: Policy,
         internal_dns_version: Generation,
         external_dns_version: Generation,
         cockroachdb_settings: CockroachDbSettings,
     ) -> Self {
         Self {
+            parent_blueprint,
             policy,
             internal_dns_version,
             external_dns_version,
@@ -1747,6 +1731,7 @@ impl PlanningInputBuilder {
 
     pub fn build(self) -> PlanningInput {
         PlanningInput {
+            parent_blueprint: self.parent_blueprint,
             policy: self.policy,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,

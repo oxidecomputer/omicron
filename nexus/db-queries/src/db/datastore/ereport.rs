@@ -48,7 +48,7 @@ pub struct EreporterRestartBySerial {
 }
 
 /// A set of filters for fetching ereports.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct EreportFilters {
     /// If present, include only ereports that were collected at the specified
     /// timestamp or later.
@@ -98,6 +98,14 @@ impl DataStore {
     ) -> LookupResult<Ereport> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
+        self.ereport_fetch_on_conn(&conn, id).await
+    }
+
+    pub(crate) async fn ereport_fetch_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        id: fm::EreportId,
+    ) -> LookupResult<Ereport> {
         let restart_id = id.restart_id.into_untyped_uuid();
         let ena = DbEna::from(id.ena);
 
@@ -106,7 +114,7 @@ impl DataStore {
             .filter(dsl::ena.eq(ena))
             .filter(dsl::time_deleted.is_null())
             .select(Ereport::as_select())
-            .first_async(&*conn)
+            .first_async(conn)
             .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?

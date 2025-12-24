@@ -11,8 +11,8 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
-use cockroach_admin_types::NodeId as CockroachNodeId;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use cockroach_admin_types::node::InternalNodeId as CockroachNodeId;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
@@ -85,16 +85,6 @@ use nexus_db_schema::enums::{
     CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
 };
 use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
-use nexus_sled_agent_shared::inventory::BootPartitionContents;
-use nexus_sled_agent_shared::inventory::BootPartitionDetails;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
-use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
@@ -115,6 +105,17 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::BootPartitionContents;
+use sled_agent_types::inventory::BootPartitionDetails;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HealthMonitorInventory;
+use sled_agent_types::inventory::ManifestNonBootInventory;
+use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::ZoneArtifactInventory;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -3646,7 +3647,7 @@ impl DataStore {
 
             let mut by_sled_id: BTreeMap<
                 SledUuid,
-                IdOrdMap<ZoneManifestNonBootInventory>,
+                IdOrdMap<ManifestNonBootInventory>,
             > = BTreeMap::new();
 
             let mut paginator = Paginator::new(
@@ -3999,6 +4000,9 @@ impl DataStore {
                 reconciler_status,
                 last_reconciliation,
                 zone_image_resolver,
+                // TODO-K[omicron#9516]: Actually query the DB when there is
+                // something there
+                health_monitor: HealthMonitorInventory::new(),
             };
             sled_agents
                 .insert_unique(sled_agent)
@@ -4461,17 +4465,6 @@ mod test {
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
     use nexus_inventory::now_db_precision;
-    use nexus_sled_agent_shared::inventory::BootPartitionContents;
-    use nexus_sled_agent_shared::inventory::BootPartitionDetails;
-    use nexus_sled_agent_shared::inventory::OrphanedDataset;
-    use nexus_sled_agent_shared::inventory::{
-        BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
-        RemoveMupdateOverrideInventory,
-    };
-    use nexus_sled_agent_shared::inventory::{
-        ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-        ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
-    };
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPageWhich;
@@ -4487,6 +4480,17 @@ mod test {
         ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
+    use sled_agent_types::inventory::BootPartitionContents;
+    use sled_agent_types::inventory::BootPartitionDetails;
+    use sled_agent_types::inventory::OrphanedDataset;
+    use sled_agent_types::inventory::{
+        BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
+        RemoveMupdateOverrideInventory,
+    };
+    use sled_agent_types::inventory::{
+        ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+        ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
+    };
     use std::num::NonZeroU32;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;

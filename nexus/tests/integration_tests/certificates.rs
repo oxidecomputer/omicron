@@ -8,13 +8,11 @@ use display_error_chain::ErrorChainExt;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use futures::TryStreamExt;
-use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use http::StatusCode;
 use http::method::Method;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
-use nexus_test_utils::load_test_config;
 use nexus_test_utils::resource_helpers::create_certificate;
 use nexus_test_utils::resource_helpers::delete_certificate;
 use nexus_test_utils_macros::nexus_test;
@@ -345,19 +343,14 @@ async fn test_silo_certificates() {
     let silo3 = SiloCert::new("silo3".parse().unwrap());
 
     // Start Nexus with a TLS server instead of its usual HTTP server.
-    let cptestctx = {
-        let mut config = load_test_config();
-        config.deployment.dropshot_external.tls = true;
-        nexus_test_utils::test_setup_with_config::<omicron_nexus::Server>(
-            "test_silo_certificates",
-            &mut config,
-            omicron_sled_agent::sim::SimMode::Explicit,
-            Some(silo1.cert.clone()),
-            0,
-            DEFAULT_SP_SIM_CONFIG.into(),
-        )
-        .await
-    };
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_silo_certificates")
+            .customize_nexus_config(&|config| {
+                config.deployment.dropshot_external.tls = true;
+            })
+            .with_tls_cert(Some(silo1.cert.clone()))
+            .start::<omicron_nexus::Server>()
+            .await;
 
     let nexus_port = cptestctx.external_client.bind_address.port();
 

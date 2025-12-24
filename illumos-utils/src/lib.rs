@@ -5,11 +5,13 @@
 //! Wrappers around illumos-specific commands.
 
 use dropshot::HttpError;
-use slog_error_chain::InlineErrorChain;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 #[allow(unused)]
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub mod addrobj;
+#[cfg(target_os = "illumos")]
+pub mod contract;
 pub mod coreadm;
 pub mod destructor;
 pub mod dkio;
@@ -26,6 +28,7 @@ pub mod scf;
 pub mod smf_helper;
 pub mod svc;
 pub mod svcadm;
+pub mod svcs;
 pub mod vmm_reservoir;
 pub mod zfs;
 pub mod zone;
@@ -56,7 +59,7 @@ impl std::fmt::Display for CommandFailureInfo {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum ExecutionError {
     #[error("Failed to start execution of [{command}]: {err}")]
     ExecutionStart { command: String, err: std::io::Error },
@@ -64,8 +67,8 @@ pub enum ExecutionError {
     #[error("{0}")]
     CommandFailure(Box<CommandFailureInfo>),
 
-    #[error("Failed to manipulate process contract: {err}")]
-    ContractFailure { err: std::io::Error },
+    #[error("contract error: {msg}: {err}")]
+    ContractFailure { msg: String, err: std::io::Error },
 
     #[error("Failed to parse command output")]
     ParseFailure(String),

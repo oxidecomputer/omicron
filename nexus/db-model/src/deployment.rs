@@ -15,7 +15,8 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
-use clickhouse_admin_types::{KeeperId, ServerId};
+use clickhouse_admin_types::keeper::KeeperId;
+use clickhouse_admin_types::server::ServerId;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     blueprint, bp_clickhouse_cluster_config,
@@ -27,7 +28,6 @@ use nexus_db_schema::schema::{
     bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
     debug_log_blueprint_planning,
 };
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -68,6 +68,7 @@ use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
     PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
+use sled_agent_types::inventory::OmicronZoneDataset;
 use std::net::{IpAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -896,7 +897,7 @@ impl BpOmicronZone {
                     self.snat_last_port,
                 ) {
                     (Some(ip), Some(first_port), Some(last_port)) => {
-                        nexus_types::inventory::SourceNatConfig::new(
+                        nexus_types::inventory::SourceNatConfigGeneric::new(
                             ip.ip(),
                             *first_port,
                             *last_port,
