@@ -502,7 +502,14 @@ impl ConnMgr {
                         Some(self.on_task_exit(task_id))
                     }
                     Err(err) => {
-                        warn!(self.log, "Connection task panic: {err}");
+                        if err.is_panic() {
+                            warn!(self.log, "Connection task panic: {err}");
+                        } else {
+                            debug!(
+                                self.log,
+                                "Connection task {} cancelled", err.id(),
+                            );
+                        }
                         Some(self.on_task_exit(err.id()))
                     }
                 }
