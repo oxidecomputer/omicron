@@ -13,7 +13,6 @@ use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
     MAX_MULTICAST_GROUPS_PER_INSTANCE, MAX_NICS_PER_INSTANCE,
 };
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
     ExternalIp, IpConfig, Ipv4Assignment, Ipv4Config, NetworkInterfaceKind,
@@ -21,7 +20,8 @@ use nexus_db_model::{
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
-use nexus_types::external_api::params::InstanceDiskAttachment;
+use nexus_types::external_api::instance::InstanceDiskAttachment;
+use nexus_types::external_api::{instance, multicast};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
@@ -50,7 +50,7 @@ use uuid::Uuid;
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
-    pub create_params: params::InstanceCreate,
+    pub create_params: instance::InstanceCreate,
     pub boundary_switches: HashSet<SwitchLocation>,
 }
 
@@ -474,8 +474,8 @@ async fn sic_create_network_interface(
     let interface_id = repeat_saga_params.new_id;
     let interface_params = &saga_params.create_params.network_interfaces;
     match interface_params {
-        params::InstanceNetworkInterfaceAttachment::None => Ok(()),
-        params::InstanceNetworkInterfaceAttachment::Default => {
+        instance::InstanceNetworkInterfaceAttachment::None => Ok(()),
+        instance::InstanceNetworkInterfaceAttachment::Default => {
             create_default_primary_network_interface(
                 &sagactx,
                 &saga_params,
@@ -485,7 +485,7 @@ async fn sic_create_network_interface(
             )
             .await
         }
-        params::InstanceNetworkInterfaceAttachment::Create(create_params) => {
+        instance::InstanceNetworkInterfaceAttachment::Create(create_params) => {
             match create_params.get(nic_index) {
                 None => Ok(()),
                 Some(ref prs) => {
@@ -566,7 +566,7 @@ async fn create_custom_network_interface(
     saga_params: &Params,
     instance_id: InstanceUuid,
     interface_id: Uuid,
-    interface_params: &params::InstanceNetworkInterfaceCreate,
+    interface_params: &instance::InstanceNetworkInterfaceCreate,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -697,7 +697,7 @@ async fn create_default_primary_network_interface(
     let iface_name =
         Name::try_from(DEFAULT_PRIMARY_NIC_NAME.to_string()).unwrap();
 
-    let interface_params = params::InstanceNetworkInterfaceCreate {
+    let interface_params = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: iface_name.clone(),
             description: format!(
@@ -858,7 +858,7 @@ async fn sic_allocate_instance_external_ip(
     // Runtime state should never be able to make 'complete_op' fallible.
     let ip = match ip_params {
         // Allocate a new IP address from the target, possibly default, pool
-        params::ExternalIpCreate::Ephemeral { pool } => {
+        instance::ExternalIpCreate::Ephemeral { pool } => {
             let pool = if let Some(name_or_id) = pool {
                 Some(
                     osagactx
@@ -888,7 +888,7 @@ async fn sic_allocate_instance_external_ip(
                 .0
         }
         // Set the parent of an existing floating IP to the new instance's ID.
-        params::ExternalIpCreate::Floating { floating_ip } => {
+        instance::ExternalIpCreate::Floating { floating_ip } => {
             let (.., authz_project, authz_fip) = match floating_ip {
                 NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
                     .project_id(saga_params.project_id)
@@ -962,10 +962,10 @@ async fn sic_allocate_instance_external_ip_undo(
     };
 
     match ip_params {
-        params::ExternalIpCreate::Ephemeral { .. } => {
+        instance::ExternalIpCreate::Ephemeral { .. } => {
             datastore.deallocate_external_ip(&opctx, ip.id).await?;
         }
-        params::ExternalIpCreate::Floating { .. } => {
+        instance::ExternalIpCreate::Floating { .. } => {
             let (.., authz_fip) = LookupPath::new(&opctx, datastore)
                 .floating_ip_id(ip.id)
                 .lookup_for(authz::Action::Modify)
@@ -1036,7 +1036,7 @@ async fn sic_join_instance_multicast_group(
     }
 
     // Look up the multicast group by name or ID using the existing nexus method
-    let multicast_group_selector = params::MulticastGroupSelector {
+    let multicast_group_selector = multicast::MulticastGroupSelector {
         multicast_group: group_name_or_id.clone(),
     };
     let multicast_group_lookup = osagactx
@@ -1113,7 +1113,7 @@ async fn sic_join_instance_multicast_group_undo(
     }
 
     // Look up the multicast group by name or ID using the existing nexus method
-    let multicast_group_selector = params::MulticastGroupSelector {
+    let multicast_group_selector = multicast::MulticastGroupSelector {
         multicast_group: group_name_or_id.clone(),
     };
     let multicast_group_lookup = osagactx
@@ -1417,7 +1417,7 @@ pub mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::instance_create::Params,
         app::sagas::instance_create::SagaInstanceCreate,
-        app::sagas::test_helpers, external_api::params,
+        app::sagas::test_helpers,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
@@ -1432,6 +1432,7 @@ pub mod test {
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance as instance_types;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
@@ -1459,7 +1460,7 @@ pub mod test {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
             project_id,
-            create_params: params::InstanceCreate {
+            create_params: instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: "My instance".to_string(),
@@ -1470,15 +1471,17 @@ pub mod test {
                 user_data: vec![],
                 ssh_public_keys: None,
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::Default,
-                external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                    pool: None,
-                }],
-                boot_disk: Some(params::InstanceDiskAttachment::Attach(
-                    params::InstanceDiskAttach {
-                        name: DISK_NAME.parse().unwrap(),
-                    },
-                )),
+                    instance_types::InstanceNetworkInterfaceAttachment::Default,
+                external_ips: vec![
+                    instance_types::ExternalIpCreate::Ephemeral { pool: None },
+                ],
+                boot_disk: Some(
+                    instance_types::InstanceDiskAttachment::Attach(
+                        instance_types::InstanceDiskAttach {
+                            name: DISK_NAME.parse().unwrap(),
+                        },
+                    ),
+                ),
                 cpu_platform: None,
                 disks: Vec::new(),
                 start: false,

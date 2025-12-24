@@ -5,8 +5,7 @@
 use super::ServiceKind;
 use db_macros::Resource;
 use nexus_db_schema::schema::certificate;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::certificate as certificate_types;
 use nexus_types::identity::Resource;
 use omicron_certificates::CertificateValidator;
 use omicron_common::api::external::Error;
@@ -44,7 +43,7 @@ impl Certificate {
         silo_id: Uuid,
         id: Uuid,
         service: ServiceKind,
-        params: params::CertificateCreate,
+        params: certificate_types::CertificateCreate,
         possible_dns_names: &[String],
     ) -> Result<Self, CertificateError> {
         let validator = CertificateValidator::default();
@@ -64,7 +63,7 @@ impl Certificate {
         silo_id: Uuid,
         id: Uuid,
         service: ServiceKind,
-        params: params::CertificateCreate,
+        params: certificate_types::CertificateCreate,
     ) -> Self {
         Self {
             identity: CertificateIdentity::new(id, params.identity),
@@ -76,7 +75,7 @@ impl Certificate {
     }
 }
 
-impl TryFrom<Certificate> for views::Certificate {
+impl TryFrom<Certificate> for certificate_types::Certificate {
     type Error = Error;
     fn try_from(cert: Certificate) -> Result<Self, Error> {
         Ok(Self {

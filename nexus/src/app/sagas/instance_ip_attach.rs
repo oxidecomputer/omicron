@@ -11,7 +11,7 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz};
 use nexus_db_model::{IpAttachState, NatEntry};
-use nexus_types::external_api::views;
+use nexus_types::external_api::external_ip;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
@@ -267,7 +267,7 @@ async fn siia_update_opte_undo(
 
 async fn siia_complete_attach(
     sagactx: NexusActionContext,
-) -> Result<views::ExternalIp, ActionError> {
+) -> Result<external_ip::ExternalIp, ActionError> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;

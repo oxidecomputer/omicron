@@ -24,11 +24,13 @@ use nexus_test_utils::resource_helpers::project_get;
 use nexus_test_utils::resource_helpers::projects_list;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared::SiloRole;
-use nexus_types::external_api::views;
-use nexus_types::external_api::views::Project;
-use nexus_types::external_api::views::Silo;
+use nexus_types::external_api::image;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::project;
+use nexus_types::external_api::project::Project;
+use nexus_types::external_api::silo::Silo;
+use nexus_types::external_api::snapshot;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -160,7 +162,7 @@ async fn test_project_deletion_with_instance(
     let _: Instance = object_create(
         client,
         &format!("/v1/instances?project={}", name),
-        &params::InstanceCreate {
+        &instance::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-instance".parse().unwrap(),
                 description: "description".to_string(),
@@ -171,7 +173,7 @@ async fn test_project_deletion_with_instance(
             user_data: b"none".to_vec(),
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::None,
+                instance::InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
@@ -273,7 +275,7 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
     delete_project_default_subnet(&name, &client).await;
     delete_project_default_vpc(&name, &client).await;
 
-    let image_create_params = params::ImageCreate {
+    let image_create_params = image::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
@@ -282,14 +284,14 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     };
 
     let images_url = format!("/v1/images?project={}", name);
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
+            .execute_and_parse_unwrap::<image::Image>()
             .await;
 
     assert_eq!(
@@ -334,10 +336,10 @@ async fn test_project_deletion_with_snapshot(
     delete_project_default_vpc(&name, &client).await;
     create_disk(&client, &name, "my-disk").await;
 
-    let _: views::Snapshot = object_create(
+    let _: snapshot::Snapshot = object_create(
         client,
         &format!("/v1/snapshots?project={}", name),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-snapshot".parse().unwrap(),
                 description: "not attached to instance".into(),
@@ -509,7 +511,7 @@ async fn test_limited_collaborator_cannot_create_project(
     // Attempt to create a project - should fail with 403 Forbidden
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, "/v1/projects")
-            .body(Some(&params::ProjectCreate {
+            .body(Some(&project::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "forbidden-project".parse().unwrap(),
                     description: "should not be created".to_string(),

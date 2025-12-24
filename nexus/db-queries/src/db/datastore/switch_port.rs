@@ -34,7 +34,7 @@ use nexus_db_model::{
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
     SwitchPortBgpPeerConfigCommunity,
 };
-use nexus_types::external_api::params;
+use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
@@ -218,7 +218,7 @@ impl DataStore {
     pub async fn switch_port_settings_create(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsCreate,
+        params: &networking::SwitchPortSettingsCreate,
         id: Option<Uuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         let err = OptionalError::new();
@@ -265,7 +265,7 @@ impl DataStore {
     pub async fn switch_port_settings_delete(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsSelector,
+        params: &networking::SwitchPortSettingsSelector,
     ) -> DeleteResult {
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -312,7 +312,7 @@ impl DataStore {
     pub async fn switch_port_settings_update(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsCreate,
+        params: &networking::SwitchPortSettingsCreate,
         id: Uuid,
     ) -> UpdateResult<SwitchPortSettingsCombinedResult> {
         let delete_err = OptionalError::new();
@@ -799,7 +799,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         portname: &external::Name,
-        params: &params::SwitchPortSelector,
+        params: &networking::SwitchPortSelector,
     ) -> DeleteResult {
         #[derive(Debug)]
         enum SwitchPortDeleteError {
@@ -1186,7 +1186,7 @@ type SpsCreateError = SwitchPortSettingsCreateError;
 async fn do_switch_port_settings_create(
     conn: &Connection<DTraceConnection<PgConnection>>,
     id: Option<Uuid>,
-    params: &params::SwitchPortSettingsCreate,
+    params: &networking::SwitchPortSettingsCreate,
     err: OptionalError<SwitchPortSettingsCreateError>,
 ) -> Result<SwitchPortSettingsCombinedResult, diesel::result::Error> {
     use nexus_db_schema::schema::{
@@ -1346,7 +1346,7 @@ async fn do_switch_port_settings_create(
             i.kind.into(),
         );
         interface_config.push(ifx_config.clone());
-        if let params::SwitchInterfaceKind::Vlan(vlan_if) = i.kind {
+        if let networking::SwitchInterfaceKind::Vlan(vlan_if) = i.kind {
             vlan_interface_config.push(SwitchVlanInterfaceConfig::new(
                 ifx_config.id,
                 vlan_if.vid,
@@ -1842,7 +1842,7 @@ async fn do_switch_port_settings_delete(
 mod test {
     use crate::db::datastore::UpdatePrecondition;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_types::external_api::params::{
+    use nexus_types::external_api::networking::{
         BgpAnnounceSetCreate, BgpConfigCreate, BgpPeerConfig,
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
     };

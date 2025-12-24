@@ -17,14 +17,16 @@ use nexus_test_utils::{
     },
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{
-    params::{
-        self, ExternalIpCreate, InstanceNetworkInterfaceAttachment,
-        InstanceNetworkInterfaceCreate,
-    },
-    shared::SiloRole,
-    views::{InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool},
+use nexus_types::external_api::instance::{
+    ExternalIpCreate, InstanceNetworkInterfaceAttachment,
+    InstanceNetworkInterfaceCreate,
 };
+use nexus_types::external_api::internet_gateway::{
+    InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool,
+    InternetGatewayIpPoolCreate,
+};
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::silo::Silo;
 use nexus_types::identity::Resource;
 use omicron_common::{
     address::{IpRange, Ipv4Range},
@@ -265,7 +267,7 @@ async fn test_igw_ip_pool_attach_silo_user(ctx: &ControlPlaneTestContext) {
 
     // Create a non-admin user
     let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.name());
-    let silo: nexus_types::external_api::views::Silo =
+    let silo: Silo =
         nexus_test_utils::resource_helpers::object_get(c, &silo_url).await;
 
     let user = create_local_user(
@@ -300,7 +302,7 @@ async fn test_igw_ip_pool_attach_silo_user(ctx: &ControlPlaneTestContext) {
         "/v1/internet-gateway-ip-pools?project={}&vpc={}&gateway={}",
         PROJECT_NAME, VPC_NAME, IGW_NAME
     );
-    let params = params::InternetGatewayIpPoolCreate {
+    let params = InternetGatewayIpPoolCreate {
         identity: IdentityMetadataCreateParams {
             name: IP_POOL_ATTACHMENT_NAME.parse().unwrap(),
             description: "Test attachment".to_string(),

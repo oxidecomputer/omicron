@@ -37,8 +37,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::identity::Asset;
 use nonempty::NonEmpty;
 use omicron_common::api::external;
@@ -1708,7 +1707,7 @@ pub(in crate::db::datastore) mod test {
     use nexus_db_model::PhysicalDiskState;
     use nexus_db_model::{Generation, SledCpuFamily};
     use nexus_db_model::{InstanceCpuPlatform, PhysicalDisk};
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::{disk, instance};
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
     use omicron_common::api::external;
@@ -3459,9 +3458,9 @@ pub(in crate::db::datastore) mod test {
             (
                 // In-service and active sleds can be marked as expunged.
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_matching(
-                        SledFilter::InService,
-                    )),
+                    predicate::in_iter(
+                        SledFilter::InService.all_matching_policies(),
+                    ),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::Expunged),
@@ -3470,9 +3469,9 @@ pub(in crate::db::datastore) mod test {
                 // The provision policy of in-service sleds can be changed, or
                 // kept the same (1 of 2).
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_matching(
-                        SledFilter::InService,
-                    )),
+                    predicate::in_iter(
+                        SledFilter::InService.all_matching_policies(),
+                    ),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::InService {
@@ -3482,9 +3481,9 @@ pub(in crate::db::datastore) mod test {
             (
                 // (2 of 2)
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_matching(
-                        SledFilter::InService,
-                    )),
+                    predicate::in_iter(
+                        SledFilter::InService.all_matching_policies(),
+                    ),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::InService {
@@ -3936,16 +3935,16 @@ pub(in crate::db::datastore) mod test {
                 }
             }
 
-            for disk in &instance.disks {
-                let params = params::DiskCreate {
+            for d in &instance.disks {
+                let params = disk::DiskCreate {
                     identity: external::IdentityMetadataCreateParams {
-                        name: disk.name.clone(),
+                        name: d.name.clone(),
                         description: String::from("desc"),
                     },
 
-                    disk_backend: params::DiskBackend::Local {},
+                    disk_backend: disk::DiskBackend::Local {},
 
-                    size: disk.size,
+                    size: d.size,
                 };
 
                 datastore
@@ -3955,7 +3954,7 @@ pub(in crate::db::datastore) mod test {
                         db::datastore::Disk::LocalStorage(
                             db::datastore::LocalStorageDisk::new(
                                 db::model::Disk::new(
-                                    disk.id,
+                                    d.id,
                                     authz_project.id(),
                                     &params,
                                     db::model::BlockSize::AdvancedFormat,
@@ -3963,7 +3962,7 @@ pub(in crate::db::datastore) mod test {
                                     db::model::DiskType::LocalStorage,
                                 ),
                                 db::model::DiskTypeLocalStorage::new(
-                                    disk.id, disk.size,
+                                    d.id, d.size,
                                 )
                                 .unwrap(),
                             ),
@@ -3973,7 +3972,7 @@ pub(in crate::db::datastore) mod test {
                     .unwrap();
 
                 let (.., authz_disk) = LookupPath::new(&opctx, datastore)
-                    .disk_id(disk.id)
+                    .disk_id(d.id)
                     .lookup_for(authz::Action::Read)
                     .await
                     .unwrap();
@@ -4147,7 +4146,7 @@ pub(in crate::db::datastore) mod test {
                 db::model::Instance::new(
                     instance_id,
                     authz_project.id(),
-                    &params::InstanceCreate {
+                    &instance::InstanceCreate {
                         identity: external::IdentityMetadataCreateParams {
                             name: name.parse().unwrap(),
                             description: "It's an instance".into(),
@@ -4157,7 +4156,7 @@ pub(in crate::db::datastore) mod test {
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,

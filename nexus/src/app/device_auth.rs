@@ -54,8 +54,7 @@ use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
 use omicron_uuid_kinds::SiloUserUuid;
 
 use anyhow::anyhow;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::device;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, Error, ListResultVec,
 };
@@ -78,7 +77,7 @@ impl super::Nexus {
     pub(crate) async fn device_auth_request_create(
         &self,
         opctx: &OpContext,
-        params: params::DeviceAuthRequest,
+        params: device::DeviceAuthRequest,
     ) -> CreateResult<DeviceAuthRequest> {
         // TODO-correctness: the `user_code` generated for a new request
         // is used as a primary key, but may potentially collide with an
@@ -292,7 +291,7 @@ impl super::Nexus {
     pub(crate) async fn device_access_token(
         &self,
         opctx: &OpContext,
-        params: params::DeviceAccessTokenRequest,
+        params: device::DeviceAccessTokenRequest,
     ) -> Result<Response<Body>, HttpError> {
         // RFC 8628 §3.4
         if params.grant_type != "urn:ietf:params:oauth:grant-type:device_code" {
@@ -317,7 +316,7 @@ impl super::Nexus {
             Ok(response) => match response {
                 Granted(token) => self.build_oauth_response(
                     StatusCode::OK,
-                    &views::DeviceAccessTokenGrant::from(token),
+                    &device::DeviceAccessTokenGrant::from(token),
                 ),
                 Pending => self.build_oauth_response(
                     StatusCode::BAD_REQUEST,

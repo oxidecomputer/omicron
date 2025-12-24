@@ -26,7 +26,9 @@ use uuid::Uuid;
 
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
-use nexus_types::external_api::params;
+use nexus_types::external_api::multicast::{
+    MulticastGroupCreate, MulticastGroupUpdate,
+};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
@@ -118,7 +120,7 @@ impl DataStore {
     pub async fn multicast_group_create(
         &self,
         opctx: &OpContext,
-        params: &params::MulticastGroupCreate,
+        params: &MulticastGroupCreate,
         authz_pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalMulticastGroup> {
         self.allocate_external_multicast_group(
@@ -228,7 +230,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         group_id: MulticastGroupUuid,
-        params: &params::MulticastGroupUpdate,
+        params: &MulticastGroupUpdate,
     ) -> UpdateResult<ExternalMulticastGroup> {
         use nexus_db_schema::schema::multicast_group::dsl;
 
@@ -652,6 +654,9 @@ mod tests {
 
     use std::net::Ipv4Addr;
 
+    use nexus_types::external_api::multicast::{
+        MulticastGroupCreate, MulticastGroupUpdate,
+    };
     use nexus_types::identity::Resource;
     use omicron_common::address::{IpRange, Ipv4Range};
     use omicron_common::api::external::{
@@ -738,7 +743,7 @@ mod tests {
             .expect("Should link multicast pool to silo");
 
         // Allocate first address
-        let params1 = params::MulticastGroupCreate {
+        let params1 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "first-group".parse().unwrap(),
                 description: "First group".to_string(),
@@ -754,7 +759,7 @@ mod tests {
             .expect("Should create first group");
 
         // Allocate second address
-        let params2 = params::MulticastGroupCreate {
+        let params2 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "second-group".parse().unwrap(),
                 description: "Second group".to_string(),
@@ -770,7 +775,7 @@ mod tests {
             .expect("Should create second group");
 
         // Third allocation should fail due to exhaustion
-        let params3 = params::MulticastGroupCreate {
+        let params3 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "third-group".parse().unwrap(),
                 description: "Should fail".to_string(),
@@ -844,7 +849,7 @@ mod tests {
             .expect("Should link multicast pool to silo");
 
         // Create group without specifying pool (should use default)
-        let params_default = params::MulticastGroupCreate {
+        let params_default = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "auto-alloc-group".parse().unwrap(),
                 description: "Group using default pool".to_string(),
@@ -870,7 +875,7 @@ mod tests {
         );
 
         // Create group with explicit pool name
-        let params_explicit = params::MulticastGroupCreate {
+        let params_explicit = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "explicit-alloc-group".parse().unwrap(),
                 description: "Group with explicit pool".to_string(),
@@ -1001,7 +1006,7 @@ mod tests {
             .expect("Should link multicast pool to silo");
 
         // Create external multicast group with explicit address
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "test-group".parse().unwrap(),
                 description: "Comprehensive test group".to_string(),
@@ -1099,7 +1104,7 @@ mod tests {
             create_project(&opctx, &datastore, "test-project").await;
 
         // Create a multicast group using the real project
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "parent-id-test-group".parse().unwrap(),
                 description: "Group for parent_id testing".to_string(),
@@ -1566,7 +1571,7 @@ mod tests {
             .await
             .expect("Should set instance runtime state");
 
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "duplicate-test-group".parse().unwrap(),
                 description: "Group for duplicate testing".to_string(),
@@ -1699,7 +1704,7 @@ mod tests {
             .expect("Should link pool to silo");
 
         // Create multicast group (datastore-only; not exercising reconciler)
-        let group_params = params::MulticastGroupCreate {
+        let group_params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "state-test-group".parse().unwrap(),
                 description: "Group for testing member state transitions"
@@ -1914,7 +1919,7 @@ mod tests {
 
         // Create group with specific IP
         let target_ip = "224.10.1.101".parse().unwrap();
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "reuse-test".parse().unwrap(),
                 description: "Group for IP reuse test".to_string(),
@@ -1942,7 +1947,7 @@ mod tests {
         assert_eq!(deleted, true, "Should successfully deallocate the group");
 
         // Create another group with the same IP - should succeed due to time_deleted filtering
-        let params2 = params::MulticastGroupCreate {
+        let params2 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "reuse-test-2".parse().unwrap(),
                 description: "Second group reusing same IP".to_string(),
@@ -2028,7 +2033,7 @@ mod tests {
             .expect("Should link pool to silo");
 
         // Exhaust the pool
-        let params1 = params::MulticastGroupCreate {
+        let params1 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "cycle-test-1".parse().unwrap(),
                 description: "First group to exhaust pool".to_string(),
@@ -2046,7 +2051,7 @@ mod tests {
         let allocated_ip = group1.multicast_ip.ip();
 
         // Try to create another group - should fail due to exhaustion
-        let params2 = params::MulticastGroupCreate {
+        let params2 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "cycle-test-2".parse().unwrap(),
                 description: "Second group should fail".to_string(),
@@ -2076,7 +2081,7 @@ mod tests {
         assert_eq!(deleted, true, "Should successfully deallocate the group");
 
         // Now creating a new group should succeed
-        let params3 = params::MulticastGroupCreate {
+        let params3 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "cycle-test-3".parse().unwrap(),
                 description: "Third group should succeed after deletion"
@@ -2164,7 +2169,7 @@ mod tests {
             .expect("Should link pool to silo");
 
         // Create a group
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "dealloc-test".parse().unwrap(),
                 description: "Group for deallocation testing".to_string(),
@@ -2289,7 +2294,7 @@ mod tests {
             .expect("Should link multicast pool to silo");
 
         // Test creating a multicast group
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "fetch-test-group".parse().unwrap(),
                 description: "Test group for fetch operations".to_string(),
@@ -2400,7 +2405,7 @@ mod tests {
             .expect("Should link multicast pool to silo");
 
         // Create fleet-wide multicast groups
-        let params_1 = params::MulticastGroupCreate {
+        let params_1 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "fleet-group-1".parse().unwrap(),
                 description: "Fleet-wide group 1".to_string(),
@@ -2411,7 +2416,7 @@ mod tests {
             mvlan: None,
         };
 
-        let params_2 = params::MulticastGroupCreate {
+        let params_2 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "fleet-group-2".parse().unwrap(),
                 description: "Fleet-wide group 2".to_string(),
@@ -2422,7 +2427,7 @@ mod tests {
             mvlan: None,
         };
 
-        let params_3 = params::MulticastGroupCreate {
+        let params_3 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "fleet-group-3".parse().unwrap(),
                 description: "Fleet-wide group 3".to_string(),
@@ -2531,7 +2536,7 @@ mod tests {
             .await
             .expect("Should link multicast pool to silo");
 
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "state-test-group".parse().unwrap(),
                 description: "Test group for state transitions".to_string(),
@@ -2761,7 +2766,7 @@ mod tests {
         assert_eq!(group.source_ips.len(), 0); // Empty array initially
 
         // Test updating name and description
-        let update_params = params::MulticastGroupUpdate {
+        let update_params = MulticastGroupUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: Some("updated-group".parse().unwrap()),
                 description: Some("Updated group description".to_string()),
@@ -2787,7 +2792,7 @@ mod tests {
         assert!(updated_group.time_modified() > group.time_modified()); // Modified time should advance
 
         // Test updating source IPs (Source-Specific Multicast)
-        let source_ip_update = params::MulticastGroupUpdate {
+        let source_ip_update = MulticastGroupUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
                 description: None,
@@ -2816,7 +2821,7 @@ mod tests {
         assert!(source_addrs.contains(&"10.1.1.20".parse().unwrap()));
 
         // Test updating all fields at once
-        let complete_update = params::MulticastGroupUpdate {
+        let complete_update = MulticastGroupUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: Some("final-group".parse().unwrap()),
                 description: Some("Final group description".to_string()),

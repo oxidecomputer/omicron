@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{audit_log, audit_log_complete};
-use nexus_types::external_api::views;
+use nexus_types::external_api::audit;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::BuiltInUserUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -267,7 +267,7 @@ impl From<AuditLogCompletion> for AuditLogCompletionUpdate {
 
 /// None of the error cases here should be possible given the DB constraints and
 /// the way we construct these rows when writing them to the database.
-impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
+impl TryFrom<AuditLogEntry> for audit::AuditLogEntry {
     type Error = Error;
 
     fn try_from(entry: AuditLogEntry) -> Result<Self, Self::Error> {
@@ -286,7 +286,7 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                             "UserBuiltin actor missing actor_id",
                         )
                     })?;
-                    views::AuditLogEntryActor::UserBuiltin {
+                    audit::AuditLogEntryActor::UserBuiltin {
                         user_builtin_id: BuiltInUserUuid::from_untyped_uuid(
                             user_builtin_id,
                         ),
@@ -301,7 +301,7 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                             "SiloUser actor missing actor_silo_id",
                         )
                     })?;
-                    views::AuditLogEntryActor::SiloUser {
+                    audit::AuditLogEntryActor::SiloUser {
                         silo_user_id: SiloUserUuid::from_untyped_uuid(
                             silo_user_id,
                         ),
@@ -314,10 +314,10 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                             "Scim actor missing actor_silo_id",
                         )
                     })?;
-                    views::AuditLogEntryActor::Scim { silo_id }
+                    audit::AuditLogEntryActor::Scim { silo_id }
                 }
                 AuditLogActorKind::Unauthenticated => {
-                    views::AuditLogEntryActor::Unauthenticated
+                    audit::AuditLogEntryActor::Unauthenticated
                 }
             },
             auth_method: entry.auth_method,
@@ -328,7 +328,7 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                         .ok_or_else(|| Error::internal_error(
                             "Audit log success result without http_status_code",
                         ))?;
-                    views::AuditLogEntryResult::Success {
+                    audit::AuditLogEntryResult::Success {
                         http_status_code: http_status_code.0,
                     }
                 }
@@ -343,14 +343,14 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                         .ok_or_else(|| Error::internal_error(
                             "Audit log error result without http_status_code",
                         ))?;
-                    views::AuditLogEntryResult::Error {
+                    audit::AuditLogEntryResult::Error {
                         http_status_code: http_status_code.0,
                         error_code: entry.error_code,
                         error_message,
                     }
                 }
                 AuditLogResultKind::Timeout => {
-                    views::AuditLogEntryResult::Unknown
+                    audit::AuditLogEntryResult::Unknown
                 }
             },
         })

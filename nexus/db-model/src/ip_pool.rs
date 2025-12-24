@@ -15,9 +15,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::ip_pool;
 use nexus_db_schema::schema::ip_pool_range;
 use nexus_db_schema::schema::ip_pool_resource;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::views;
+use nexus_types::external_api::ip_pool as ip_pool_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use std::net::IpAddr;
@@ -110,16 +108,16 @@ impl ::std::fmt::Display for IpVersion {
     }
 }
 
-impl From<shared::IpVersion> for IpVersion {
-    fn from(value: shared::IpVersion) -> Self {
+impl From<ip_pool_types::IpVersion> for IpVersion {
+    fn from(value: ip_pool_types::IpVersion) -> Self {
         match value {
-            shared::IpVersion::V4 => Self::V4,
-            shared::IpVersion::V6 => Self::V6,
+            ip_pool_types::IpVersion::V4 => Self::V4,
+            ip_pool_types::IpVersion::V6 => Self::V6,
         }
     }
 }
 
-impl From<IpVersion> for shared::IpVersion {
+impl From<IpVersion> for ip_pool_types::IpVersion {
     fn from(value: IpVersion) -> Self {
         match value {
             IpVersion::V4 => Self::V4,
@@ -128,16 +126,16 @@ impl From<IpVersion> for shared::IpVersion {
     }
 }
 
-impl From<shared::IpPoolType> for IpPoolType {
-    fn from(value: shared::IpPoolType) -> Self {
+impl From<ip_pool_types::IpPoolType> for IpPoolType {
+    fn from(value: ip_pool_types::IpPoolType) -> Self {
         match value {
-            shared::IpPoolType::Unicast => Self::Unicast,
-            shared::IpPoolType::Multicast => Self::Multicast,
+            ip_pool_types::IpPoolType::Unicast => Self::Unicast,
+            ip_pool_types::IpPoolType::Multicast => Self::Multicast,
         }
     }
 }
 
-impl From<IpPoolType> for shared::IpPoolType {
+impl From<IpPoolType> for ip_pool_types::IpPoolType {
     fn from(value: IpPoolType) -> Self {
         match value {
             IpPoolType::Unicast => Self::Unicast,
@@ -226,7 +224,7 @@ impl IpPool {
     }
 }
 
-impl From<IpPool> for views::IpPool {
+impl From<IpPool> for ip_pool_types::IpPool {
     fn from(pool: IpPool) -> Self {
         let identity = pool.identity();
         let pool_type = pool.pool_type;
@@ -251,8 +249,8 @@ pub struct IpPoolUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::IpPoolUpdate> for IpPoolUpdate {
-    fn from(params: params::IpPoolUpdate) -> Self {
+impl From<ip_pool_types::IpPoolUpdate> for IpPoolUpdate {
+    fn from(params: ip_pool_types::IpPoolUpdate) -> Self {
         Self {
             name: params.identity.name.map(|n| n.into()),
             description: params.identity.description,
@@ -298,7 +296,7 @@ pub struct IpPoolResource {
     pub is_default: bool,
 }
 
-impl From<IpPoolResource> for views::IpPoolSiloLink {
+impl From<IpPoolResource> for ip_pool_types::IpPoolSiloLink {
     fn from(assoc: IpPoolResource) -> Self {
         Self {
             ip_pool_id: assoc.ip_pool_id,
@@ -328,7 +326,7 @@ pub struct IpPoolRange {
 }
 
 impl IpPoolRange {
-    pub fn new(range: &shared::IpRange, ip_pool_id: Uuid) -> Self {
+    pub fn new(range: &ip_pool_types::IpRange, ip_pool_id: Uuid) -> Self {
         let now = Utc::now();
         let first_address = range.first_address();
         let last_address = range.last_address();
@@ -351,11 +349,11 @@ impl IpPoolRange {
     }
 }
 
-impl TryFrom<IpPoolRange> for views::IpPoolRange {
+impl TryFrom<IpPoolRange> for ip_pool_types::IpPoolRange {
     type Error = external::Error;
 
     fn try_from(range: IpPoolRange) -> Result<Self, Self::Error> {
-        let ip_range = shared::IpRange::try_from(&range).map_err(|e| {
+        let ip_range = ip_pool_types::IpRange::try_from(&range).map_err(|e| {
             external::Error::internal_error(&format!(
                 "Invalid IP range in database (id={}, pool={}, first={}, last={}): {e:#}",
                 range.id, range.ip_pool_id,
@@ -372,20 +370,20 @@ impl TryFrom<IpPoolRange> for views::IpPoolRange {
     }
 }
 
-impl TryFrom<&IpPoolRange> for shared::IpRange {
+impl TryFrom<&IpPoolRange> for ip_pool_types::IpRange {
     type Error = IpRangeConversionError;
 
     fn try_from(range: &IpPoolRange) -> Result<Self, Self::Error> {
         match (range.first_address.ip(), range.last_address.ip()) {
             (IpAddr::V4(first), IpAddr::V4(last)) => {
-                shared::IpRange::try_from((first, last)).map_err(|e| {
+                ip_pool_types::IpRange::try_from((first, last)).map_err(|e| {
                     IpRangeConversionError::InvalidRange {
                         msg: format!("Invalid IPv4 range: {e:#}",),
                     }
                 })
             }
             (IpAddr::V6(first), IpAddr::V6(last)) => {
-                shared::IpRange::try_from((first, last)).map_err(|e| {
+                ip_pool_types::IpRange::try_from((first, last)).map_err(|e| {
                     IpRangeConversionError::InvalidRange {
                         msg: format!("Invalid IPv6 range: {e:#}"),
                     }

@@ -180,7 +180,7 @@ pub fn blueprint_internal_dns_config(
     // names.
     let mut nrepo_depots = 6;
     for sled in sleds_by_id {
-        if !sled.policy().matches(SledFilter::TufArtifactReplication) {
+        if !SledFilter::TufArtifactReplication.matches_policy(sled.policy()) {
             continue;
         }
 

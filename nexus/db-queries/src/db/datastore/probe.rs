@@ -22,7 +22,7 @@ use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::IpConfig;
 use nexus_db_model::Probe;
 use nexus_db_model::VpcSubnet;
-use nexus_types::external_api::shared::ProbeInfo;
+use nexus_types::external_api::probe::ProbeInfo;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;

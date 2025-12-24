@@ -26,13 +26,12 @@ use nexus_test_utils::resource_helpers::{
     object_get_error, object_put, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    IpPoolCreate, MulticastGroupCreate, MulticastGroupMemberAdd,
-    MulticastGroupUpdate,
+use nexus_types::external_api::ip_pool::{
+    IpPool, IpPoolCreate, IpPoolRange, IpRange, IpVersion, Ipv4Range, Ipv6Range,
 };
-use nexus_types::external_api::shared::{IpRange, Ipv4Range, Ipv6Range};
-use nexus_types::external_api::views::{
-    IpPool, IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
+use nexus_types::external_api::multicast::{
+    MulticastGroup, MulticastGroupCreate, MulticastGroupMember,
+    MulticastGroupMemberAdd, MulticastGroupUpdate,
 };
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{

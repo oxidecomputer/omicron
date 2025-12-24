@@ -12,7 +12,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::TransitionError;
 use nexus_types::deployment::Blueprint;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::sled::SledState;
 use omicron_uuid_kinds::SledUuid;
 
 pub(crate) async fn decommission_sleds(

@@ -16,10 +16,10 @@ use nexus_test_utils::resource_helpers::{
     object_delete, object_get, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    MulticastGroupCreate, MulticastGroupMemberAdd,
+use nexus_types::external_api::multicast::{
+    MulticastGroup, MulticastGroupCreate, MulticastGroupMember,
+    MulticastGroupMemberAdd,
 };
-use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, NameOrId, SwitchLocation,
 };

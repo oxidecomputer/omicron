@@ -18,11 +18,13 @@ use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_project, object_create,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment, MulticastGroupCreate,
+use nexus_types::external_api::instance::{
+    InstanceCreate, InstanceNetworkInterfaceAttachment,
+};
+use nexus_types::external_api::multicast::{
+    MulticastGroup, MulticastGroupCreate, MulticastGroupMember,
     MulticastGroupMemberAdd,
 };
-use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
     NameOrId,

@@ -17,7 +17,7 @@ use itertools::Itertools;
 use nexus_db_schema::schema::instance_network_interface;
 use nexus_db_schema::schema::network_interface;
 use nexus_db_schema::schema::service_network_interface;
-use nexus_types::external_api::params;
+use nexus_types::external_api::instance as instance_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::PrivateIpConfig;
@@ -804,8 +804,10 @@ impl From<InstanceNetworkInterface> for external::InstanceNetworkInterface {
     }
 }
 
-impl From<params::InstanceNetworkInterfaceUpdate> for NetworkInterfaceUpdate {
-    fn from(params: params::InstanceNetworkInterfaceUpdate) -> Self {
+impl From<instance_types::InstanceNetworkInterfaceUpdate>
+    for NetworkInterfaceUpdate
+{
+    fn from(params: instance_types::InstanceNetworkInterfaceUpdate) -> Self {
         let primary = if params.primary { Some(true) } else { None };
         let (transit_ips_v4, transit_ips_v6): (Vec<_>, Vec<_>) =
             params.transit_ips.into_iter().partition_map(|net| match net {

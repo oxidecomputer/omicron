@@ -9,8 +9,10 @@ use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::shared::{self, SiloRole};
-use nexus_types::external_api::views;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::silo;
+use nexus_types::external_api::silo::SiloIdentityMode;
+use nexus_types::external_api::user;
 use omicron_common::api::external::{Name, UserId};
 use omicron_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
 use std::str::FromStr;
@@ -37,7 +39,7 @@ async fn test_local_users(cptestctx: &ControlPlaneTestContext) {
         client,
         silo_name.as_str(),
         true,
-        shared::SiloIdentityMode::LocalOnly,
+        SiloIdentityMode::LocalOnly,
     )
     .await;
     test_local_user_basic(client, &silo).await;
@@ -52,7 +54,7 @@ async fn test_local_users(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 }
 
-async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
+async fn test_local_user_basic(client: &ClientTestContext, silo: &silo::Silo) {
     let silo_name = &silo.identity.name;
 
     // First, try logging in with a non-existent user.  This naturally should
@@ -298,7 +300,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
 
 async fn test_local_user_with_no_initial_password(
     client: &ClientTestContext,
-    silo: &views::Silo,
+    silo: &silo::Silo,
 ) {
     let silo_name = &silo.identity.name;
 
@@ -349,10 +351,10 @@ async fn test_local_user_with_no_initial_password(
 async fn expect_session_valid(
     client: &ClientTestContext,
     session_token: &str,
-) -> views::CurrentUser {
+) -> user::CurrentUser {
     NexusRequest::object_get(client, "/v1/me")
         .authn_as(AuthnMode::Session(session_token.to_string()))
-        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .execute_and_parse_unwrap::<user::CurrentUser>()
         .await
 }
 

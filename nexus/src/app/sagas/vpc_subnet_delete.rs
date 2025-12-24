@@ -125,13 +125,13 @@ pub(crate) mod test {
     use crate::{
         app::sagas::vpc_subnet_delete::Params,
         app::sagas::vpc_subnet_delete::SagaVpcSubnetDelete,
-        external_api::params,
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::{authn::saga::Serialized, context::OpContext};
     use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::vpc;
     use omicron_common::api::external::NameOrId;
     use uuid::Uuid;
 
@@ -162,7 +162,7 @@ pub(crate) mod test {
         let (.., authz_vpc, authz_subnet, db_subnet) = nexus
             .vpc_subnet_lookup(
                 &opctx,
-                params::SubnetSelector {
+                vpc::SubnetSelector {
                     project: Some(project_id.into()),
                     vpc: Some(NameOrId::Name("default".parse().unwrap())),
                     subnet: NameOrId::Name("default".parse().unwrap()),

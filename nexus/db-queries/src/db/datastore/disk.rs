@@ -1618,7 +1618,8 @@ mod tests {
     use super::*;
 
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::disk as disk_types;
+    use nexus_types::external_api::project;
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -1636,7 +1637,7 @@ mod tests {
                 &opctx,
                 Project::new(
                     silo_id,
-                    params::ProjectCreate {
+                    project::ProjectCreate {
                         identity: external::IdentityMetadataCreateParams {
                             name: "testpost".parse().unwrap(),
                             description: "please ignore".to_string(),
@@ -1649,16 +1650,16 @@ mod tests {
 
         let disk_id = Uuid::new_v4();
 
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(512).unwrap(),
         };
 
-        let create_params = params::DiskCreate {
+        let create_params = disk_types::DiskCreate {
             identity: external::IdentityMetadataCreateParams {
                 name: "first-post".parse().unwrap(),
                 description: "just trying things out".to_string(),
             },
-            disk_backend: params::DiskBackend::Distributed {
+            disk_backend: disk_types::DiskBackend::Distributed {
                 disk_source: disk_source.clone(),
             },
             size: external::ByteCount::from(2147483648),

@@ -36,7 +36,7 @@ use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
-use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::TufRepoDescription;
@@ -585,7 +585,8 @@ impl ExampleSystemBuilder {
                     .unwrap();
 
                 // Create discretionary zones if allowed.
-                if sled_details.policy.matches(SledFilter::Discretionary) {
+                if SledFilter::Discretionary.matches_policy(sled_details.policy)
+                {
                     for _ in 0..nexus_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {

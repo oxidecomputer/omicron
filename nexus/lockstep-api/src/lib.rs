@@ -26,16 +26,13 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorConfigView;
-use nexus_types::external_api::headers::RangeRequest;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::PhysicalDiskPath;
-use nexus_types::external_api::params::SledSelector;
-use nexus_types::external_api::params::UninitializedSledId;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::UninitializedSled;
-use nexus_types::external_api::views::Ping;
-use nexus_types::external_api::views::PingStatus;
-use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::hardware::{
+    UninitializedSled, UninitializedSledId,
+};
+use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
+use nexus_types::external_api::sled::{SledPolicy, SledSelector};
+use nexus_types::external_api::support_bundle;
+use nexus_types::external_api::system::{Ping, PingStatus};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::RackInitializationRequest;
 use nexus_types::internal_api::views::BackgroundTask;
@@ -44,6 +41,7 @@ use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::UpdateStatus;
+use nexus_types_versions::latest::headers::RangeRequest;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
@@ -232,7 +230,7 @@ pub trait NexusLockstepApi {
     }]
     async fn blueprint_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+        path_params: Path<BlueprintPath>,
     ) -> Result<HttpResponseOk<Blueprint>, HttpError>;
 
     /// Deletes one blueprint
@@ -242,7 +240,7 @@ pub trait NexusLockstepApi {
     }]
     async fn blueprint_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+        path_params: Path<BlueprintPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Managing the current target blueprint
@@ -402,7 +400,10 @@ pub trait NexusLockstepApi {
     async fn support_bundle_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByTimeAndId>,
-    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<support_bundle::SupportBundleInfo>>,
+        HttpError,
+    >;
 
     /// View a support bundle
     #[endpoint {
@@ -411,8 +412,8 @@ pub trait NexusLockstepApi {
     }]
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::SupportBundlePath>,
-    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+        path_params: Path<support_bundle::SupportBundlePath>,
+    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>;
 
     /// Download the index of a support bundle
     #[endpoint {
@@ -422,7 +423,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
         headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundlePath>,
+        path_params: Path<support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the contents of a support bundle
@@ -433,7 +434,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
         headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundlePath>,
+        path_params: Path<support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download a file within a support bundle
@@ -444,7 +445,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
         headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundleFilePath>,
+        path_params: Path<support_bundle::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the metadata of a support bundle
@@ -455,7 +456,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
         headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundlePath>,
+        path_params: Path<support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the metadata of a file within the support bundle
@@ -466,7 +467,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
         headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundleFilePath>,
+        path_params: Path<support_bundle::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Create a new support bundle
@@ -476,8 +477,8 @@ pub trait NexusLockstepApi {
     }]
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<params::SupportBundleCreate>,
-    ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError>;
+        body: TypedBody<support_bundle::SupportBundleCreate>,
+    ) -> Result<HttpResponseCreated<support_bundle::SupportBundleInfo>, HttpError>;
 
     /// Delete an existing support bundle
     ///
@@ -489,7 +490,7 @@ pub trait NexusLockstepApi {
     }]
     async fn support_bundle_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::SupportBundlePath>,
+        path_params: Path<support_bundle::SupportBundlePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Update a support bundle
@@ -499,9 +500,9 @@ pub trait NexusLockstepApi {
     }]
     async fn support_bundle_update(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::SupportBundlePath>,
-        body: TypedBody<params::SupportBundleUpdate>,
-    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+        path_params: Path<support_bundle::SupportBundlePath>,
+        body: TypedBody<support_bundle::SupportBundleUpdate>,
+    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>;
 
     /// Get the current clickhouse policy
     #[endpoint {

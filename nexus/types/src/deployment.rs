@@ -12,7 +12,7 @@
 //! nexus/db-model, but nexus/reconfigurator/planning does not currently know
 //! about nexus/db-model and it's convenient to separate these concerns.)
 
-use crate::external_api::views::SledState;
+use crate::external_api::sled::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfigGeneric;

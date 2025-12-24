@@ -11,8 +11,9 @@ use std::net::IpAddr;
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_project, object_create, object_get,
 };
-use nexus_types::external_api::params::MulticastGroupCreate;
-use nexus_types::external_api::views::MulticastGroup;
+use nexus_types::external_api::multicast::{
+    MulticastGroup, MulticastGroupCreate,
+};
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, Instance, InstanceState, NameOrId,
 };

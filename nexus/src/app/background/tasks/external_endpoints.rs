@@ -116,7 +116,7 @@ mod test {
     use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::shared::SiloIdentityMode;
+    use nexus_types::external_api::silo::SiloIdentityMode;
     use nexus_types::identity::Resource;
     use tokio::sync::watch;
 

@@ -10,14 +10,14 @@ use http::StatusCode;
 use http::method::Method;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
+use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate,
     BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
     SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPortApplySettings,
     SwitchPortSettingsCreate,
 };
-use nexus_types::external_api::views::Rack;
+use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::{
     self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
     LinkSpeed, NameOrId, SwitchLocation, SwitchPort, SwitchPortSettings,

@@ -3093,10 +3093,10 @@ mod tests {
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
-    use nexus_types::external_api::views::PhysicalDiskPolicy;
-    use nexus_types::external_api::views::PhysicalDiskState;
-    use nexus_types::external_api::views::SledPolicy;
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::physical_disk::{
+        PhysicalDiskPolicy, PhysicalDiskState,
+    };
+    use nexus_types::external_api::sled::{SledPolicy, SledState};
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Collection;
     use omicron_common::address::IpRange;

@@ -12,11 +12,11 @@ use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
 use super::OmicronZoneNic;
 use crate::deployment::PlannerConfig;
-use crate::external_api::views::PhysicalDiskPolicy;
-use crate::external_api::views::PhysicalDiskState;
-use crate::external_api::views::SledPolicy;
-use crate::external_api::views::SledProvisionPolicy;
-use crate::external_api::views::SledState;
+use crate::external_api::physical_disk::PhysicalDiskPolicy;
+use crate::external_api::physical_disk::PhysicalDiskState;
+use crate::external_api::sled::SledPolicy;
+use crate::external_api::sled::SledProvisionPolicy;
+use crate::external_api::sled::SledState;
 use crate::inventory::BaseboardId;
 use chrono::DateTime;
 use chrono::TimeDelta;
@@ -629,24 +629,37 @@ pub enum DiskFilter {
 }
 
 impl DiskFilter {
-    fn matches_policy_and_state(
+    /// Returns true if the given policy and state match this filter
+    pub fn matches_policy_and_state(
         self,
         policy: PhysicalDiskPolicy,
         state: PhysicalDiskState,
     ) -> bool {
-        policy.matches(self) && state.matches(self)
+        self.matches_policy(policy) && self.matches_state(state)
     }
-}
 
-impl PhysicalDiskPolicy {
-    /// Returns true if self matches the filter
-    pub fn matches(self, filter: DiskFilter) -> bool {
-        match self {
-            PhysicalDiskPolicy::InService => match filter {
+    /// Returns true if the given policy matches this filter
+    pub fn matches_policy(self, policy: PhysicalDiskPolicy) -> bool {
+        match policy {
+            PhysicalDiskPolicy::InService => match self {
                 DiskFilter::All => true,
                 DiskFilter::InService => true,
             },
-            PhysicalDiskPolicy::Expunged => match filter {
+            PhysicalDiskPolicy::Expunged => match self {
+                DiskFilter::All => true,
+                DiskFilter::InService => false,
+            },
+        }
+    }
+
+    /// Returns true if the given state matches this filter
+    pub fn matches_state(self, state: PhysicalDiskState) -> bool {
+        match state {
+            PhysicalDiskState::Active => match self {
+                DiskFilter::All => true,
+                DiskFilter::InService => true,
+            },
+            PhysicalDiskState::Decommissioned => match self {
                 DiskFilter::All => true,
                 DiskFilter::InService => false,
             },
@@ -656,35 +669,25 @@ impl PhysicalDiskPolicy {
     /// Returns all policies matching the given filter.
     ///
     /// This is meant for database access, and is generally paired with
-    /// [`PhysicalDiskState::all_matching`]. See `ApplyPhysicalDiskFilterExt` in
+    /// [`DiskFilter::all_matching_states`]. See `ApplyPhysicalDiskFilterExt` in
     /// nexus-db-model.
-    pub fn all_matching(filter: DiskFilter) -> impl Iterator<Item = Self> {
-        Self::iter().filter(move |state| state.matches(filter))
-    }
-}
-
-impl PhysicalDiskState {
-    /// Returns true if self matches the filter
-    pub fn matches(self, filter: DiskFilter) -> bool {
-        match self {
-            PhysicalDiskState::Active => match filter {
-                DiskFilter::All => true,
-                DiskFilter::InService => true,
-            },
-            PhysicalDiskState::Decommissioned => match filter {
-                DiskFilter::All => true,
-                DiskFilter::InService => false,
-            },
-        }
+    pub fn all_matching_policies(
+        self,
+    ) -> impl Iterator<Item = PhysicalDiskPolicy> {
+        PhysicalDiskPolicy::iter()
+            .filter(move |policy| self.matches_policy(*policy))
     }
 
-    /// Returns all state matching the given filter.
+    /// Returns all states matching the given filter.
     ///
     /// This is meant for database access, and is generally paired with
-    /// [`PhysicalDiskPolicy::all_matching`]. See `ApplyPhysicalDiskFilterExt` in
+    /// [`DiskFilter::all_matching_policies`]. See `ApplyPhysicalDiskFilterExt` in
     /// nexus-db-model.
-    pub fn all_matching(filter: DiskFilter) -> impl Iterator<Item = Self> {
-        Self::iter().filter(move |state| state.matches(filter))
+    pub fn all_matching_states(
+        self,
+    ) -> impl Iterator<Item = PhysicalDiskState> {
+        PhysicalDiskState::iter()
+            .filter(move |state| self.matches_state(*state))
     }
 }
 
@@ -826,32 +829,30 @@ pub enum SledFilter {
 }
 
 impl SledFilter {
-    /// Returns true if self matches the provided policy and state.
+    /// Returns true if the provided policy and state match this filter.
     pub fn matches_policy_and_state(
         self,
         policy: SledPolicy,
         state: SledState,
     ) -> bool {
-        policy.matches(self) && state.matches(self)
+        self.matches_policy(policy) && self.matches_state(state)
     }
-}
 
-impl SledPolicy {
-    /// Returns true if self matches the filter.
+    /// Returns true if the given policy matches this filter.
     ///
     /// Any users of this must also compare against the [`SledState`], if
     /// relevant: a sled filter is fully matched when it matches both the
     /// policy and the state. See [`SledFilter::matches_policy_and_state`].
-    pub fn matches(self, filter: SledFilter) -> bool {
+    pub fn matches_policy(self, policy: SledPolicy) -> bool {
         // Some notes:
         //
         // # Match style
         //
         // This code could be written in three ways:
         //
-        // 1. match self { match filter { ... } }
-        // 2. match filter { match self { ... } }
-        // 3. match (self, filter) { ... }
+        // 1. match policy { match self { ... } }
+        // 2. match self { match policy { ... } }
+        // 3. match (self, policy) { ... }
         //
         // We choose 1 here because we expect many filters and just a few
         // policies, and 1 is the easiest form to represent that.
@@ -863,12 +864,12 @@ impl SledPolicy {
         // have a policy+state combo where the policy says the sled is in
         // service but the state is decommissioned, for example, but the two
         // separate types let us represent that. Code that ANDs
-        // policy.matches(filter) and state.matches(filter) naturally guards
-        // against those states.
-        match self {
+        // filter.matches_policy(policy) and filter.matches_state(state)
+        // naturally guards against those states.
+        match policy {
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::Provisionable,
-            } => match filter {
+            } => match self {
                 SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
@@ -883,7 +884,7 @@ impl SledPolicy {
             },
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
-            } => match filter {
+            } => match self {
                 SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
@@ -896,7 +897,7 @@ impl SledPolicy {
                 SledFilter::TufArtifactReplication => true,
                 SledFilter::SpsUpdatedByReconfigurator => true,
             },
-            SledPolicy::Expunged => match filter {
+            SledPolicy::Expunged => match self {
                 SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => true,
@@ -912,26 +913,15 @@ impl SledPolicy {
         }
     }
 
-    /// Returns all policies matching the given filter.
-    ///
-    /// This is meant for database access, and is generally paired with
-    /// [`SledState::all_matching`]. See `ApplySledFilterExt` in
-    /// nexus-db-model.
-    pub fn all_matching(filter: SledFilter) -> impl Iterator<Item = Self> {
-        Self::iter().filter(move |policy| policy.matches(filter))
-    }
-}
-
-impl SledState {
-    /// Returns true if self matches the filter.
+    /// Returns true if the given state matches this filter.
     ///
     /// Any users of this must also compare against the [`SledPolicy`], if
     /// relevant: a sled filter is fully matched when both the policy and the
     /// state match. See [`SledFilter::matches_policy_and_state`].
-    pub fn matches(self, filter: SledFilter) -> bool {
-        // See `SledFilter::matches` above for some notes.
-        match self {
-            SledState::Active => match filter {
+    pub fn matches_state(self, state: SledState) -> bool {
+        // See `matches_policy` above for some notes.
+        match state {
+            SledState::Active => match self {
                 SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
@@ -944,7 +934,7 @@ impl SledState {
                 SledFilter::TufArtifactReplication => true,
                 SledFilter::SpsUpdatedByReconfigurator => true,
             },
-            SledState::Decommissioned => match filter {
+            SledState::Decommissioned => match self {
                 SledFilter::All => true,
                 SledFilter::Commissioned => false,
                 SledFilter::Decommissioned => true,
@@ -960,13 +950,22 @@ impl SledState {
         }
     }
 
-    /// Returns all policies matching the given filter.
+    /// Returns all policies matching this filter.
     ///
     /// This is meant for database access, and is generally paired with
-    /// [`SledPolicy::all_matching`]. See `ApplySledFilterExt` in
+    /// [`SledFilter::all_matching_states`]. See `ApplySledFilterExt` in
     /// nexus-db-model.
-    pub fn all_matching(filter: SledFilter) -> impl Iterator<Item = Self> {
-        Self::iter().filter(move |state| state.matches(filter))
+    pub fn all_matching_policies(self) -> impl Iterator<Item = SledPolicy> {
+        SledPolicy::iter().filter(move |policy| self.matches_policy(*policy))
+    }
+
+    /// Returns all states matching this filter.
+    ///
+    /// This is meant for database access, and is generally paired with
+    /// [`SledFilter::all_matching_policies`]. See `ApplySledFilterExt` in
+    /// nexus-db-model.
+    pub fn all_matching_states(self) -> impl Iterator<Item = SledState> {
+        SledState::iter().filter(move |state| self.matches_state(*state))
     }
 }
 

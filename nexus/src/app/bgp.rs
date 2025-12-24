@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::app::authz;
-use crate::external_api::params;
 use mg_admin_client::types::MessageHistoryRequest;
 use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
 use nexus_db_queries::context::OpContext;
+use nexus_types::external_api::networking;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, BgpExported, BgpImportedRouteIpv4, BgpMessageHistory, BgpPeerStatus,
@@ -19,7 +19,7 @@ impl super::Nexus {
     pub async fn bgp_config_create(
         &self,
         opctx: &OpContext,
-        config: &params::BgpConfigCreate,
+        config: &networking::BgpConfigCreate,
     ) -> CreateResult<BgpConfig> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result = self.db_datastore.bgp_config_create(opctx, config).await?;
@@ -47,7 +47,7 @@ impl super::Nexus {
     pub async fn bgp_config_delete(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpConfigSelector,
+        sel: &networking::BgpConfigSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result = self.db_datastore.bgp_config_delete(opctx, sel).await?;
@@ -57,7 +57,7 @@ impl super::Nexus {
     pub async fn bgp_update_announce_set(
         &self,
         opctx: &OpContext,
-        announce: &params::BgpAnnounceSetCreate,
+        announce: &networking::BgpAnnounceSetCreate,
     ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result =
@@ -81,7 +81,7 @@ impl super::Nexus {
     pub async fn bgp_delete_announce_set(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpAnnounceSetSelector,
+        sel: &networking::BgpAnnounceSetSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result =
@@ -92,7 +92,7 @@ impl super::Nexus {
     pub async fn bgp_announcement_list(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpAnnounceSetSelector,
+        sel: &networking::BgpAnnounceSetSelector,
     ) -> ListResultVec<BgpAnnouncement> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore.bgp_announcement_list(opctx, sel).await
@@ -226,7 +226,7 @@ impl super::Nexus {
     pub async fn bgp_message_history(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpRouteSelector,
+        sel: &networking::BgpRouteSelector,
     ) -> ListResultVec<SwitchBgpHistory> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
@@ -269,7 +269,7 @@ impl super::Nexus {
     pub async fn bgp_imported_routes_ipv4(
         &self,
         opctx: &OpContext,
-        _sel: &params::BgpRouteSelector,
+        _sel: &networking::BgpRouteSelector,
     ) -> ListResultVec<BgpImportedRouteIpv4> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();

@@ -21,13 +21,14 @@ use nexus_test_utils::resource_helpers::{
     link_ip_pool, object_create, object_delete,
 };
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::params::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment, IpPoolCreate,
-    MulticastGroupCreate,
+use nexus_types::external_api::instance::{
+    InstanceCreate, InstanceNetworkInterfaceAttachment,
 };
-use nexus_types::external_api::shared::{IpRange, Ipv4Range};
-use nexus_types::external_api::views::{
-    IpPool, IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
+use nexus_types::external_api::ip_pool::{
+    IpPool, IpPoolCreate, IpPoolRange, IpRange, IpVersion, Ipv4Range,
+};
+use nexus_types::external_api::multicast::{
+    MulticastGroup, MulticastGroupCreate, MulticastGroupMember,
 };
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::{

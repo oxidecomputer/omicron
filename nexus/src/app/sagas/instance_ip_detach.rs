@@ -10,10 +10,10 @@ use super::instance_common::{
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IpAttachState;
-use nexus_types::external_api::views;
+use nexus_types::external_api::external_ip;
+use nexus_types::external_api::instance;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use ref_cast::RefCast;
@@ -53,7 +53,7 @@ declare_saga_actions! {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
-    pub delete_params: params::ExternalIpDetach,
+    pub delete_params: instance::ExternalIpDetach,
     pub authz_instance: authz::Instance,
     pub project_id: Uuid,
     /// Authentication context to use to fetch the instance's current state from
@@ -75,7 +75,7 @@ async fn siid_begin_detach_ip(
     let instance_id =
         InstanceUuid::from_untyped_uuid(params.authz_instance.id());
     match &params.delete_params {
-        params::ExternalIpDetach::Ephemeral => {
+        instance::ExternalIpDetach::Ephemeral => {
             let eip = datastore
                 .instance_lookup_ephemeral_ip(&opctx, instance_id)
                 .await
@@ -101,7 +101,7 @@ async fn siid_begin_detach_ip(
                 })
             }
         }
-        params::ExternalIpDetach::Floating { floating_ip } => {
+        instance::ExternalIpDetach::Floating { floating_ip } => {
             let (.., authz_fip) = match floating_ip {
                 NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
                     .project_id(params.project_id)
@@ -227,7 +227,7 @@ async fn siid_update_opte_undo(
 
 async fn siid_complete_detach(
     sagactx: NexusActionContext,
-) -> Result<Option<views::ExternalIp>, ActionError> {
+) -> Result<Option<external_ip::ExternalIp>, ActionError> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
@@ -314,11 +314,11 @@ pub(crate) mod test {
         use_floating: bool,
     ) -> Params {
         let delete_params = if use_floating {
-            params::ExternalIpDetach::Floating {
+            instance::ExternalIpDetach::Floating {
                 floating_ip: FIP_NAME.parse::<Name>().unwrap().into(),
             }
         } else {
-            params::ExternalIpDetach::Ephemeral
+            instance::ExternalIpDetach::Ephemeral
         };
 
         let (.., authz_project, authz_instance) =

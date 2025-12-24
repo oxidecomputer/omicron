@@ -302,7 +302,7 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::project;
     use omicron_common::api::external::Name;
 
     type ControlPlaneTestContext =
@@ -321,7 +321,7 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let project_selector = params::ProjectSelector {
+        let project_selector = project::ProjectSelector {
             project: Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
         };
 

@@ -17,7 +17,7 @@ use crate::{
         Blueprint, BlueprintZoneDisposition, BlueprintZoneType,
         blueprint_zone_type,
     },
-    external_api::views::SledPolicy,
+    external_api::sled::SledPolicy,
 };
 
 /// The minimal information needed to represent a sled in the context of

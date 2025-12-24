@@ -1162,8 +1162,8 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
-    use nexus_types::external_api::shared::IpRange;
     use nexus_types::inventory::SourceNatConfigGeneric;
+    use omicron_common::address::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;

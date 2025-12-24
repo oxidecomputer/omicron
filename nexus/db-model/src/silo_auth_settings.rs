@@ -1,7 +1,7 @@
 use crate::SqlU32;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::silo_auth_settings;
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::silo;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -37,7 +37,7 @@ impl SiloAuthSettings {
     }
 }
 
-impl From<SiloAuthSettings> for views::SiloAuthSettings {
+impl From<SiloAuthSettings> for silo::SiloAuthSettings {
     fn from(silo_auth_settings: SiloAuthSettings) -> Self {
         Self {
             silo_id: silo_auth_settings.silo_id,
@@ -58,8 +58,8 @@ pub struct SiloAuthSettingsUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::SiloAuthSettingsUpdate> for SiloAuthSettingsUpdate {
-    fn from(params: params::SiloAuthSettingsUpdate) -> Self {
+impl From<silo::SiloAuthSettingsUpdate> for SiloAuthSettingsUpdate {
+    fn from(params: silo::SiloAuthSettingsUpdate) -> Self {
         Self {
             device_token_max_ttl_seconds: Some(
                 params.device_token_max_ttl_seconds.map(|ttl| ttl.get().into()),

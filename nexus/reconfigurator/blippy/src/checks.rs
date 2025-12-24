@@ -598,7 +598,7 @@ fn check_mupdate_override(blippy: &mut Blippy<'_>) {
     // Perform checks for invariants that should be upheld if
     // remove_mupdate_override is set for a sled.
     for (&sled_id, sled) in &blippy.blueprint().sleds {
-        if !sled.state.matches(SledFilter::InService) {
+        if !SledFilter::InService.matches_state(sled.state) {
             continue;
         }
 

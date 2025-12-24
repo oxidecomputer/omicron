@@ -619,12 +619,12 @@ async fn sim_instance_migrate(
 mod tests {
     use super::*;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::params;
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance as instance_types;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
@@ -648,7 +648,7 @@ mod tests {
         object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -659,7 +659,7 @@ mod tests {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
+                    instance_types::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,

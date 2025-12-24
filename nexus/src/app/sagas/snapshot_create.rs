@@ -98,11 +98,11 @@ use super::{
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
-use crate::external_api::params;
 use anyhow::anyhow;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_types::external_api::{disk, snapshot};
 use omicron_common::api::external::Error;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_common::{
@@ -137,7 +137,7 @@ pub(crate) struct Params {
     pub disk: db::datastore::CrucibleDisk,
     pub attach_instance_id: Option<Uuid>,
     pub use_the_pantry: bool,
-    pub create_params: params::SnapshotCreate,
+    pub create_params: snapshot::SnapshotCreate,
 }
 
 // snapshot create saga: actions
@@ -450,8 +450,8 @@ async fn ssc_alloc_regions(
         .disk_region_allocate(
             &opctx,
             destination_volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
+            &disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(
                     disk.block_size.to_bytes(),
                 )
                 .map_err(|e| ActionError::action_failed(e.to_string()))?,
@@ -1737,7 +1737,7 @@ mod test {
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params::InstanceDiskAttachment;
+    use nexus_types::external_api::instance as instance_types;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Instance;
@@ -1978,7 +1978,7 @@ mod test {
             disk: db_disk,
             attach_instance_id,
             use_the_pantry,
-            create_params: params::SnapshotCreate {
+            create_params: snapshot::SnapshotCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-snapshot".parse().expect("Invalid disk name"),
                     description: "My snapshot".to_string(),
@@ -2108,18 +2108,19 @@ mod test {
     async fn setup_test_instance(
         cptestctx: &ControlPlaneTestContext,
         client: &ClientTestContext,
-        disks_to_attach: Vec<InstanceDiskAttachment>,
+        disks_to_attach: Vec<instance_types::InstanceDiskAttachment>,
     ) -> InstanceAndActiveVmm {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
 
         let mut disks_iter = disks_to_attach.into_iter();
         let boot_disk = disks_iter.next();
-        let data_disks: Vec<InstanceDiskAttachment> = disks_iter.collect();
+        let data_disks: Vec<instance_types::InstanceDiskAttachment> =
+            disks_iter.collect();
 
         let instance: Instance = object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -2132,7 +2133,7 @@ mod test {
                         .to_vec(),
                 ssh_public_keys:  Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
+                    instance_types::InstanceNetworkInterfaceAttachment::None,
                 boot_disk,
                 cpu_platform: None,
                 disks: data_disks,
@@ -2264,8 +2265,8 @@ mod test {
                             let state = setup_test_instance(
                                 cptestctx,
                                 client,
-                                vec![params::InstanceDiskAttachment::Attach(
-                                    params::InstanceDiskAttach {
+                                vec![instance_types::InstanceDiskAttachment::Attach(
+                                    instance_types::InstanceDiskAttach {
                                         name: Name::from_str(DISK_NAME)
                                             .unwrap(),
                                     },
@@ -2415,8 +2416,8 @@ mod test {
         let _instance_and_vmm = setup_test_instance(
             &cptestctx,
             &client,
-            vec![params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
+            vec![instance_types::InstanceDiskAttachment::Attach(
+                instance_types::InstanceDiskAttach {
                     name: Name::from_str(DISK_NAME).unwrap(),
                 },
             )],
@@ -2566,8 +2567,8 @@ mod test {
         let instance_state = setup_test_instance(
             cptestctx,
             client,
-            vec![params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
+            vec![instance_types::InstanceDiskAttachment::Attach(
+                instance_types::InstanceDiskAttach {
                     name: Name::from_str(DISK_NAME).unwrap(),
                 },
             )],

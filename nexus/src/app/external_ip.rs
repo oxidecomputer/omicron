@@ -6,15 +6,15 @@
 
 use std::sync::Arc;
 
-use crate::external_api::views::ExternalIp;
-use crate::external_api::views::FloatingIp;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::IpAttachState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::external_ip;
+use nexus_types::external_api::floating_ip;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::project;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -31,7 +31,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> ListResultVec<ExternalIp> {
+    ) -> ListResultVec<external_ip::ExternalIp> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Read).await?;
         Ok(self
@@ -55,10 +55,10 @@ impl super::Nexus {
     pub(crate) fn floating_ip_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        fip_selector: params::FloatingIpSelector,
+        fip_selector: floating_ip::FloatingIpSelector,
     ) -> LookupResult<lookup::FloatingIp<'a>> {
         match fip_selector {
-            params::FloatingIpSelector {
+            floating_ip::FloatingIpSelector {
                 floating_ip: NameOrId::Id(id),
                 project: None,
             } => {
@@ -66,17 +66,21 @@ impl super::Nexus {
                     .floating_ip_id(id);
                 Ok(floating_ip)
             }
-            params::FloatingIpSelector {
+            floating_ip::FloatingIpSelector {
                 floating_ip: NameOrId::Name(name),
                 project: Some(project),
             } => {
                 let floating_ip = self
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .project_lookup(
+                        opctx,
+                        project::ProjectSelector { project },
+                    )?
                     .floating_ip_name_owned(name.into());
                 Ok(floating_ip)
             }
-            params::FloatingIpSelector {
-                floating_ip: NameOrId::Id(_), ..
+            floating_ip::FloatingIpSelector {
+                floating_ip: NameOrId::Id(_),
+                ..
             } => Err(Error::invalid_request(
                 "when providing Floating IP as an ID project should not be specified",
             )),
@@ -91,7 +95,7 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<FloatingIp> {
+    ) -> ListResultVec<floating_ip::FloatingIp> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
 
@@ -108,12 +112,12 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        params: params::FloatingIpCreate,
-    ) -> CreateResult<FloatingIp> {
+        params: floating_ip::FloatingIpCreate,
+    ) -> CreateResult<floating_ip::FloatingIp> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        let params::FloatingIpCreate { identity, pool, ip } = params;
+        let floating_ip::FloatingIpCreate { identity, pool, ip } = params;
 
         // resolve NameOrId into authz::IpPool
         let pool = match pool {
@@ -138,8 +142,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         ip_lookup: lookup::FloatingIp<'_>,
-        params: params::FloatingIpUpdate,
-    ) -> UpdateResult<FloatingIp> {
+        params: floating_ip::FloatingIpUpdate,
+    ) -> UpdateResult<floating_ip::FloatingIp> {
         let (.., authz_fip) =
             ip_lookup.lookup_for(authz::Action::Modify).await?;
         Ok(self
@@ -164,20 +168,20 @@ impl super::Nexus {
     pub(crate) async fn floating_ip_attach(
         self: &Arc<Self>,
         opctx: &OpContext,
-        fip_selector: params::FloatingIpSelector,
-        target: params::FloatingIpAttach,
-    ) -> UpdateResult<views::FloatingIp> {
+        fip_selector: floating_ip::FloatingIpSelector,
+        target: floating_ip::FloatingIpAttach,
+    ) -> UpdateResult<floating_ip::FloatingIp> {
         let fip_lookup = self.floating_ip_lookup(opctx, fip_selector)?;
         let (.., authz_project, authz_fip) =
             fip_lookup.lookup_for(authz::Action::Modify).await?;
 
         match target.kind {
-            params::FloatingIpParentKind::Instance => {
+            floating_ip::FloatingIpParentKind::Instance => {
                 // Handle the cases where the FIP and instance are specified by
                 // name and ID (or ID and name) respectively. We remove the project
                 // from the instance lookup if using the instance's ID, and insert
                 // the floating IP's project ID otherwise.
-                let instance_selector = params::InstanceSelector {
+                let instance_selector = instance::InstanceSelector {
                     project: match &target.parent {
                         NameOrId::Id(_) => None,
                         NameOrId::Name(_) => Some(authz_project.id().into()),
@@ -195,7 +199,7 @@ impl super::Nexus {
                     authz_project,
                 )
                 .await
-                .and_then(FloatingIp::try_from)
+                .and_then(floating_ip::FloatingIp::try_from)
             }
         }
     }
@@ -204,7 +208,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         ip_lookup: lookup::FloatingIp<'_>,
-    ) -> UpdateResult<views::FloatingIp> {
+    ) -> UpdateResult<floating_ip::FloatingIp> {
         // XXX: Today, this only happens for instances.
         //      In future, we will need to separate out by the *type* of
         //      parent attached to a floating IP. We don't yet store this
@@ -217,17 +221,17 @@ impl super::Nexus {
             return Ok(db_fip.into());
         };
 
-        let instance_selector = params::InstanceSelector {
+        let instance_selector = instance::InstanceSelector {
             project: None,
             instance: parent_id.into(),
         };
         let instance = self.instance_lookup(opctx, instance_selector)?;
-        let attach_params = &params::ExternalIpDetach::Floating {
+        let attach_params = &instance::ExternalIpDetach::Floating {
             floating_ip: authz_fip.id().into(),
         };
 
         self.instance_detach_external_ip(opctx, &instance, attach_params)
             .await
-            .and_then(FloatingIp::try_from)
+            .and_then(floating_ip::FloatingIp::try_from)
     }
 }

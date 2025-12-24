@@ -7,11 +7,11 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
-use crate::external_api::params;
 use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
+use nexus_types::external_api::{internet_gateway, vpc};
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -28,7 +28,7 @@ use uuid::Uuid;
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub vpc_create: params::VpcCreate,
+    pub vpc_create: vpc::VpcCreate,
     pub authz_project: authz::Project,
 }
 
@@ -215,7 +215,7 @@ async fn svc_create_router(
         system_router_id,
         vpc_id,
         db::model::VpcRouterKind::System,
-        params::VpcRouterCreate {
+        vpc::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: "system".parse().unwrap(),
                 description: "Routes are automatically added to this \
@@ -300,7 +300,7 @@ async fn svc_create_route(
         route_id,
         system_router_id,
         external::RouterRouteKind::Default,
-        params::RouterRouteCreate {
+        vpc::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
                 description: "The default route of a vpc".to_string(),
@@ -548,7 +548,7 @@ async fn svc_create_gateway(
     let igw = db::model::InternetGateway::new(
         default_igw_id,
         vpc_id,
-        params::InternetGatewayCreate {
+        internet_gateway::InternetGatewayCreate {
             identity: IdentityMetadataCreateParams {
                 name: "default".parse().unwrap(),
                 description: "Automatically created default VPC gateway".into(),
@@ -649,7 +649,6 @@ async fn svc_notify_sleds(
 pub(crate) mod test {
     use crate::{
         app::sagas::vpc_create::Params, app::sagas::vpc_create::SagaVpcCreate,
-        external_api::params,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
@@ -665,6 +664,7 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::{project, vpc as vpc_types};
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_common::api::external::NameOrId;
@@ -688,7 +688,7 @@ pub(crate) mod test {
     ) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
-            vpc_create: params::VpcCreate {
+            vpc_create: vpc_types::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-vpc".parse().unwrap(),
                     description: "My VPC".to_string(),
@@ -714,7 +714,7 @@ pub(crate) mod test {
     ) -> authz::Project {
         let nexus = &cptestctx.server.server_context().nexus;
         let project_selector =
-            params::ProjectSelector { project: NameOrId::Id(project_id) };
+            project::ProjectSelector { project: NameOrId::Id(project_id) };
         let opctx = test_opctx(&cptestctx);
         let (.., authz_project) = nexus
             .project_lookup(&opctx, project_selector)

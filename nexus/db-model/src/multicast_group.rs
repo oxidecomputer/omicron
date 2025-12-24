@@ -88,7 +88,7 @@ use db_macros::Resource;
 use nexus_db_schema::schema::{
     multicast_group, multicast_group_member, underlay_multicast_group,
 };
-use nexus_types::external_api::views;
+use nexus_types::external_api::multicast as multicast_types;
 use nexus_types::identity::Resource as IdentityResource;
 use omicron_common::api::external::{self, IdentityMetadata};
 use omicron_common::vlan::VlanID;
@@ -283,7 +283,7 @@ pub struct MulticastGroupMember {
 
 // Conversions to external API views
 
-impl TryFrom<ExternalMulticastGroup> for views::MulticastGroup {
+impl TryFrom<ExternalMulticastGroup> for multicast_types::MulticastGroup {
     type Error = external::Error;
 
     fn try_from(group: ExternalMulticastGroup) -> Result<Self, Self::Error> {
@@ -297,7 +297,7 @@ impl TryFrom<ExternalMulticastGroup> for views::MulticastGroup {
                 ))
             })?;
 
-        Ok(views::MulticastGroup {
+        Ok(multicast_types::MulticastGroup {
             identity: group.identity(),
             multicast_ip: group.multicast_ip.ip(),
             source_ips: group
@@ -312,11 +312,11 @@ impl TryFrom<ExternalMulticastGroup> for views::MulticastGroup {
     }
 }
 
-impl TryFrom<MulticastGroupMember> for views::MulticastGroupMember {
+impl TryFrom<MulticastGroupMember> for multicast_types::MulticastGroupMember {
     type Error = external::Error;
 
     fn try_from(member: MulticastGroupMember) -> Result<Self, Self::Error> {
-        Ok(views::MulticastGroupMember {
+        Ok(multicast_types::MulticastGroupMember {
             identity: IdentityMetadata {
                 id: member.id,
                 name: format!("member-{}", member.id).parse().map_err(|e| {
@@ -470,12 +470,10 @@ pub struct ExternalMulticastGroupUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<nexus_types::external_api::params::MulticastGroupUpdate>
+impl From<multicast_types::MulticastGroupUpdate>
     for ExternalMulticastGroupUpdate
 {
-    fn from(
-        params: nexus_types::external_api::params::MulticastGroupUpdate,
-    ) -> Self {
+    fn from(params: multicast_types::MulticastGroupUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
