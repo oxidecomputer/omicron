@@ -109,8 +109,8 @@ impl DataStore {
         Ok(output)
     }
 
-    /// This is a special method called during `rack_initialize that inserts a
-    /// configuration  with all nodes acked. It specifically does no validation
+    /// This is a special method called during `rack_initialize` that inserts a
+    /// configuration with all nodes acked. It specifically does no validation
     /// and is only expected to be called once during the lifetime of a rack.
     ///
     /// For reconfiguration and lrtq upgrade we always call
