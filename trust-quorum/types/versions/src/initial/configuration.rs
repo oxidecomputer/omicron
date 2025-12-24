@@ -13,8 +13,8 @@ use omicron_uuid_kinds::RackUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use slog_error_chain::SlogInlineError;
 pub use sled_hardware_types::BaseboardId;
+use slog_error_chain::SlogInlineError;
 
 use super::crypto::{EncryptedRackSecrets, Sha3_256Digest};
 use super::types::{Epoch, Threshold};
@@ -32,7 +32,9 @@ pub struct ConfigurationMember {
 }
 
 /// Error creating a configuration.
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq, SlogInlineError, JsonSchema)]
+#[derive(
+    Debug, Clone, thiserror::Error, PartialEq, Eq, SlogInlineError, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigurationError {
     #[error("rack secret split error")]

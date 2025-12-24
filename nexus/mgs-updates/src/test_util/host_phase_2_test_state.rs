@@ -940,7 +940,7 @@ mod api_impl {
         async fn trust_quorum_reconfigure(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<
-                sled_agent_types::trust_quorum::TrustQuorumReconfigureRequest,
+                sled_agent_types::trust_quorum::ReconfigureRequest,
             >,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
@@ -949,7 +949,7 @@ mod api_impl {
         async fn trust_quorum_upgrade_from_lrtq(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<
-                sled_agent_types::trust_quorum::TrustQuorumLrtqUpgradeRequest,
+                sled_agent_types::trust_quorum::LrtqUpgradeRequest,
             >,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
@@ -957,15 +957,8 @@ mod api_impl {
 
         async fn trust_quorum_commit(
             _request_context: RequestContext<Self::Context>,
-            _body: TypedBody<
-                sled_agent_types::trust_quorum::TrustQuorumCommitRequest,
-            >,
-        ) -> Result<
-            HttpResponseOk<
-                sled_agent_types::trust_quorum::TrustQuorumCommitResponse,
-            >,
-            HttpError,
-        > {
+            _body: TypedBody<sled_agent_types::trust_quorum::CommitRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
@@ -973,22 +966,20 @@ mod api_impl {
             _request_context: RequestContext<Self::Context>,
         ) -> Result<
             HttpResponseOk<
-                Option<sled_agent_types::trust_quorum::TrustQuorumCoordinatorStatus>,
+                Option<sled_agent_types::trust_quorum::CoordinatorStatus>,
             >,
             HttpError,
-        >{
+        > {
             unimplemented!()
         }
 
         async fn trust_quorum_prepare_and_commit(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<
-                sled_agent_types::trust_quorum::TrustQuorumPrepareAndCommitRequest,
+                sled_agent_types::trust_quorum::PrepareAndCommitRequest,
             >,
         ) -> Result<
-            HttpResponseOk<
-                sled_agent_types::trust_quorum::TrustQuorumCommitResponse,
-            >,
+            HttpResponseOk<sled_agent_types::trust_quorum::CommitStatus>,
             HttpError,
         > {
             unimplemented!()
@@ -997,26 +988,19 @@ mod api_impl {
         async fn trust_quorum_proxy_commit(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<
-                sled_agent_types::trust_quorum::TrustQuorumProxyCommitRequest,
+                sled_agent_types::trust_quorum::ProxyCommitRequest,
             >,
-        ) -> Result<
-            HttpResponseOk<
-                sled_agent_types::trust_quorum::TrustQuorumCommitResponse,
-            >,
-            HttpError,
-        > {
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
         async fn trust_quorum_proxy_prepare_and_commit(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<
-                sled_agent_types::trust_quorum::TrustQuorumProxyPrepareAndCommitRequest,
+                sled_agent_types::trust_quorum::ProxyPrepareAndCommitRequest,
             >,
         ) -> Result<
-            HttpResponseOk<
-                sled_agent_types::trust_quorum::TrustQuorumCommitResponse,
-            >,
+            HttpResponseOk<sled_agent_types::trust_quorum::CommitStatus>,
             HttpError,
         > {
             unimplemented!()
@@ -1024,13 +1008,9 @@ mod api_impl {
 
         async fn trust_quorum_proxy_status(
             _request_context: RequestContext<Self::Context>,
-            _body: TypedBody<
-                sled_agent_types::trust_quorum::TrustQuorumProxyStatusRequest,
-            >,
+            _query_params: Query<sled_agent_types::sled::BaseboardId>,
         ) -> Result<
-            HttpResponseOk<
-                sled_agent_types::trust_quorum::TrustQuorumNodeStatus,
-            >,
+            HttpResponseOk<sled_agent_types::trust_quorum::NodeStatus>,
             HttpError,
         > {
             unimplemented!()

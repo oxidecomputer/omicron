@@ -15,7 +15,15 @@ use super::types::Epoch;
 /// An alarm indicating a protocol invariant violation.
 #[allow(clippy::large_enum_variant)]
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum Alarm {

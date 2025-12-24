@@ -169,13 +169,12 @@ pub mod trust_quorum {
     pub use crate::v13::trust_quorum::Threshold;
 
     // HTTP request types specific to the sled-agent API
-    pub use crate::v13::trust_quorum::TrustQuorumCommitRequest;
-    pub use crate::v13::trust_quorum::TrustQuorumLrtqUpgradeRequest;
-    pub use crate::v13::trust_quorum::TrustQuorumPrepareAndCommitRequest;
-    pub use crate::v13::trust_quorum::TrustQuorumProxyCommitRequest;
-    pub use crate::v13::trust_quorum::TrustQuorumProxyPrepareAndCommitRequest;
-    pub use crate::v13::trust_quorum::TrustQuorumProxyStatusRequest;
-    pub use crate::v13::trust_quorum::TrustQuorumReconfigureRequest;
+    pub use crate::v13::trust_quorum::CommitRequest;
+    pub use crate::v13::trust_quorum::LrtqUpgradeRequest;
+    pub use crate::v13::trust_quorum::PrepareAndCommitRequest;
+    pub use crate::v13::trust_quorum::ProxyCommitRequest;
+    pub use crate::v13::trust_quorum::ProxyPrepareAndCommitRequest;
+    pub use crate::v13::trust_quorum::ReconfigureRequest;
 }
 
 pub mod zone_bundle {

@@ -1548,29 +1548,49 @@
       }
     },
     "/trust-quorum/commit": {
-      "post": {
+      "put": {
         "summary": "Commit a trust quorum configuration",
         "operationId": "trust_quorum_commit",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TrustQuorumCommitRequest"
+                "$ref": "#/components/schemas/CommitRequest"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CommitStatus"
-                }
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/trust-quorum/configuration": {
+      "put": {
+        "summary": "Initiate a trust quorum reconfiguration",
+        "operationId": "trust_quorum_reconfigure",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconfigureRequest"
               }
             }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1606,14 +1626,14 @@
       }
     },
     "/trust-quorum/prepare-and-commit": {
-      "post": {
+      "put": {
         "summary": "Attempt to prepare and commit a trust quorum configuration",
         "operationId": "trust_quorum_prepare_and_commit",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TrustQuorumPrepareAndCommitRequest"
+                "$ref": "#/components/schemas/PrepareAndCommitRequest"
               }
             }
           },
@@ -1640,29 +1660,22 @@
       }
     },
     "/trust-quorum/proxy/commit": {
-      "post": {
+      "put": {
         "summary": "Proxy a commit operation to another trust quorum node",
         "operationId": "trust_quorum_proxy_commit",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TrustQuorumProxyCommitRequest"
+                "$ref": "#/components/schemas/ProxyCommitRequest"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CommitStatus"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1674,14 +1687,14 @@
       }
     },
     "/trust-quorum/proxy/prepare-and-commit": {
-      "post": {
+      "put": {
         "summary": "Proxy a prepare-and-commit operation to another trust quorum node",
         "operationId": "trust_quorum_proxy_prepare_and_commit",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TrustQuorumProxyPrepareAndCommitRequest"
+                "$ref": "#/components/schemas/ProxyPrepareAndCommitRequest"
               }
             }
           },
@@ -1708,19 +1721,29 @@
       }
     },
     "/trust-quorum/proxy/status": {
-      "post": {
+      "get": {
         "summary": "Proxy a status request to another trust quorum node",
         "operationId": "trust_quorum_proxy_status",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TrustQuorumProxyStatusRequest"
-              }
+        "parameters": [
+          {
+            "in": "query",
+            "name": "part_number",
+            "description": "Oxide Part Number",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           },
-          "required": true
-        },
+          {
+            "in": "query",
+            "name": "serial_number",
+            "description": "Serial number (unique for a given part number)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "successful operation",
@@ -1741,42 +1764,15 @@
         }
       }
     },
-    "/trust-quorum/reconfigure": {
-      "post": {
-        "summary": "Initiate a trust quorum reconfiguration",
-        "operationId": "trust_quorum_reconfigure",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TrustQuorumReconfigureRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/trust-quorum/upgrade-from-lrtq": {
-      "post": {
+    "/trust-quorum/upgrade": {
+      "put": {
         "summary": "Initiate an upgrade from LRTQ",
         "operationId": "trust_quorum_upgrade_from_lrtq",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TrustQuorumLrtqUpgradeRequest"
+                "$ref": "#/components/schemas/LrtqUpgradeRequest"
               }
             }
           },
@@ -3666,6 +3662,24 @@
           "duplicate_x_coordinates",
           "invalid_share_lengths",
           "invalid_share_id"
+        ]
+      },
+      "CommitRequest": {
+        "description": "Request to commit a trust quorum configuration at a given epoch.",
+        "type": "object",
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          }
+        },
+        "required": [
+          "epoch",
+          "rack_id"
         ]
       },
       "CommitStatus": {
@@ -6427,6 +6441,38 @@
           "volume_size"
         ]
       },
+      "LrtqUpgradeRequest": {
+        "description": "Request to upgrade from LRTQ (Legacy Rack Trust Quorum).",
+        "type": "object",
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          },
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
+          "threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "epoch",
+          "members",
+          "rack_id",
+          "threshold"
+        ]
+      },
       "M2Slot": {
         "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
         "type": "string",
@@ -7941,6 +7987,18 @@
           "speed400_g"
         ]
       },
+      "PrepareAndCommitRequest": {
+        "description": "Request to prepare and commit a trust quorum configuration.\n\nThis is the `Configuration` sent to a node that missed the `Prepare` phase.",
+        "type": "object",
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/Configuration"
+          }
+        },
+        "required": [
+          "config"
+        ]
+      },
       "PriorityDimension": {
         "description": "A dimension along with bundles can be sorted, to determine priority.",
         "oneOf": [
@@ -8186,6 +8244,65 @@
         "type": "string",
         "format": "uuid"
       },
+      "ProxyCommitRequest": {
+        "description": "Request to proxy a commit operation to another trust quorum node.",
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "The target node to proxy the request to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "epoch": {
+            "description": "The epoch to commit.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rack_id": {
+            "description": "Unique ID of the rack.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "destination",
+          "epoch",
+          "rack_id"
+        ]
+      },
+      "ProxyPrepareAndCommitRequest": {
+        "description": "Request to proxy a prepare-and-commit operation to another trust quorum node.",
+        "type": "object",
+        "properties": {
+          "config": {
+            "description": "The configuration to prepare and commit.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Configuration"
+              }
+            ]
+          },
+          "destination": {
+            "description": "The target node to proxy the request to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "config",
+          "destination"
+        ]
+      },
       "QemuPvpanic": {
         "type": "object",
         "properties": {
@@ -8284,6 +8401,44 @@
         },
         "type": "string",
         "format": "uuid"
+      },
+      "ReconfigureRequest": {
+        "description": "Reconfigure message for trust quorum changes.",
+        "type": "object",
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "last_committed_epoch": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          },
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
+          "threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "epoch",
+          "members",
+          "rack_id",
+          "threshold"
+        ]
       },
       "RemoveMupdateOverrideBootSuccessInventory": {
         "description": "Status of removing the mupdate override on the boot disk.",
@@ -9230,182 +9385,6 @@
         },
         "required": [
           "uplinks"
-        ]
-      },
-      "TrustQuorumCommitRequest": {
-        "description": "Request to commit a trust quorum configuration at a given epoch.",
-        "type": "object",
-        "properties": {
-          "epoch": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "rack_id": {
-            "$ref": "#/components/schemas/RackUuid"
-          }
-        },
-        "required": [
-          "epoch",
-          "rack_id"
-        ]
-      },
-      "TrustQuorumLrtqUpgradeRequest": {
-        "description": "Request to upgrade from LRTQ (Legacy Rack Trust Quorum).",
-        "type": "object",
-        "properties": {
-          "epoch": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
-          },
-          "rack_id": {
-            "$ref": "#/components/schemas/RackUuid"
-          },
-          "threshold": {
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "epoch",
-          "members",
-          "rack_id",
-          "threshold"
-        ]
-      },
-      "TrustQuorumPrepareAndCommitRequest": {
-        "description": "Request to prepare and commit a trust quorum configuration.\n\nThis is the `Configuration` sent to a node that missed the `Prepare` phase.",
-        "type": "object",
-        "properties": {
-          "config": {
-            "$ref": "#/components/schemas/Configuration"
-          }
-        },
-        "required": [
-          "config"
-        ]
-      },
-      "TrustQuorumProxyCommitRequest": {
-        "description": "Request to proxy a commit operation to another trust quorum node.",
-        "type": "object",
-        "properties": {
-          "destination": {
-            "description": "The target node to proxy the request to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BaseboardId"
-              }
-            ]
-          },
-          "epoch": {
-            "description": "The epoch to commit.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "rack_id": {
-            "description": "Unique ID of the rack.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RackUuid"
-              }
-            ]
-          }
-        },
-        "required": [
-          "destination",
-          "epoch",
-          "rack_id"
-        ]
-      },
-      "TrustQuorumProxyPrepareAndCommitRequest": {
-        "description": "Request to proxy a prepare-and-commit operation to another trust quorum node.",
-        "type": "object",
-        "properties": {
-          "config": {
-            "description": "The configuration to prepare and commit.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Configuration"
-              }
-            ]
-          },
-          "destination": {
-            "description": "The target node to proxy the request to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BaseboardId"
-              }
-            ]
-          }
-        },
-        "required": [
-          "config",
-          "destination"
-        ]
-      },
-      "TrustQuorumProxyStatusRequest": {
-        "description": "Request to proxy a status request to another trust quorum node.",
-        "type": "object",
-        "properties": {
-          "destination": {
-            "description": "The target node to get the status from.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BaseboardId"
-              }
-            ]
-          }
-        },
-        "required": [
-          "destination"
-        ]
-      },
-      "TrustQuorumReconfigureRequest": {
-        "description": "Reconfigure message for trust quorum changes.",
-        "type": "object",
-        "properties": {
-          "epoch": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "last_committed_epoch": {
-            "nullable": true,
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
-          },
-          "rack_id": {
-            "$ref": "#/components/schemas/RackUuid"
-          },
-          "threshold": {
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "epoch",
-          "members",
-          "rack_id",
-          "threshold"
         ]
       },
       "TxEqConfig": {
