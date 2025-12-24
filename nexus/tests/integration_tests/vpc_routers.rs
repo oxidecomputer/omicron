@@ -23,13 +23,8 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{create_project, create_vpc};
 use nexus_test_utils::resource_helpers::{object_put, object_put_error};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
-use nexus_types::external_api::params::InstanceNetworkInterfaceCreate;
-use nexus_types::external_api::params::VpcSubnetUpdate;
-use nexus_types::external_api::views::VpcRouter;
-use nexus_types::external_api::views::VpcRouterKind;
-use nexus_types::external_api::views::VpcSubnet;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::vpc;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
@@ -65,7 +60,7 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     // get routers should have only the system router created w/ the VPC
     let routers = list_routers(client, &VPC_NAME).await;
     assert_eq!(routers.len(), 1);
-    assert_eq!(routers[0].kind, VpcRouterKind::System);
+    assert_eq!(routers[0].kind, vpc::VpcRouterKind::System);
 
     // This router should not be deletable.
     let system_router_url = format!("/v1/vpc-routers/{}", routers[0].id());
@@ -113,7 +108,7 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(router.identity.name, router_name);
     assert_eq!(router.identity.description, "router description");
     assert_eq!(router.vpc_id, vpc.identity.id);
-    assert_eq!(router.kind, VpcRouterKind::Custom);
+    assert_eq!(router.kind, vpc::VpcRouterKind::Custom);
 
     // get router, should be the same
     let same_router = NexusRequest::object_get(client, &router_url)
@@ -133,7 +128,7 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     // creating another router in the same VPC with the same name fails
     let error: dropshot::HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(&client, Method::POST, &routers_url)
-            .body(Some(&params::VpcRouterCreate {
+            .body(Some(&vpc::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: router_name.parse().unwrap(),
                     description: String::from("this is not a router"),
@@ -181,7 +176,7 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
         create_router(client, PROJECT_NAME, VPC_NAME, router2_name).await;
     assert_eq!(router2.identity.name, router2_name);
     assert_eq!(router2.vpc_id, vpc.identity.id);
-    assert_eq!(router2.kind, VpcRouterKind::Custom);
+    assert_eq!(router2.kind, vpc::VpcRouterKind::Custom);
 
     // routers list should now have two custom and one system
     let routers = list_routers(client, &VPC_NAME).await;
@@ -190,13 +185,13 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     routers_eq(&routers[1], &router2);
 
     // update first router
-    let update_params = params::VpcRouterUpdate {
+    let update_params = vpc::VpcRouterUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("new-name".parse().unwrap()),
             description: Some("another description".to_string()),
         },
     };
-    let update: VpcRouter =
+    let update: vpc::VpcRouter =
         NexusRequest::object_put(&client, &router_url, Some(&update_params))
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -235,7 +230,7 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     );
 
     // fetching by new name works
-    let updated_router: VpcRouter =
+    let updated_router: vpc::VpcRouter =
         NexusRequest::object_get(&client, &router_url)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -325,13 +320,13 @@ async fn test_vpc_routers_attach_to_subnet(
     // get routers should have only the system router created w/ the VPC
     let routers = list_routers(client, VPC_NAME).await;
     assert_eq!(routers.len(), 1);
-    assert_eq!(routers[0].kind, VpcRouterKind::System);
+    assert_eq!(routers[0].kind, vpc::VpcRouterKind::System);
 
     // Create a custom router for later use.
     let router_name = ROUTER_NAMES[0];
     let router =
         create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
-    assert_eq!(router.kind, VpcRouterKind::Custom);
+    assert_eq!(router.kind, vpc::VpcRouterKind::Custom);
 
     // Attaching a system router should fail.
     let err = object_put_error(
@@ -339,7 +334,7 @@ async fn test_vpc_routers_attach_to_subnet(
         &format!(
             "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={VPC_NAME}"
         ),
-        &VpcSubnetUpdate {
+        &vpc::VpcSubnetUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
                 description: None,
@@ -403,7 +398,7 @@ async fn test_vpc_routers_attach_to_subnet(
     let err = object_put_error(
         client,
         &format!("/v1/vpc-subnets/default?project={PROJECT_NAME}&vpc=vpc1"),
-        &VpcSubnetUpdate {
+        &vpc::VpcSubnetUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
                 description: None,
@@ -457,7 +452,9 @@ async fn test_vpc_routers_attach_to_subnet(
     .await;
 
     for subnet in
-        objects_list_page_authz::<VpcSubnet>(client, &subnets_url).await.items
+        objects_list_page_authz::<vpc::VpcSubnet>(client, &subnets_url)
+            .await
+            .items
     {
         assert!(subnet.custom_router_id.is_none(), "{subnet:?}");
     }
@@ -501,8 +498,8 @@ async fn test_vpc_routers_custom_delivered_to_instance(
             client,
             PROJECT_NAME,
             instance_name,
-            &InstanceNetworkInterfaceAttachment::Create(vec![
-                InstanceNetworkInterfaceCreate {
+            &instance::InstanceNetworkInterfaceAttachment::Create(vec![
+                instance::InstanceNetworkInterfaceCreate {
                     identity: IdentityMetadataCreateParams {
                         name: format!("nic-{i}").parse().unwrap(),
                         description: "".into(),
@@ -693,13 +690,13 @@ async fn set_custom_router(
     subnet_name: &str,
     vpc_name: &str,
     custom_router: Option<NameOrId>,
-) -> VpcSubnet {
+) -> vpc::VpcSubnet {
     object_put(
         client,
         &format!(
             "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={vpc_name}"
         ),
-        &VpcSubnetUpdate {
+        &vpc::VpcSubnetUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
                 description: None,
@@ -713,14 +710,15 @@ async fn set_custom_router(
 async fn list_routers(
     client: &ClientTestContext,
     vpc_name: &str,
-) -> Vec<VpcRouter> {
+) -> Vec<vpc::VpcRouter> {
     let routers_url =
         format!("/v1/vpc-routers?project={}&vpc={}", PROJECT_NAME, vpc_name);
-    let out = objects_list_page_authz::<VpcRouter>(client, &routers_url).await;
+    let out =
+        objects_list_page_authz::<vpc::VpcRouter>(client, &routers_url).await;
     out.items
 }
 
-fn routers_eq(sn1: &VpcRouter, sn2: &VpcRouter) {
+fn routers_eq(sn1: &vpc::VpcRouter, sn2: &vpc::VpcRouter) {
     identity_eq(&sn1.identity, &sn2.identity);
     assert_eq!(sn1.vpc_id, sn2.vpc_id);
 }

@@ -18,7 +18,8 @@ use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::vpc;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     InstanceNetworkInterface,
@@ -36,8 +37,8 @@ async fn create_instance_expect_failure(
     subnet_name: &str,
 ) -> HttpErrorResponseBody {
     let network_interfaces =
-        params::InstanceNetworkInterfaceAttachment::Create(vec![
-            params::InstanceNetworkInterfaceCreate {
+        instance::InstanceNetworkInterfaceAttachment::Create(vec![
+            instance::InstanceNetworkInterfaceCreate {
                 identity: IdentityMetadataCreateParams {
                     // We're using the name of the instance purposefully, to
                     // avoid any naming conflicts on the interface.
@@ -50,7 +51,7 @@ async fn create_instance_expect_failure(
                 transit_ips: vec![],
             },
         ]);
-    let new_instance = params::InstanceCreate {
+    let new_instance = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: name.parse().unwrap(),
             description: "".to_string(),
@@ -109,7 +110,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let network_address = Ipv4Addr::new(192, 168, 42, 0);
     let subnet = Ipv4Net::new(network_address, subnet_size)
         .expect("Invalid IPv4 network");
-    let subnet_create = params::VpcSubnetCreate {
+    let subnet_create = vpc::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: subnet_name.parse().unwrap(),
             description: String::from("a small subnet"),
@@ -128,8 +129,8 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     // The valid addresses for allocation in `subnet` are 192.168.42.5 and
     // 192.168.42.6. The rest are reserved as described in RFD21.
     const SUBNET_NAME: &str = "small";
-    let nic = params::InstanceNetworkInterfaceAttachment::Create(vec![
-        params::InstanceNetworkInterfaceCreate {
+    let nic = instance::InstanceNetworkInterfaceAttachment::Create(vec![
+        instance::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "eth0".parse().unwrap(),
                 description: String::from("some iface"),
@@ -155,9 +156,9 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             &format!("i{}", i),
             &nic,
             // Disks=
-            Vec::<params::InstanceDiskAttachment>::new(),
+            Vec::<instance::InstanceDiskAttachment>::new(),
             // External IPs=
-            Vec::<params::ExternalIpCreate>::new(),
+            Vec::<instance::ExternalIpCreate>::new(),
             true,
             Default::default(),
             None,

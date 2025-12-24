@@ -246,7 +246,7 @@ mod test {
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
         blueprint_zone_type,
     };
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;

@@ -44,7 +44,7 @@ use nexus_db_schema::schema::alert_subscription::dsl as subscription_dsl;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as delivery_attempt_dsl;
 use nexus_db_schema::schema::webhook_secret::dsl as secret_dsl;
-use nexus_types::external_api::params;
+use nexus_types::external_api::alert;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::AlertGlobStatus;
 use omicron_common::api::external::CreateResult;
@@ -64,19 +64,15 @@ impl DataStore {
     pub async fn webhook_rx_create(
         &self,
         opctx: &OpContext,
-        params: params::WebhookCreate,
+        params: alert::WebhookCreate,
     ) -> CreateResult<WebhookReceiverConfig> {
         // TODO(eliza): someday we gotta allow creating webhooks with more
         // restrictive permissions...
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let params::WebhookCreate {
-            identity,
-            endpoint,
-            secrets,
-            subscriptions,
-        } = params;
+        let alert::WebhookCreate { identity, endpoint, secrets, subscriptions } =
+            params;
 
         let subscriptions = subscriptions
             .into_iter()
@@ -342,7 +338,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_rx: &authz::AlertReceiver,
-        params: params::WebhookReceiverUpdate,
+        params: alert::WebhookReceiverUpdate,
     ) -> UpdateResult<AlertReceiver> {
         opctx.authorize(authz::Action::Modify, authz_rx).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -1186,7 +1182,7 @@ mod test {
         datastore
             .webhook_rx_create(
                 opctx,
-                params::WebhookCreate {
+                alert::WebhookCreate {
                     identity: IdentityMetadataCreateParams {
                         name: name.parse().unwrap(),
                         description: "it'sa  webhook".to_string(),

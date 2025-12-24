@@ -10,7 +10,7 @@
 use nexus_db_schema::schema::{device_access_token, device_auth_request};
 
 use chrono::{DateTime, Duration, Utc};
-use nexus_types::external_api::views;
+use nexus_types::external_api::device;
 use omicron_uuid_kinds::{
     AccessTokenKind, GenericUuid, SiloUserKind, SiloUserUuid, TypedUuid,
 };
@@ -47,9 +47,9 @@ impl DeviceAuthRequest {
         self,
         tls: bool,
         host: &str,
-    ) -> views::DeviceAuthResponse {
+    ) -> device::DeviceAuthResponse {
         let scheme = if tls { "https" } else { "http" };
-        views::DeviceAuthResponse {
+        device::DeviceAuthResponse {
             verification_uri: format!("{scheme}://{host}/device/verify"),
             user_code: self.user_code,
             device_code: self.device_code,
@@ -181,18 +181,18 @@ impl DeviceAccessToken {
     }
 }
 
-impl From<DeviceAccessToken> for views::DeviceAccessTokenGrant {
+impl From<DeviceAccessToken> for device::DeviceAccessTokenGrant {
     fn from(access_token: DeviceAccessToken) -> Self {
         Self {
             access_token: format!("oxide-token-{}", access_token.token),
-            token_type: views::DeviceAccessTokenType::Bearer,
+            token_type: device::DeviceAccessTokenType::Bearer,
             token_id: access_token.id.into_untyped_uuid(),
             time_expires: access_token.time_expires,
         }
     }
 }
 
-impl From<DeviceAccessToken> for views::DeviceAccessToken {
+impl From<DeviceAccessToken> for device::DeviceAccessToken {
     fn from(access_token: DeviceAccessToken) -> Self {
         Self {
             id: access_token.id.into_untyped_uuid(),

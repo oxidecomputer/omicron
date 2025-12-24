@@ -30,8 +30,7 @@ use nexus_test_utils::resource_helpers::create_snapshot;
 use nexus_test_utils::resource_helpers::delete_snapshot;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::snapshot;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::*;
@@ -778,10 +777,10 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
-    let snapshot: views::Snapshot = object_create(
+    let snapshot: snapshot::Snapshot = object_create(
         client,
         &snapshots_url,
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "snapshot".parse().unwrap(),
                 description: String::from("a snapshot"),
@@ -1255,7 +1254,9 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     let snapshots_url = get_snapshots_url();
     assert_eq!(
-        collection_list::<views::Snapshot>(&client, &snapshots_url).await.len(),
+        collection_list::<snapshot::Snapshot>(&client, &snapshots_url)
+            .await
+            .len(),
         0
     );
 

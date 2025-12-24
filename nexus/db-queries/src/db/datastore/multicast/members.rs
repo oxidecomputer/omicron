@@ -825,7 +825,7 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::multicast::MulticastGroupCreate;
     use nexus_types::identity::Resource;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -890,7 +890,7 @@ mod tests {
         .await;
 
         // Create creating group manually (needs to stay in "Creating" state)
-        let creating_group_params = params::MulticastGroupCreate {
+        let creating_group_params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "creating-group".parse().unwrap(),
                 description: "Creating test group".to_string(),

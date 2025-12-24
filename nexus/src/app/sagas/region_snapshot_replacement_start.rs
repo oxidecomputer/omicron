@@ -1236,7 +1236,7 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::create_snapshot;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::views;
+    use nexus_types::external_api::snapshot;
     use nexus_types::identity::Asset;
 
     use sled_agent_client::VolumeConstructionRequest;
@@ -1303,7 +1303,7 @@ pub(crate) mod test {
 
     struct PrepareResult<'a> {
         db_disk: db::datastore::CrucibleDisk,
-        snapshot: views::Snapshot,
+        snapshot: snapshot::Snapshot,
         db_snapshot: nexus_db_model::Snapshot,
         disk_test: DiskTest<'a, crate::Server>,
     }

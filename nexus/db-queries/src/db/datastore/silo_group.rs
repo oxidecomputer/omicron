@@ -22,7 +22,7 @@ use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
-use nexus_types::external_api::views;
+use nexus_types::external_api::user;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -128,8 +128,8 @@ impl From<SiloGroup> for model::SiloGroup {
     }
 }
 
-impl From<SiloGroup> for views::Group {
-    fn from(u: SiloGroup) -> views::Group {
+impl From<SiloGroup> for user::Group {
+    fn from(u: SiloGroup) -> user::Group {
         match u {
             SiloGroup::ApiOnly(u) => u.into(),
             SiloGroup::Jit(u) => u.into(),
@@ -186,9 +186,9 @@ impl From<SiloGroupApiOnly> for SiloGroup {
     }
 }
 
-impl From<SiloGroupApiOnly> for views::Group {
-    fn from(u: SiloGroupApiOnly) -> views::Group {
-        views::Group {
+impl From<SiloGroupApiOnly> for user::Group {
+    fn from(u: SiloGroupApiOnly) -> user::Group {
+        user::Group {
             id: u.id,
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
@@ -245,9 +245,9 @@ impl From<SiloGroupJit> for SiloGroup {
     }
 }
 
-impl From<SiloGroupJit> for views::Group {
-    fn from(u: SiloGroupJit) -> views::Group {
-        views::Group {
+impl From<SiloGroupJit> for user::Group {
+    fn from(u: SiloGroupJit) -> user::Group {
+        user::Group {
             id: u.id,
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
@@ -312,9 +312,9 @@ impl From<SiloGroupScim> for SiloGroup {
     }
 }
 
-impl From<SiloGroupScim> for views::Group {
-    fn from(u: SiloGroupScim) -> views::Group {
-        views::Group {
+impl From<SiloGroupScim> for user::Group {
+    fn from(u: SiloGroupScim) -> user::Group {
+        user::Group {
             id: u.id,
             // TODO the use of display name as display_name is temporary
             display_name: u.display_name,

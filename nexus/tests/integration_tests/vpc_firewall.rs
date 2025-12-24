@@ -15,7 +15,7 @@ use nexus_test_utils::resource_helpers::{
     create_project, create_vpc, object_get, object_put, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::Vpc;
+use nexus_types::external_api::vpc::Vpc;
 use omicron_common::api::external::{
     IcmpParamRange, IdentityMetadata, L4Port, L4PortRange, ServiceIcmpConfig,
     VpcFirewallIcmpFilter, VpcFirewallRule, VpcFirewallRuleAction,

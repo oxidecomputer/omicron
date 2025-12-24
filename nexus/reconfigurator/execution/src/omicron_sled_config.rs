@@ -92,9 +92,9 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::external_api::views::SledPolicy;
-    use nexus_types::external_api::views::SledProvisionPolicy;
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::sled::SledPolicy;
+    use nexus_types::external_api::sled::SledProvisionPolicy;
+    use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::external::Generation;

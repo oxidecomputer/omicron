@@ -11,8 +11,7 @@ use db_macros::Resource;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_db_schema::schema::network_interface;
 use nexus_db_schema::schema::vpc_subnet;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::vpc;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::Deserialize;
@@ -97,7 +96,7 @@ pub enum RequestAddressError {
     Broadcast,
 }
 
-impl From<VpcSubnet> for views::VpcSubnet {
+impl From<VpcSubnet> for vpc::VpcSubnet {
     fn from(subnet: VpcSubnet) -> Self {
         Self {
             identity: subnet.identity(),
@@ -118,8 +117,8 @@ pub struct VpcSubnetUpdate {
     pub custom_router_id: Option<Option<Uuid>>,
 }
 
-impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
-    fn from(params: params::VpcSubnetUpdate) -> Self {
+impl From<vpc::VpcSubnetUpdate> for VpcSubnetUpdate {
+    fn from(params: vpc::VpcSubnetUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

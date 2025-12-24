@@ -266,8 +266,8 @@ impl TryFrom<types::ProducerEndpoint>
     }
 }
 
-impl From<nexus_types::external_api::shared::Baseboard> for types::Baseboard {
-    fn from(value: nexus_types::external_api::shared::Baseboard) -> Self {
+impl From<nexus_types::external_api::hardware::Baseboard> for types::Baseboard {
+    fn from(value: nexus_types::external_api::hardware::Baseboard) -> Self {
         types::Baseboard {
             part: value.part,
             revision: value.revision,

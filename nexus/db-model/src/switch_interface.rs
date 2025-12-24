@@ -6,7 +6,7 @@ use crate::impl_enum_type;
 use db_macros::Asset;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{loopback_address, switch_vlan_interface_config};
-use nexus_types::external_api::params;
+use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Asset;
 use omicron_common::api::external;
 use omicron_uuid_kinds::LoopbackAddressKind;
@@ -34,14 +34,16 @@ impl_enum_type!(
     Loopback => b"loopback"
 );
 
-impl From<params::SwitchInterfaceKind> for DbSwitchInterfaceKind {
-    fn from(k: params::SwitchInterfaceKind) -> Self {
+impl From<networking_types::SwitchInterfaceKind> for DbSwitchInterfaceKind {
+    fn from(k: networking_types::SwitchInterfaceKind) -> Self {
         match k {
-            params::SwitchInterfaceKind::Primary => {
+            networking_types::SwitchInterfaceKind::Primary => {
                 DbSwitchInterfaceKind::Primary
             }
-            params::SwitchInterfaceKind::Vlan(_) => DbSwitchInterfaceKind::Vlan,
-            params::SwitchInterfaceKind::Loopback => {
+            networking_types::SwitchInterfaceKind::Vlan(_) => {
+                DbSwitchInterfaceKind::Vlan
+            }
+            networking_types::SwitchInterfaceKind::Loopback => {
                 DbSwitchInterfaceKind::Loopback
             }
         }

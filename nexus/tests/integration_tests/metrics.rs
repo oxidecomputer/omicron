@@ -22,8 +22,9 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::shared::ProjectRole;
-use nexus_types::external_api::views;
+use nexus_types::external_api::oxql;
+use nexus_types::external_api::policy::ProjectRole;
+use nexus_types::external_api::timeseries;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use oximeter::TimeseriesSchema;
@@ -271,7 +272,7 @@ async fn test_instance_watcher_metrics(
 
     #[track_caller]
     fn count_state(
-        table: &views::OxqlTable,
+        table: &oxql::OxqlTable,
         instance_id: InstanceUuid,
         state: &'static str,
     ) -> Result<i64, MetricsNotYet> {
@@ -580,7 +581,7 @@ async fn test_project_timeseries_query(
     // expect error when querying a metric that has no project_id on it
     let q6 = "get integration_target:integration_metric";
     let url = "/v1/timeseries/query?project=project1";
-    let body = nexus_types::external_api::params::TimeseriesQuery {
+    let body = timeseries::TimeseriesQuery {
         query: q6.to_string(),
         include_summaries: false,
     };
@@ -601,7 +602,7 @@ async fn test_project_timeseries_query(
 
     // nonexistent project
     let url = "/v1/timeseries/query?project=nonexistent";
-    let body = nexus_types::external_api::params::TimeseriesQuery {
+    let body = timeseries::TimeseriesQuery {
         query: q6.to_string(),
         include_summaries: false,
     };
@@ -611,7 +612,7 @@ async fn test_project_timeseries_query(
 
     // unprivileged user gets 404 on project that exists, but which they can't read
     let url = "/v1/timeseries/query?project=project1";
-    let body = nexus_types::external_api::params::TimeseriesQuery {
+    let body = timeseries::TimeseriesQuery {
         query: q1.to_string(),
         include_summaries: false,
     };
@@ -644,14 +645,14 @@ async fn test_project_timeseries_query(
         .expect_status(Some(StatusCode::OK));
     let result = NexusRequest::new(request)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<views::OxqlQueryResult>()
+        .execute_and_parse_unwrap::<oxql::OxqlQueryResult>()
         .await;
     assert_eq!(result.tables.len(), 1);
     assert_eq!(result.tables[0].timeseries.len(), 2); // two instances
     assert!(result.query_summaries.is_none());
 
     // Request metrics again, this time with query summaries.
-    let body = nexus_types::external_api::params::TimeseriesQuery {
+    let body = timeseries::TimeseriesQuery {
         query: q1.to_string(),
         include_summaries: true,
     };
@@ -660,7 +661,7 @@ async fn test_project_timeseries_query(
         .expect_status(Some(StatusCode::OK));
     let result = NexusRequest::new(request)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<views::OxqlQueryResult>()
+        .execute_and_parse_unwrap::<oxql::OxqlQueryResult>()
         .await;
     assert_eq!(result.tables.len(), 1);
     assert_eq!(result.tables[0].timeseries.len(), 2); // two instances

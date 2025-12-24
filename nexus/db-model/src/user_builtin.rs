@@ -4,8 +4,7 @@
 
 use db_macros::Resource;
 use nexus_db_schema::schema::user_builtin;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::user;
 use nexus_types::identity::Resource;
 use omicron_uuid_kinds::BuiltInUserUuid;
 
@@ -20,12 +19,12 @@ pub struct UserBuiltin {
 
 impl UserBuiltin {
     /// Creates a new database UserBuiltin object.
-    pub fn new(id: BuiltInUserUuid, params: params::UserBuiltinCreate) -> Self {
+    pub fn new(id: BuiltInUserUuid, params: user::UserBuiltinCreate) -> Self {
         Self { identity: UserBuiltinIdentity::new(id, params.identity) }
     }
 }
 
-impl From<UserBuiltin> for views::UserBuiltin {
+impl From<UserBuiltin> for user::UserBuiltin {
     fn from(user: UserBuiltin) -> Self {
         Self { identity: user.identity() }
     }

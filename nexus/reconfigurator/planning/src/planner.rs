@@ -52,9 +52,9 @@ use nexus_types::deployment::{
     PlanningReport, PlanningZoneUpdatesStepReport, ZoneAddWaitingOn,
     ZoneUpdatesWaitingOn, ZoneWaitingToExpunge,
 };
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
+use nexus_types::external_api::sled::SledPolicy;
+use nexus_types::external_api::sled::SledState;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use omicron_common::api::external::Generation;

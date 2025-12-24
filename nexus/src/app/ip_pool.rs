@@ -4,8 +4,6 @@
 
 //! IP Pools, collections of external IP addresses for guest instances
 
-use crate::external_api::params;
-use crate::external_api::shared;
 use ipnetwork::IpNetwork;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
@@ -19,6 +17,7 @@ use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
+use nexus_types::external_api::ip_pool;
 use nexus_types::identity::Resource;
 use omicron_common::address::{
     IPV4_LINK_LOCAL_MULTICAST_SUBNET, IPV4_SSM_SUBNET,
@@ -62,9 +61,9 @@ fn not_found_from_lookup(pool_lookup: &lookup::IpPool<'_>) -> Error {
 /// - IPv4: Rejects link-local (224.0.0.0/24), prevents ASM/SSM boundary spanning
 /// - IPv6: Rejects interface-local (ff01::/16) and link-local (ff02::/16),
 ///   prevents ASM/SSM boundary spanning
-fn validate_multicast_range(range: &shared::IpRange) -> Result<(), Error> {
+fn validate_multicast_range(range: &ip_pool::IpRange) -> Result<(), Error> {
     match range {
-        shared::IpRange::V4(v4_range) => {
+        ip_pool::IpRange::V4(v4_range) => {
             let first = v4_range.first_address();
             let last = v4_range.last_address();
 
@@ -88,7 +87,7 @@ fn validate_multicast_range(range: &shared::IpRange) -> Result<(), Error> {
                 ));
             }
         }
-        shared::IpRange::V6(v6_range) => {
+        ip_pool::IpRange::V6(v6_range) => {
             let first = v6_range.first_address();
             let last = v6_range.last_address();
 
@@ -150,13 +149,13 @@ impl super::Nexus {
     pub(crate) async fn ip_pool_create(
         &self,
         opctx: &OpContext,
-        pool_params: &params::IpPoolCreate,
+        pool_params: &ip_pool::IpPoolCreate,
     ) -> CreateResult<IpPool> {
         // https://github.com/oxidecomputer/omicron/issues/8881
         let ip_version = pool_params.ip_version.into();
 
         // IPv6 is not yet supported for unicast pools
-        if matches!(pool_params.pool_type, shared::IpPoolType::Unicast)
+        if matches!(pool_params.pool_type, ip_pool::IpPoolType::Unicast)
             && matches!(ip_version, IpVersion::V6)
         {
             return Err(Error::invalid_request(
@@ -164,13 +163,13 @@ impl super::Nexus {
             ));
         }
 
-        let pool = match pool_params.pool_type.clone() {
-            shared::IpPoolType::Unicast => IpPool::new(
+        let pool = match pool_params.pool_type {
+            ip_pool::IpPoolType::Unicast => IpPool::new(
                 &pool_params.identity,
                 ip_version,
                 IpPoolReservationType::ExternalSilos,
             ),
-            shared::IpPoolType::Multicast => IpPool::new_multicast(
+            ip_pool::IpPoolType::Multicast => IpPool::new_multicast(
                 &pool_params.identity,
                 ip_version,
                 IpPoolReservationType::ExternalSilos,
@@ -268,7 +267,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        silo_link: &params::IpPoolLinkSilo,
+        silo_link: &ip_pool::IpPoolLinkSilo,
     ) -> CreateResult<db::model::IpPoolResource> {
         let (authz_pool,) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
@@ -320,7 +319,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
         silo_lookup: &lookup::Silo<'_>,
-        update: &params::IpPoolSiloUpdate,
+        update: &ip_pool::IpPoolSiloUpdate,
     ) -> CreateResult<db::model::IpPoolResource> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
@@ -369,7 +368,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        updates: &params::IpPoolUpdate,
+        updates: &ip_pool::IpPoolUpdate,
     ) -> UpdateResult<db::model::IpPool> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
@@ -405,7 +404,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        range: &shared::IpRange,
+        range: &ip_pool::IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
@@ -423,7 +422,7 @@ impl super::Nexus {
         // pool utilization.
         //
         // See https://github.com/oxidecomputer/omicron/issues/8761.
-        if matches!(range, shared::IpRange::V6(_)) {
+        if matches!(range, ip_pool::IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
             ));
@@ -432,7 +431,7 @@ impl super::Nexus {
         // Validate uniformity and pool type constraints.
         // Extract first/last addresses once and reuse for all validation checks.
         match range {
-            shared::IpRange::V4(v4_range) => {
+            ip_pool::IpRange::V4(v4_range) => {
                 let first = v4_range.first_address();
                 let last = v4_range.last_address();
                 let first_is_multicast = first.is_multicast();
@@ -464,7 +463,7 @@ impl super::Nexus {
                     }
                 }
             }
-            shared::IpRange::V6(v6_range) => {
+            ip_pool::IpRange::V6(v6_range) => {
                 let first = v6_range.first_address();
                 let last = v6_range.last_address();
                 let first_is_multicast = first.is_multicast();
@@ -507,7 +506,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        range: &shared::IpRange,
+        range: &ip_pool::IpRange,
     ) -> DeleteResult {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
@@ -557,7 +556,7 @@ impl super::Nexus {
     pub(crate) async fn ip_pool_service_add_range(
         &self,
         opctx: &OpContext,
-        range: &shared::IpRange,
+        range: &ip_pool::IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
         let (authz_pool, db_pool) = self
             .db_datastore
@@ -574,7 +573,7 @@ impl super::Nexus {
         // pool utilization.
         //
         // See https://github.com/oxidecomputer/omicron/issues/8761.
-        if matches!(range, shared::IpRange::V6(_)) {
+        if matches!(range, ip_pool::IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
             ));
@@ -583,7 +582,7 @@ impl super::Nexus {
         // Validate uniformity and pool type constraints.
         // Extract first/last addresses once and reuse for all validation checks.
         match range {
-            shared::IpRange::V4(v4_range) => {
+            ip_pool::IpRange::V4(v4_range) => {
                 let first = v4_range.first_address();
                 let last = v4_range.last_address();
                 let first_is_multicast = first.is_multicast();
@@ -615,7 +614,7 @@ impl super::Nexus {
                     }
                 }
             }
-            shared::IpRange::V6(v6_range) => {
+            ip_pool::IpRange::V6(v6_range) => {
                 let first = v6_range.first_address();
                 let last = v6_range.last_address();
                 let first_is_multicast = first.is_multicast();
@@ -657,7 +656,7 @@ impl super::Nexus {
     pub(crate) async fn ip_pool_service_delete_range(
         &self,
         opctx: &OpContext,
-        range: &shared::IpRange,
+        range: &ip_pool::IpRange,
     ) -> DeleteResult {
         let (authz_pool, ..) = self
             .db_datastore

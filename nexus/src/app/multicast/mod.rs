@@ -44,7 +44,7 @@ use nexus_db_lookup::{LookupPath, lookup};
 use nexus_db_model::Name;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::{authz, db};
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::multicast;
 use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_SUBNET};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
@@ -59,7 +59,7 @@ impl super::Nexus {
     pub(crate) fn multicast_group_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        multicast_group_selector: &'a params::MulticastGroupSelector,
+        multicast_group_selector: &'a multicast::MulticastGroupSelector,
     ) -> LookupResult<lookup::MulticastGroup<'a>> {
         // Multicast groups are fleet-scoped (like IP pools)
         match &multicast_group_selector.multicast_group {
@@ -82,7 +82,7 @@ impl super::Nexus {
     pub(crate) async fn multicast_group_create(
         &self,
         opctx: &OpContext,
-        params: &params::MulticastGroupCreate,
+        params: &multicast::MulticastGroupCreate,
     ) -> CreateResult<db::model::ExternalMulticastGroup> {
         // Authorization FIRST: check before validating parameters
         // This ensures 403 Forbidden is returned before 400 Bad Request
@@ -196,7 +196,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         group_lookup: &lookup::MulticastGroup<'_>,
-        params: &params::MulticastGroupUpdate,
+        params: &multicast::MulticastGroupUpdate,
     ) -> UpdateResult<db::model::ExternalMulticastGroup> {
         let (.., group_id) =
             group_lookup.lookup_for(authz::Action::Modify).await?;
@@ -388,7 +388,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> ListResultVec<views::MulticastGroupMember> {
+    ) -> ListResultVec<multicast::MulticastGroupMember> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Read).await?;
         let members = self
@@ -401,7 +401,7 @@ impl super::Nexus {
             .await?;
         members
             .into_iter()
-            .map(views::MulticastGroupMember::try_from)
+            .map(multicast::MulticastGroupMember::try_from)
             .collect::<Result<Vec<_>, _>>()
     }
 }

@@ -7,7 +7,7 @@ use nexus_db_model::Ipv4Config;
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::queries::network_interface;
-use nexus_types::external_api::params;
+use nexus_types::external_api::instance;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -29,10 +29,10 @@ impl super::Nexus {
     pub fn instance_network_interface_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        network_interface_selector: params::InstanceNetworkInterfaceSelector,
+        network_interface_selector: instance::InstanceNetworkInterfaceSelector,
     ) -> LookupResult<lookup::InstanceNetworkInterface<'a>> {
         match network_interface_selector {
-            params::InstanceNetworkInterfaceSelector {
+            instance::InstanceNetworkInterfaceSelector {
                 network_interface: NameOrId::Id(id),
                 instance: None,
                 project: None,
@@ -42,20 +42,20 @@ impl super::Nexus {
                         .instance_network_interface_id(id);
                 Ok(network_interface)
             }
-            params::InstanceNetworkInterfaceSelector {
+            instance::InstanceNetworkInterfaceSelector {
                 network_interface: NameOrId::Name(name),
-                instance: Some(instance),
+                instance: Some(inst),
                 project,
             } => {
                 let network_interface = self
                     .instance_lookup(
                         opctx,
-                        params::InstanceSelector { project, instance },
+                        instance::InstanceSelector { project, instance: inst },
                     )?
                     .instance_network_interface_name_owned(name.into());
                 Ok(network_interface)
             }
-            params::InstanceNetworkInterfaceSelector {
+            instance::InstanceNetworkInterfaceSelector {
                 network_interface: NameOrId::Id(_),
                 ..
             } => Err(Error::invalid_request(
@@ -75,7 +75,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        params: &params::InstanceNetworkInterfaceCreate,
+        params: &instance::InstanceNetworkInterfaceCreate,
     ) -> CreateResult<db::model::InstanceNetworkInterface> {
         // TODO-completeness: Support creating dual-stack NICs in the public
         // API. See https://github.com/oxidecomputer/omicron/issues/9248.
@@ -176,7 +176,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         network_interface_lookup: &lookup::InstanceNetworkInterface<'_>,
-        updates: params::InstanceNetworkInterfaceUpdate,
+        updates: instance::InstanceNetworkInterfaceUpdate,
     ) -> UpdateResult<db::model::InstanceNetworkInterface> {
         let (.., authz_instance, authz_interface) =
             network_interface_lookup.lookup_for(authz::Action::Modify).await?;

@@ -312,11 +312,11 @@ mod test {
         create_default_ip_pool, link_ip_pool, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params::{
-        IpPoolCreate, MulticastGroupCreate,
+    use nexus_types::external_api::ip_pool::{
+        IpPool, IpPoolCreate, IpPoolRange,
     };
-    use nexus_types::external_api::shared::{IpRange, Ipv4Range};
-    use nexus_types::external_api::views::{IpPool, IpPoolRange, IpVersion};
+    use nexus_types::external_api::multicast::MulticastGroupCreate;
+    use omicron_common::address::{IpRange, IpVersion, Ipv4Range};
     use omicron_common::api::external::{
         IdentityMetadataCreateParams, NameOrId,
     };
@@ -476,7 +476,7 @@ mod test {
             mvlan: None,
         };
 
-        let group: nexus_types::external_api::views::MulticastGroup =
+        let group: nexus_types::external_api::multicast::MulticastGroup =
             object_create(client, "/v1/multicast-groups", &group_params).await;
 
         // Fetch the external group from database to get full model

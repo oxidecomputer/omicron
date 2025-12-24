@@ -16,13 +16,13 @@ use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::SiloQuotasCreate;
-use nexus_types::external_api::views::Silo;
-use nexus_types::external_api::views::SiloQuotas;
-use nexus_types::external_api::views::SiloUtilization;
-use nexus_types::external_api::views::Utilization;
-use nexus_types::external_api::views::VirtualResourceCounts;
+use nexus_types::external_api::disk;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::project;
+use nexus_types::external_api::silo::{
+    Silo, SiloQuotas, SiloQuotasCreate, SiloUtilization, Utilization,
+    VirtualResourceCounts,
+};
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCpuCount;
@@ -50,7 +50,7 @@ async fn test_utilization_list(cptestctx: &ControlPlaneTestContext) {
     let _: SiloQuotas = object_put(
         client,
         quotas_url,
-        &params::SiloQuotasCreate::arbitrarily_high_default(),
+        &SiloQuotasCreate::arbitrarily_high_default(),
     )
     .await;
 
@@ -87,8 +87,7 @@ async fn test_utilization_list(cptestctx: &ControlPlaneTestContext) {
 
     // now we take the quota back off of test-suite-silo and end up empty again
     let _: SiloQuotas =
-        object_put(client, quotas_url, &params::SiloQuotasCreate::empty())
-            .await;
+        object_put(client, quotas_url, &SiloQuotasCreate::empty()).await;
 
     assert!(util_list(client).await.is_empty());
 }
@@ -140,15 +139,15 @@ async fn test_utilization_view(cptestctx: &ControlPlaneTestContext) {
     // provision disk
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disk_url)
-            .body(Some(&params::DiskCreate {
+            .body(Some(&disk::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "test-disk".parse().unwrap(),
                     description: "".into(),
                 },
                 size: ByteCount::from_gibibytes_u32(2),
-                disk_backend: params::DiskBackend::Distributed {
-                    disk_source: params::DiskSource::Blank {
-                        block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_backend: disk::DiskBackend::Distributed {
+                    disk_source: disk::DiskSource::Blank {
+                        block_size: disk::BlockSize::try_from(512).unwrap(),
                     },
                 },
             }))
@@ -206,7 +205,7 @@ async fn create_resources_in_test_suite_silo(client: &ClientTestContext) {
     NexusRequest::objects_post(
         client,
         "/v1/projects",
-        &params::ProjectCreate {
+        &project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: test_project_name.parse().unwrap(),
                 description: String::new(),
@@ -219,7 +218,7 @@ async fn create_resources_in_test_suite_silo(client: &ClientTestContext) {
     .expect("failed to create project in test-suite-silo");
 
     // Create instance in test-suite-silo as the test user
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: "test-inst".parse().unwrap(),
             description: "test instance in test-suite-silo".to_string(),
@@ -229,7 +228,8 @@ async fn create_resources_in_test_suite_silo(client: &ClientTestContext) {
         hostname: "test-inst".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,

@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use external_api::shared::ServiceUsingCertificate;
-use nexus_types::{external_api, internal_api};
+use nexus_types::external_api::certificate::ServiceUsingCertificate;
+use nexus_types::internal_api;
 use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 

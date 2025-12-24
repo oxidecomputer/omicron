@@ -4565,7 +4565,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_model::SqlU16;
-    use nexus_types::external_api::params::DiskSource;
+    use nexus_types::external_api::disk::DiskSource;
     use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::VolumeUuid;

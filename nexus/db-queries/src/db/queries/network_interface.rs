@@ -1964,9 +1964,9 @@ mod tests {
     use nexus_db_model::IpVersion;
     use nexus_db_model::Ipv4Assignment;
     use nexus_db_model::Ipv4Config;
-    use nexus_types::external_api::params;
-    use nexus_types::external_api::params::InstanceCreate;
-    use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
+    use nexus_types::external_api::instance::InstanceCreate;
+    use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
+    use nexus_types::external_api::project;
     use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::Error;
@@ -2135,7 +2135,7 @@ mod tests {
             // Create a project
             let project = Project::new(
                 authz_silo.id(),
-                params::ProjectCreate {
+                project::ProjectCreate {
                     identity: IdentityMetadataCreateParams {
                         name: "project".parse().unwrap(),
                         description: "desc".to_string(),

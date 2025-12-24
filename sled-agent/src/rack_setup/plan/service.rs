@@ -25,7 +25,7 @@ use nexus_types::deployment::{
     OmicronZoneExternalSnatIp, OximeterReadMode, PendingMgsUpdates,
     blueprint_zone_type,
 };
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::sled::SledState;
 use omicron_common::address::{
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT,
     NEXUS_INTERNAL_PORT, NEXUS_LOCKSTEP_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,

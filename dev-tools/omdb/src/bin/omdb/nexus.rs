@@ -2895,7 +2895,7 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
     }
 }
 fn print_task_webhook_deliverator(details: &serde_json::Value) {
-    use nexus_types::external_api::views::WebhookDeliveryAttemptResult;
+    use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
     use nexus_types::internal_api::background::WebhookDeliveratorStatus;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
     use nexus_types::internal_api::background::WebhookRxDeliveryStatus;

@@ -13,7 +13,16 @@ use nexus_test_utils::resource_helpers::{
     object_create_error, object_delete, objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{params, shared, views};
+use nexus_types::external_api::{
+    audit::{AuditLogEntry, AuditLogEntryActor, AuditLogEntryResult},
+    instance::{
+        ExternalIpCreate, InstanceDiskAttachment,
+        InstanceNetworkInterfaceAttachment,
+    },
+    project::ProjectCreate,
+    silo::SiloIdentityMode,
+    user::CurrentUser,
+};
 use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, InstanceAutoRestartPolicy,
@@ -32,13 +41,13 @@ async fn fetch_log(
     client: &ClientTestContext,
     start: DateTime<Utc>,
     end: Option<DateTime<Utc>>,
-) -> ResultsPage<views::AuditLogEntry> {
+) -> ResultsPage<AuditLogEntry> {
     let mut qs = vec![format!("start_time={}", to_q(start))];
     if let Some(end) = end {
         qs.push(format!("end_time={}", to_q(end)));
     }
     let url = format!("/v1/system/audit-log?{}", qs.join("&"));
-    objects_list_page_authz::<views::AuditLogEntry>(client, &url).await
+    objects_list_page_authz::<AuditLogEntry>(client, &url).await
 }
 
 #[nexus_test]
@@ -69,7 +78,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     // we have to do this rigmarole instead of using create_project in order to
     // get the user agent header in there and to use a session cookie to test
     // the auth_method field
-    let body = &params::ProjectCreate {
+    let body = &ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: "test-proj2".parse().unwrap(),
             description: "a pier".to_string(),
@@ -106,7 +115,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert!(e1.time_completed > e1.time_started);
     assert_eq!(
         e1.actor,
-        views::AuditLogEntryActor::SiloUser {
+        AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
             silo_id: DEFAULT_SILO_ID,
         }
@@ -122,8 +131,8 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert!(e2.time_completed > e2.time_started);
 
     // login attempts are unauthenticated (until the user is authenticated)
-    // assert_eq!(e2.actor, views::AuditLogEntryActor::Unauthenticated);
-    assert_eq!(e2.actor, views::AuditLogEntryActor::Unauthenticated);
+    // assert_eq!(e2.actor, AuditLogEntryActor::Unauthenticated);
+    assert_eq!(e2.actor, AuditLogEntryActor::Unauthenticated);
 
     // session create was the test suite user in the test suite silo, which
     // is different from the privileged user, so we need to fetch the user
@@ -134,7 +143,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to 201 on project create with session")
-        .parsed_body::<views::CurrentUser>()
+        .parsed_body::<CurrentUser>()
         .unwrap();
 
     // third one was done with the session cookie, reflected in auth_method
@@ -150,7 +159,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert!(e3.time_completed > e3.time_started);
     assert_eq!(
         e3.actor,
-        views::AuditLogEntryActor::SiloUser {
+        AuditLogEntryActor::SiloUser {
             silo_user_id: me.user.id,
             silo_id: me.user.silo_id,
         }
@@ -172,7 +181,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
         to_q(t1)
     );
     let reverse_log =
-        objects_list_page_authz::<views::AuditLogEntry>(client, &url).await;
+        objects_list_page_authz::<AuditLogEntry>(client, &url).await;
     assert_eq!(reverse_log.items.len(), 3);
     assert_eq!(e1.id, reverse_log.items[2].id);
     assert_eq!(e2.id, reverse_log.items[1].id);
@@ -180,8 +189,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
 
     // test pagination cursor. with limit 1, we only get one item, and it's e1
     let url = format!("/v1/system/audit-log?start_time={}&limit=1", to_q(t1));
-    let log =
-        objects_list_page_authz::<views::AuditLogEntry>(client, &url).await;
+    let log = objects_list_page_authz::<AuditLogEntry>(client, &url).await;
     assert_eq!(log.items.len(), 1);
     assert_eq!(e1.id, log.items[0].id);
 
@@ -190,8 +198,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
         "/v1/system/audit-log?page_token={}&limit=1",
         log.next_page.clone().unwrap()
     );
-    let log =
-        objects_list_page_authz::<views::AuditLogEntry>(client, &url).await;
+    let log = objects_list_page_authz::<AuditLogEntry>(client, &url).await;
     assert_eq!(log.items.len(), 1);
     assert_eq!(e2.id, log.items[0].id);
 }
@@ -206,7 +213,7 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
 
     // Create test silo and user first
     let silo_name = Name::from_str("test-silo").unwrap();
-    let local = shared::SiloIdentityMode::LocalOnly;
+    let local = SiloIdentityMode::LocalOnly;
     let silo = create_silo(client, silo_name.as_str(), true, local).await;
 
     let test_user = UserId::from_str("test-user").unwrap();
@@ -240,7 +247,7 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
     assert_eq!(e1.source_ip.to_string(), "127.0.0.1");
     assert_eq!(
         e1.result,
-        views::AuditLogEntryResult::Error {
+        AuditLogEntryResult::Error {
             http_status_code: 401,
             error_code: Some("Unauthorized".to_string()),
             error_message: "credentials missing or invalid".to_string(),
@@ -255,7 +262,7 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
     assert_eq!(e2.source_ip.to_string(), "127.0.0.1");
     assert_eq!(
         e2.result,
-        views::AuditLogEntryResult::Success { http_status_code: 204 }
+        AuditLogEntryResult::Success { http_status_code: 204 }
     );
     assert!(e2.time_started >= t2 && e2.time_started <= t3);
     assert!(e2.time_completed > e2.time_started);
@@ -321,9 +328,9 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
         client,
         "test-project",
         "test-instance",
-        &params::InstanceNetworkInterfaceAttachment::Default,
-        Vec::<params::InstanceDiskAttachment>::new(),
-        Vec::<params::ExternalIpCreate>::new(),
+        &InstanceNetworkInterfaceAttachment::Default,
+        Vec::<InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
         false, // start=false, so instance is created in stopped state
         None::<InstanceAutoRestartPolicy>,
         None::<InstanceCpuPlatform>,
@@ -371,7 +378,7 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
 }
 
 fn verify_entry(
-    entry: &views::AuditLogEntry,
+    entry: &AuditLogEntry,
     operation_id: &str,
     request_uri: &str,
     http_status_code: u16,
@@ -381,16 +388,13 @@ fn verify_entry(
     // Verify operation-specific fields
     assert_eq!(entry.operation_id, operation_id);
     assert_eq!(entry.request_uri, request_uri);
-    assert_eq!(
-        entry.result,
-        views::AuditLogEntryResult::Success { http_status_code }
-    );
+    assert_eq!(entry.result, AuditLogEntryResult::Success { http_status_code });
     assert!(entry.time_started >= start_time && entry.time_started <= end_time);
 
     // Verify fields common to all test-generated entries
     assert_eq!(
         entry.actor,
-        views::AuditLogEntryActor::SiloUser {
+        AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
             silo_id: DEFAULT_SILO_ID,
         }

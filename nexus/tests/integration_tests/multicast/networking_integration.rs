@@ -17,13 +17,14 @@ use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_project, object_create, object_delete,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    EphemeralIpCreate, ExternalIpCreate, FloatingIpAttach, InstanceCreate,
-    InstanceNetworkInterfaceAttachment, MulticastGroupCreate,
-    MulticastGroupMemberAdd,
+use nexus_types::external_api::floating_ip::{FloatingIp, FloatingIpAttach};
+use nexus_types::external_api::instance::{
+    EphemeralIpCreate, ExternalIpCreate, InstanceCreate,
+    InstanceNetworkInterfaceAttachment,
 };
-use nexus_types::external_api::views::{
-    FloatingIp, MulticastGroup, MulticastGroupMember,
+use nexus_types::external_api::multicast::{
+    MulticastGroup, MulticastGroupCreate, MulticastGroupMember,
+    MulticastGroupMemberAdd,
 };
 
 use omicron_common::api::external::{
@@ -676,7 +677,7 @@ async fn test_multicast_with_floating_ip_basic(
         "/v1/floating-ips/{floating_ip_name}/attach?project={project_name}"
     );
     let attach_params = FloatingIpAttach {
-        kind: nexus_types::external_api::params::FloatingIpParentKind::Instance,
+        kind: nexus_types::external_api::floating_ip::FloatingIpParentKind::Instance,
         parent: NameOrId::Name(instance_name.parse().unwrap()),
     };
 

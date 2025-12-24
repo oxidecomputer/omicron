@@ -208,7 +208,7 @@ mod test {
         app::saga::create_saga_dag,
         app::sagas::instance_create::test::verify_clean_slate,
         app::sagas::instance_delete::Params,
-        app::sagas::instance_delete::SagaInstanceDelete, external_api::params,
+        app::sagas::instance_delete::SagaInstanceDelete,
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_lookup::LookupPath;
@@ -218,6 +218,7 @@ mod test {
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::{instance as instance_types, project};
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
@@ -261,8 +262,8 @@ mod test {
     }
 
     // Helper for creating instance create parameters
-    fn new_instance_create_params() -> params::InstanceCreate {
-        params::InstanceCreate {
+    fn new_instance_create_params() -> instance_types::InstanceCreate {
+        instance_types::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: INSTANCE_NAME.parse().unwrap(),
                 description: "My instance".to_string(),
@@ -273,12 +274,14 @@ mod test {
             user_data: vec![],
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::Default,
-            external_ips: vec![params::ExternalIpCreate::Ephemeral {
+                instance_types::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![instance_types::ExternalIpCreate::Ephemeral {
                 pool: None,
             }],
-            boot_disk: Some(params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
+            boot_disk: Some(instance_types::InstanceDiskAttachment::Attach(
+                instance_types::InstanceDiskAttach {
+                    name: DISK_NAME.parse().unwrap(),
+                },
             )),
             cpu_platform: None,
             disks: Vec::new(),
@@ -322,12 +325,12 @@ mod test {
 
     async fn create_instance(
         cptestctx: &ControlPlaneTestContext,
-        params: params::InstanceCreate,
+        params: instance_types::InstanceCreate,
     ) -> db::model::Instance {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let project_selector = params::ProjectSelector {
+        let project_selector = project::ProjectSelector {
             project: PROJECT_NAME.to_string().try_into().unwrap(),
         };
         let project_lookup =

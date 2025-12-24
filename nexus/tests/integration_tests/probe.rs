@@ -6,7 +6,7 @@ use nexus_test_utils::{
     resource_helpers::{create_default_ip_pool, create_project},
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{params::ProbeCreate, shared::ProbeInfo};
+use nexus_types::external_api::probe::{ProbeCreate, ProbeInfo};
 use omicron_common::api::external::{IdentityMetadataCreateParams, Probe};
 
 type ControlPlaneTestContext =

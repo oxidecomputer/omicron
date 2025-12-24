@@ -12,8 +12,8 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::oxql;
+use nexus_types::external_api::timeseries;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
@@ -93,7 +93,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
         cond: F,
     ) -> T
     where
-        F: Fn(Vec<views::OxqlTable>) -> Result<T, MetricsNotYet>,
+        F: Fn(Vec<oxql::OxqlTable>) -> Result<T, MetricsNotYet>,
     {
         self.timeseries_query_until("/v1/system/timeseries/query", query, cond)
             .await
@@ -108,7 +108,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
         cond: F,
     ) -> T
     where
-        F: Fn(Vec<views::OxqlTable>) -> Result<T, MetricsNotYet>,
+        F: Fn(Vec<oxql::OxqlTable>) -> Result<T, MetricsNotYet>,
     {
         self.timeseries_query_until(
             &format!("/v1/timeseries/query?project={project}"),
@@ -128,7 +128,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
         &self,
         project: &str,
         query: &str,
-    ) -> Vec<views::OxqlTable> {
+    ) -> Vec<oxql::OxqlTable> {
         self.project_timeseries_query_until(project, query, |tables| Ok(tables))
             .await
     }
@@ -270,7 +270,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
         cond: F,
     ) -> T
     where
-        F: Fn(Vec<views::OxqlTable>) -> Result<T, MetricsNotYet>,
+        F: Fn(Vec<oxql::OxqlTable>) -> Result<T, MetricsNotYet>,
     {
         let result = wait_for_condition(
             || async {
@@ -339,7 +339,8 @@ impl<'a, N> MetricsQuerier<'a, N> {
         query: String,
     ) -> TimeseriesQueryResult {
         // Issue the query.
-        let body = params::TimeseriesQuery { query, include_summaries: false };
+        let body =
+            timeseries::TimeseriesQuery { query, include_summaries: false };
         let query = &body.query;
         let rsp = NexusRequest::new(
             RequestBuilder::new(
@@ -375,7 +376,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
         // Try to parse the query as usual, which will fail on other kinds of
         // errors.
         TimeseriesQueryResult::Ok(
-            rsp.parsed_body::<views::OxqlQueryResult>()
+            rsp.parsed_body::<oxql::OxqlQueryResult>()
                 .unwrap_or_else(|e| {
                     panic!(
                         "could not parse timeseries query response: {e:?}\n\
@@ -389,5 +390,5 @@ impl<'a, N> MetricsQuerier<'a, N> {
 
 enum TimeseriesQueryResult {
     TimeseriesNotFound,
-    Ok(Vec<views::OxqlTable>),
+    Ok(Vec<oxql::OxqlTable>),
 }

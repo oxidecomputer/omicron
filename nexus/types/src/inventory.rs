@@ -9,8 +9,8 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
-use crate::external_api::params::PhysicalDiskKind;
-use crate::external_api::params::UninitializedSledId;
+use crate::external_api::hardware::UninitializedSledId;
+use crate::external_api::physical_disk::PhysicalDiskKind;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
@@ -333,8 +333,8 @@ impl std::fmt::Display for BaseboardId {
     }
 }
 
-impl From<crate::external_api::shared::Baseboard> for BaseboardId {
-    fn from(value: crate::external_api::shared::Baseboard) -> Self {
+impl From<crate::external_api::hardware::Baseboard> for BaseboardId {
+    fn from(value: crate::external_api::hardware::Baseboard) -> Self {
         BaseboardId { part_number: value.part, serial_number: value.serial }
     }
 }
