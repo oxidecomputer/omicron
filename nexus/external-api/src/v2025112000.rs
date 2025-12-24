@@ -17,14 +17,6 @@ pub enum DiskType {
     Crucible,
 }
 
-impl From<DiskType> for external::DiskType {
-    fn from(old: DiskType) -> external::DiskType {
-        match old {
-            DiskType::Crucible => external::DiskType::Distributed,
-        }
-    }
-}
-
 /// View of a Disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
@@ -47,13 +39,15 @@ impl From<Disk> for external::Disk {
         external::Disk {
             identity: old.identity,
             project_id: old.project_id,
-            snapshot_id: old.snapshot_id,
-            image_id: old.image_id,
             size: old.size,
             block_size: old.block_size,
             state: old.state,
-            device_path: old.device_path,
-            disk_type: old.disk_type.into(),
+            disk_type: match old.disk_type {
+                DiskType::Crucible => external::DiskType::Distributed {
+                    snapshot_id: old.snapshot_id,
+                    image_id: old.image_id,
+                },
+            },
         }
     }
 }
@@ -62,29 +56,36 @@ impl TryFrom<external::Disk> for Disk {
     type Error = dropshot::HttpError;
 
     fn try_from(new: external::Disk) -> Result<Disk, Self::Error> {
+        let (snapshot_id, image_id) = match new.disk_type {
+            external::DiskType::Distributed { snapshot_id, image_id } => {
+                (snapshot_id, image_id)
+            }
+
+            _ => {
+                // Cannot display any other variant for this old client
+                return Err(dropshot::HttpError::for_client_error(
+                    Some(String::from("Not Acceptable")),
+                    dropshot::ClientErrorStatusCode::NOT_ACCEPTABLE,
+                    String::from(
+                        "disk type variant not supported for client version",
+                    ),
+                ));
+            }
+        };
+
+        // This path was fake before, so retain that behaviour here
+        let device_path = format!("/mnt/{}", new.identity.name.as_str());
+
         Ok(Disk {
             identity: new.identity,
             project_id: new.project_id,
-            snapshot_id: new.snapshot_id,
-            image_id: new.image_id,
+            snapshot_id,
+            image_id,
             size: new.size,
             block_size: new.block_size,
             state: new.state,
-            device_path: new.device_path,
-            disk_type: match new.disk_type {
-                external::DiskType::Distributed => DiskType::Crucible,
-
-                _ => {
-                    // Cannot display any other variant for this old client
-                    return Err(dropshot::HttpError::for_client_error(
-                        Some(String::from("Not Acceptable")),
-                        dropshot::ClientErrorStatusCode::NOT_ACCEPTABLE,
-                        String::from(
-                            "disk type variant not supported for client version",
-                        ),
-                    ));
-                }
-            },
+            device_path,
+            disk_type: DiskType::Crucible,
         })
     }
 }
