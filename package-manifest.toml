@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "38d4cc9b288c8133845510c69436feecc30c85ae"
+source.commit = "205b3ccf75b527ac7a565285fdcc0c78f4fcee95"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "ae0654f31b480ec4c604cff4d9a8a3c7dab7555995efdaf9a4f059ad21d555f9"
+source.sha256 = "fa122dfaf77b1c060f19ca0e044f57044342c8c2b444595ca156ac8885852ebe"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -670,10 +670,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "38d4cc9b288c8133845510c69436feecc30c85ae"
+source.commit = "205b3ccf75b527ac7a565285fdcc0c78f4fcee95"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "4648e779b2b8c2acde376bfedc019057c1f7742feb2ee055e38cd2a135f21d5e"
+source.sha256 = "14c8f3f77149c5aa217f56b57585eb1bcffc507d04910e84fc87c033cbe0ef39"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -685,7 +685,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "38d4cc9b288c8133845510c69436feecc30c85ae"
+source.commit = "205b3ccf75b527ac7a565285fdcc0c78f4fcee95"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "53576d28cae4304db61367d687580e9b96da23e647898b9034fdfa1603376b0c"
