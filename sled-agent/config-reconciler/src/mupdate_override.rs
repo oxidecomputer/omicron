@@ -6,9 +6,11 @@
 
 use crate::InternalDisks;
 use crate::host_phase_2::HostPhase2PreparedContents;
+use crate::measurements::PreparedOmicronMeasurements;
 use camino::Utf8PathBuf;
 use omicron_common::resolvable_files::ResolvableFileSource;
 use sled_agent_types::inventory::HostPhase2DesiredContents;
+use sled_agent_types::inventory::OmicronSingleMeasurement;
 use sled_agent_types::inventory::OmicronZoneConfig;
 use sled_agent_types::inventory::OmicronZoneImageSource;
 use sled_agent_types::inventory::ZoneKind;
@@ -22,6 +24,7 @@ use slog::error;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use tufaceous_artifact::ArtifactHash;
 
 /// An extension trait for `ResolverStatus`.
@@ -58,6 +61,13 @@ pub trait ResolverStatusExt {
         log: &slog::Logger,
         desired: &'a HostPhase2DesiredContents,
     ) -> HostPhase2PreparedContents<'a>;
+
+    fn prepare_all_measurements(
+        &self,
+        log: &slog::Logger,
+        desired: &BTreeSet<OmicronSingleMeasurement>,
+        internal_disks: &InternalDisks,
+    ) -> PreparedOmicronMeasurements;
 }
 
 impl ResolverStatusExt for ResolverStatus {
@@ -285,6 +295,84 @@ impl ResolverStatusExt for ResolverStatus {
                 }
             }
         }
+    }
+
+    fn prepare_all_measurements(
+        &self,
+        log: &slog::Logger,
+        _desired: &BTreeSet<OmicronSingleMeasurement>,
+        internal_disks: &InternalDisks,
+    ) -> PreparedOmicronMeasurements {
+        // For now we only support measurements from the install dataset
+        // regardless of mupdate override status
+
+        let mut file_sources = Vec::new();
+
+        // Measurements for local keys are handled via the sprockets config.
+        // We could add a fixed path to place testing measurements but that
+        // potentially weakens our security story. Arguably there's not much
+        // of a difference between a fixed testing path and the install dataset
+        // but there's at least a few checks here.
+
+        all_install_measurements(
+            log,
+            self,
+            internal_disks,
+            |path, file_name, hash| {
+                file_sources.push(OmicronResolvableFileSource {
+                    location: OmicronResolvableFileLocation::InstallDataset {
+                        hash,
+                    },
+                    file_source: ResolvableFileSource {
+                        file_name,
+                        search_paths: vec![path.join("measurements")],
+                    },
+                })
+            },
+        );
+
+        PreparedOmicronMeasurements { sources: file_sources }
+    }
+}
+
+fn all_install_measurements<F>(
+    log: &slog::Logger,
+    resolver_status: &ResolverStatus,
+    internal_disks: &InternalDisks,
+    mut search_paths_cb: F,
+) where
+    F: FnMut(Utf8PathBuf, String, Result<ArtifactHash, ZoneImageLocationError>),
+{
+    if let Some(path) = internal_disks.boot_disk_install_dataset() {
+        match resolver_status.measurement_manifest.all_measurements() {
+            Ok(entries) => {
+                for e in entries {
+                    match e {
+                        Ok((file_name, hash)) => {
+                            search_paths_cb(path.clone(), file_name, Ok(hash))
+                        }
+                        Err(e) => error!(
+                            log,
+                            "measurement entry error";
+                            "error" => InlineErrorChain::new(&e),
+                        ),
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    log,
+                    "measurement error";
+                    "error" => InlineErrorChain::new(&e),
+                );
+            }
+        }
+    } else {
+        error!(
+            log,
+            "boot disk install dataset not available, \
+             not returning it as a source";
+        );
     }
 }
 
