@@ -2,21 +2,24 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Mechanism for reporting protocol invariant violations
+//! Mechanism for reporting protocol invariant violations.
 
+use gfss::shamir::CombineError;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    Configuration, Epoch,
-    crypto::{DecryptionError, RackSecretReconstructError},
-};
+use super::configuration::Configuration;
+use super::crypto::{DecryptionError, RackSecretReconstructError};
+use super::types::Epoch;
 
+/// An alarm indicating a protocol invariant violation.
 #[allow(clippy::large_enum_variant)]
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum Alarm {
-    /// Different configurations found for the same epoch
+    /// Different configurations found for the same epoch.
     ///
     /// Reason: Nexus creates configurations and stores them in CRDB before
     /// sending them to a coordinator of its choosing. Nexus will not send the
@@ -27,16 +30,16 @@ pub enum Alarm {
     MismatchedConfigurations {
         config1: Configuration,
         config2: Configuration,
-        // Either a stringified `BaseboardId` or "Nexus"
+        /// Either a stringified `BaseboardId` or "Nexus".
         from: String,
     },
 
-    /// The `keyShareComputer` could not compute this node's share
+    /// The `keyShareComputer` could not compute this node's share.
     ///
     /// Reason: A threshold of valid key shares were received based on the the
     /// share digests in the Configuration. However, computation of the share
     /// still failed. This should be impossible.
-    ShareComputationFailed { epoch: Epoch, err: gfss::shamir::CombineError },
+    ShareComputationFailed { epoch: Epoch, err: CombineError },
 
     /// We started collecting shares for a committed configuration,
     /// but we no longer have that configuration in our persistent state.
@@ -50,7 +53,7 @@ pub enum Alarm {
     ///
     /// `Configuration` membership contains the hashes of each valid share. All
     /// shares utilized to reconstruct the rack secret were validated against
-    /// these hashes, and the rack seceret was reconstructed. However, using
+    /// these hashes, and the rack secret was reconstructed. However, using
     /// the rack secret to derive encryption keys and decrypt the secrets from
     /// old configurations still failed. This should never be possible, and
     /// therefore we raise an alarm.

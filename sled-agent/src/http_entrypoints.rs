@@ -56,10 +56,8 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    TrustQuorumAlarm, TrustQuorumCommitRequest, TrustQuorumCommitResponse,
-    TrustQuorumConfiguration, TrustQuorumCoordinatorStatus,
-    TrustQuorumLrtqUpgradeRequest, TrustQuorumNodeStatus,
-    TrustQuorumPersistentStateSummary, TrustQuorumPrepareAndCommitRequest,
+    CommitStatus, CoordinatorStatus, NodeStatus, TrustQuorumCommitRequest,
+    TrustQuorumLrtqUpgradeRequest, TrustQuorumPrepareAndCommitRequest,
     TrustQuorumProxyCommitRequest, TrustQuorumProxyPrepareAndCommitRequest,
     TrustQuorumProxyStatusRequest, TrustQuorumReconfigureRequest,
 };
@@ -1196,12 +1194,10 @@ impl SledAgentApi for SledAgentImpl {
 
         let msg = trust_quorum_protocol::ReconfigureMsg {
             rack_id: request.rack_id,
-            epoch: trust_quorum_protocol::Epoch(request.epoch),
-            last_committed_epoch: request
-                .last_committed_epoch
-                .map(trust_quorum_protocol::Epoch),
+            epoch: request.epoch,
+            last_committed_epoch: request.last_committed_epoch,
             members: request.members,
-            threshold: trust_quorum_protocol::Threshold(request.threshold),
+            threshold: request.threshold,
         };
 
         sa.trust_quorum()
@@ -1221,9 +1217,9 @@ impl SledAgentApi for SledAgentImpl {
 
         let msg = trust_quorum_protocol::LrtqUpgradeMsg {
             rack_id: request.rack_id,
-            epoch: trust_quorum_protocol::Epoch(request.epoch),
+            epoch: request.epoch,
             members: request.members,
-            threshold: trust_quorum_protocol::Threshold(request.threshold),
+            threshold: request.threshold,
         };
 
         sa.trust_quorum()
@@ -1237,35 +1233,22 @@ impl SledAgentApi for SledAgentImpl {
     async fn trust_quorum_commit(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<TrustQuorumCommitRequest>,
-    ) -> Result<HttpResponseOk<TrustQuorumCommitResponse>, HttpError> {
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
 
         let status = sa
             .trust_quorum()
-            .commit(
-                request.rack_id,
-                trust_quorum_protocol::Epoch(request.epoch),
-            )
+            .commit(request.rack_id, request.epoch)
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        let response = match status {
-            trust_quorum::CommitStatus::Committed => {
-                TrustQuorumCommitResponse::Committed
-            }
-            trust_quorum::CommitStatus::Pending => {
-                TrustQuorumCommitResponse::Pending
-            }
-        };
-
-        Ok(HttpResponseOk(response))
+        Ok(HttpResponseOk(status))
     }
 
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<TrustQuorumCoordinatorStatus>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
         let sa = request_context.context();
 
         let status = sa
@@ -1274,156 +1257,63 @@ impl SledAgentApi for SledAgentImpl {
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        let response = status.map(|s| TrustQuorumCoordinatorStatus {
-            config: TrustQuorumConfiguration {
-                rack_id: s.config.rack_id,
-                epoch: s.config.epoch.0,
-                coordinator: s.config.coordinator,
-                members: s
-                    .config
-                    .members
-                    .into_iter()
-                    .map(|(id, digest)| (id, digest.0))
-                    .collect(),
-                threshold: s.config.threshold.0,
-            },
-            acked_prepares: s.acked_prepares,
-        });
-
-        Ok(HttpResponseOk(response))
+        Ok(HttpResponseOk(status))
     }
 
     async fn trust_quorum_prepare_and_commit(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<TrustQuorumPrepareAndCommitRequest>,
-    ) -> Result<HttpResponseOk<TrustQuorumCommitResponse>, HttpError> {
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
 
-        let members = request
-            .members
-            .into_iter()
-            .map(|(id, digest)| (id, trust_quorum_protocol::Sha3_256Digest(digest)))
-            .collect();
-
-        let encrypted_rack_secrets =
-            request.encrypted_rack_secrets.map(|ers| {
-                trust_quorum_protocol::EncryptedRackSecrets::new(
-                    trust_quorum_protocol::Salt(ers.salt),
-                    ers.data.into_boxed_slice(),
-                )
-            });
-
-        let config = trust_quorum_protocol::Configuration {
-            rack_id: request.rack_id,
-            epoch: trust_quorum_protocol::Epoch(request.epoch),
-            coordinator: request.coordinator,
-            members,
-            threshold: trust_quorum_protocol::Threshold(request.threshold),
-            encrypted_rack_secrets,
-        };
-
         let status = sa
             .trust_quorum()
-            .prepare_and_commit(config)
+            .prepare_and_commit(request.config)
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        let response = match status {
-            trust_quorum::CommitStatus::Committed => {
-                TrustQuorumCommitResponse::Committed
-            }
-            trust_quorum::CommitStatus::Pending => {
-                TrustQuorumCommitResponse::Pending
-            }
-        };
-
-        Ok(HttpResponseOk(response))
+        Ok(HttpResponseOk(status))
     }
 
     async fn trust_quorum_proxy_commit(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<TrustQuorumProxyCommitRequest>,
-    ) -> Result<HttpResponseOk<TrustQuorumCommitResponse>, HttpError> {
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
 
         let status = sa
             .trust_quorum()
             .proxy()
-            .commit(
-                request.destination,
-                request.rack_id,
-                trust_quorum_protocol::Epoch(request.epoch),
-            )
+            .commit(request.destination, request.rack_id, request.epoch)
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        let response = match status {
-            trust_quorum::CommitStatus::Committed => {
-                TrustQuorumCommitResponse::Committed
-            }
-            trust_quorum::CommitStatus::Pending => {
-                TrustQuorumCommitResponse::Pending
-            }
-        };
-
-        Ok(HttpResponseOk(response))
+        Ok(HttpResponseOk(status))
     }
 
     async fn trust_quorum_proxy_prepare_and_commit(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<TrustQuorumProxyPrepareAndCommitRequest>,
-    ) -> Result<HttpResponseOk<TrustQuorumCommitResponse>, HttpError> {
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
-
-        let members = request
-            .members
-            .into_iter()
-            .map(|(id, digest)| (id, trust_quorum_protocol::Sha3_256Digest(digest)))
-            .collect();
-
-        let encrypted_rack_secrets =
-            request.encrypted_rack_secrets.map(|ers| {
-                trust_quorum_protocol::EncryptedRackSecrets::new(
-                    trust_quorum_protocol::Salt(ers.salt),
-                    ers.data.into_boxed_slice(),
-                )
-            });
-
-        let config = trust_quorum_protocol::Configuration {
-            rack_id: request.rack_id,
-            epoch: trust_quorum_protocol::Epoch(request.epoch),
-            coordinator: request.coordinator,
-            members,
-            threshold: trust_quorum_protocol::Threshold(request.threshold),
-            encrypted_rack_secrets,
-        };
 
         let status = sa
             .trust_quorum()
             .proxy()
-            .prepare_and_commit(request.destination, config)
+            .prepare_and_commit(request.destination, request.config)
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        let response = match status {
-            trust_quorum::CommitStatus::Committed => {
-                TrustQuorumCommitResponse::Committed
-            }
-            trust_quorum::CommitStatus::Pending => {
-                TrustQuorumCommitResponse::Pending
-            }
-        };
-
-        Ok(HttpResponseOk(response))
+        Ok(HttpResponseOk(status))
     }
 
     async fn trust_quorum_proxy_status(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<TrustQuorumProxyStatusRequest>,
-    ) -> Result<HttpResponseOk<TrustQuorumNodeStatus>, HttpError> {
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
 
@@ -1434,98 +1324,6 @@ impl SledAgentApi for SledAgentImpl {
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        // We can't define a `From` impl between Alarm (the internal protocol type) and
-        // TrustQuorumAlarm (the external API type) due to orphan rules, and this conversion is only
-        // used here to bridge the API to the underlying trust-quorum types, so we'll just define a
-        // couple free functions in this scope for conversion:
-
-        fn convert_configuration(
-            config: trust_quorum_protocol::Configuration,
-        ) -> TrustQuorumConfiguration {
-            TrustQuorumConfiguration {
-                rack_id: config.rack_id,
-                epoch: config.epoch.0,
-                coordinator: config.coordinator,
-                members: config
-                    .members
-                    .into_iter()
-                    .map(|(id, digest)| (id, digest.0))
-                    .collect(),
-                threshold: config.threshold.0,
-            }
-        }
-
-        fn convert_alarm(
-            alarm: trust_quorum_protocol::Alarm,
-        ) -> TrustQuorumAlarm {
-            match alarm {
-                trust_quorum_protocol::Alarm::MismatchedConfigurations {
-                    config1,
-                    config2,
-                    from,
-                } => TrustQuorumAlarm::MismatchedConfigurations {
-                    config1: convert_configuration(config1),
-                    config2: convert_configuration(config2),
-                    from,
-                },
-                trust_quorum_protocol::Alarm::ShareComputationFailed { epoch, err } => {
-                    TrustQuorumAlarm::ShareComputationFailed {
-                        epoch: epoch.0,
-                        error: err.to_string(),
-                    }
-                }
-                trust_quorum_protocol::Alarm::CommittedConfigurationLost {
-                    latest_committed_epoch,
-                    collecting_epoch,
-                } => TrustQuorumAlarm::CommittedConfigurationLost {
-                    latest_committed_epoch: latest_committed_epoch.0,
-                    collecting_epoch: collecting_epoch.0,
-                },
-                trust_quorum_protocol::Alarm::RackSecretDecryptionFailed {
-                    epoch,
-                    err,
-                } => TrustQuorumAlarm::RackSecretDecryptionFailed {
-                    epoch: epoch.0,
-                    error: err.to_string(),
-                },
-                trust_quorum_protocol::Alarm::RackSecretReconstructionFailed {
-                    epoch,
-                    err,
-                } => TrustQuorumAlarm::RackSecretReconstructionFailed {
-                    epoch: epoch.0,
-                    error: err.to_string(),
-                },
-            }
-        }
-
-        let response = TrustQuorumNodeStatus {
-            connected_peers: status.connected_peers,
-            alarms: status.alarms.into_iter().map(convert_alarm).collect(),
-            persistent_state: TrustQuorumPersistentStateSummary {
-                has_lrtq_share: status.persistent_state.has_lrtq_share,
-                configs: status
-                    .persistent_state
-                    .configs
-                    .into_iter()
-                    .map(|e| e.0)
-                    .collect(),
-                shares: status
-                    .persistent_state
-                    .shares
-                    .into_iter()
-                    .map(|e| e.0)
-                    .collect(),
-                commits: status
-                    .persistent_state
-                    .commits
-                    .into_iter()
-                    .map(|e| e.0)
-                    .collect(),
-                expunged: status.persistent_state.expunged.is_some(),
-            },
-            proxied_requests: status.proxied_requests,
-        };
-
-        Ok(HttpResponseOk(response))
+        Ok(HttpResponseOk(status))
     }
 }

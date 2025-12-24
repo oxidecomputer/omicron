@@ -1099,7 +1099,7 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         body: TypedBody<latest::trust_quorum::TrustQuorumCommitRequest>,
     ) -> Result<
-        HttpResponseOk<latest::trust_quorum::TrustQuorumCommitResponse>,
+        HttpResponseOk<latest::trust_quorum::CommitStatus>,
         HttpError,
     >;
 
@@ -1112,9 +1112,7 @@ pub trait SledAgentApi {
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<
-            Option<latest::trust_quorum::TrustQuorumCoordinatorStatus>,
-        >,
+        HttpResponseOk<Option<latest::trust_quorum::CoordinatorStatus>>,
         HttpError,
     >;
 
@@ -1130,7 +1128,7 @@ pub trait SledAgentApi {
             latest::trust_quorum::TrustQuorumPrepareAndCommitRequest,
         >,
     ) -> Result<
-        HttpResponseOk<latest::trust_quorum::TrustQuorumCommitResponse>,
+        HttpResponseOk<latest::trust_quorum::CommitStatus>,
         HttpError,
     >;
 
@@ -1144,7 +1142,7 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         body: TypedBody<latest::trust_quorum::TrustQuorumProxyCommitRequest>,
     ) -> Result<
-        HttpResponseOk<latest::trust_quorum::TrustQuorumCommitResponse>,
+        HttpResponseOk<latest::trust_quorum::CommitStatus>,
         HttpError,
     >;
 
@@ -1160,7 +1158,7 @@ pub trait SledAgentApi {
             latest::trust_quorum::TrustQuorumProxyPrepareAndCommitRequest,
         >,
     ) -> Result<
-        HttpResponseOk<latest::trust_quorum::TrustQuorumCommitResponse>,
+        HttpResponseOk<latest::trust_quorum::CommitStatus>,
         HttpError,
     >;
 
@@ -1174,7 +1172,7 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         body: TypedBody<latest::trust_quorum::TrustQuorumProxyStatusRequest>,
     ) -> Result<
-        HttpResponseOk<latest::trust_quorum::TrustQuorumNodeStatus>,
+        HttpResponseOk<latest::trust_quorum::NodeStatus>,
         HttpError,
     >;
 }

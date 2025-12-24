@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 digest.workspace = true
 rand.workspace = true
+schemars.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 subtle.workspace = true

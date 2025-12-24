@@ -4,6 +4,8 @@
 
 //! Messsages for the trust quorum protocol
 
+#[cfg(feature = "testing")]
+use crate::configuration::configurations_equal_except_for_crypto_data;
 use crate::crypto::LrtqShare;
 use crate::{BaseboardId, Configuration, Epoch, Threshold};
 use gfss::shamir::Share;
@@ -113,14 +115,14 @@ impl PeerMsgKind {
             (
                 Self::Prepare { config: config1, .. },
                 Self::Prepare { config: config2, .. },
-            ) => config1.equal_except_for_crypto_data(config2),
+            ) => configurations_equal_except_for_crypto_data(config1, config2),
             (
                 Self::Share { epoch: epoch1, .. },
                 Self::Share { epoch: epoch2, .. },
             ) => epoch1 == epoch2,
             (Self::LrtqShare(_), Self::LrtqShare(_)) => true,
             (Self::CommitAdvance(config1), Self::CommitAdvance(config2)) => {
-                config1.equal_except_for_crypto_data(config2)
+                configurations_equal_except_for_crypto_data(config1, config2)
             }
             (s, o) => s == o,
         }

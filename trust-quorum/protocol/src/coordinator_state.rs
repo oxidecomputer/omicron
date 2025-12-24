@@ -5,12 +5,16 @@
 //! State of a reconfiguration coordinator inside a [`crate::Node`]
 
 use crate::NodeHandlerCtx;
-use crate::configuration::{ConfigurationDiff, ConfigurationError};
-use crate::crypto::{LrtqShare, PlaintextRackSecrets, ReconstructedRackSecret};
+use crate::configuration::new_configuration;
+use crate::crypto::{
+    LrtqShare, PlaintextRackSecrets, ReconstructedRackSecret, decrypt_rack_secrets,
+};
+use crate::{ConfigurationError};
 use crate::validators::{
     ReconfigurationError, ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
 };
 use crate::{BaseboardId, Configuration, Epoch, PeerMsgKind, RackSecret};
+use trust_quorum_types::configuration::ConfigurationDiff;
 use bootstore::trust_quorum::RackSecret as LrtqRackSecret;
 use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
@@ -100,7 +104,7 @@ impl CoordinatorState {
     {
         let log = log.new(o!("component" => "tq-coordinator-state"));
         // Create a configuration for this epoch
-        let (config, shares) = Configuration::new((&msg).into())?;
+        let (config, shares) = new_configuration((&msg).into())?;
 
         let mut prepares = BTreeMap::new();
         // `my_share` is optional only so that we can fill it in via the
@@ -145,7 +149,7 @@ impl CoordinatorState {
         our_latest_committed_share: Share,
     ) -> Result<CoordinatorState, ReconfigurationError> {
         let log = log.new(o!("component" => "tq-coordinator-state"));
-        let (config, new_shares) = Configuration::new((&msg).into())?;
+        let (config, new_shares) = new_configuration((&msg).into())?;
 
         info!(
             log,
@@ -176,7 +180,7 @@ impl CoordinatorState {
         msg: ValidatedLrtqUpgradeMsg,
     ) -> Result<CoordinatorState, ConfigurationError> {
         let log = log.new(o!("component" => "tq-coordinator-state"));
-        let (configuration, new_shares) = Configuration::new((&msg).into())?;
+        let (configuration, new_shares) = new_configuration((&msg).into())?;
 
         info!(
             log,
@@ -462,7 +466,8 @@ impl CoordinatorState {
                 let mut plaintext_secrets = if let Some(encrypted_secrets) =
                     &old_config.encrypted_rack_secrets
                 {
-                    match encrypted_secrets.decrypt(
+                    match decrypt_rack_secrets(
+                        encrypted_secrets,
                         old_config.rack_id,
                         old_config.epoch,
                         &old_rack_secret,

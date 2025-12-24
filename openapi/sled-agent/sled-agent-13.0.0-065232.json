@@ -1567,7 +1567,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrustQuorumCommitResponse"
+                  "$ref": "#/components/schemas/CommitStatus"
                 }
               }
             }
@@ -1591,7 +1591,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrustQuorumCoordinatorStatus"
+                  "$ref": "#/components/schemas/CoordinatorStatus"
                 }
               }
             }
@@ -1625,7 +1625,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrustQuorumCommitResponse"
+                  "$ref": "#/components/schemas/CommitStatus"
                 }
               }
             }
@@ -1659,7 +1659,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrustQuorumCommitResponse"
+                  "$ref": "#/components/schemas/CommitStatus"
                 }
               }
             }
@@ -1693,7 +1693,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrustQuorumCommitResponse"
+                  "$ref": "#/components/schemas/CommitStatus"
                 }
               }
             }
@@ -1727,7 +1727,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrustQuorumNodeStatus"
+                  "$ref": "#/components/schemas/NodeStatus"
                 }
               }
             }
@@ -2617,6 +2617,151 @@
           "start_request"
         ]
       },
+      "Alarm": {
+        "description": "An alarm indicating a protocol invariant violation.",
+        "oneOf": [
+          {
+            "description": "Different configurations found for the same epoch.\n\nReason: Nexus creates configurations and stores them in CRDB before sending them to a coordinator of its choosing. Nexus will not send the same reconfiguration request to different coordinators. If it does those coordinators will generate different key shares. However, since Nexus will not tell different nodes to coordinate the same configuration, this state should be impossible to reach.",
+            "type": "object",
+            "properties": {
+              "mismatched_configurations": {
+                "type": "object",
+                "properties": {
+                  "config1": {
+                    "$ref": "#/components/schemas/Configuration"
+                  },
+                  "config2": {
+                    "$ref": "#/components/schemas/Configuration"
+                  },
+                  "from": {
+                    "description": "Either a stringified `BaseboardId` or \"Nexus\".",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "config1",
+                  "config2",
+                  "from"
+                ]
+              }
+            },
+            "required": [
+              "mismatched_configurations"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "The `keyShareComputer` could not compute this node's share.\n\nReason: A threshold of valid key shares were received based on the the share digests in the Configuration. However, computation of the share still failed. This should be impossible.",
+            "type": "object",
+            "properties": {
+              "share_computation_failed": {
+                "type": "object",
+                "properties": {
+                  "epoch": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  },
+                  "err": {
+                    "$ref": "#/components/schemas/CombineError"
+                  }
+                },
+                "required": [
+                  "epoch",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "share_computation_failed"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "We started collecting shares for a committed configuration, but we no longer have that configuration in our persistent state.",
+            "type": "object",
+            "properties": {
+              "committed_configuration_lost": {
+                "type": "object",
+                "properties": {
+                  "collecting_epoch": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  },
+                  "latest_committed_epoch": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "collecting_epoch",
+                  "latest_committed_epoch"
+                ]
+              }
+            },
+            "required": [
+              "committed_configuration_lost"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Decrypting the encrypted rack secrets failed when presented with a `valid` RackSecret.\n\n`Configuration` membership contains the hashes of each valid share. All shares utilized to reconstruct the rack secret were validated against these hashes, and the rack secret was reconstructed. However, using the rack secret to derive encryption keys and decrypt the secrets from old configurations still failed. This should never be possible, and therefore we raise an alarm.",
+            "type": "object",
+            "properties": {
+              "rack_secret_decryption_failed": {
+                "type": "object",
+                "properties": {
+                  "epoch": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  },
+                  "err": {
+                    "$ref": "#/components/schemas/DecryptionError"
+                  }
+                },
+                "required": [
+                  "epoch",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "rack_secret_decryption_failed"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Reconstructing the rack secret failed when presented with `valid` shares.\n\n`Configuration` membership contains the hashes of each valid share. All shares utilized to reconstruct the rack secret were validated against these hashes, and yet, the reconstruction still failed. This indicates either a bit flip in a share after validation, or, more likely, an invalid hash.",
+            "type": "object",
+            "properties": {
+              "rack_secret_reconstruction_failed": {
+                "type": "object",
+                "properties": {
+                  "epoch": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  },
+                  "err": {
+                    "$ref": "#/components/schemas/RackSecretReconstructError"
+                  }
+                },
+                "required": [
+                  "epoch",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "rack_secret_reconstruction_failed"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "ArtifactConfig": {
         "description": "Artifact configuration.\n\nThis type is used in both GET (response) and PUT (request) operations.",
         "type": "object",
@@ -2767,7 +2912,7 @@
         ]
       },
       "BaseboardId": {
-        "description": "A representation of a Baseboard ID as used in the inventory subsystem This type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem.\n\nThis type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
         "type": "object",
         "properties": {
           "part_number": {
@@ -3514,6 +3659,23 @@
           }
         ]
       },
+      "CombineError": {
+        "type": "string",
+        "enum": [
+          "too_few_shares",
+          "duplicate_x_coordinates",
+          "invalid_share_lengths",
+          "invalid_share_id"
+        ]
+      },
+      "CommitStatus": {
+        "description": "Whether or not a configuration has been committed or is still underway.",
+        "type": "string",
+        "enum": [
+          "committed",
+          "pending"
+        ]
+      },
       "ComponentV0": {
         "oneOf": [
           {
@@ -4120,6 +4282,105 @@
           }
         ]
       },
+      "Configuration": {
+        "description": "The configuration for a given epoch.\n\nOnly valid for non-lrtq configurations.",
+        "type": "object",
+        "properties": {
+          "coordinator": {
+            "description": "Who was the coordinator of this reconfiguration?",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "encrypted_rack_secrets": {
+            "nullable": true,
+            "description": "There are no encrypted rack secrets for the initial configuration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EncryptedRackSecrets"
+              }
+            ]
+          },
+          "epoch": {
+            "description": "Unique, monotonically increasing identifier for a configuration.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "members": {
+            "description": "All members of the current configuration and the hash of their key shares.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationMember"
+            }
+          },
+          "rack_id": {
+            "description": "Unique Id of the rack.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackUuid"
+              }
+            ]
+          },
+          "threshold": {
+            "description": "The number of sleds required to reconstruct the rack secret.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "coordinator",
+          "epoch",
+          "members",
+          "rack_id",
+          "threshold"
+        ]
+      },
+      "ConfigurationMember": {
+        "description": "A member entry in a trust quorum configuration.\n\nThis type is used for OpenAPI schema generation since OpenAPI v3.0.x doesn't support tuple arrays.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The baseboard ID of the member.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "share_digest": {
+            "description": "The SHA3-256 hash of the member's key share.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "share_digest"
+        ]
+      },
+      "CoordinatorStatus": {
+        "description": "Status of the node coordinating the reconfiguration or LRTQ upgrade.",
+        "type": "object",
+        "properties": {
+          "acked_prepares": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          },
+          "config": {
+            "$ref": "#/components/schemas/Configuration"
+          }
+        },
+        "required": [
+          "acked_prepares",
+          "config"
+        ]
+      },
       "Cpuid": {
         "description": "A set of CPUID values to expose to a guest.",
         "type": "object",
@@ -4304,6 +4565,25 @@
         },
         "type": "string",
         "format": "uuid"
+      },
+      "DecryptionError": {
+        "description": "Error decrypting rack secrets.",
+        "oneOf": [
+          {
+            "description": "An opaque error indicating decryption failed.",
+            "type": "string",
+            "enum": [
+              "aead"
+            ]
+          },
+          {
+            "description": "The length of the plaintext is not the correct size and cannot be decoded.",
+            "type": "string",
+            "enum": [
+              "invalid_length"
+            ]
+          }
+        ]
       },
       "DelegatedZvol": {
         "description": "Delegate a ZFS volume to a zone",
@@ -4795,6 +5075,23 @@
           "ntp_servers"
         ]
       },
+      "EncryptedRackSecrets": {
+        "description": "All possibly relevant __encrypted__ rack secrets for _prior_ committed configurations.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "salt": {
+            "description": "A random value used to derive the key to encrypt the rack secrets for prior committed epochs.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "salt"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -4828,6 +5125,30 @@
         "required": [
           "addr",
           "baseboard"
+        ]
+      },
+      "ExpungedMetadata": {
+        "description": "Metadata about a node being expunged from the trust quorum.",
+        "type": "object",
+        "properties": {
+          "epoch": {
+            "description": "The committed epoch, later than its current configuration at which the node learned that it had been expunged.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "from": {
+            "description": "Which node this commit information was learned from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "epoch",
+          "from"
         ]
       },
       "ExternalIp": {
@@ -5710,6 +6031,13 @@
               "value"
             ]
           }
+        ]
+      },
+      "InvalidRackSecretSizeError": {
+        "description": "Error indicating the rack secret has an invalid size.",
+        "type": "string",
+        "enum": [
+          null
         ]
       },
       "Inventory": {
@@ -6607,6 +6935,90 @@
               "type"
             ]
           }
+        ]
+      },
+      "NodePersistentStateSummary": {
+        "description": "A summary of a node's persistent state.",
+        "type": "object",
+        "properties": {
+          "commits": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          },
+          "configs": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          },
+          "expunged": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExpungedMetadata"
+              }
+            ]
+          },
+          "has_lrtq_share": {
+            "type": "boolean"
+          },
+          "shares": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "commits",
+          "configs",
+          "has_lrtq_share",
+          "shares"
+        ]
+      },
+      "NodeStatus": {
+        "description": "Details about a given node's status.",
+        "type": "object",
+        "properties": {
+          "alarms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Alarm"
+            },
+            "uniqueItems": true
+          },
+          "connected_peers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          },
+          "persistent_state": {
+            "$ref": "#/components/schemas/NodePersistentStateSummary"
+          },
+          "proxied_requests": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "alarms",
+          "connected_peers",
+          "persistent_state",
+          "proxied_requests"
         ]
       },
       "NvmeDisk": {
@@ -7835,6 +8247,35 @@
           "rack_subnet"
         ]
       },
+      "RackSecretReconstructError": {
+        "description": "Error reconstructing a rack secret from shares.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "combine": {
+                "$ref": "#/components/schemas/CombineError"
+              }
+            },
+            "required": [
+              "combine"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "size": {
+                "$ref": "#/components/schemas/InvalidRackSecretSizeError"
+              }
+            },
+            "required": [
+              "size"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "RackUuid": {
         "x-rust-type": {
           "crate": "omicron-uuid-kinds",
@@ -8791,169 +9232,6 @@
           "uplinks"
         ]
       },
-      "TrustQuorumAlarm": {
-        "description": "An alarm indicating a protocol invariant violation in trust quorum.",
-        "oneOf": [
-          {
-            "description": "Different configurations found for the same epoch.",
-            "type": "object",
-            "properties": {
-              "mismatched_configurations": {
-                "type": "object",
-                "properties": {
-                  "config1": {
-                    "description": "The first configuration.",
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/TrustQuorumConfiguration"
-                      }
-                    ]
-                  },
-                  "config2": {
-                    "description": "The second (mismatched) configuration.",
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/TrustQuorumConfiguration"
-                      }
-                    ]
-                  },
-                  "from": {
-                    "description": "The source of the mismatch (either a baseboard ID or \"Nexus\").",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "config1",
-                  "config2",
-                  "from"
-                ]
-              }
-            },
-            "required": [
-              "mismatched_configurations"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "The key share computer could not compute this node's share.",
-            "type": "object",
-            "properties": {
-              "share_computation_failed": {
-                "type": "object",
-                "properties": {
-                  "epoch": {
-                    "description": "The epoch for which share computation failed.",
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
-                  },
-                  "error": {
-                    "description": "The error message.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "epoch",
-                  "error"
-                ]
-              }
-            },
-            "required": [
-              "share_computation_failed"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "We started collecting shares for a committed configuration, but we no longer have that configuration in our persistent state.",
-            "type": "object",
-            "properties": {
-              "committed_configuration_lost": {
-                "type": "object",
-                "properties": {
-                  "collecting_epoch": {
-                    "description": "The epoch we were collecting shares for.",
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
-                  },
-                  "latest_committed_epoch": {
-                    "description": "The latest committed epoch.",
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
-                  }
-                },
-                "required": [
-                  "collecting_epoch",
-                  "latest_committed_epoch"
-                ]
-              }
-            },
-            "required": [
-              "committed_configuration_lost"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "Decrypting the encrypted rack secrets failed when presented with a valid rack secret.",
-            "type": "object",
-            "properties": {
-              "rack_secret_decryption_failed": {
-                "type": "object",
-                "properties": {
-                  "epoch": {
-                    "description": "The epoch for which decryption failed.",
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
-                  },
-                  "error": {
-                    "description": "The error message.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "epoch",
-                  "error"
-                ]
-              }
-            },
-            "required": [
-              "rack_secret_decryption_failed"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "Reconstructing the rack secret failed when presented with valid shares.",
-            "type": "object",
-            "properties": {
-              "rack_secret_reconstruction_failed": {
-                "type": "object",
-                "properties": {
-                  "epoch": {
-                    "description": "The epoch for which reconstruction failed.",
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
-                  },
-                  "error": {
-                    "description": "The error message.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "epoch",
-                  "error"
-                ]
-              }
-            },
-            "required": [
-              "rack_secret_reconstruction_failed"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
       "TrustQuorumCommitRequest": {
         "description": "Request to commit a trust quorum configuration at a given epoch.",
         "type": "object",
@@ -8970,117 +9248,6 @@
         "required": [
           "epoch",
           "rack_id"
-        ]
-      },
-      "TrustQuorumCommitResponse": {
-        "description": "Response indicating the commit status.",
-        "oneOf": [
-          {
-            "description": "The configuration has been committed.",
-            "type": "string",
-            "enum": [
-              "committed"
-            ]
-          },
-          {
-            "description": "The commit is still pending.",
-            "type": "string",
-            "enum": [
-              "pending"
-            ]
-          }
-        ]
-      },
-      "TrustQuorumConfiguration": {
-        "description": "A trust quorum configuration.",
-        "type": "object",
-        "properties": {
-          "coordinator": {
-            "description": "The coordinator of this reconfiguration.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BaseboardId"
-              }
-            ]
-          },
-          "epoch": {
-            "description": "Unique, monotonically increasing identifier for a configuration.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "members": {
-            "description": "All members of the configuration and the SHA3-256 hash of their key shares.",
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "rack_id": {
-            "description": "Unique ID of the rack.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RackUuid"
-              }
-            ]
-          },
-          "threshold": {
-            "description": "The number of sleds required to reconstruct the rack secret.",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "coordinator",
-          "epoch",
-          "members",
-          "rack_id",
-          "threshold"
-        ]
-      },
-      "TrustQuorumCoordinatorStatus": {
-        "description": "Status of a node coordinating a trust quorum reconfiguration.",
-        "type": "object",
-        "properties": {
-          "acked_prepares": {
-            "description": "The set of nodes that have acknowledged the prepare.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
-          },
-          "config": {
-            "description": "The configuration being prepared.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TrustQuorumConfiguration"
-              }
-            ]
-          }
-        },
-        "required": [
-          "acked_prepares",
-          "config"
-        ]
-      },
-      "TrustQuorumEncryptedRackSecrets": {
-        "description": "Encrypted rack secrets for prior configurations.",
-        "type": "object",
-        "properties": {
-          "data": {
-            "description": "Encrypted data.",
-            "type": "string"
-          },
-          "salt": {
-            "description": "32-byte salt used to derive the encryption key.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "data",
-          "salt"
         ]
       },
       "TrustQuorumLrtqUpgradeRequest": {
@@ -9115,153 +9282,16 @@
           "threshold"
         ]
       },
-      "TrustQuorumNodeStatus": {
-        "description": "Status of a trust quorum node, returned from a proxied status request.",
-        "type": "object",
-        "properties": {
-          "alarms": {
-            "description": "Any alarms raised by this node.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TrustQuorumAlarm"
-            }
-          },
-          "connected_peers": {
-            "description": "The peers this node is connected to.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
-          },
-          "persistent_state": {
-            "description": "Summary of the node's persistent state.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TrustQuorumPersistentStateSummary"
-              }
-            ]
-          },
-          "proxied_requests": {
-            "description": "Number of proxied requests currently in flight.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "alarms",
-          "connected_peers",
-          "persistent_state",
-          "proxied_requests"
-        ]
-      },
-      "TrustQuorumPersistentStateSummary": {
-        "description": "Summary of a trust quorum node's persistent state.",
-        "type": "object",
-        "properties": {
-          "commits": {
-            "description": "Epochs that have been committed.",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            },
-            "uniqueItems": true
-          },
-          "configs": {
-            "description": "Epochs for which configurations have been prepared.",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            },
-            "uniqueItems": true
-          },
-          "expunged": {
-            "description": "Whether this node has been expunged from the quorum.",
-            "type": "boolean"
-          },
-          "has_lrtq_share": {
-            "description": "Whether the node has an LRTQ (legacy) share.",
-            "type": "boolean"
-          },
-          "shares": {
-            "description": "Epochs for which key shares exist.",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "commits",
-          "configs",
-          "expunged",
-          "has_lrtq_share",
-          "shares"
-        ]
-      },
       "TrustQuorumPrepareAndCommitRequest": {
-        "description": "Request to prepare and commit a trust quorum configuration.",
+        "description": "Request to prepare and commit a trust quorum configuration.\n\nThis is the `Configuration` sent to a node that missed the `Prepare` phase.",
         "type": "object",
         "properties": {
-          "coordinator": {
-            "description": "The coordinator of this reconfiguration.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BaseboardId"
-              }
-            ]
-          },
-          "encrypted_rack_secrets": {
-            "nullable": true,
-            "description": "Encrypted rack secrets from prior configurations, if any.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TrustQuorumEncryptedRackSecrets"
-              }
-            ]
-          },
-          "epoch": {
-            "description": "Unique, monotonically increasing identifier for a configuration.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "members": {
-            "description": "All members of the configuration and the SHA3-256 hash of their key shares.",
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "rack_id": {
-            "description": "Unique ID of the rack.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RackUuid"
-              }
-            ]
-          },
-          "threshold": {
-            "description": "The number of sleds required to reconstruct the rack secret.",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
+          "config": {
+            "$ref": "#/components/schemas/Configuration"
           }
         },
         "required": [
-          "coordinator",
-          "epoch",
-          "members",
-          "rack_id",
-          "threshold"
+          "config"
         ]
       },
       "TrustQuorumProxyCommitRequest": {
@@ -9301,11 +9331,11 @@
         "description": "Request to proxy a prepare-and-commit operation to another trust quorum node.",
         "type": "object",
         "properties": {
-          "coordinator": {
-            "description": "The coordinator of this reconfiguration.",
+          "config": {
+            "description": "The configuration to prepare and commit.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/BaseboardId"
+                "$ref": "#/components/schemas/Configuration"
               }
             ]
           },
@@ -9316,51 +9346,11 @@
                 "$ref": "#/components/schemas/BaseboardId"
               }
             ]
-          },
-          "encrypted_rack_secrets": {
-            "nullable": true,
-            "description": "Encrypted rack secrets from prior configurations, if any.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TrustQuorumEncryptedRackSecrets"
-              }
-            ]
-          },
-          "epoch": {
-            "description": "Unique, monotonically increasing identifier for a configuration.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "members": {
-            "description": "All members of the configuration and the SHA3-256 hash of their key shares.",
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "rack_id": {
-            "description": "Unique ID of the rack.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RackUuid"
-              }
-            ]
-          },
-          "threshold": {
-            "description": "The number of sleds required to reconstruct the rack secret.",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
           }
         },
         "required": [
-          "coordinator",
-          "destination",
-          "epoch",
-          "members",
-          "rack_id",
-          "threshold"
+          "config",
+          "destination"
         ]
       },
       "TrustQuorumProxyStatusRequest": {

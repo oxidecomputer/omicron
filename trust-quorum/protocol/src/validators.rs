@@ -4,11 +4,10 @@
 
 //! Various validation functions to be used by a [`crate::Node`]
 
-use crate::configuration::{ConfigurationError, NewConfigParams};
 use crate::messages::ReconfigureMsg;
 use crate::{
-    BaseboardId, Epoch, LrtqUpgradeMsg, NodeHandlerCtx, PersistentStateSummary,
-    Threshold,
+    BaseboardId, ConfigurationError, Epoch, LrtqUpgradeMsg, NewConfigParams,
+    NodeHandlerCtx, PersistentStateSummary, Threshold,
 };
 use daft::{BTreeSetDiff, Diffable, Leaf};
 use omicron_uuid_kinds::RackUuid;
