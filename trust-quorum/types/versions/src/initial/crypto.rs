@@ -65,7 +65,15 @@ pub struct Salt(
 /// configurations.
 #[serde_as]
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
 pub struct EncryptedRackSecrets {
     /// A random value used to derive the key to encrypt the rack secrets for

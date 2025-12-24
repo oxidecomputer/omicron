@@ -89,7 +89,7 @@ pub struct ShareDigestLrtq(Sha3_256Digest);
 
 impl From<ShareDigestLrtq> for bootstore::Sha3_256Digest {
     fn from(value: ShareDigestLrtq) -> Self {
-        bootstore::Sha3_256Digest::new(value.0 .0)
+        bootstore::Sha3_256Digest::new(value.0.0)
     }
 }
 
@@ -130,7 +130,6 @@ impl PartialEq for ReconstructedRackSecret {
         self.expose_secret().ct_eq(other.expose_secret()).into()
     }
 }
-
 
 impl TryFrom<SecretBox<[u8]>> for ReconstructedRackSecret {
     type Error = InvalidRackSecretSizeError;
@@ -173,7 +172,6 @@ impl From<RackSecret> for ReconstructedRackSecret {
         ReconstructedRackSecret { secret }
     }
 }
-
 
 /// A shared secret based on GF256
 #[derive(Debug)]
@@ -473,8 +471,13 @@ mod tests {
         let new_rack_secret = RackSecret::new().into();
         let encrypted =
             plaintext.encrypt(rack_id, new_epoch, &new_rack_secret).unwrap();
-        let decrypted =
-            decrypt_rack_secrets(&encrypted, rack_id, new_epoch, &new_rack_secret).unwrap();
+        let decrypted = decrypt_rack_secrets(
+            &encrypted,
+            rack_id,
+            new_epoch,
+            &new_rack_secret,
+        )
+        .unwrap();
 
         // We don't actually do any comparisons of rack secrets outside this
         // test and we don't want to derive `PartialEq` due to data dependent
@@ -503,26 +506,47 @@ mod tests {
 
         // Decrypting with wrong rack_id fails.
         assert!(
-            decrypt_rack_secrets(&encrypted, RackUuid::new_v4(), new_epoch, &new_rack_secret)
-                .is_err()
+            decrypt_rack_secrets(
+                &encrypted,
+                RackUuid::new_v4(),
+                new_epoch,
+                &new_rack_secret
+            )
+            .is_err()
         );
 
         // Decrypting with wrong epoch fails.
         assert!(
-            decrypt_rack_secrets(&encrypted, RackUuid::new_v4(), Epoch(99), &new_rack_secret)
-                .is_err()
+            decrypt_rack_secrets(
+                &encrypted,
+                RackUuid::new_v4(),
+                Epoch(99),
+                &new_rack_secret
+            )
+            .is_err()
         );
 
         // Decrypting with the wrong secret fails
         assert!(
-            decrypt_rack_secrets(&encrypted, rack_id, new_epoch, &RackSecret::new().into())
-                .is_err()
+            decrypt_rack_secrets(
+                &encrypted,
+                rack_id,
+                new_epoch,
+                &RackSecret::new().into()
+            )
+            .is_err()
         );
 
         // Decrypting with corrupted plaintext is invalid
         encrypted.data = vec![0u8, 1u8].into_boxed_slice();
         assert!(
-            decrypt_rack_secrets(&encrypted, rack_id, new_epoch, &new_rack_secret).is_err()
+            decrypt_rack_secrets(
+                &encrypted,
+                rack_id,
+                new_epoch,
+                &new_rack_secret
+            )
+            .is_err()
         );
     }
 }

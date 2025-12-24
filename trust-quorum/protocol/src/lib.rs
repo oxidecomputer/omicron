@@ -57,9 +57,9 @@ pub use validators::{
 
 // These crypto types and functions are NOT in trust-quorum-types because they
 // contain sensitive data or have complex implementations tied to this crate.
-pub use configuration::new_configuration;
 #[cfg(feature = "testing")]
 pub use configuration::configurations_equal_except_for_crypto_data;
+pub use configuration::new_configuration;
 pub use crypto::{
     PlaintextRackSecrets, RackSecret, ReconstructedRackSecret, SECRET_LEN,
     decrypt_rack_secrets, new_salt,

@@ -1069,39 +1069,36 @@ pub trait SledAgentApi {
 
     /// Initiate a trust quorum reconfiguration
     #[endpoint {
-        method = POST,
-        path = "/trust-quorum/reconfigure",
+        method = PUT,
+        path = "/trust-quorum/configuration",
         versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_reconfigure(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::trust_quorum::TrustQuorumReconfigureRequest>,
+        body: TypedBody<latest::trust_quorum::ReconfigureRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Initiate an upgrade from LRTQ
     #[endpoint {
-        method = POST,
-        path = "/trust-quorum/upgrade-from-lrtq",
+        method = PUT,
+        path = "/trust-quorum/upgrade",
         versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_upgrade_from_lrtq(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::trust_quorum::TrustQuorumLrtqUpgradeRequest>,
+        body: TypedBody<latest::trust_quorum::LrtqUpgradeRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Commit a trust quorum configuration
     #[endpoint {
-        method = POST,
+        method = PUT,
         path = "/trust-quorum/commit",
         versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_commit(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::trust_quorum::TrustQuorumCommitRequest>,
-    ) -> Result<
-        HttpResponseOk<latest::trust_quorum::CommitStatus>,
-        HttpError,
-    >;
+        body: TypedBody<latest::trust_quorum::CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get the coordinator status if this node is coordinating a reconfiguration
     #[endpoint {
@@ -1118,61 +1115,45 @@ pub trait SledAgentApi {
 
     /// Attempt to prepare and commit a trust quorum configuration
     #[endpoint {
-        method = POST,
+        method = PUT,
         path = "/trust-quorum/prepare-and-commit",
         versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_prepare_and_commit(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<
-            latest::trust_quorum::TrustQuorumPrepareAndCommitRequest,
-        >,
-    ) -> Result<
-        HttpResponseOk<latest::trust_quorum::CommitStatus>,
-        HttpError,
-    >;
+        body: TypedBody<latest::trust_quorum::PrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<latest::trust_quorum::CommitStatus>, HttpError>;
 
     /// Proxy a commit operation to another trust quorum node
     #[endpoint {
-        method = POST,
+        method = PUT,
         path = "/trust-quorum/proxy/commit",
         versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_proxy_commit(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::trust_quorum::TrustQuorumProxyCommitRequest>,
-    ) -> Result<
-        HttpResponseOk<latest::trust_quorum::CommitStatus>,
-        HttpError,
-    >;
+        body: TypedBody<latest::trust_quorum::ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Proxy a prepare-and-commit operation to another trust quorum node
     #[endpoint {
-        method = POST,
+        method = PUT,
         path = "/trust-quorum/proxy/prepare-and-commit",
         versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_proxy_prepare_and_commit(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<
-            latest::trust_quorum::TrustQuorumProxyPrepareAndCommitRequest,
-        >,
-    ) -> Result<
-        HttpResponseOk<latest::trust_quorum::CommitStatus>,
-        HttpError,
-    >;
+        body: TypedBody<latest::trust_quorum::ProxyPrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<latest::trust_quorum::CommitStatus>, HttpError>;
 
     /// Proxy a status request to another trust quorum node
     #[endpoint {
-        method = POST,
+        method = GET,
         path = "/trust-quorum/proxy/status",
         versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_proxy_status(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::trust_quorum::TrustQuorumProxyStatusRequest>,
-    ) -> Result<
-        HttpResponseOk<latest::trust_quorum::NodeStatus>,
-        HttpError,
-    >;
+        query_params: Query<latest::sled::BaseboardId>,
+    ) -> Result<HttpResponseOk<latest::trust_quorum::NodeStatus>, HttpError>;
 }

@@ -28,7 +28,7 @@ pub use trust_quorum_types_versions::v1::types::{Epoch, Threshold};
 
 /// Reconfigure message for trust quorum changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TrustQuorumReconfigureRequest {
+pub struct ReconfigureRequest {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
     pub last_committed_epoch: Option<Epoch>,
@@ -38,7 +38,7 @@ pub struct TrustQuorumReconfigureRequest {
 
 /// Request to upgrade from LRTQ (Legacy Rack Trust Quorum).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TrustQuorumLrtqUpgradeRequest {
+pub struct LrtqUpgradeRequest {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
     pub members: BTreeSet<BaseboardId>,
@@ -47,7 +47,7 @@ pub struct TrustQuorumLrtqUpgradeRequest {
 
 /// Request to commit a trust quorum configuration at a given epoch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TrustQuorumCommitRequest {
+pub struct CommitRequest {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
 }
@@ -56,13 +56,13 @@ pub struct TrustQuorumCommitRequest {
 ///
 /// This is the `Configuration` sent to a node that missed the `Prepare` phase.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TrustQuorumPrepareAndCommitRequest {
+pub struct PrepareAndCommitRequest {
     pub config: Configuration,
 }
 
 /// Request to proxy a commit operation to another trust quorum node.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TrustQuorumProxyCommitRequest {
+pub struct ProxyCommitRequest {
     /// The target node to proxy the request to.
     pub destination: BaseboardId,
     /// Unique ID of the rack.
@@ -73,16 +73,9 @@ pub struct TrustQuorumProxyCommitRequest {
 
 /// Request to proxy a prepare-and-commit operation to another trust quorum node.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TrustQuorumProxyPrepareAndCommitRequest {
+pub struct ProxyPrepareAndCommitRequest {
     /// The target node to proxy the request to.
     pub destination: BaseboardId,
     /// The configuration to prepare and commit.
     pub config: Configuration,
-}
-
-/// Request to proxy a status request to another trust quorum node.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TrustQuorumProxyStatusRequest {
-    /// The target node to get the status from.
-    pub destination: BaseboardId,
 }

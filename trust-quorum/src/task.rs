@@ -30,9 +30,7 @@ use trust_quorum_protocol::{
 };
 
 // Re-export types that need to be visible from this crate
-pub use trust_quorum_protocol::{
-    CommitStatus, CoordinatorStatus, NodeStatus,
-};
+pub use trust_quorum_protocol::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311

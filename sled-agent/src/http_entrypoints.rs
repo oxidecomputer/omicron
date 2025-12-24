@@ -49,6 +49,7 @@ use sled_agent_types::instance::{
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
+use sled_agent_types::sled::BaseboardId;
 use sled_agent_types::support_bundle::{
     RangeRequestHeaders, SupportBundleFilePathParam,
     SupportBundleFinalizeQueryParams, SupportBundleListPathParam,
@@ -56,10 +57,9 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    CommitStatus, CoordinatorStatus, NodeStatus, TrustQuorumCommitRequest,
-    TrustQuorumLrtqUpgradeRequest, TrustQuorumPrepareAndCommitRequest,
-    TrustQuorumProxyCommitRequest, TrustQuorumProxyPrepareAndCommitRequest,
-    TrustQuorumProxyStatusRequest, TrustQuorumReconfigureRequest,
+    CommitRequest, CommitStatus, CoordinatorStatus, LrtqUpgradeRequest,
+    NodeStatus, PrepareAndCommitRequest, ProxyCommitRequest,
+    ProxyPrepareAndCommitRequest, ReconfigureRequest,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -1187,7 +1187,7 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_reconfigure(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<TrustQuorumReconfigureRequest>,
+        body: TypedBody<ReconfigureRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
@@ -1210,7 +1210,7 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_upgrade_from_lrtq(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<TrustQuorumLrtqUpgradeRequest>,
+        body: TypedBody<LrtqUpgradeRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
@@ -1232,8 +1232,8 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_commit(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<TrustQuorumCommitRequest>,
-    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        body: TypedBody<CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
 
@@ -1243,7 +1243,14 @@ impl SledAgentApi for SledAgentImpl {
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        Ok(HttpResponseOk(status))
+        // Pending is not expected for commit operations - it indicates an error
+        if status == CommitStatus::Pending {
+            return Err(HttpError::for_internal_error(
+                "commit returned Pending, which is unexpected".to_string(),
+            ));
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn trust_quorum_coordinator_status(
@@ -1262,7 +1269,7 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_prepare_and_commit(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<TrustQuorumPrepareAndCommitRequest>,
+        body: TypedBody<PrepareAndCommitRequest>,
     ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
@@ -1278,8 +1285,8 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_proxy_commit(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<TrustQuorumProxyCommitRequest>,
-    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        body: TypedBody<ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
 
@@ -1290,12 +1297,19 @@ impl SledAgentApi for SledAgentImpl {
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        Ok(HttpResponseOk(status))
+        // Pending is not expected for commit operations - it indicates an error
+        if status == CommitStatus::Pending {
+            return Err(HttpError::for_internal_error(
+                "commit returned Pending, which is unexpected".to_string(),
+            ));
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn trust_quorum_proxy_prepare_and_commit(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<TrustQuorumProxyPrepareAndCommitRequest>,
+        body: TypedBody<ProxyPrepareAndCommitRequest>,
     ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
@@ -1312,15 +1326,15 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_proxy_status(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<TrustQuorumProxyStatusRequest>,
+        query_params: Query<BaseboardId>,
     ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
         let sa = request_context.context();
-        let request = body.into_inner();
+        let destination = query_params.into_inner();
 
         let status = sa
             .trust_quorum()
             .proxy()
-            .status(request.destination)
+            .status(destination)
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
