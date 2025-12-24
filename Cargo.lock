@@ -12983,10 +12983,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "async-recursion",
  "async-trait",
  "bytes",
  "camino",
  "camino-tempfile",
+ "camino-tempfile-ext",
  "chrono",
  "debug-ignore",
  "derive_more 0.99.20",
