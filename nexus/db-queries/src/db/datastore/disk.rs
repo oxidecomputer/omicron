@@ -543,7 +543,7 @@ impl DataStore {
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::disk,
                 dsl::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
+                &pagparams.map_name(Name::ref_cast),
             ),
         }
         .left_join(
