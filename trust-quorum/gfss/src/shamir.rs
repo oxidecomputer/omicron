@@ -7,6 +7,7 @@
 use digest::Digest;
 use rand::TryRngCore;
 use rand::{Rng, rngs::OsRng};
+use schemars::JsonSchema;
 use secrecy::SecretBox;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
@@ -15,7 +16,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::gf256::{self, Gf256};
 use crate::polynomial::Polynomial;
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum SplitError {
     #[error("splitting requires at least a threshold of 2")]
     ThresholdToSmall,
@@ -33,7 +35,9 @@ pub enum SplitError {
     Ord,
     Serialize,
     Deserialize,
+    JsonSchema,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum CombineError {
     #[error("must be at least 2 shares to combine")]
     TooFewShares,

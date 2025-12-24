@@ -49,11 +49,17 @@ use sled_agent_types::instance::{
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
+use sled_agent_types::sled::BaseboardId;
 use sled_agent_types::support_bundle::{
     RangeRequestHeaders, SupportBundleFilePathParam,
     SupportBundleFinalizeQueryParams, SupportBundleListPathParam,
     SupportBundleMetadata, SupportBundlePathParam,
     SupportBundleTransferQueryParams,
+};
+use sled_agent_types::trust_quorum::{
+    CommitRequest, CommitStatus, CoordinatorStatus, LrtqUpgradeMsg, NodeStatus,
+    PrepareAndCommitRequest, ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    ReconfigureMsg,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -1177,5 +1183,150 @@ impl SledAgentApi for SledAgentImpl {
         .await?;
 
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_reconfigure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ReconfigureMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let msg = body.into_inner();
+
+        sa.trust_quorum()
+            .reconfigure(msg)
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_upgrade_from_lrtq(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<LrtqUpgradeMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let msg = body.into_inner();
+
+        sa.trust_quorum()
+            .upgrade_from_lrtq(msg)
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let status = sa
+            .trust_quorum()
+            .commit(request.rack_id, request.epoch)
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        // Pending is not expected for commit operations - it indicates an error
+        if status == CommitStatus::Pending {
+            return Err(HttpError::for_internal_error(
+                "commit returned Pending, which is unexpected".to_string(),
+            ));
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_coordinator_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+        let sa = request_context.context();
+
+        let status = sa
+            .trust_quorum()
+            .coordinator_status()
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<PrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let status = sa
+            .trust_quorum()
+            .prepare_and_commit(request.config)
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_proxy_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let status = sa
+            .trust_quorum()
+            .proxy()
+            .commit(
+                request.destination,
+                request.request.rack_id,
+                request.request.epoch,
+            )
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        // Pending is not expected for commit operations - it indicates an error
+        if status == CommitStatus::Pending {
+            return Err(HttpError::for_internal_error(
+                "commit returned Pending, which is unexpected".to_string(),
+            ));
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_proxy_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProxyPrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let status = sa
+            .trust_quorum()
+            .proxy()
+            .prepare_and_commit(request.destination, request.request.config)
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_proxy_status(
+        request_context: RequestContext<Self::Context>,
+        query_params: Query<BaseboardId>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        let sa = request_context.context();
+        let destination = query_params.into_inner();
+
+        let status = sa
+            .trust_quorum()
+            .proxy()
+            .status(destination)
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(HttpResponseOk(status))
     }
 }

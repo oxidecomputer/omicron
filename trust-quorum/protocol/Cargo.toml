@@ -32,6 +32,7 @@ slog-error-chain.workspace = true
 static_assertions.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
+trust-quorum-types.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 omicron-workspace-hack.workspace = true

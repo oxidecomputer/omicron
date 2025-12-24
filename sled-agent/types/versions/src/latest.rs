@@ -155,6 +155,28 @@ pub mod support_bundle {
     pub use crate::v1::support_bundle::SupportBundleTransferQueryParams;
 }
 
+pub mod trust_quorum {
+    // Core types re-exported from trust-quorum-types-versions
+    pub use crate::v13::trust_quorum::Alarm;
+    pub use crate::v13::trust_quorum::CommitStatus;
+    pub use crate::v13::trust_quorum::Configuration;
+    pub use crate::v13::trust_quorum::CoordinatorStatus;
+    pub use crate::v13::trust_quorum::EncryptedRackSecrets;
+    pub use crate::v13::trust_quorum::Epoch;
+    pub use crate::v13::trust_quorum::ExpungedMetadata;
+    pub use crate::v13::trust_quorum::NodePersistentStateSummary;
+    pub use crate::v13::trust_quorum::NodeStatus;
+    pub use crate::v13::trust_quorum::Threshold;
+
+    // HTTP request types specific to the sled-agent API
+    pub use crate::v13::trust_quorum::CommitRequest;
+    pub use crate::v13::trust_quorum::LrtqUpgradeMsg;
+    pub use crate::v13::trust_quorum::PrepareAndCommitRequest;
+    pub use crate::v13::trust_quorum::ProxyCommitRequest;
+    pub use crate::v13::trust_quorum::ProxyPrepareAndCommitRequest;
+    pub use crate::v13::trust_quorum::ReconfigureMsg;
+}
+
 pub mod zone_bundle {
     pub use crate::v1::zone_bundle::BundleUtilization;
     pub use crate::v1::zone_bundle::CleanupContext;

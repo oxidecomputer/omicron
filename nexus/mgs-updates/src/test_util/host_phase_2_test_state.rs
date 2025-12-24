@@ -936,5 +936,80 @@ mod api_impl {
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
+
+        async fn trust_quorum_reconfigure(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<sled_agent_types::trust_quorum::ReconfigureMsg>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_upgrade_from_lrtq(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<sled_agent_types::trust_quorum::LrtqUpgradeMsg>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<sled_agent_types::trust_quorum::CommitRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_coordinator_status(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<
+                Option<sled_agent_types::trust_quorum::CoordinatorStatus>,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_prepare_and_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::PrepareAndCommitRequest,
+            >,
+        ) -> Result<
+            HttpResponseOk<sled_agent_types::trust_quorum::CommitStatus>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_proxy_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::ProxyCommitRequest,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_proxy_prepare_and_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::ProxyPrepareAndCommitRequest,
+            >,
+        ) -> Result<
+            HttpResponseOk<sled_agent_types::trust_quorum::CommitStatus>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_proxy_status(
+            _request_context: RequestContext<Self::Context>,
+            _query_params: Query<sled_agent_types::sled::BaseboardId>,
+        ) -> Result<
+            HttpResponseOk<sled_agent_types::trust_quorum::NodeStatus>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
     }
 }
