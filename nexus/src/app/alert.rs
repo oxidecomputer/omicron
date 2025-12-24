@@ -322,7 +322,7 @@ impl Nexus {
                         return None;
                     }
                 }
-                Some(class.into())
+                Some(nexus_types::alert::AlertClass::from(class).into())
             })
             .take(pagparams.limit.get() as usize)
             .collect::<Vec<_>>();
