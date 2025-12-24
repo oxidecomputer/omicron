@@ -15,7 +15,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 use slog::{Logger, o};
-use wicketd_client::types::GetLocationResponse;
+use wicketd_client::types::{CurrentRssUserConfig, GetLocationResponse};
 
 /// The [`MainScreen`] is the primary UI element of the terminal, covers the
 /// entire terminal window/buffer and is visible for all interactions except
@@ -194,7 +194,8 @@ impl MainScreen {
         frame: &mut Frame<'_>,
         rect: Rect,
     ) {
-        let location_spans = location_spans(&state.wicketd_location);
+        let location_spans =
+            location_spans(&state.rss_config, &state.wicketd_location);
         let wicketd_spans = state.service_status.wicketd_liveness().to_spans();
         let mgs_spans = state.service_status.mgs_liveness().to_spans();
         let xcvr_spans = state.service_status.transceiver_liveness().to_spans();
@@ -230,11 +231,24 @@ impl MainScreen {
     }
 }
 
-fn location_spans(location: &GetLocationResponse) -> Vec<Span<'static>> {
+fn location_spans(
+    rss_config: &Option<CurrentRssUserConfig>,
+    location: &GetLocationResponse,
+) -> Vec<Span<'static>> {
     // We reuse `style::connected()` and `style::delayed()` in these spans to
     // match the wicketd/mgs connection statuses that follow us in the status
     // bar.
     let mut spans = Vec::new();
+    if let Some(config) = rss_config {
+        spans.push(Span::styled(
+            config.insensitive.external_dns_zone_name.clone(),
+            style::connected(),
+        ));
+    } else {
+        spans
+            .push(Span::styled("Unnamed Rack".to_string(), style::connected()));
+    }
+    spans.push(Span::styled("/", style::divider()));
     if let Some(id) = location.sled_id.as_ref() {
         spans.push(Span::styled(
             format!("Sled {}", id.slot),
