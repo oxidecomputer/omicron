@@ -167,6 +167,7 @@ impl TrustQuorumConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IsLrtqUpgrade {
     Yes,
+    // TODO: This should not be an option
     No { last_committed_epoch: Option<Epoch> },
 }
 

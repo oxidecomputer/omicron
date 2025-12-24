@@ -28,6 +28,8 @@ use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
+use rand::rng;
+use rand::seq::IteratorRandom;
 use sled_agent_types::sled::BaseboardId;
 use std::collections::{BTreeMap, BTreeSet};
 use trust_quorum_protocol::{
@@ -400,13 +402,22 @@ impl DataStore {
             })
     }
 
+    // A configuration returned from `validate_new_config_conn` that is safe to
+    // be inserted into the database inside a transaction.
+    struct ValidatedConfig {
+        config: TrustQuorumConfig,
+        // The last committed configuration should have its state changed from
+        // committing to committed-partially.
+        commit_partially: bool
+    }
+
     async fn validate_new_config_conn(
         &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
         proposed: ProposedTrustQuorumConfig,
-    ) -> Result<TrustQuorumConfig, TransactionError<Error>> {
+    ) -> Result<ValidatedConfig, TransactionError<Error>> {
         //
         // Check validity of members in proposed config
         //
@@ -429,7 +440,7 @@ impl DataStore {
 
         bail_unless!(
             hw_baseboard_ids.len() == proposed.members.len(),
-            "Trust Quorum proposed configuration missing hw_baseboard_ids \n
+            "Trust Quorum proposed configuration missing hw_baseboard_ids \
             in database. Do all physical sleds exist in this rack?"
         );
 
@@ -468,9 +479,8 @@ impl DataStore {
             proposed.epoch
         );
 
-        // Some helpers that we may want to use if we have a `latest_config`
-        // and enter the following if.
-        let mut should_commit_partially = false;
+        // Helper variable to operate on the last committed config, no matter
+        // how we find it.
         let mut last_committed_config: Option<TrustQuorumConfig> = None;
 
         // Is there actually a latest configuration?
@@ -485,22 +495,9 @@ impl DataStore {
             );
 
             // If the configuration is still committting then we must ensure
-            // that enough nodes have acked commits before a reconfiguration can occur.
+            // that enough nodes have acked commits before a reconfiguration
+            // can occur.
             if latest_config.state.is_committing() {
-                let acked = latest_config.acked_commits();
-                // N - Z
-                let minimum = latest_config.members.len()
-                    - latest_config.commit_crash_tolerance;
-                bail_unless!(
-                    acked >= min,
-                    "Trust quorum reconfiguration in progress: not enough nodes \
-                    have acked commit in epoch {}. Expected at least {} acks, \
-                    Got {} acks. If this persists please contact Oxide support.",
-                    latest_config.epoch,
-                    min,
-                    acked
-                );
-                should_commit_partially = true;
                 last_committed_config = Some(latest_config);
             }
 
@@ -544,43 +541,76 @@ impl DataStore {
             }
         }
 
+        // The last committed epoch may not have received acked commits from
+        // all nodes, but it may have received enough nodes to allow a new
+        // configuration to be installed. If the latter is true then we must
+        // mark the old configuration `CommittedPartially` in the DB.
+        let mut should_commit_partially = false;
+
         // At this point we have either loaded the proposed last committed
         // configuration or there is not one.
-        let possible_coordinators: BTreeSet<BaseboardId> =
-            if let Some(last_committed_config) = last_committed_config {
-                bail_unless!(
-                    config.is_committed(),
-                    "Trust Quorum proposed configuration contains a last \
-                    committed epoch ({}) for a configuration that is not \
-                    committed",
-                    last_committed_config.epoch
-                );
+        let possible_coordinators: BTreeSet<BaseboardId> = if let Some(
+            last_committed_config,
+        ) =
+            last_committed_config
+        {
+            bail_unless!(
+                config.is_committed() || config.is_committing(),
+                "Trust Quorum proposed configuration contains a last \
+                committed epoch ({}) for a configuration that is not \
+                committed",
+                last_committed_config.epoch
+            );
 
-                // A coordinator must have acked a commit in the prior configuration
-                // if it's to be a candidate.
-                let committed_members: BTreeSet<BaseboardId> =
-                    last_committed_config
-                        .members
-                        .filter_map(|(id, data)| {
-                            if data.state == TrustQuorumMemberState::Committed {
-                                Some(id.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                proposed.members.intersection(&committed_members).collect()
-            } else {
-                proposed.members.clone()
-            };
+            let acked = latest_config.acked_commits();
+            // N - Z
+            let minimum = latest_config.members.len()
+                - latest_config.commit_crash_tolerance;
+            bail_unless!(
+                acked >= min,
+                "Trust quorum reconfiguration in progress: not enough nodes \
+                have acked commit in epoch {}. Expected at least {} acks, \
+                Got {} acks. If this persists please contact Oxide support.",
+                latest_config.epoch,
+                min,
+                acked
+            );
+            should_commit_partially = true;
 
-        // Pick a coordinator from our set of possibilities:
-        //   * A coordinator's sled-agent should be up as reported in inventory
-        //   * A coordinator must be a member of the new configuration
+            // A coordinator must have acked a commit in the prior configuration
+            // if it's to be a candidate.
+            let committed_members: BTreeSet<BaseboardId> =
+                last_committed_config
+                    .members
+                    .filter_map(|(id, data)| {
+                        if data.state == TrustQuorumMemberState::Committed {
+                            Some(id.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+            proposed.members.intersection(&committed_members).collect()
+        } else {
+            proposed.members.clone()
+        };
+
+        bail_unless!(
+            !possible_coordinators.is_empty(),
+            "Trust Quorum proposed configuration has no possible coordinators \
+            for epoch {}",
+            proposed.epoch
+        );
+        // Pick a random coordinator from our set of possibilities.
+        let coordinator = possible_coordinators.into_iter().choose(&mut rng());
 
         // Convert proposal to a new `TrustQuorumConfig`
-
-        todo!()
+        Ok(ValidatedConfig {
+            config: TrustQuorumConfig::new(proposed, coordinator),
+            commit_partially: should_commit_partially
+        })
+            
+        
     }
 
     /// If this configuration is in the `Preparing` state, then update any
