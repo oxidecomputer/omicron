@@ -96,7 +96,7 @@ pub struct MeasurementManifestStatus {
     pub non_boot_disk_metadata: IdOrdMap<OmicronManifestNonBootInfo>,
 }
 
-type MeasurementEntry = Result<(String, ArtifactHash), ManifestHashError>;
+type MeasurementEntry = Result<String, ManifestHashError>;
 
 impl MeasurementManifestStatus {
     /// Convert this status to the inventory format.
@@ -136,8 +136,7 @@ impl MeasurementManifestStatus {
         for artifact in artifacts_result.data.clone() {
             match artifact.status {
                 ArtifactReadResult::Valid => {
-                    results
-                        .push(Ok((artifact.file_name, artifact.expected_hash)));
+                    results.push(Ok(artifact.file_name));
                 }
                 ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
                     results.push(Err(ManifestHashError::SizeHashMismatch {

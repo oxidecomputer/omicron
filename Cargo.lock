@@ -8928,6 +8928,7 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-health-monitor",
+ "sled-agent-measurements",
  "sled-agent-resolvable-files",
  "sled-agent-types",
  "sled-agent-types-versions",
@@ -13130,6 +13131,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "sled-agent-measurements"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "camino",
+ "key-manager",
+ "omicron-workspace-hack",
+ "serde",
+ "sled-agent-config-reconciler",
+ "sled-agent-resolvable-files",
+ "sled-agent-types",
+ "sled-agent-types-versions",
+ "slog",
+ "slog-error-chain",
+ "thiserror 2.0.17",
+ "tokio",
+]
+
+[[package]]
 name = "sled-agent-resolvable-files"
 version = "0.1.0"
 dependencies = [
@@ -15138,6 +15159,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha3",
+ "sled-agent-measurements",
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
