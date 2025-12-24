@@ -12,6 +12,7 @@ use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
+use sled_agent_types::inventory::OmicronSingleMeasurement;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
@@ -19,7 +20,7 @@ use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::watch;
@@ -63,10 +64,15 @@ use crate::reconciler_task::CurrentlyManagedZpools;
 use crate::reconciler_task::CurrentlyManagedZpoolsReceiver;
 use crate::reconciler_task::ReconcilerResult;
 
+use crate::InternalDisks;
+use sled_agent_types::resolvable_files::ResolverStatus;
+
 #[derive(Debug, thiserror::Error)]
 pub enum InventoryError {
     #[error("ledger contents not yet available")]
     LedgerContentsNotAvailable,
+    #[error("waiting for ledger task to run")]
+    WaitingOnLedger,
     #[error("could not contact dataset task")]
     DatasetTaskError(#[from] DatasetTaskError),
     #[error("could not list dataset properties")]
@@ -92,6 +98,7 @@ pub struct ConfigReconcilerSpawnToken {
     raw_disks_rx: RawDisksReceiver,
     ledger_task_log: Logger,
     reconciler_task_log: Logger,
+    ledger_rx: Option<watch::Receiver<CurrentSledConfig>>,
 }
 
 #[derive(Debug)]
@@ -180,8 +187,73 @@ impl ConfigReconcilerHandle {
                     .new(slog::o!("component" => "SledConfigLedgerTask")),
                 reconciler_task_log: base_log
                     .new(slog::o!("component" => "ConfigReconcilerTask")),
+                ledger_rx: None,
             },
         )
+    }
+
+    /// Pre-spawn the ledger task
+    ///
+    /// This is the first half of spawning the reconciliation task. We need to
+    /// spawn the ledger task early to allow for access to the ledger for
+    /// early measurement reconcilaition
+    ///
+    /// This method can effectively only be called once, because the caller must
+    /// supply the `token` returned by `new()` when this handle was created.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called multiple times, which is statically impossible outside
+    /// shenanigans to get a second [`ConfigReconcilerSpawnToken`].
+    pub fn pre_spawn_reconciliation_task<U: SledAgentArtifactStore + Clone>(
+        &self,
+        sled_agent_artifact_store: U,
+        token: ConfigReconcilerSpawnToken,
+    ) -> ConfigReconcilerSpawnToken {
+        let ConfigReconcilerSpawnToken {
+            key_requester,
+            time_sync_config,
+            reconciler_result_tx,
+            currently_managed_zpools_tx,
+            external_disks_tx,
+            former_zone_root_archiver,
+            raw_disks_rx,
+            ledger_task_log,
+            reconciler_task_log,
+            ledger_rx: _,
+        } = token;
+
+        // Spawn the task that manages our config ledger.
+        let (ledger_task, current_config_rx) =
+            LedgerTaskHandle::spawn_ledger_task(
+                self.internal_disks_rx.clone(),
+                sled_agent_artifact_store.clone(),
+                ledger_task_log.clone(),
+            );
+        match self.ledger_task.set(ledger_task) {
+            Ok(()) => (),
+            // We can only be called with the `token` we returned in `new()` and
+            // we document that we panic if called multiple times via some
+            // multi-token shenanigans.
+            Err(_) => {
+                panic!(
+                    "spawn_reconciliation_task() called with multiple tokens"
+                )
+            }
+        }
+
+        ConfigReconcilerSpawnToken {
+            key_requester,
+            time_sync_config,
+            reconciler_result_tx,
+            currently_managed_zpools_tx,
+            external_disks_tx,
+            former_zone_root_archiver,
+            raw_disks_rx,
+            ledger_task_log,
+            reconciler_task_log,
+            ledger_rx: Some(current_config_rx),
+        }
     }
 
     /// Spawn the primary config reconciliation task.
@@ -191,8 +263,7 @@ impl ConfigReconcilerHandle {
     ///
     /// # Panics
     ///
-    /// Panics if called multiple times, which is statically impossible outside
-    /// shenanigans to get a second [`ConfigReconcilerSpawnToken`].
+    /// Panics if called multiple times or if we haven't called the ledger setup
     pub fn spawn_reconciliation_task<
         T: SledAgentFacilities,
         U: SledAgentArtifactStore + Clone,
@@ -210,35 +281,19 @@ impl ConfigReconcilerHandle {
             external_disks_tx,
             former_zone_root_archiver,
             raw_disks_rx,
-            ledger_task_log,
+            ledger_task_log: _,
             reconciler_task_log,
+            ledger_rx,
         } = token;
 
-        // Spawn the task that manages our config ledger.
-        let (ledger_task, current_config_rx) =
-            LedgerTaskHandle::spawn_ledger_task(
-                self.internal_disks_rx.clone(),
-                sled_agent_artifact_store.clone(),
-                ledger_task_log,
-            );
-        match self.ledger_task.set(ledger_task) {
-            Ok(()) => (),
-            // We can only be called with the `token` we returned in `new()` and
-            // we document that we panic if called multiple times via some
-            // multi-token shenanigans.
-            Err(_) => {
-                panic!(
-                    "spawn_reconciliation_task() called with multiple tokens"
-                )
-            }
-        }
+        let ledger_rx = ledger_rx.expect("Failed to call pre_spawn");
 
         reconciler_task::spawn(
             Arc::clone(self.internal_disks_rx.mount_config()),
             self.dataset_task.clone(),
             key_requester,
             time_sync_config,
-            current_config_rx,
+            ledger_rx,
             reconciler_result_tx,
             currently_managed_zpools_tx,
             self.internal_disks_rx.clone(),
@@ -351,6 +406,34 @@ impl ConfigReconcilerHandle {
             .await
     }
 
+    /// Run a first reconciliation of reference measurements on cold boot
+    pub async fn bootstrap_measurement_reconciler(
+        &self,
+        resolver_status: &ResolverStatus,
+        internal_disks: &InternalDisks,
+        desired: &BTreeSet<OmicronSingleMeasurement>,
+        log: &Logger,
+    ) -> Vec<Utf8PathBuf> {
+        let resolved = crate::measurements::reconcile_measurements(
+            resolver_status,
+            internal_disks,
+            desired,
+            log,
+        )
+        .await;
+        resolved.iter().filter_map(|entry| match &entry.result {
+            sled_agent_types::inventory::ConfigReconcilerInventoryResult::Ok => Some(entry.path.clone()),
+            sled_agent_types::inventory::ConfigReconcilerInventoryResult::Err { .. } => None,
+        }).collect()
+    }
+    /// Watch for changes to measurements
+    pub async fn measurement_corpus_rx(
+        &self,
+        pre_boot: Vec<Utf8PathBuf>,
+    ) -> MeasurementsReceiver {
+        MeasurementsReceiver::new(self.reconciler_result_rx.clone(), pre_boot)
+    }
+
     /// Return the currently-ledgered [`OmicronSledConfig`].
     ///
     /// # Errors
@@ -370,8 +453,9 @@ impl ConfigReconcilerHandle {
             // This shouldn't happen in practice: sled-agent should both wait
             // for the boot disk and spawn the reconciler task before starting
             // the dropshot server that allows Nexus to collect inventory.
-            None | Some(CurrentSledConfig::WaitingForInternalDisks) => {
-                Err(InventoryError::LedgerContentsNotAvailable)
+            None => Err(InventoryError::LedgerContentsNotAvailable),
+            Some(CurrentSledConfig::WaitingForInternalDisks) => {
+                Err(InventoryError::WaitingOnLedger)
             }
             Some(CurrentSledConfig::WaitingForInitialConfig) => Ok(None),
             Some(CurrentSledConfig::Ledgered(config)) => Ok(Some(*config)),
@@ -543,4 +627,41 @@ enum AvailableDatasetsReceiverInner {
     // Test path: allow tests to specify their own directories.
     #[cfg(feature = "testing")]
     FakeStatic(Vec<(ZpoolName, Utf8PathBuf)>),
+}
+
+#[derive(Debug, Clone)]
+enum MeasurementsReceiverInner {
+    Real { rx: watch::Receiver<ReconcilerResult>, pre_boot: Vec<Utf8PathBuf> },
+    Fake(Vec<Utf8PathBuf>),
+}
+
+#[derive(Debug, Clone)]
+pub struct MeasurementsReceiver {
+    inner: MeasurementsReceiverInner,
+}
+
+impl MeasurementsReceiver {
+    pub fn new(
+        rx: watch::Receiver<ReconcilerResult>,
+        pre_boot: Vec<Utf8PathBuf>,
+    ) -> Self {
+        MeasurementsReceiver {
+            inner: MeasurementsReceiverInner::Real { rx, pre_boot },
+        }
+    }
+
+    pub fn new_fake(paths: Vec<Utf8PathBuf>) -> Self {
+        MeasurementsReceiver { inner: MeasurementsReceiverInner::Fake(paths) }
+    }
+    pub fn latest_measurements(&self) -> Vec<Utf8PathBuf> {
+        match &self.inner {
+            MeasurementsReceiverInner::Real { rx, pre_boot } => {
+                match rx.borrow().all_current_measurements() {
+                    either::Either::Left(_) => pre_boot.clone(),
+                    either::Either::Right(s) => s.collect(),
+                }
+            }
+            MeasurementsReceiverInner::Fake(paths) => paths.clone(),
+        }
+    }
 }
