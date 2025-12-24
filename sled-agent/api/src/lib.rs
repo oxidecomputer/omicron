@@ -1075,7 +1075,7 @@ pub trait SledAgentApi {
     }]
     async fn trust_quorum_reconfigure(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::trust_quorum::ReconfigureRequest>,
+        body: TypedBody<latest::trust_quorum::ReconfigureMsg>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Initiate an upgrade from LRTQ
@@ -1086,7 +1086,7 @@ pub trait SledAgentApi {
     }]
     async fn trust_quorum_upgrade_from_lrtq(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::trust_quorum::LrtqUpgradeRequest>,
+        body: TypedBody<latest::trust_quorum::LrtqUpgradeMsg>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Commit a trust quorum configuration

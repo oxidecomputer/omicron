@@ -1582,7 +1582,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReconfigureRequest"
+                "$ref": "#/components/schemas/ReconfigureMsg"
               }
             }
           },
@@ -1772,7 +1772,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LrtqUpgradeRequest"
+                "$ref": "#/components/schemas/LrtqUpgradeMsg"
               }
             }
           },
@@ -6441,8 +6441,8 @@
           "volume_size"
         ]
       },
-      "LrtqUpgradeRequest": {
-        "description": "Request to upgrade from LRTQ (Legacy Rack Trust Quorum).",
+      "LrtqUpgradeMsg": {
+        "description": "A request from Nexus informing a node to start coordinating an upgrade from LRTQ.",
         "type": "object",
         "properties": {
           "epoch": {
@@ -8256,39 +8256,24 @@
               }
             ]
           },
-          "epoch": {
-            "description": "The epoch to commit.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "rack_id": {
-            "description": "Unique ID of the rack.",
+          "request": {
+            "description": "The commit request to proxy.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackUuid"
+                "$ref": "#/components/schemas/CommitRequest"
               }
             ]
           }
         },
         "required": [
           "destination",
-          "epoch",
-          "rack_id"
+          "request"
         ]
       },
       "ProxyPrepareAndCommitRequest": {
         "description": "Request to proxy a prepare-and-commit operation to another trust quorum node.",
         "type": "object",
         "properties": {
-          "config": {
-            "description": "The configuration to prepare and commit.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Configuration"
-              }
-            ]
-          },
           "destination": {
             "description": "The target node to proxy the request to.",
             "allOf": [
@@ -8296,11 +8281,19 @@
                 "$ref": "#/components/schemas/BaseboardId"
               }
             ]
+          },
+          "request": {
+            "description": "The prepare-and-commit request to proxy.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PrepareAndCommitRequest"
+              }
+            ]
           }
         },
         "required": [
-          "config",
-          "destination"
+          "destination",
+          "request"
         ]
       },
       "QemuPvpanic": {
@@ -8402,8 +8395,8 @@
         "type": "string",
         "format": "uuid"
       },
-      "ReconfigureRequest": {
-        "description": "Reconfigure message for trust quorum changes.",
+      "ReconfigureMsg": {
+        "description": "A request from Nexus informing a node to start coordinating a reconfiguration.",
         "type": "object",
         "properties": {
           "epoch": {
