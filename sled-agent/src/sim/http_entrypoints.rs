@@ -69,9 +69,9 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    CommitRequest, CommitStatus, CoordinatorStatus, LrtqUpgradeMsg,
-    NodeStatus, PrepareAndCommitRequest, ProxyCommitRequest,
-    ProxyPrepareAndCommitRequest, ReconfigureMsg,
+    CommitRequest, CommitStatus, CoordinatorStatus, LrtqUpgradeMsg, NodeStatus,
+    PrepareAndCommitRequest, ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    ReconfigureMsg,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
