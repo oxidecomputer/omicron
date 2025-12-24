@@ -1497,13 +1497,14 @@ mod tests {
     impl Default for FakeSledAgentFacilitiesInner {
         fn default() -> Self {
             let boot_disk_path = Utf8PathBuf::from(BOOT_DISK_PATH);
+            let measurement_boot_disk_path = Utf8PathBuf::from(BOOT_DISK_PATH);
             Self {
                 start_responses: Default::default(),
                 removed_ddm_prefixes: Default::default(),
                 // successful status containing no artifacts
                 resolver_status: ResolverStatus {
                     measurement_manifest: MeasurementManifestStatus {
-                        boot_disk_path: boot_disk_path.clone(),
+                        boot_disk_path: measurement_boot_disk_path.clone(),
                         boot_disk_result: Ok(ZoneManifestArtifactsResult {
                             manifest: OmicronInstallManifest {
                                 source: OmicronInstallManifestSource::SledAgent,

@@ -6,9 +6,11 @@
 
 use crate::InternalDisks;
 use crate::host_phase_2::HostPhase2PreparedContents;
+use crate::measurements::PreparedOmicronMeasurements;
 use camino::Utf8PathBuf;
 use omicron_common::zone_images::ZoneImageFileSource;
 use sled_agent_types::inventory::HostPhase2DesiredContents;
+use sled_agent_types::inventory::OmicronSingleMeasurement;
 use sled_agent_types::inventory::OmicronZoneConfig;
 use sled_agent_types::inventory::OmicronZoneImageSource;
 use sled_agent_types::inventory::ZoneKind;
@@ -17,6 +19,8 @@ use sled_agent_types::zone_images::OmicronZoneImageLocation;
 use sled_agent_types::zone_images::PreparedOmicronZone;
 use sled_agent_types::zone_images::RAMDISK_IMAGE_PATH;
 use sled_agent_types::zone_images::ResolverStatus;
+use sled_agent_types::zone_images::TESTING_MEASUREMENTS_FILE;
+use sled_agent_types::zone_images::TESTING_MEASUREMENTS_PATH;
 use sled_agent_types::zone_images::ZoneImageLocationError;
 use slog::error;
 use slog::info;
@@ -58,6 +62,13 @@ pub trait ResolverStatusExt {
         log: &slog::Logger,
         desired: &'a HostPhase2DesiredContents,
     ) -> HostPhase2PreparedContents<'a>;
+
+    fn prepare_all_measurements(
+        &self,
+        log: &slog::Logger,
+        desired: &Vec<OmicronSingleMeasurement>,
+        internal_disks: &InternalDisks,
+    ) -> PreparedOmicronMeasurements;
 }
 
 impl ResolverStatusExt for ResolverStatus {
@@ -283,6 +294,93 @@ impl ResolverStatusExt for ResolverStatus {
                 }
             }
         }
+    }
+
+    fn prepare_all_measurements(
+        &self,
+        log: &slog::Logger,
+        _desired: &Vec<OmicronSingleMeasurement>,
+        internal_disks: &InternalDisks,
+    ) -> PreparedOmicronMeasurements {
+        // For now we only support measurements from the install dataset
+        // regardless of mupdate override status
+
+        // There's always at least one image path (the RAM disk below).
+        let mut file_sources = Vec::with_capacity(1);
+
+        // install dataset images are not stored on the RAM disk in
+        // production, just in development or test workflows.
+        file_sources.push(OmicronZoneFileSource {
+            location: OmicronZoneImageLocation::InstallDataset {
+                // XXX hmmm we don't have the hash?
+                hash: Err(ZoneImageLocationError::BootDiskMissing),
+            },
+            file_source: ZoneImageFileSource {
+                file_name: TESTING_MEASUREMENTS_FILE.to_string(),
+                search_paths: vec![Utf8PathBuf::from(
+                    TESTING_MEASUREMENTS_PATH,
+                )],
+            },
+        });
+
+        all_install_measurements(
+            log,
+            self,
+            internal_disks,
+            |path, file_name, hash| {
+                file_sources.push(OmicronZoneFileSource {
+                    location: OmicronZoneImageLocation::InstallDataset { hash },
+                    file_source: ZoneImageFileSource {
+                        file_name,
+                        // XXX we're not super consistent about where we join
+                        search_paths: vec![path.join("measurements")],
+                    },
+                })
+            },
+        );
+
+        PreparedOmicronMeasurements { sources: file_sources }
+    }
+}
+
+fn all_install_measurements<F>(
+    log: &slog::Logger,
+    resolver_status: &ResolverStatus,
+    internal_disks: &InternalDisks,
+    mut search_paths_cb: F,
+) where
+    F: FnMut(Utf8PathBuf, String, Result<ArtifactHash, ZoneImageLocationError>),
+{
+    if let Some(path) = internal_disks.boot_disk_install_dataset() {
+        match resolver_status.measurement_manifest.all_measurements() {
+            Ok(entries) => {
+                for e in entries {
+                    match e {
+                        Ok((file_name, hash)) => {
+                            search_paths_cb(path.clone(), file_name, Ok(hash))
+                        }
+                        Err(e) => error!(
+                            log,
+                            "measurement entry error";
+                            "error" => InlineErrorChain::new(&e),
+                        ),
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    log,
+                    "measurement error";
+                    "error" => InlineErrorChain::new(&e),
+                );
+            }
+        }
+    } else {
+        error!(
+            log,
+            "boot disk install dataset not available, \
+             not returning it as a source";
+        );
     }
 }
 

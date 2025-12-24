@@ -310,6 +310,8 @@ fn merge_old_configs(
         remove_mupdate_override: None,
         // Old configs are pre-host-phase-2 knowledge.
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
+        // Old configs are pre-measurement knowledge
+        //measurements: OmicronMeasurements::measurements_defaults(),
     }
 }
 
