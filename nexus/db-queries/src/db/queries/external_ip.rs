@@ -911,7 +911,6 @@ mod tests {
     use nexus_db_model::Name;
     use nexus_db_model::NetworkInterfaceKind;
     use nexus_db_schema::enums::NetworkInterfaceKindEnum;
-    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
