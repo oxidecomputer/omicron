@@ -23,6 +23,7 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::de::Error as _;
+use sled_agent_types::sled::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use strum::EnumIter;
 use uuid::Uuid;
@@ -354,6 +355,12 @@ pub struct Baseboard {
     pub serial: String,
     pub part: String,
     pub revision: u32,
+}
+
+impl From<Baseboard> for BaseboardId {
+    fn from(value: crate::external_api::shared::Baseboard) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
 }
 
 /// A sled that has not been added to an initialized rack yet

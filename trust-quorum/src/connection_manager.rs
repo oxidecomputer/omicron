@@ -6,7 +6,8 @@
 
 use crate::established_conn::EstablishedConn;
 use crate::proxy;
-use trust_quorum_protocol::{BaseboardId, Envelope, PeerMsg};
+use sled_agent_types::sled::BaseboardId;
+use trust_quorum_protocol::{Envelope, PeerMsg};
 
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311

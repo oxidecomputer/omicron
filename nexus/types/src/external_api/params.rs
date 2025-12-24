@@ -27,6 +27,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{self, Visitor},
 };
+use sled_agent_types::sled::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
@@ -79,6 +80,12 @@ macro_rules! id_path_param {
 pub struct UninitializedSledId {
     pub serial: String,
     pub part: String,
+}
+
+impl From<UninitializedSledId> for BaseboardId {
+    fn from(value: UninitializedSledId) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
 }
 
 path_param!(AffinityGroupPath, affinity_group, "affinity group");

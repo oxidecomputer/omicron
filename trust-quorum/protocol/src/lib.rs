@@ -9,12 +9,11 @@
 //! All persistent state and all networking is managed outside of this
 //! implementation.
 
-use crypto::Sha3_256Digest;
 use daft::Diffable;
 use derive_more::Display;
 use gfss::shamir::Share;
 use serde::{Deserialize, Serialize};
-pub use sled_agent_types::sled::BaseboardId;
+use sled_agent_types::sled::BaseboardId;
 use slog::{Logger, error, warn};
 
 mod alarm;
@@ -42,7 +41,10 @@ pub use validators::{
 };
 
 pub use alarm::Alarm;
-pub use crypto::{RackSecret, ReconstructedRackSecret};
+pub use crypto::{
+    EncryptedRackSecrets, RackSecret, ReconstructedRackSecret, Salt,
+    Sha3_256Digest,
+};
 pub use messages::*;
 pub use node::{CommitError, Node, NodeDiff, PrepareAndCommitError};
 // public only for docs.
@@ -72,6 +74,10 @@ pub struct Epoch(pub u64);
 impl Epoch {
     pub fn next(&self) -> Epoch {
         Epoch(self.0.checked_add(1).expect("fewer than 2^64 epochs"))
+    }
+
+    pub fn previous(&self) -> Option<Epoch> {
+        self.0.checked_sub(1).map(Epoch)
     }
 }
 

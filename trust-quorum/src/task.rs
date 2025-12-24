@@ -14,6 +14,7 @@ use crate::proxy;
 use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::sled::BaseboardId;
 use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
@@ -24,7 +25,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 use trust_quorum_protocol::{
-    Alarm, BaseboardId, CommitError, Configuration, Epoch, ExpungedMetadata,
+    Alarm, CommitError, Configuration, Epoch, ExpungedMetadata,
     LoadRackSecretError, LrtqUpgradeError, LrtqUpgradeMsg, Node, NodeCallerCtx,
     NodeCommonCtx, NodeCtx, PersistentState, PrepareAndCommitError,
     ReconfigurationError, ReconfigureMsg, ReconstructedRackSecret,

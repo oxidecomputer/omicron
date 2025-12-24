@@ -85,7 +85,6 @@ use nexus_db_schema::enums::{
     CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
 };
 use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
-use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -116,6 +115,7 @@ use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::ZoneArtifactInventory;
+use sled_agent_types::sled::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -2744,12 +2744,11 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
-                bbs.extend(batch.into_iter().map(|bb| {
-                    (
-                        bb.id,
-                        Arc::new(nexus_types::inventory::BaseboardId::from(bb)),
-                    )
-                }));
+                bbs.extend(
+                    batch
+                        .into_iter()
+                        .map(|bb| (bb.id, Arc::new(BaseboardId::from(bb)))),
+                );
             }
 
             bbs
@@ -4468,7 +4467,7 @@ mod test {
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPageWhich;
-    use nexus_types::inventory::{BaseboardId, SpType};
+    use nexus_types::inventory::SpType;
     use omicron_common::api::external::Error;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
@@ -4491,6 +4490,7 @@ mod test {
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
         ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
     };
+    use sled_agent_types::sled::BaseboardId;
     use std::num::NonZeroU32;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;

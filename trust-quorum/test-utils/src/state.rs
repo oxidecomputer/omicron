@@ -13,15 +13,16 @@ use daft::{BTreeMapDiff, BTreeSetDiff, Diffable, Leaf};
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::GenericUuid;
 use secrecy::ExposeSecretMut;
+use sled_agent_types::sled::BaseboardId;
 use sled_hardware_types::Baseboard;
 use slog::{Logger, info};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use trust_quorum_protocol::{
-    BaseboardId, Configuration, CoordinatingMsg, CoordinatorOperation,
-    CoordinatorStateDiff, Envelope, Epoch, LoadRackSecretError, Node,
-    NodeCallerCtx, NodeCommonCtx, NodeCtx, NodeCtxDiff, NodeDiff, PeerMsgKind,
-    PersistentState, ValidatedLrtqUpgradeMsgDiff, ValidatedReconfigureMsgDiff,
+    Configuration, CoordinatingMsg, CoordinatorOperation, CoordinatorStateDiff,
+    Envelope, Epoch, LoadRackSecretError, Node, NodeCallerCtx, NodeCommonCtx,
+    NodeCtx, NodeCtxDiff, NodeDiff, PeerMsgKind, PersistentState,
+    ValidatedLrtqUpgradeMsgDiff, ValidatedReconfigureMsgDiff,
 };
 
 // The state of our entire system including the system under test and
