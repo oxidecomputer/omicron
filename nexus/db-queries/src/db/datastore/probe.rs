@@ -106,12 +106,6 @@ impl super::DataStore {
                 )?
             };
 
-            // TODO ProbeInfo still uses version 1 of the network interface. We
-            // need to support version 2, which allows dual-stack IP
-            // configurations.
-            // See https://github.com/oxidecomputer/omicron/issues/9248.
-            let interface = interface.try_into()?;
-
             result.push(ProbeInfo {
                 id: probe.id(),
                 name: probe.name().clone(),
@@ -156,12 +150,6 @@ impl super::DataStore {
             ..interface
                 .into_internal(db_subnet.ipv4_block.0, db_subnet.ipv6_block.0)?
         };
-
-        // TODO ProbeInfo still uses version 1 of the network interface. We
-        // need to support version 2, which allows dual-stack IP
-        // configurations.
-        // See https://github.com/oxidecomputer/omicron/issues/9248.
-        let interface = interface.try_into()?;
 
         Ok(ProbeInfo {
             id: probe.id(),
@@ -270,7 +258,7 @@ impl super::DataStore {
                     probe.name(),
                 ),
             },
-            PrivateIpStackCreate::auto_ipv4(),
+            PrivateIpStackCreate::auto_dual_stack(),
             None, //Request MAC address assignment
         )?;
 
