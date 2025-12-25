@@ -15,6 +15,7 @@ use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::sled::BaseboardId;
+use sled_agent_config_reconciler::MeasurementsReceiver;
 use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
@@ -424,12 +425,16 @@ pub struct NodeTask {
 
     /// A tracker for API requests proxied to other nodes
     proxy_tracker: proxy::Tracker,
+
+    /// Measurements RX
+    measurements_rx: MeasurementsReceiver,
 }
 
 impl NodeTask {
     pub async fn new(
         config: Config,
         log: &Logger,
+        measurements_rx: MeasurementsReceiver,
     ) -> (NodeTask, NodeTaskHandle) {
         let log = log.new(o!(
             "component" => "trust-quorum",
@@ -486,6 +491,7 @@ impl NodeTask {
                 rx,
                 network_config,
                 proxy_tracker: proxy::Tracker::new(),
+                measurements_rx,
             },
             NodeTaskHandle { baseboard_id, tx, listen_addr },
         )
@@ -496,8 +502,7 @@ impl NodeTask {
     /// This should be spawned into its own tokio task
     pub async fn run(&mut self) {
         while !self.shutdown {
-            // TODO: Real corpus
-            let corpus = vec![];
+            let corpus = self.measurements_rx.latest_measurements();
             tokio::select! {
                 Some(request) = self.rx.recv() => {
                     self.on_api_request(request).await;
@@ -643,8 +648,7 @@ impl NodeTask {
         match request {
             NodeApiRequest::BootstrapAddresses(addrs) => {
                 info!(self.log, "Updated Peer Addresses: {addrs:?}");
-                // TODO: real corpus
-                let corpus = vec![];
+                let corpus = self.measurements_rx.latest_measurements();
                 let disconnected = self
                     .conn_mgr
                     .update_bootstrap_connections(addrs, corpus)
@@ -1016,8 +1020,9 @@ mod tests {
             let mut node_handles = vec![];
             let mut join_handles = vec![];
             for config in configs.clone() {
+                let measurement_receiver = MeasurementsReceiver::new_fake(vec![]);
                 let (mut task, handle) =
-                    NodeTask::new(config, &logctx.log).await;
+                    NodeTask::new(config, &logctx.log, measurement_receiver).await;
                 node_handles.push(handle);
                 join_handles
                     .push(tokio::spawn(async move { task.run().await }));
@@ -1077,8 +1082,9 @@ mod tests {
             for (config, share_pkg) in
                 configs.clone().into_iter().zip(share_pkgs)
             {
+                let measurement_receiver = MeasurementsReceiver::new_fake(vec![]);
                 let (mut task, handle) =
-                    NodeTask::new(config, &logctx.log).await;
+                    NodeTask::new(config, &logctx.log, measurement_receiver).await;
                 task.ctx.update_persistent_state(|ps| {
                     ps.lrtq = Some(share_pkg);
                     // We are modifying the persistent state, but not in a way
@@ -1114,9 +1120,11 @@ mod tests {
         }
 
         pub async fn simulate_restart_of_last_node(&mut self) {
+            let measurement_receiver = MeasurementsReceiver::new_fake(vec![]);
             let (mut task, handle) = NodeTask::new(
                 self.configs.last().unwrap().clone(),
                 &self.logctx.log,
+                measurement_receiver,
             )
             .await;
             let listen_addr = handle.listen_addr();
@@ -1274,10 +1282,13 @@ mod tests {
 
         debug!(logctx.log, "AFTER poll for conns with node down");
 
+
+        let measurement_receiver = MeasurementsReceiver::new_fake(vec![]);
         // Now let's bring back up the old node and ensure full connectivity again
         let (mut task, handle) = NodeTask::new(
             setup.configs.last().unwrap().clone(),
             &setup.logctx.log,
+            measurement_receiver,
         )
         .await;
         setup.node_handles.push(handle.clone());

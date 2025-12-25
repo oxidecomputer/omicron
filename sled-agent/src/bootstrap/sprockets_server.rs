@@ -10,6 +10,7 @@ use crate::bootstrap::params::version;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
 use crate::bootstrap::views::SledAgentResponse;
+use sled_agent_config_reconciler::MeasurementsReceiver;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use sprockets_tls::Stream;
@@ -33,12 +34,14 @@ pub(super) struct SprocketsServer {
     listener: Server,
     tx_requests: TxRequestsChannel,
     log: Logger,
+    measurements: MeasurementsReceiver,
 }
 
 impl SprocketsServer {
     pub(super) async fn bind(
         bind_addr: SocketAddrV6,
         tx_requests: TxRequestsChannel,
+        measurements: MeasurementsReceiver,
         sprockets_conf: SprocketsConfig,
         base_log: &Logger,
     ) -> io::Result<Self> {
@@ -49,7 +52,7 @@ impl SprocketsServer {
         let listener =
             Server::new(sprockets_conf, bind_addr, log.clone()).await.unwrap();
         info!(log, "Started listening"; "local_addr" => %bind_addr);
-        Ok(Self { listener, tx_requests, log })
+        Ok(Self { listener, tx_requests, log, measurements })
     }
 
     /// Run the sprockets server.
@@ -64,7 +67,13 @@ impl SprocketsServer {
             // Sprockets actually _uses_ the key here!
             // TODO: Once we have a corpus, use it.
             // Will we ever have one at RSS time?
-            let corpus = vec![];
+            let corpus = self.measurements.latest_measurements();
+            if corpus.is_empty() {
+                error!(self.log, "The measurement log shouldn't be empty");
+            }
+            for c in &corpus {
+                info!(self.log, "Using file {c} in corpus");
+            }
             let acceptor = match self.listener.accept(corpus).await {
                 Ok(acceptor) => acceptor,
                 Err(err) => {
