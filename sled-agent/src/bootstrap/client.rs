@@ -10,6 +10,7 @@ use super::params::version;
 use super::views::SledAgentResponse;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
+use sled_agent_config_reconciler::MeasurementsReceiver;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use slog_error_chain::SlogInlineError;
@@ -77,15 +78,17 @@ pub(crate) struct Client {
     addr: SocketAddrV6,
     log: Logger,
     sprockets_conf: SprocketsConfig,
+    measurements_rx: MeasurementsReceiver,
 }
 
 impl Client {
     pub(crate) fn new(
         addr: SocketAddrV6,
         sprockets_conf: SprocketsConfig,
+        measurements_rx: MeasurementsReceiver,
         log: Logger,
     ) -> Self {
-        Self { addr, sprockets_conf, log }
+        Self { addr, sprockets_conf, log, measurements_rx }
     }
 
     /// Start sled agent by sending an initialization request determined from
@@ -117,8 +120,14 @@ impl Client {
         // Establish connection and sprockets connection (if possible).
         // The sprockets client loads the associated root certificates at this point.
         //
-        // TODO: Use a real corpus
-        let corpus = vec![];
+        let corpus = self.measurements_rx.latest_measurements();
+        if corpus.is_empty() {
+            error!(self.log, "The measurement log shouldn't be empty");
+        }
+        for c in &corpus {
+            info!(self.log, "Using file {c} in corpus");
+        }
+
         let stream = SprocketsClient::connect(
             self.sprockets_conf.clone(),
             self.addr,
