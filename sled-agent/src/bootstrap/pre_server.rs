@@ -55,6 +55,7 @@ pub(super) struct BootstrapAgentStartup {
     pub(super) long_running_task_handles: LongRunningTaskHandles,
     pub(super) sled_agent_started_tx: oneshot::Sender<SledAgent>,
     pub(super) config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
+    pub(super) cold_boot_measurements: Vec<Utf8PathBuf>,
 }
 
 impl BootstrapAgentStartup {
@@ -125,6 +126,7 @@ impl BootstrapAgentStartup {
             config_reconciler_spawn_token,
             sled_agent_started_tx,
             service_manager_ready_tx,
+            cold_boot_measurements,
         } = spawn_all_longrunning_tasks(
             &base_log,
             sled_mode,
@@ -162,6 +164,7 @@ impl BootstrapAgentStartup {
             long_running_task_handles,
             sled_agent_started_tx,
             config_reconciler_spawn_token,
+            cold_boot_measurements,
         })
     }
 }

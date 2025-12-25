@@ -844,6 +844,7 @@ impl SledAgentApi for SledAgentImpl {
         crate::sled_agent::sled_add(
             sa.logger().clone(),
             sa.sprockets().clone(),
+            sa.measurements_rx().await.clone(),
             request.sled_id,
             request.start_request,
         )

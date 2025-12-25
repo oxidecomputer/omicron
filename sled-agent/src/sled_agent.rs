@@ -63,7 +63,7 @@ use omicron_uuid_kinds::{
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
-    ReconcilerInventory, SledAgentFacilities,
+    MeasurementsReceiver, ReconcilerInventory, SledAgentFacilities,
 };
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
@@ -1098,6 +1098,10 @@ impl SledAgent {
         Ok(())
     }
 
+    pub(crate) async fn measurements_rx(&self) -> MeasurementsReceiver {
+        self.inner.config_reconciler.measurement_corpus_rx(vec![]).await
+    }
+
     /// Return identifiers for this sled.
     ///
     /// This is mostly used to identify timeseries data with the originating
@@ -1365,6 +1369,7 @@ pub enum AddSledError {
 pub async fn sled_add(
     log: Logger,
     sprockets_config: SprocketsConfig,
+    measurements_rx: MeasurementsReceiver,
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
@@ -1425,6 +1430,7 @@ pub async fn sled_add(
     let client = crate::bootstrap::client::Client::new(
         bootstrap_addr,
         sprockets_config,
+        measurements_rx,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 

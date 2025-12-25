@@ -182,6 +182,7 @@ impl Server {
             long_running_task_handles,
             sled_agent_started_tx,
             config_reconciler_spawn_token,
+            cold_boot_measurements,
         } = BootstrapAgentStartup::run(config).await?;
 
         // Do we have a StartSledAgentRequest stored in the ledger?
@@ -216,12 +217,23 @@ impl Server {
             sled_reset_tx,
             sprockets: config.sprockets.clone(),
             trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
+            measurements_rx: long_running_task_handles
+                .config_reconciler
+                .measurement_corpus_rx(cold_boot_measurements.clone())
+                .await
+                .clone(),
         };
         let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
 
         // Create a channel for proxying sled-initialization requests that land
         // in the sprockets server to our bootstrap agent `Inner` task.
         let (sled_init_tx, sled_init_rx) = mpsc::channel(1);
+
+        let measurements = long_running_task_handles
+            .config_reconciler
+            .measurement_corpus_rx(cold_boot_measurements)
+            .await
+            .clone();
 
         // We don't bother to wrap this bind in a
         // `wait_while_handling_hardware_updates()` because (a) binding should
@@ -235,6 +247,7 @@ impl Server {
                 0,
             ),
             sled_init_tx,
+            measurements,
             config.sprockets.clone(),
             &base_log,
         )
