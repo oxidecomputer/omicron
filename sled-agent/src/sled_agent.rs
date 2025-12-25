@@ -4,7 +4,7 @@
 
 //! Sled agent implementation
 
-use crate::artifact_store::ArtifactStore;
+use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
@@ -63,7 +63,7 @@ use omicron_uuid_kinds::{
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
-    ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
+    MeasurementsReceiver, ReconcilerInventory, SledAgentFacilities,
 };
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
@@ -95,7 +95,6 @@ use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
-use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use illumos_utils::dladm::{Dladm, EtherstubVnic};
@@ -610,15 +609,6 @@ impl SledAgent {
                  network config from bootstore",
             );
 
-        let artifact_store = Arc::new(
-            ArtifactStore::new(
-                &log,
-                config_reconciler.internal_disks_rx().clone(),
-                Some(Arc::clone(&config_reconciler)),
-            )
-            .await,
-        );
-
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(
             ReconcilerFacilities {
@@ -626,7 +616,9 @@ impl SledAgent {
                 service_manager: services.clone(),
                 metrics_queue: metrics_manager.request_queue(),
             },
-            SledAgentArtifactStoreWrapper(Arc::clone(&artifact_store)),
+            SledAgentArtifactStoreWrapper(Arc::clone(
+                &long_running_task_handles.artifact_store,
+            )),
             config_reconciler_spawn_token,
         );
 
@@ -641,8 +633,10 @@ impl SledAgent {
             )
             .await?;
 
-        let repo_depot =
-            artifact_store.start(sled_address, &config.dropshot).await?;
+        let repo_depot = long_running_task_handles
+            .artifact_store
+            .start(sled_address, &config.dropshot)
+            .await?;
 
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
@@ -1104,6 +1098,10 @@ impl SledAgent {
         Ok(())
     }
 
+    pub(crate) async fn measurements_rx(&self) -> MeasurementsReceiver {
+        self.inner.config_reconciler.measurement_corpus_rx(vec![]).await
+    }
+
     /// Return identifiers for this sled.
     ///
     /// This is mostly used to identify timeseries data with the originating
@@ -1371,6 +1369,7 @@ pub enum AddSledError {
 pub async fn sled_add(
     log: Logger,
     sprockets_config: SprocketsConfig,
+    measurements_rx: MeasurementsReceiver,
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
@@ -1431,6 +1430,7 @@ pub async fn sled_add(
     let client = crate::bootstrap::client::Client::new(
         bootstrap_addr,
         sprockets_config,
+        measurements_rx,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
@@ -1509,19 +1509,5 @@ impl SledAgentFacilities for ReconcilerFacilities {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);
-    }
-}
-
-// Workaround wrapper for orphan rules.
-#[derive(Clone)]
-struct SledAgentArtifactStoreWrapper(Arc<ArtifactStore<InternalDisksReceiver>>);
-
-impl SledAgentArtifactStore for SledAgentArtifactStoreWrapper {
-    async fn get_artifact(
-        &self,
-        artifact: ArtifactHash,
-    ) -> anyhow::Result<tokio::fs::File> {
-        let file = self.0.get(artifact).await?;
-        Ok(file)
     }
 }

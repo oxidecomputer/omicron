@@ -24,6 +24,7 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_config_reconciler::MeasurementsReceiver;
 use sled_agent_types::rack_init::{
     RackInitializeRequest, RackInitializeRequestParams,
 };
@@ -48,6 +49,7 @@ pub(crate) struct BootstrapServerContext {
         mpsc::Sender<oneshot::Sender<Result<(), BootstrapError>>>,
     pub(crate) sprockets: SprocketsConfig,
     pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
+    pub(crate) measurements_rx: MeasurementsReceiver,
 }
 
 impl BootstrapServerContext {
@@ -60,6 +62,7 @@ impl BootstrapServerContext {
             self.sprockets.clone(),
             self.global_zone_bootstrap_ip,
             &self.internal_disks_rx,
+            &self.measurements_rx,
             &self.bootstore_node_handle,
             &self.trust_quorum_handle,
             request,
@@ -132,6 +135,7 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
             .start_reset(
                 &ctx.base_log,
                 ctx.sprockets.clone(),
+                ctx.measurements_rx.clone(),
                 ctx.global_zone_bootstrap_ip,
             )
             .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;

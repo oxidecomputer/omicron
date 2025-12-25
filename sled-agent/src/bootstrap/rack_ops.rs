@@ -10,6 +10,7 @@ use bootstore::schemes::v0 as bootstore;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_config_reconciler::MeasurementsReceiver;
 use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::rack_ops::{RackOperationStatus, RssStep};
 use slog::Logger;
@@ -149,6 +150,7 @@ impl RssAccess {
         sprockets: SprocketsConfig,
         global_zone_bootstrap_ip: Ipv6Addr,
         internal_disks_rx: &InternalDisksReceiver,
+        measurements_rx: &MeasurementsReceiver,
         bootstore_node_handle: &bootstore::NodeHandle,
         trust_quorum_handle: &trust_quorum::NodeTaskHandle,
         request: RackInitializeRequestParams,
@@ -188,6 +190,7 @@ impl RssAccess {
                 mem::drop(status);
                 let parent_log = parent_log.clone();
                 let internal_disks_rx = internal_disks_rx.clone();
+                let measurements_rx = measurements_rx.clone();
                 let bootstore_node_handle = bootstore_node_handle.clone();
                 let status = Arc::clone(&self.status);
                 let trust_quorum_handle = trust_quorum_handle.clone();
@@ -197,6 +200,7 @@ impl RssAccess {
                         sprockets,
                         global_zone_bootstrap_ip,
                         internal_disks_rx,
+                        measurements_rx,
                         bootstore_node_handle,
                         trust_quorum_handle,
                         request,
@@ -224,6 +228,7 @@ impl RssAccess {
         &self,
         parent_log: &Logger,
         sprockets: SprocketsConfig,
+        measurements_rx: MeasurementsReceiver,
         global_zone_bootstrap_ip: Ipv6Addr,
     ) -> Result<RackResetUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
@@ -264,6 +269,7 @@ impl RssAccess {
                     let result = rack_reset(
                         &parent_log,
                         sprockets,
+                        measurements_rx,
                         global_zone_bootstrap_ip,
                     )
                     .await;
@@ -339,6 +345,7 @@ async fn rack_initialize(
     sprockets: SprocketsConfig,
     global_zone_bootstrap_ip: Ipv6Addr,
     internal_disks_rx: InternalDisksReceiver,
+    measurements_rx: MeasurementsReceiver,
     bootstore_node_handle: bootstore::NodeHandle,
     trust_quorum_handle: trust_quorum::NodeTaskHandle,
     request: RackInitializeRequestParams,
@@ -350,6 +357,7 @@ async fn rack_initialize(
         request,
         global_zone_bootstrap_ip,
         internal_disks_rx,
+        measurements_rx,
         bootstore_node_handle,
         trust_quorum_handle,
         step_tx,
@@ -360,8 +368,14 @@ async fn rack_initialize(
 async fn rack_reset(
     parent_log: &Logger,
     sprockets: SprocketsConfig,
+    measurements_rx: MeasurementsReceiver,
     global_zone_bootstrap_ip: Ipv6Addr,
 ) -> Result<(), SetupServiceError> {
-    RssHandle::run_rss_reset(parent_log, global_zone_bootstrap_ip, sprockets)
-        .await
+    RssHandle::run_rss_reset(
+        parent_log,
+        global_zone_bootstrap_ip,
+        sprockets,
+        measurements_rx,
+    )
+    .await
 }

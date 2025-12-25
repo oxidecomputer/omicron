@@ -15095,6 +15095,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha3",
+ "sled-agent-config-reconciler",
  "sled-agent-types",
  "sled-hardware-types",
  "slog",

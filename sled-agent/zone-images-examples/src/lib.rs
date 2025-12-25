@@ -82,6 +82,7 @@ pub static NON_BOOT_3_PATHS: LazyLock<OverridePaths> =
 #[derive(Clone, Debug)]
 pub struct WriteInstallDatasetContext {
     pub zones: IdOrdMap<ZoneContents>,
+    pub measurements: IdOrdMap<ZoneContents>,
     pub mupdate_id: MupdateUuid,
     pub mupdate_override_uuid: MupdateOverrideUuid,
     pub write_zone_manifest_to_disk: bool,
@@ -102,6 +103,8 @@ impl WriteInstallDatasetContext {
             ]
             .into_iter()
             .collect(),
+            // XXX we need real fake measurements here
+            measurements: [].into_iter().collect(),
             mupdate_id: MupdateUuid::new_v4(),
             mupdate_override_uuid: MupdateOverrideUuid::new_v4(),
             write_zone_manifest_to_disk: true,
@@ -217,6 +220,34 @@ impl WriteInstallDatasetContext {
         }
     }
 
+    // XXX UGGGH
+    pub fn measurement_manifest(&self) -> OmicronInstallManifest {
+        let source = if self.write_zone_manifest_to_disk {
+            OmicronInstallManifestSource::Installinator {
+                mupdate_id: self.mupdate_id,
+            }
+        } else {
+            OmicronInstallManifestSource::SledAgent
+        };
+        OmicronInstallManifest {
+            source,
+            files: self
+                .measurements
+                .iter()
+                .filter_map(|zone| {
+                    zone.include_in_json.then(|| OmicronInstallMetadata {
+                        file_name: zone
+                            .zone_kind
+                            .artifact_in_install_dataset()
+                            .to_owned(),
+                        file_size: zone.json_size,
+                        hash: zone.json_hash,
+                    })
+                })
+                .collect(),
+        }
+    }
+
     /// Returns the expected result of writing the zone manifest, taking into
     /// account mismatches, etc.
     pub fn expected_result(
@@ -235,6 +266,7 @@ impl WriteInstallDatasetContext {
                 zone.include_in_json.then(|| zone.expected_result(dir))
             })
             .collect();
+
         ZoneManifestArtifactsResult { manifest, data }
     }
 
