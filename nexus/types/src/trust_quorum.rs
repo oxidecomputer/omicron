@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::RackUuid;
 use sled_agent_types::sled::BaseboardId;
 use trust_quorum_protocol::{
@@ -76,6 +77,11 @@ pub struct TrustQuorumConfig {
     pub coordinator: BaseboardId,
     pub encrypted_rack_secrets: Option<EncryptedRackSecrets>,
     pub members: BTreeMap<BaseboardId, TrustQuorumMemberData>,
+    pub time_created: DateTime<Utc>,
+    pub time_committing: Option<DateTime<Utc>>,
+    pub time_committed: Option<DateTime<Utc>>,
+    pub time_aborted: Option<DateTime<Utc>>,
+    pub abort_reason: Option<String>,
 }
 
 impl TrustQuorumConfig {
@@ -108,6 +114,11 @@ impl TrustQuorumConfig {
                     )
                 })
                 .collect(),
+            time_created: Utc::now(),
+            time_committing: None,
+            time_committed: None,
+            time_aborted: None,
+            abort_reason: None,
         }
     }
 
@@ -119,6 +130,7 @@ impl TrustQuorumConfig {
         let num_members = u8::try_from(initial_members.len()).unwrap();
         assert!(num_members >= 3);
         assert!(num_members <= 32);
+        let now = Utc::now();
         TrustQuorumConfig {
             rack_id,
             epoch: Epoch(1),
@@ -140,6 +152,11 @@ impl TrustQuorumConfig {
                     )
                 })
                 .collect(),
+            time_created: now,
+            time_committing: Some(now),
+            time_committed: Some(now),
+            time_aborted: None,
+            abort_reason: None,
         }
     }
 

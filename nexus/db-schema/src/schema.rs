@@ -3001,6 +3001,11 @@ table! {
         coordinator -> Uuid,
         encrypted_rack_secrets_salt -> Nullable<Text>,
         encrypted_rack_secrets -> Nullable<Binary>,
+        time_created -> Timestamptz,
+        time_committing -> Nullable<Timestamptz>,
+        time_committed -> Nullable<Timestamptz>,
+        time_aborted -> Nullable<Timestamptz>,
+        abort_reason -> Nullable<Text>,
     }
 }
 

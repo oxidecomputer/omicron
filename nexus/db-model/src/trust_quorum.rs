@@ -7,6 +7,7 @@
 use super::impl_enum_type;
 use crate::SqlU8;
 use crate::typed_uuid::DbTypedUuid;
+use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{
     trust_quorum_configuration, trust_quorum_member,
 };
@@ -110,6 +111,11 @@ pub struct TrustQuorumConfiguration {
     pub coordinator: Uuid,
     pub encrypted_rack_secrets_salt: Option<String>,
     pub encrypted_rack_secrets: Option<Vec<u8>>,
+    pub time_created: DateTime<Utc>,
+    pub time_committing: Option<DateTime<Utc>>,
+    pub time_committed: Option<DateTime<Utc>>,
+    pub time_aborted: Option<DateTime<Utc>>,
+    pub abort_reason: Option<String>,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]

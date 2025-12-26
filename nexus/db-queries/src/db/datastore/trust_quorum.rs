@@ -5,13 +5,13 @@
 //! Trust quorum related queries
 
 // REMAINING TODO:
-//  * Timestamps in schema
-//  * Alert string in schema
+//   Timestamps in members - created and modified
 
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
@@ -278,6 +278,11 @@ impl DataStore {
             coordinator,
             encrypted_rack_secrets,
             members: tq_members,
+            time_created: config.time_created,
+            time_committing: config.time_committing,
+            time_committed: config.time_committed,
+            time_aborted: config.time_aborted,
+            abort_reason: config.abort_reason,
         }))
     }
 
@@ -859,6 +864,7 @@ impl DataStore {
         opctx: &OpContext,
         rack_id: RackUuid,
         epoch: Epoch,
+        abort_reason: String,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
@@ -870,6 +876,7 @@ impl DataStore {
         self.transaction_retry_wrapper("tq_abort_config")
             .transaction(&conn, |c| {
                 let err = err.clone();
+                let abort_reason = abort_reason.clone();
                 async move {
                     // First, retrieve our configuration if there is one.
                     let latest =
@@ -924,6 +931,7 @@ impl DataStore {
                         &c,
                         db_config.rack_id,
                         db_config.epoch,
+                        abort_reason,
                     )
                     .await
                     .map_err(|txn_error| txn_error.into_diesel(&err))?;
@@ -1007,6 +1015,11 @@ impl DataStore {
                 coordinator: coordinator_id,
                 encrypted_rack_secrets_salt: salt,
                 encrypted_rack_secrets: secrets,
+                time_created: config.time_created,
+                time_committing: config.time_committing,
+                time_committed: config.time_committed,
+                time_aborted: config.time_aborted,
+                abort_reason: config.abort_reason.clone(),
             })
             .execute_async(conn)
             .await?;
@@ -1211,7 +1224,10 @@ impl DataStore {
                 DbTrustQuorumConfigurationState::Preparing,
                 DbTrustQuorumConfigurationState::PreparingLrtqUpgrade,
             ]))
-            .set(dsl::state.eq(DbTrustQuorumConfigurationState::Committing))
+            .set((
+                dsl::state.eq(DbTrustQuorumConfigurationState::Committing),
+                dsl::time_committing.eq(Some(Utc::now())),
+            ))
             .execute_async(conn)
             .await?;
 
@@ -1240,7 +1256,10 @@ impl DataStore {
             .filter(dsl::rack_id.eq(rack_id))
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Committing))
-            .set(dsl::state.eq(DbTrustQuorumConfigurationState::Committed))
+            .set((
+                dsl::state.eq(DbTrustQuorumConfigurationState::Committed),
+                dsl::time_committed.eq(Some(Utc::now())),
+            ))
             .execute_async(conn)
             .await?;
 
@@ -1269,10 +1288,11 @@ impl DataStore {
             .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Committing))
-            .set(
+            .set((
                 dsl::state
                     .eq(DbTrustQuorumConfigurationState::CommittedPartially),
-            )
+                dsl::time_committed.eq(Some(Utc::now())),
+            ))
             .execute_async(conn)
             .await?;
 
@@ -1292,6 +1312,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
         epoch: i64,
+        abort_reason: String,
     ) -> Result<(), TransactionError<Error>> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
@@ -1303,7 +1324,11 @@ impl DataStore {
                 DbTrustQuorumConfigurationState::Preparing,
                 DbTrustQuorumConfigurationState::PreparingLrtqUpgrade,
             ]))
-            .set(dsl::state.eq(DbTrustQuorumConfigurationState::Aborted))
+            .set((
+                dsl::state.eq(DbTrustQuorumConfigurationState::Aborted),
+                dsl::time_aborted.eq(Some(Utc::now())),
+                dsl::abort_reason.eq(Some(abort_reason)),
+            ))
             .execute_async(conn)
             .await?;
 
@@ -1830,13 +1855,13 @@ mod tests {
 
         // Aborting should succeed, since we haven't committed
         datastore
-            .tq_abort_config(opctx, config.rack_id, config.epoch)
+            .tq_abort_config(opctx, config.rack_id, config.epoch, "test".into())
             .await
             .unwrap();
 
         // Aborting is idempotent
         datastore
-            .tq_abort_config(opctx, config.rack_id, config.epoch)
+            .tq_abort_config(opctx, config.rack_id, config.epoch, "test".into())
             .await
             .unwrap();
 
@@ -1911,7 +1936,7 @@ mod tests {
 
         // Trying to abort the old config will fail because it's stale
         datastore
-            .tq_abort_config(opctx, config.rack_id, config.epoch)
+            .tq_abort_config(opctx, config.rack_id, config.epoch, "test".into())
             .await
             .unwrap_err();
 
@@ -1939,7 +1964,12 @@ mod tests {
 
         // Abort of latest config should fail because it has already committed
         datastore
-            .tq_abort_config(opctx, config2.rack_id, config2.epoch)
+            .tq_abort_config(
+                opctx,
+                config2.rack_id,
+                config2.epoch,
+                "test".into(),
+            )
             .await
             .unwrap_err();
 
