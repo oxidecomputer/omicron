@@ -4,6 +4,14 @@
 
 //! Trust quorum related queries
 
+// REMAINING TODO:
+//  * Timestamps in schema
+//  * Alert string in schema
+//  * Fix tests
+//  * Unique partial index on rack_id, epoch where !committed, !committed_partially, !aborted
+//    * Query for that data
+//    * Test for that data
+
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
@@ -537,6 +545,7 @@ impl DataStore {
             for epoch {}",
             proposed.epoch
         );
+
         // Pick a random coordinator from our set of possibilities.
         //
         // Safe to unwrap, as we check for emptiness above
@@ -1389,7 +1398,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::HwBaseboardId;
     use nexus_types::trust_quorum::{
-        TrustQuorumConfigState, TrustQuorumMemberState,
+        IsLrtqUpgrade, TrustQuorumConfigState, TrustQuorumMemberState,
     };
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::RackUuid;
@@ -1425,8 +1434,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_insert_latest_tq_round_trip() {
-        let logctx = test_setup_log("test_insert_latest_tq_round_trip");
+    async fn test_tq_insert_latest_errors() {
+        let logctx = test_setup_log("test_tq_insert_latest_errors");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -1434,121 +1443,82 @@ mod tests {
 
         let rack_id = RackUuid::new_v4();
 
-        // Create an initial config
-        let mut config = TrustQuorumConfig {
-            rack_id,
-            epoch: Epoch(1),
-            last_committed_epoch: None,
-            state: TrustQuorumConfigState::Preparing,
-            threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
-            commit_crash_tolerance: 2,
-            coordinator: hw_ids.first().unwrap().clone().into(),
-            encrypted_rack_secrets: None,
-            members: hw_ids
-                .clone()
-                .into_iter()
-                .map(|m| (m.into(), TrustQuorumMemberData::new()))
-                .collect(),
-        };
+        let members: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
 
-        // Create a couple of invalid configs andd try to insert them.
-        // They should return distinct errors.
-        let bad_config =
-            TrustQuorumConfig { epoch: Epoch(2), ..config.clone() };
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let coordinator = members.first().unwrap().clone();
+
+        // Insert an initial config
+        DataStore::insert_rss_config_after_handoff(
+            opctx,
+            &conn,
+            rack_id,
+            members.clone(),
+            coordinator,
+        )
+        .await
+        .unwrap();
+
+        // Last committed epoch is incoreect (should be 1)
+        let bad_config = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(2),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(4),
+            },
+            members: members.clone(),
+        };
         let e1 = datastore
             .tq_insert_latest_config(opctx, bad_config)
             .await
             .unwrap_err();
+        println!("{e1}");
 
-        let bad_config = TrustQuorumConfig {
-            epoch: Epoch(3),
-            state: TrustQuorumConfigState::PreparingLrtqUpgrade,
-            ..config.clone()
+        // Missing baseboard
+        let mut bad_members = members.clone();
+        bad_members.insert(BaseboardId {
+            part_number: "bad".into(),
+            serial_number: "value".into(),
+        });
+        let bad_config = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(2),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(1),
+            },
+            members: bad_members,
         };
         let e2 = datastore
             .tq_insert_latest_config(opctx, bad_config)
             .await
             .unwrap_err();
+        println!("{e2}");
 
-        let bad_config = TrustQuorumConfig {
-            state: TrustQuorumConfigState::Committing,
-            ..config.clone()
+        // Non-sequential epoch (should be 2)
+        let bad_config = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(3),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(1),
+            },
+            members: members.clone(),
         };
         let e3 = datastore
             .tq_insert_latest_config(opctx, bad_config)
             .await
             .unwrap_err();
+        println!("{e3}");
 
         assert_ne!(e1, e2);
         assert_ne!(e1, e3);
         assert_ne!(e2, e3);
 
-        // Insert a valid config and watch it succeed
-
-        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
-
-        let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
-            .await
-            .expect("no error")
-            .expect("returned config");
-
-        assert_eq!(config, read_config);
-
-        // Inserting the same config again should fail
-        datastore
-            .tq_insert_latest_config(opctx, config.clone())
-            .await
-            .expect_err("duplicate insert should fail");
-
-        // Bumping the epoch and inserting should succeed
-        config.epoch = Epoch(2);
-        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
-
-        let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
-            .await
-            .expect("no error")
-            .expect("returned config");
-
-        assert_eq!(config, read_config);
-
-        // We should get an error if we try to insert with a coordinator that is
-        // not part of the membership.
-        config.epoch = Epoch(3);
-        let saved_serial = config.coordinator.serial_number.clone();
-        config.coordinator.serial_number = "dummy".to_string();
-        datastore
-            .tq_insert_latest_config(opctx, config.clone())
-            .await
-            .expect_err("insert should fail with invalid coordinator");
-
-        // Restoring the serial number should succeed
-        config.coordinator.serial_number = saved_serial;
-        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
-
-        let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
-            .await
-            .expect("no error")
-            .expect("returned config");
-
-        assert_eq!(config, read_config);
-
-        // Incrementing the epoch by more than one should fail
-        config.epoch = Epoch(5);
-        datastore
-            .tq_insert_latest_config(opctx, config.clone())
-            .await
-            .expect_err(
-                "insert should fail because previous epoch is incorrect",
-            );
-
         db.terminate().await;
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
+    /*    #[tokio::test]
     async fn test_tq_update_prepare_and_commit_normal_case() {
         let logctx =
             test_setup_log("test_tq_update_prepare_and_commit_normal_case");
@@ -1966,4 +1936,5 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+    */
 }

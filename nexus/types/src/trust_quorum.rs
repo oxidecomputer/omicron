@@ -167,8 +167,10 @@ impl TrustQuorumConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IsLrtqUpgrade {
     Yes,
-    // TODO: This should not be an option
-    No { last_committed_epoch: Option<Epoch> },
+    // We only use this variant when reconfiguring, and not during an
+    // initial configuration via RSS, and therefore there must always be a
+    // `last_committed_epoch`.
+    No { last_committed_epoch: Epoch },
 }
 
 // A trust quorum configuration proposed by a user that will be converted to a
@@ -185,7 +187,9 @@ impl ProposedTrustQuorumConfig {
     pub fn last_committed_epoch(&self) -> Option<Epoch> {
         match self.is_lrtq_upgrade {
             IsLrtqUpgrade::Yes => None,
-            IsLrtqUpgrade::No { last_committed_epoch } => last_committed_epoch,
+            IsLrtqUpgrade::No { last_committed_epoch } => {
+                Some(last_committed_epoch)
+            }
         }
     }
 }
