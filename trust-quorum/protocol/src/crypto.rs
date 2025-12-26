@@ -74,12 +74,12 @@ impl LrtqShare {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct ShareDigestLrtq(Sha3_256Digest);
 
 #[derive(
-    Default, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct Sha3_256Digest(pub [u8; 32]);
 

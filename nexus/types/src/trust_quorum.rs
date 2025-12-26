@@ -40,14 +40,14 @@ impl TrustQuorumConfigState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustQuorumMemberState {
     Unacked,
     Prepared,
     Committed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrustQuorumMemberData {
     pub state: TrustQuorumMemberState,
 

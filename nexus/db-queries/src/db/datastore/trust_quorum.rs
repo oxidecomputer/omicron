@@ -505,53 +505,57 @@ impl DataStore {
 
         // At this point we have either loaded the proposed last committed
         // configuration or there is not one.
-        let possible_coordinators: BTreeSet<BaseboardId> = if let Some(
-            last_committed_config,
-        ) =
-            last_committed_config
-        {
-            bail_unless!(
-                last_committed_config.state.is_committed()
-                    || last_committed_config.state.is_committing(),
-                "Trust Quorum proposed configuration contains a last \
+        let possible_coordinators: BTreeSet<BaseboardId> =
+            if let Some(last_committed_config) = last_committed_config {
+                bail_unless!(
+                    last_committed_config.state.is_committed()
+                        || last_committed_config.state.is_committing(),
+                    "Trust Quorum proposed configuration contains a last \
                 committed epoch ({}) for a configuration that is not \
                 committed",
-                last_committed_config.epoch
-            );
+                    last_committed_config.epoch
+                );
 
-            let acked = last_committed_config.acked_commits();
-            // N - Z
-            let min = last_committed_config.members.len()
-                - last_committed_config.commit_crash_tolerance as usize;
-            bail_unless!(
-                acked >= min,
-                "Trust quorum reconfiguration in progress: not enough nodes \
-                have acked commit in epoch {}. Expected at least {} acks, \
-                Got {} acks. If this persists please contact Oxide support.",
-                last_committed_config.epoch,
-                min,
-                acked
-            );
-            should_commit_partially = true;
+                if last_committed_config.state.is_committing() {
+                    let acked = last_committed_config.acked_commits();
+                    // N - Z
+                    let min = last_committed_config.members.len()
+                        - last_committed_config.commit_crash_tolerance as usize;
+                    bail_unless!(
+                        acked >= min,
+                        "Trust quorum reconfiguration in progress: not enough \
+                         nodes have acked commit in epoch {}. Expected at \
+                         least {} acks, Got {} acks. If this persists please \
+                         contact Oxide support.",
+                        last_committed_config.epoch,
+                        min,
+                        acked
+                    );
+                    should_commit_partially = true;
+                }
 
-            // A coordinator must have acked a commit in the prior configuration
-            // if it's to be a candidate.
-            let committed_members: BTreeSet<BaseboardId> =
-                last_committed_config
+                // A coordinator must have acked a commit in the prior configuration
+                // if it's to be a candidate.
+                let committed_members: BTreeSet<BaseboardId> =
+                    last_committed_config
+                        .members
+                        .iter()
+                        .filter_map(|(id, data)| {
+                            if data.state == TrustQuorumMemberState::Committed {
+                                Some(id.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                proposed
                     .members
-                    .iter()
-                    .filter_map(|(id, data)| {
-                        if data.state == TrustQuorumMemberState::Committed {
-                            Some(id.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-            proposed.members.intersection(&committed_members).cloned().collect()
-        } else {
-            proposed.members.clone()
-        };
+                    .intersection(&committed_members)
+                    .cloned()
+                    .collect()
+            } else {
+                proposed.members.clone()
+            };
 
         bail_unless!(
             !possible_coordinators.is_empty(),
@@ -946,12 +950,20 @@ impl DataStore {
     ) -> Result<(), TransactionError<Error>> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        let members = Self::lookup_hw_baseboard_ids_conn(
+        let hw_baseboard_ids = Self::lookup_hw_baseboard_ids_conn(
             opctx,
             conn,
             config.members.keys().cloned(),
         )
         .await?;
+
+        bail_unless!(
+            hw_baseboard_ids.len() == config.members.len(),
+            "Failed to find all hw_baseboard_ids for trust quorum members \
+            of rack_id {}, epoch = {}",
+            config.rack_id,
+            config.epoch
+        );
 
         let (salt, secrets) =
             config.encrypted_rack_secrets.map_or((None, None), |s| {
@@ -962,7 +974,7 @@ impl DataStore {
         // the output with an `order_by` in the DB query, or speed up search
         // if converted to a map. Neither seems necessary for such a rare
         // operation.
-        let coordinator_id = members.iter().find(|m| {
+        let coordinator_id = hw_baseboard_ids.iter().find(|m| {
             m.part_number == config.coordinator.part_number
                 && m.serial_number == config.coordinator.serial_number
         });
@@ -1011,14 +1023,16 @@ impl DataStore {
         );
 
         // Insert the members
-        let members: Vec<_> = members
+        let members: Vec<_> = hw_baseboard_ids
+            .iter()
+            .zip(config.members.values())
             .into_iter()
-            .map(|m| DbTrustQuorumMember {
+            .map(|(hw_baseboard_id, m)| DbTrustQuorumMember {
                 rack_id: config.rack_id.into(),
                 epoch,
-                hw_baseboard_id: m.id,
-                state: nexus_db_model::DbTrustQuorumMemberState::Unacked,
-                share_digest: None,
+                hw_baseboard_id: hw_baseboard_id.id,
+                state: m.state.into(),
+                share_digest: m.digest.map(|d| hex::encode(d.0)),
             })
             .collect();
 
@@ -1454,9 +1468,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let hw_ids = insert_hw_baseboard_ids(&db).await;
-
         let rack_id = RackUuid::new_v4();
-
         let members: BTreeSet<_> =
             hw_ids.iter().cloned().map(BaseboardId::from).collect();
 
@@ -1532,37 +1544,62 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /*    #[tokio::test]
-    async fn test_tq_update_prepare_and_commit_normal_case() {
-        let logctx =
-            test_setup_log("test_tq_update_prepare_and_commit_normal_case");
+    #[tokio::test]
+    async fn test_tq_update_prepare_and_commit() {
+        let logctx = test_setup_log("test_tq_update_prepare_and_commit");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let hw_ids = insert_hw_baseboard_ids(&db).await;
-
         let rack_id = RackUuid::new_v4();
+        let members: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
 
-        // Create an initial config
-        let config = TrustQuorumConfig {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let coordinator = members.first().unwrap().clone();
+
+        // Insert an initial config
+        DataStore::insert_rss_config_after_handoff(
+            opctx,
+            &conn,
             rack_id,
-            epoch: Epoch(1),
-            last_committed_epoch: None,
-            state: TrustQuorumConfigState::Preparing,
-            threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
-            commit_crash_tolerance: 2,
-            coordinator: hw_ids.first().unwrap().clone().into(),
-            encrypted_rack_secrets: None,
-            members: hw_ids
-                .clone()
-                .into_iter()
-                .map(|m| (m.into(), TrustQuorumMemberData::new()))
-                .collect(),
-        };
+            members.clone(),
+            coordinator,
+        )
+        .await
+        .unwrap();
 
+        // Propse a second configuration and successfully insert it
+        let config = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(2),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(1),
+            },
+            members: members.clone(),
+        };
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
-        // A configuration returned from a coordinator is different
+        // Read the config back and check that it's preparing with no acks
+        let read_config = datastore
+            .tq_get_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        // The read config should be preparing
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(read_config.state, TrustQuorumConfigState::Preparing);
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert!(read_config.members.iter().all(|(_, info)| {
+            info.state == TrustQuorumMemberState::Unacked
+        }));
+
+        // Trying to insert a new config should fails since we are currently preparing
+
+        // Trying to ack commits should fail since we are currently preparing
+
+        /*        // A configuration returned from a coordinator is different
         let coordinator_config = trust_quorum_protocol::Configuration {
             rack_id: config.rack_id,
             epoch: config.epoch,
@@ -1729,10 +1766,12 @@ mod tests {
             )
         );
 
+        */
         db.terminate().await;
         logctx.cleanup_successful();
     }
 
+    /*
     #[tokio::test]
     async fn test_tq_abort() {
         let logctx = test_setup_log("test_tq_abort");
