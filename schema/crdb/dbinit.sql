@@ -7551,8 +7551,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     ),
 
     -- Each rack has its own trust quorum
-    PRIMARY KEY (rack_id, epoch)
+    PRIMARY KEY (rack_id, epoch DESC)
 );
+
+-- A partial index to retrieve all "active" trust quorum configurations.
+--
+-- These are configurations that are either still preparing or committing and
+-- therefore require work from Nexus.
+CREATE UNIQUE INDEX IF NOT EXISTS trust_quorum_active_configurations
+    on omicron.public.trust_quorum_configuration(rack_id, epoch DESC)
+    WHERE state = 'preparing'
+        OR state = 'preparing-lrtq-upgrade'
+        OR state = 'committing';
 
 -- Whether a node has prepared or committed yet
 CREATE TYPE IF NOT EXISTS omicron.public.trust_quorum_member_state AS ENUM (
@@ -7587,7 +7597,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     -- Hex formatted string
     share_digest STRING(64),
 
-    PRIMARY KEY (rack_id, epoch, hw_baseboard_id)
+    PRIMARY KEY (rack_id, epoch DESC, hw_baseboard_id)
 );
 
 

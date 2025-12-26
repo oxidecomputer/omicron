@@ -7,10 +7,6 @@
 // REMAINING TODO:
 //  * Timestamps in schema
 //  * Alert string in schema
-//  * Fix tests
-//  * Unique partial index on rack_id, epoch where !committed, !committed_partially, !aborted
-//    * Query for that data
-//    * Test for that data
 
 use super::DataStore;
 use crate::authz;
@@ -108,13 +104,13 @@ impl DataStore {
 
         let values: Vec<(DbTypedUuid<RackKind>, i64)> =
             dsl::trust_quorum_configuration
-                .filter(dsl::state.ne_all(vec![
-                    DbTrustQuorumConfigurationState::Committed,
-                    DbTrustQuorumConfigurationState::Aborted,
+                .filter(dsl::state.eq_any(vec![
+                    DbTrustQuorumConfigurationState::Preparing,
+                    DbTrustQuorumConfigurationState::PreparingLrtqUpgrade,
+                    DbTrustQuorumConfigurationState::Committing,
                 ]))
                 .select((dsl::rack_id, dsl::epoch))
                 .order_by((dsl::rack_id, dsl::epoch.desc()))
-                .distinct_on(dsl::rack_id)
                 .load_async(conn)
                 .await
                 .map_err(|e| {
@@ -1951,7 +1947,6 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /*
     #[tokio::test]
     async fn test_tq_get_all_active_rack_id_and_latest_epoch() {
         let logctx =
@@ -1963,47 +1958,39 @@ mod tests {
         let rack_id2 = RackUuid::new_v4();
         let rack_id3 = RackUuid::new_v4();
 
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Save the membership for rack_id 2
+        let mut rack2_members: BTreeSet<BaseboardId> = BTreeSet::new();
+
         // Create an initial config for 3 diff racks
         for rack_id in [rack_id1, rack_id2, rack_id3] {
             let hw_ids = insert_hw_baseboard_ids(&db).await;
-            let config = TrustQuorumConfig {
+            let members: BTreeSet<_> =
+                hw_ids.iter().cloned().map(BaseboardId::from).collect();
+            if rack_id == rack_id2 {
+                rack2_members = members.clone();
+            }
+            let coordinator = members.first().unwrap().clone();
+            DataStore::insert_rss_config_after_handoff(
+                opctx,
+                &conn,
                 rack_id,
-                epoch: Epoch(1),
-                last_committed_epoch: None,
-                state: TrustQuorumConfigState::Preparing,
-                threshold: TrustQuorumConfig::threshold(hw_ids.len() as u8),
-                commit_crash_tolerance: 2,
-                coordinator: hw_ids.first().unwrap().clone().into(),
-                encrypted_rack_secrets: None,
-                members: hw_ids
-                    .clone()
-                    .into_iter()
-                    .map(|m| (m.into(), TrustQuorumMemberData::new()))
-                    .collect(),
-            };
-
-            datastore
-                .tq_insert_latest_config(opctx, config.clone())
-                .await
-                .unwrap();
+                members.clone(),
+                coordinator,
+            )
+            .await
+            .unwrap();
         }
 
         // Create a second rack config for rack 2
-        let hw_ids = insert_hw_baseboard_ids(&db).await;
-        let config = TrustQuorumConfig {
+        let config = ProposedTrustQuorumConfig {
             rack_id: rack_id2,
             epoch: Epoch(2),
-            last_committed_epoch: Some(Epoch(1)),
-            state: TrustQuorumConfigState::Preparing,
-            threshold: TrustQuorumConfig::threshold(hw_ids.len() as u8),
-            commit_crash_tolerance: 2,
-            coordinator: hw_ids.first().unwrap().clone().into(),
-            encrypted_rack_secrets: None,
-            members: hw_ids
-                .clone()
-                .into_iter()
-                .map(|m| (m.into(), TrustQuorumMemberData::new()))
-                .collect(),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(1),
+            },
+            members: rack2_members,
         };
 
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
@@ -2014,20 +2001,14 @@ mod tests {
             .await
             .unwrap();
 
-        // We should have retrieved one epoch per rack_id
-        assert_eq!(values.len(), 3);
+        // We should only have retrieved the configuration for rack 2 that did
+        // not commit or abort yet.
+        assert_eq!(values.len(), 1);
 
         // The epoch should be the latest that exists
-        for (rack_id, epoch) in values {
-            if rack_id == rack_id2 {
-                assert_eq!(epoch, Epoch(2));
-            } else {
-                assert_eq!(epoch, Epoch(1));
-            }
-        }
+        assert_eq!(values[&rack_id2], Epoch(2));
 
         db.terminate().await;
         logctx.cleanup_successful();
     }
-    */
 }

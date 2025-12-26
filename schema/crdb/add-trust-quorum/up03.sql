@@ -54,5 +54,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     ),
 
     -- Each rack has its own trust quorum
-    PRIMARY KEY (rack_id, epoch)
+    PRIMARY KEY (rack_id, epoch DESC)
 );

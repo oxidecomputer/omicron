@@ -20,5 +20,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     -- Hex formatted string
     share_digest STRING(64),
 
-    PRIMARY KEY (rack_id, epoch, hw_baseboard_id)
+    PRIMARY KEY (rack_id, epoch DESC, hw_baseboard_id)
 );
