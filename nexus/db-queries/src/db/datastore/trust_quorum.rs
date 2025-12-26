@@ -622,7 +622,7 @@ impl DataStore {
                         bail_txn!(
                             err,
                             "Cannot update trust quorum config. \
-                             Latest epoch does not match. Expected {}, Got {}",
+                             Latest epoch does not match. Proposed {}, Got {}",
                             epoch,
                             actual
                         );
@@ -1595,22 +1595,47 @@ mod tests {
             info.state == TrustQuorumMemberState::Unacked
         }));
 
-        // Trying to insert a new config should fails since we are currently preparing
+        // Trying to insert a new config should fail since we are currently
+        // preparing
+        let bad_config = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(3),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(1),
+            },
+            members: members.clone(),
+        };
+        let e = datastore
+            .tq_insert_latest_config(opctx, bad_config)
+            .await
+            .unwrap_err();
+        println!("{e}");
 
         // Trying to ack commits should fail since we are currently preparing
+        let acked_commits = members.clone();
+        let e = datastore
+            .tq_update_commit_status(
+                opctx,
+                rack_id,
+                config.epoch,
+                acked_commits,
+            )
+            .await
+            .unwrap_err();
+        println!("{e}");
 
-        /*        // A configuration returned from a coordinator is different
+        // A configuration returned from a coordinator is part of the trust
+        // quorum protocol
         let coordinator_config = trust_quorum_protocol::Configuration {
             rack_id: config.rack_id,
             epoch: config.epoch,
             coordinator: hw_ids.first().unwrap().clone().into(),
-            members: config
-                .members
-                .keys()
-                .cloned()
+            members: members
+                .clone()
+                .into_iter()
                 .map(|id| (id, Sha3_256Digest([0u8; 32])))
                 .collect(),
-            threshold: config.threshold,
+            threshold: Threshold(members.len() as u8 / 2 + 1),
             encrypted_rack_secrets: None,
         };
 
@@ -1653,7 +1678,7 @@ mod tests {
                 coordinator_config
                     .members
                     .keys()
-                    .take(config.threshold.0 as usize)
+                    .take(coordinator_config.threshold.0 as usize)
                     .cloned()
                     .collect(),
             )
@@ -1673,7 +1698,7 @@ mod tests {
         assert_eq!(read_config.state, TrustQuorumConfigState::Preparing);
         assert!(read_config.encrypted_rack_secrets.is_none());
         assert_eq!(
-            config.threshold.0 as usize,
+            coordinator_config.threshold.0 as usize,
             read_config
                 .members
                 .iter()
@@ -1685,8 +1710,8 @@ mod tests {
 
         // Ack an additional `commit_crash_tolerance` of nodes. This should
         // trigger a commit.
-        let acked_prepares = config.threshold.0 as usize
-            + config.commit_crash_tolerance as usize;
+        let acked_prepares = coordinator_config.threshold.0 as usize
+            + read_config.commit_crash_tolerance as usize;
 
         datastore
             .tq_update_prepare_status(
@@ -1723,7 +1748,8 @@ mod tests {
                 .count()
         );
 
-        // Future prepare acks should fail because we have already committed.
+        // Future prepare acks should fail because we have already started
+        // committing.
         datastore
             .tq_update_prepare_status(
                 opctx,
@@ -1766,7 +1792,6 @@ mod tests {
             )
         );
 
-        */
         db.terminate().await;
         logctx.cleanup_successful();
     }
