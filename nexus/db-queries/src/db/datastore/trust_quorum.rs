@@ -1635,7 +1635,7 @@ mod tests {
                 .into_iter()
                 .map(|id| (id, Sha3_256Digest([0u8; 32])))
                 .collect(),
-            threshold: Threshold(members.len() as u8 / 2 + 1),
+            threshold: TrustQuorumConfig::threshold(members.len() as u8),
             encrypted_rack_secrets: None,
         };
 
@@ -1796,7 +1796,6 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /*
     #[tokio::test]
     async fn test_tq_abort() {
         let logctx = test_setup_log("test_tq_abort");
@@ -1804,26 +1803,33 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let hw_ids = insert_hw_baseboard_ids(&db).await;
-
         let rack_id = RackUuid::new_v4();
+        let members: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
 
-        // Create an initial config
-        let config = TrustQuorumConfig {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let coordinator = members.first().unwrap().clone();
+
+        // Insert an initial config
+        DataStore::insert_rss_config_after_handoff(
+            opctx,
+            &conn,
             rack_id,
-            epoch: Epoch(1),
-            last_committed_epoch: None,
-            state: TrustQuorumConfigState::Preparing,
-            threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
-            commit_crash_tolerance: 2,
-            coordinator: hw_ids.first().unwrap().clone().into(),
-            encrypted_rack_secrets: None,
-            members: hw_ids
-                .clone()
-                .into_iter()
-                .map(|m| (m.into(), TrustQuorumMemberData::new()))
-                .collect(),
-        };
+            members.clone(),
+            coordinator,
+        )
+        .await
+        .unwrap();
 
+        // Propse a second configuration and successfully insert it
+        let config = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(2),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(1),
+            },
+            members: members.clone(),
+        };
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
         // Aborting should succeed, since we haven't committed
@@ -1842,35 +1848,35 @@ mod tests {
         // (This is not directly callable from a public API).
         {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let num_rows_updated = DataStore::update_tq_state_committing_conn(
+            DataStore::update_tq_state_committing_conn(
                 opctx,
                 &conn,
                 config.rack_id.into(),
                 config.epoch.0 as i64,
             )
             .await
-            .unwrap();
-            assert_eq!(num_rows_updated, 0);
+            .unwrap_err();
         }
 
-        // A configuration returned from a coordinator is different
+        // Create a config to simulate retrieving one from a coordinator
         let coordinator_config = trust_quorum_protocol::Configuration {
             rack_id: config.rack_id,
             epoch: config.epoch,
             coordinator: hw_ids.first().unwrap().clone().into(),
-            members: config
-                .members
-                .keys()
-                .cloned()
+            members: members
+                .clone()
+                .into_iter()
                 .map(|id| (id, Sha3_256Digest([0u8; 32])))
                 .collect(),
-            threshold: config.threshold,
+            threshold: TrustQuorumConfig::threshold(members.len() as u8),
             encrypted_rack_secrets: None,
         };
 
-        // This is how we actually try to trigger commit operations. This should fail outright.
-        let acked_prepares = config.threshold.0 as usize
-            + config.commit_crash_tolerance as usize;
+        // This is how we actually try to trigger commit operations. This should
+        // fail outright.
+        let acked_prepares = (coordinator_config.threshold.0
+            + TrustQuorumConfig::commit_crash_tolerance(members.len() as u8))
+            as usize;
         datastore
             .tq_update_prepare_status(
                 opctx,
@@ -1893,8 +1899,15 @@ mod tests {
             .expect("returned config");
         assert_eq!(read_config.state, TrustQuorumConfigState::Aborted);
 
-        // Create a second config
-        let config2 = TrustQuorumConfig { epoch: Epoch(2), ..config.clone() };
+        // Create and insert another config
+        let config2 = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(3),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(1),
+            },
+            members: members.clone(),
+        };
         datastore
             .tq_insert_latest_config(opctx, config2.clone())
             .await
@@ -1906,13 +1919,14 @@ mod tests {
             .await
             .unwrap_err();
 
-        // Commit it
+        // Commit the new config
         let coordinator_config2 = trust_quorum_protocol::Configuration {
             epoch: config2.epoch,
             ..coordinator_config
         };
-        let acked_prepares = config2.threshold.0 as usize
-            + config2.commit_crash_tolerance as usize;
+        let acked_prepares = (coordinator_config.threshold.0
+            + TrustQuorumConfig::commit_crash_tolerance(members.len() as u8))
+            as usize;
         datastore
             .tq_update_prepare_status(
                 opctx,
@@ -1937,6 +1951,7 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /*
     #[tokio::test]
     async fn test_tq_get_all_active_rack_id_and_latest_epoch() {
         let logctx =
@@ -1956,7 +1971,7 @@ mod tests {
                 epoch: Epoch(1),
                 last_committed_epoch: None,
                 state: TrustQuorumConfigState::Preparing,
-                threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
+                threshold: TrustQuorumConfig::threshold(hw_ids.len() as u8),
                 commit_crash_tolerance: 2,
                 coordinator: hw_ids.first().unwrap().clone().into(),
                 encrypted_rack_secrets: None,
@@ -1980,7 +1995,7 @@ mod tests {
             epoch: Epoch(2),
             last_committed_epoch: Some(Epoch(1)),
             state: TrustQuorumConfigState::Preparing,
-            threshold: Threshold((hw_ids.len() / 2 + 1) as u8),
+            threshold: TrustQuorumConfig::threshold(hw_ids.len() as u8),
             commit_crash_tolerance: 2,
             coordinator: hw_ids.first().unwrap().clone().into(),
             encrypted_rack_secrets: None,

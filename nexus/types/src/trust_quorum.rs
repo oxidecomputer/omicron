@@ -150,11 +150,11 @@ impl TrustQuorumConfig {
             .count()
     }
 
-    fn threshold(num_members: u8) -> Threshold {
+    pub fn threshold(num_members: u8) -> Threshold {
         Threshold(num_members / 2 + 1)
     }
 
-    fn commit_crash_tolerance(num_members: u8) -> u8 {
+    pub fn commit_crash_tolerance(num_members: u8) -> u8 {
         match num_members {
             0..=3 => 0,
             4..=8 => 1,
