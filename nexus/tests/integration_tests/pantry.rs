@@ -14,7 +14,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
@@ -58,7 +58,7 @@ fn get_disk_attach_url(instance_name: &str) -> String {
 }
 
 async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
