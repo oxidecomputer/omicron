@@ -49,6 +49,7 @@ use omicron_common::api::external::Hostname;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
@@ -2190,6 +2191,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         pool: Option<NameOrId>,
+        ip_version: Option<IpVersion>,
     ) -> UpdateResult<views::ExternalIp> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -2198,7 +2200,7 @@ impl super::Nexus {
             opctx,
             authz_instance,
             authz_project.id(),
-            ExternalIpAttach::Ephemeral { pool },
+            ExternalIpAttach::Ephemeral { pool, ip_version },
         )
         .await
     }

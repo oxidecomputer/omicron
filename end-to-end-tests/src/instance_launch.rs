@@ -71,7 +71,10 @@ async fn instance_launch() -> Result<()> {
             }),
             disks: Vec::new(),
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
-            external_ips: vec![ExternalIpCreate::Ephemeral { pool: None }],
+            external_ips: vec![ExternalIpCreate::Ephemeral {
+                pool: None,
+                ip_version: None,
+            }],
             user_data: String::new(),
             ssh_public_keys: Some(vec![oxide_client::types::NameOrId::Name(
                 ssh_key_name.clone(),

@@ -94,7 +94,7 @@ async fn siia_begin_attach_ip(
         InstanceUuid::from_untyped_uuid(params.authz_instance.id());
     match &params.create_params {
         // Allocate a new IP address from the target, possibly default, pool
-        ExternalIpAttach::Ephemeral { pool } => {
+        ExternalIpAttach::Ephemeral { pool, ip_version } => {
             let pool = if let Some(name_or_id) = pool {
                 Some(
                     osagactx
@@ -116,6 +116,7 @@ async fn siia_begin_attach_ip(
                     Uuid::new_v4(),
                     instance_id,
                     pool,
+                    ip_version.map(Into::into),
                     false,
                 )
                 .await
@@ -378,7 +379,7 @@ pub(crate) mod test {
                 .unwrap();
             ExternalIpAttach::Floating { floating_ip }
         } else {
-            ExternalIpAttach::Ephemeral { pool: None }
+            ExternalIpAttach::Ephemeral { pool: None, ip_version: None }
         };
 
         let (.., authz_project, authz_instance) =

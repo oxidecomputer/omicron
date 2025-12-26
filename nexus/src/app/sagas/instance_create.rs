@@ -858,7 +858,7 @@ async fn sic_allocate_instance_external_ip(
     // Runtime state should never be able to make 'complete_op' fallible.
     let ip = match ip_params {
         // Allocate a new IP address from the target, possibly default, pool
-        params::ExternalIpCreate::Ephemeral { pool } => {
+        params::ExternalIpCreate::Ephemeral { pool, ip_version } => {
             let pool = if let Some(name_or_id) = pool {
                 Some(
                     osagactx
@@ -881,6 +881,7 @@ async fn sic_allocate_instance_external_ip(
                     ip_id,
                     instance_id,
                     pool,
+                    ip_version.map(Into::into),
                     true,
                 )
                 .await
@@ -1473,6 +1474,7 @@ pub mod test {
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {
                     pool: None,
+                    ip_version: None,
                 }],
                 boot_disk: Some(params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {

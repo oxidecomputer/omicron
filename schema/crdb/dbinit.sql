@@ -2304,6 +2304,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
     resource_type omicron.public.ip_pool_resource_type NOT NULL,
     resource_id UUID NOT NULL,
     is_default BOOL NOT NULL,
+    -- Denormalized from ip_pool for efficient default pool lookups
+    pool_type omicron.public.ip_pool_type NOT NULL,
+    ip_version omicron.public.ip_version NOT NULL,
     -- TODO: timestamps for soft deletes?
 
     -- resource_type is redundant because resource IDs are globally unique, but
@@ -2311,9 +2314,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
     PRIMARY KEY (ip_pool_id, resource_type, resource_id)
 );
 
--- a given resource can only have one default ip pool
-CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.public.ip_pool_resource (
-    resource_id
+-- One default pool per (resource, pool_type, ip_version) combination
+-- Allows silos to have separate default pools for each IP version and pool type
+CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource_type_version ON omicron.public.ip_pool_resource (
+    resource_id,
+    pool_type,
+    ip_version
 ) where
     is_default = true;
 
@@ -7478,7 +7484,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '215.0.0', NULL)
+    (TRUE, NOW(), NOW(), '216.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

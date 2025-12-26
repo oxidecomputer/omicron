@@ -5677,11 +5677,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
+            let params::EphemeralIpCreate { pool, ip_version } =
+                ip_to_create.into_inner();
             let ip = nexus
                 .instance_attach_ephemeral_ip(
                     &opctx,
                     &instance_lookup,
-                    ip_to_create.into_inner().pool,
+                    pool,
+                    ip_version,
                 )
                 .await?;
             Ok(HttpResponseAccepted(ip))

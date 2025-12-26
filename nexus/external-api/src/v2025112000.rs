@@ -11,6 +11,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::v2025121200;
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DiskType {
@@ -219,7 +221,7 @@ pub struct InstanceCreate {
     /// connectivity. These external addresses can be used to provide a fixed,
     /// known IP address for making inbound connections to the instance.
     #[serde(default)]
-    pub external_ips: Vec<params::ExternalIpCreate>,
+    pub external_ips: Vec<v2025121200::ExternalIpCreate>,
 
     /// The multicast groups this instance should join.
     ///
@@ -308,7 +310,11 @@ impl From<InstanceCreate> for params::InstanceCreate {
             hostname: old.hostname,
             user_data: old.user_data,
             network_interfaces: old.network_interfaces,
-            external_ips: old.external_ips,
+            external_ips: old
+                .external_ips
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             multicast_groups: old.multicast_groups,
             disks: old.disks.into_iter().map(Into::into).collect(),
             boot_disk: old.boot_disk.map(Into::into),
