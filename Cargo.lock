@@ -1759,7 +1759,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=a76c4dc61360a6a1c5f0f425f35b68a4e1ca008f#a76c4dc61360a6a1c5f0f425f35b68a4e1ca008f"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=97a2fd72f3388595254b5afa11f69d5b8e8ee696#97a2fd72f3388595254b5afa11f69d5b8e8ee696"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2992,11 +2992,11 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=a76c4dc61360a6a1c5f0f425f35b68a4e1ca008f#a76c4dc61360a6a1c5f0f425f35b68a4e1ca008f"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=97a2fd72f3388595254b5afa11f69d5b8e8ee696#97a2fd72f3388595254b5afa11f69d5b8e8ee696"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=a76c4dc61360a6a1c5f0f425f35b68a4e1ca008f)",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=97a2fd72f3388595254b5afa11f69d5b8e8ee696)",
  "crc8",
  "futures",
  "http",
@@ -5113,7 +5113,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0f048374110d75ae61743ae3ec0de96960a2848d#0f048374110d75ae61743ae3ec0de96960a2848d"
+source = "git+https://github.com/oxidecomputer/opte?rev=a1ed0960673b6ca2e6b68835537f53cc86110a77#a1ed0960673b6ca2e6b68835537f53cc86110a77"
 dependencies = [
  "bitflags 2.9.4",
 ]
@@ -5737,7 +5737,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0f048374110d75ae61743ae3ec0de96960a2848d#0f048374110d75ae61743ae3ec0de96960a2848d"
+source = "git+https://github.com/oxidecomputer/opte?rev=a1ed0960673b6ca2e6b68835537f53cc86110a77#a1ed0960673b6ca2e6b68835537f53cc86110a77"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -7400,7 +7400,7 @@ dependencies = [
  "crucible-agent-client",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=a76c4dc61360a6a1c5f0f425f35b68a4e1ca008f)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=97a2fd72f3388595254b5afa11f69d5b8e8ee696)",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -8281,7 +8281,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=a76c4dc61360a6a1c5f0f425f35b68a4e1ca008f)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=97a2fd72f3388595254b5afa11f69d5b8e8ee696)",
  "dropshot",
  "ereport-types",
  "expectorate",
@@ -8762,7 +8762,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=a76c4dc61360a6a1c5f0f425f35b68a4e1ca008f)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=97a2fd72f3388595254b5afa11f69d5b8e8ee696)",
  "dropshot",
  "expectorate",
  "flate2",
@@ -9212,7 +9212,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0f048374110d75ae61743ae3ec0de96960a2848d#0f048374110d75ae61743ae3ec0de96960a2848d"
+source = "git+https://github.com/oxidecomputer/opte?rev=a1ed0960673b6ca2e6b68835537f53cc86110a77#a1ed0960673b6ca2e6b68835537f53cc86110a77"
 dependencies = [
  "bitflags 2.9.4",
  "dyn-clone",
@@ -9231,7 +9231,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0f048374110d75ae61743ae3ec0de96960a2848d#0f048374110d75ae61743ae3ec0de96960a2848d"
+source = "git+https://github.com/oxidecomputer/opte?rev=a1ed0960673b6ca2e6b68835537f53cc86110a77#a1ed0960673b6ca2e6b68835537f53cc86110a77"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -9244,7 +9244,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0f048374110d75ae61743ae3ec0de96960a2848d#0f048374110d75ae61743ae3ec0de96960a2848d"
+source = "git+https://github.com/oxidecomputer/opte?rev=a1ed0960673b6ca2e6b68835537f53cc86110a77#a1ed0960673b6ca2e6b68835537f53cc86110a77"
 dependencies = [
  "libc",
  "libnet",
@@ -9346,7 +9346,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0f048374110d75ae61743ae3ec0de96960a2848d#0f048374110d75ae61743ae3ec0de96960a2848d"
+source = "git+https://github.com/oxidecomputer/opte?rev=a1ed0960673b6ca2e6b68835537f53cc86110a77#a1ed0960673b6ca2e6b68835537f53cc86110a77"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -16110,7 +16110,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=a76c4dc61360a6a1c5f0f425f35b68a4e1ca008f)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=97a2fd72f3388595254b5afa11f69d5b8e8ee696)",
  "dropshot",
  "gateway-client",
  "gateway-types",
@@ -16170,7 +16170,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=a76c4dc61360a6a1c5f0f425f35b68a4e1ca008f)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=97a2fd72f3388595254b5afa11f69d5b8e8ee696)",
  "dropshot",
  "either",
  "expectorate",
