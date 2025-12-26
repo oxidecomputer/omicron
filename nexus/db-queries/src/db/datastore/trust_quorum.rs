@@ -438,9 +438,9 @@ impl DataStore {
                 latest_config.epoch
             );
 
-            // If the latest configuration is committed, then the proposed
-            // configuration must have the last committed configuration set to
-            // match this.
+            // If the latest configuration is at least committing, then the
+            // proposed configuration must have the last committed configuration
+            // set to match this.
             if latest_config.state.is_committed()
                 || latest_config.state.is_committing()
             {
@@ -456,6 +456,20 @@ impl DataStore {
                 );
 
                 last_committed_config = Some(latest_config);
+            } else if latest_config.state.is_aborted() {
+                // Inductively,the latest configuration should not have
+                // been written to the database unless its last committed
+                // configuration was valid.
+                bail_unless!(
+                    latest_config.last_committed_epoch
+                        == proposed.last_committed_epoch(),
+                    "Trust quorum proposed configuration has a last committed \
+                    epoch that does not match the last committed epoch of the \
+                    latest (aborted) configuration. \
+                    Proposed = {:?}, Actual = {:?}",
+                    proposed.last_committed_epoch(),
+                    latest_config.last_committed_epoch
+                );
             }
         }
 
