@@ -33,12 +33,11 @@ use omicron_common::api::external::{
 };
 use openapiv3::OpenAPI;
 
-/// Copies of data that changed prior to adding dual-stack NICs.
-mod v2025121700;
-
 /// Copies of data types that changed between versions
 mod v2025112000;
 mod v2025120300;
+mod v2025121700;
+mod v2025122600;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -68,6 +67,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2025122600, DUAL_STACK_PROBES),
     (2025121700, DUAL_STACK_NICS),
     (2025121200, BGP_PEER_COLLISION_STATE),
     (2025120300, LOCAL_STORAGE),
@@ -3222,12 +3222,39 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/vpc-subnets/{subnet}/network-interfaces",
         tags = ["vpcs"],
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn vpc_subnet_list_network_interfaces(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPath>,
         query_params: Query<PaginatedByNameOrId<params::OptionalVpcSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<InstanceNetworkInterface>>, HttpError>;
+
+    /// List network interfaces
+    #[endpoint {
+        method = GET,
+        operation_id = "vpc_subnet_list_network_interfaces",
+        path = "/v1/vpc-subnets/{subnet}/network-interfaces",
+        tags = ["vpcs"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2025121700_vpc_subnet_list_network_interfaces(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPath>,
+        query_params: Query<PaginatedByNameOrId<params::OptionalVpcSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025121700::InstanceNetworkInterface>>,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { next_page, items }) =
+            Self::vpc_subnet_list_network_interfaces(rqctx, path_params, query_params).await?;
+        items
+            .into_iter()
+            .map(v2025121700::InstanceNetworkInterface::try_from)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { next_page, items }))
+            .map_err(HttpError::from)
+    }
 
     // VPC Firewalls
 
@@ -4241,23 +4268,69 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/experimental/v1/probes",
         tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = VERSION_DUAL_STACK_PROBES..,
     }]
     async fn probe_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<shared::ProbeInfo>>, HttpError>;
 
+    /// List instrumentation probes
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/probes",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = ..VERSION_DUAL_STACK_PROBES,
+    }]
+    async fn probe_list_v2025121700(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025122600::ProbeInfo>>, HttpError>
+    {
+        let page: ResultsPage<shared::ProbeInfo> =
+            Self::probe_list(rqctx, query_params).await?.0;
+
+        let mut result = ResultsPage::<v2025122600::ProbeInfo> {
+            next_page: page.next_page,
+            items: Vec::default(),
+        };
+
+        for x in page.items.into_iter() {
+            result.items.push(v2025122600::ProbeInfo::try_from(x)?);
+        }
+
+        Ok(HttpResponseOk(result))
+    }
+
     /// View instrumentation probe
     #[endpoint {
         method = GET,
         path = "/experimental/v1/probes/{probe}",
         tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = VERSION_DUAL_STACK_PROBES..,
     }]
     async fn probe_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ProbePath>,
         query_params: Query<params::ProjectSelector>,
     ) -> Result<HttpResponseOk<shared::ProbeInfo>, HttpError>;
+
+    /// View instrumentation probe
+    #[endpoint {
+        method = GET,
+        operation_id = "probe_view",
+        path = "/experimental/v1/probes/{probe}",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = ..VERSION_DUAL_STACK_PROBES,
+    }]
+    async fn probe_view_v2025122600(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::ProbePath>,
+        query_params: Query<params::ProjectSelector>,
+    ) -> Result<HttpResponseOk<v2025122600::ProbeInfo>, HttpError> {
+        let probe = Self::probe_view(rqctx, path_params, query_params).await?.0;
+        Ok(HttpResponseOk(v2025122600::ProbeInfo::try_from(probe)?))
+    }
 
     /// Create instrumentation probe
     #[endpoint {

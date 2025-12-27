@@ -1397,11 +1397,12 @@ mod test {
 
         let log = opctx.log;
 
-        // Check to ensure that the nat entry for the address has made it onto switch1 dendrite.
-        // Note: ipv4_nat_trigger_update() triggers dendrite's RPW asynchronously and returns
-        // immediately, but dendrite still needs time to process the update and create the NAT
-        // entries. Tests need to poll/wait for entries rather than checking immediately, or
-        // they'll be flaky.
+        // Check to ensure that the nat entry for the address has made it onto
+        // switch1 dendrite. Note: nat_trigger_update() triggers dendrite's
+        // RPW asynchronously and returns immediately, but dendrite still needs
+        // time to process the update and create the NAT entries. Tests need to
+        // poll/wait for entries rather than checking immediately, or they'll
+        // be flaky.
         let expected_nat_entries = 1; // Instance has 1 external IP
         let nat_subnet = std::net::Ipv4Addr::new(10, 0, 0, 0);
         let poll_interval = Duration::from_millis(100);

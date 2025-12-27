@@ -12,7 +12,7 @@ use dropshot::{
 use dropshot_api_manager_types::api_versions;
 use nexus_types::{
     external_api::{
-        shared::ProbeInfo,
+        shared::ProbeExternalIp,
         views::{Ping, PingStatus},
     },
     internal_api::{
@@ -23,17 +23,35 @@ use nexus_types::{
     },
 };
 use omicron_common::api::{
-    external::http_pagination::PaginatedById,
-    internal::nexus::{
-        DiskRuntimeState, DownstairsClientStopRequest, DownstairsClientStopped,
-        ProducerEndpoint, ProducerRegistrationResponse, RepairFinishInfo,
-        RepairProgress, RepairStartInfo, SledVmmState,
+    external::{Name, http_pagination::PaginatedById},
+    internal::{
+        nexus::{
+            DiskRuntimeState, DownstairsClientStopRequest,
+            DownstairsClientStopped, ProducerEndpoint,
+            ProducerRegistrationResponse, RepairFinishInfo, RepairProgress,
+            RepairStartInfo, SledVmmState,
+        },
+        shared::network_interface::v1::NetworkInterface,
     },
 };
 use omicron_uuid_kinds::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// Probe information using v1 NetworkInterface for backward compatibility.
+///
+/// This type is used by the abandoned `probes_get` endpoint which always
+/// returns 410 Gone. It preserves the original API schema.
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProbeInfo {
+    pub id: Uuid,
+    pub name: Name,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
+    pub external_ips: Vec<ProbeExternalIp>,
+    pub interface: NetworkInterface,
+}
 
 api_versions!([
     // Do not create new versions of this client-side versioned API.
@@ -235,6 +253,13 @@ pub trait NexusInternalApi {
     // NAT RPW internal APIs
 
     /// Fetch NAT ChangeSet
+    ///
+    /// NOTE: This is no longer just IPv4, it includes IPv6. However, this API
+    /// cannot have forward-incompatable changes (e.g. clients running against
+    /// new API definitions need to be able to talk to older server still) so
+    /// we cannot add a generic nat_changeset API endpoint which would only be
+    /// backwards compatiable. So for the time being we are stuck with this
+    /// misleading name.
     ///
     /// Caller provides their generation as `from_gen`, along with a query
     /// parameter for the page size (`limit`). Endpoint will return changes
