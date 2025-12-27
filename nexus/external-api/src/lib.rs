@@ -3247,7 +3247,12 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         let HttpResponseOk(ResultsPage { next_page, items }) =
-            Self::vpc_subnet_list_network_interfaces(rqctx, path_params, query_params).await?;
+            Self::vpc_subnet_list_network_interfaces(
+                rqctx,
+                path_params,
+                query_params,
+            )
+            .await?;
         items
             .into_iter()
             .map(v2025121700::InstanceNetworkInterface::try_from)
