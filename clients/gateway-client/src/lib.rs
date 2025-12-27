@@ -83,12 +83,12 @@ progenitor::generate_api!(
     },
 
     replace = {
-        RotSlot = gateway_types::rot::RotSlot,
+        RotSlot = gateway_types_versions::latest::rot::RotSlot,
         Ena = ereport_types::Ena,
         Ereport = ereport_types::Ereport,
         Ereports = ereport_types::Ereports,
-        SpType = gateway_types::component::SpType,
-        TaskDump = gateway_types::task_dump::TaskDump,
+        SpType = gateway_types_versions::latest::component::SpType,
+        TaskDump = gateway_types_versions::latest::task_dump::TaskDump,
     },
 );
 
@@ -131,7 +131,7 @@ impl Client {
     /// handful of seconds on real hardware.
     pub async fn host_phase_1_flash_hash_calculate_with_timeout(
         &self,
-        sp_type: gateway_types::component::SpType,
+        sp_type: gateway_types_versions::latest::component::SpType,
         sp_slot: u16,
         phase1_slot: u16,
         timeout: Duration,
