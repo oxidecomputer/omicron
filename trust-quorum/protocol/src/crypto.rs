@@ -74,12 +74,12 @@ impl LrtqShare {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct ShareDigestLrtq(Sha3_256Digest);
 
 #[derive(
-    Default, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct Sha3_256Digest(pub [u8; 32]);
 
@@ -306,8 +306,8 @@ impl Default for Salt {
 pub struct EncryptedRackSecrets {
     /// A random value used to derive the key to encrypt the rack secrets for
     /// prior committed epochs.
-    salt: Salt,
-    data: Box<[u8]>,
+    pub salt: Salt,
+    pub data: Box<[u8]>,
 }
 
 #[derive(
