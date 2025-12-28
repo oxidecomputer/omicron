@@ -14,7 +14,7 @@ use nexus_db_model::{
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
-use omicron_common::api::external::{Error, NameOrId};
+use omicron_common::api::external::{Error, IpVersion, NameOrId};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
 use steno::ActionError;
@@ -534,6 +534,6 @@ pub(super) async fn instance_ip_remove_opte(
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ExternalIpAttach {
-    Ephemeral { pool: Option<NameOrId> },
+    Ephemeral { pool: Option<NameOrId>, ip_version: Option<IpVersion> },
     Floating { floating_ip: authz::FloatingIp },
 }

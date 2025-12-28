@@ -35,8 +35,8 @@ use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult,
-    IdentityMetadataCreateParams, ListResultVec, LookupResult, LookupType,
-    ResourceType, UpdateResult,
+    IdentityMetadataCreateParams, IpVersion, ListResultVec, LookupResult,
+    LookupType, ResourceType, UpdateResult,
 };
 use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
@@ -108,6 +108,10 @@ pub(crate) struct MulticastGroupAllocationParams {
     /// Derived for whether the joining member has source IPs.
     /// Used for default pool selection -> if true, prefer SSM pool first.
     pub has_sources: bool,
+    /// Preferred IP version when allocating without a specific address or pool.
+    /// Required if multiple default multicast pools of different IP versions
+    /// exist.
+    pub ip_version: Option<IpVersion>,
 }
 
 impl DataStore {
@@ -255,6 +259,7 @@ impl DataStore {
                 pool: authz_pool,
                 mvlan: params.mvlan,
                 has_sources: params.has_sources,
+                ip_version: params.ip_version,
             },
         )
         .await
@@ -466,10 +471,15 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         has_sources: bool,
+        ip_version: Option<IpVersion>,
     ) -> Result<authz::IpPool, external::Error> {
+        // Convert from omicron_common::address::IpVersion to nexus_db_model::IpVersion
+        let db_ip_version = ip_version.map(Into::into);
+
         let pool_result = if has_sources {
             // Try SSM first for source-filtered groups
-            match self.ip_pools_fetch_ssm_multicast(opctx).await {
+            match self.ip_pools_fetch_ssm_multicast(opctx, db_ip_version).await
+            {
                 Ok((pool, _)) => Ok(pool),
                 Err(_) => {
                     // SSM pool unavailable - fall back to ASM pool.
@@ -479,14 +489,16 @@ impl DataStore {
                         opctx.log,
                         "No SSM pool linked to silo, using ASM pool for source-filtered group"
                     );
-                    self.ip_pools_fetch_asm_multicast(opctx)
+                    self.ip_pools_fetch_asm_multicast(opctx, db_ip_version)
                         .await
                         .map(|(pool, _)| pool)
                 }
             }
         } else {
             // No sources -> ASM
-            self.ip_pools_fetch_asm_multicast(opctx).await.map(|(pool, _)| pool)
+            self.ip_pools_fetch_asm_multicast(opctx, db_ip_version)
+                .await
+                .map(|(pool, _)| pool)
         };
 
         pool_result.map_err(|_| {
@@ -538,7 +550,11 @@ impl DataStore {
 
         let authz_pool = if needs_default_pool {
             let pool = self
-                .fetch_default_multicast_pool(opctx, params.has_sources)
+                .fetch_default_multicast_pool(
+                    opctx,
+                    params.has_sources,
+                    params.ip_version,
+                )
                 .await?;
             opctx.authorize(authz::Action::CreateChild, &pool).await?;
             pool
@@ -547,6 +563,7 @@ impl DataStore {
                 opctx,
                 params.pool,
                 IpPoolType::Multicast,
+                params.ip_version.map(Into::into),
             )
             .await?
         };
@@ -878,8 +895,8 @@ mod tests {
     use crate::db::datastore::LookupType;
     use crate::db::model::IpPool;
     use crate::db::model::{
-        Generation, InstanceRuntimeState, IpPoolReservationType,
-        IpPoolResource, IpPoolResourceType, IpVersion,
+        Generation, IncompleteIpPoolResource, InstanceRuntimeState,
+        IpPoolReservationType, IpPoolResourceType, IpVersion,
         MulticastGroupMemberState,
     };
     use crate::db::pub_test_utils::helpers::{
@@ -938,7 +955,7 @@ mod tests {
             .await
             .expect("Should add multicast range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -958,6 +975,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
         datastore
             .multicast_group_create(&opctx, &params1, Some(authz_pool.clone()))
@@ -973,6 +991,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
         datastore
             .multicast_group_create(&opctx, &params2, Some(authz_pool.clone()))
@@ -988,6 +1007,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
         let res3 = datastore
             .multicast_group_create(&opctx, &params3, Some(authz_pool.clone()))
@@ -1041,7 +1061,7 @@ mod tests {
             .await
             .expect("Should add multicast range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -1061,6 +1081,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group_default = datastore
@@ -1086,6 +1107,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
         let group_explicit = datastore
             .multicast_group_create(&opctx, &params_explicit, None)
@@ -1193,7 +1215,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1213,6 +1235,7 @@ mod tests {
             multicast_ip: Some("224.1.3.3".parse().unwrap()),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let external_group = datastore
@@ -1293,7 +1316,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1317,6 +1340,7 @@ mod tests {
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group = datastore
@@ -1713,7 +1737,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1787,6 +1811,7 @@ mod tests {
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group = datastore
@@ -1899,7 +1924,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1920,6 +1945,7 @@ mod tests {
             multicast_ip: None, // Let it allocate from pool
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
         let group = datastore
             .multicast_group_create(
@@ -2112,7 +2138,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2133,6 +2159,7 @@ mod tests {
             multicast_ip: Some(target_ip),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group1 = datastore
@@ -2160,6 +2187,7 @@ mod tests {
             multicast_ip: Some(target_ip),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group2 = datastore
@@ -2225,7 +2253,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2245,6 +2273,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group1 = datastore
@@ -2262,6 +2291,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let res2 = datastore
@@ -2292,6 +2322,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group3 = datastore
@@ -2358,7 +2389,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2378,6 +2409,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group = datastore
@@ -2482,7 +2514,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -2502,6 +2534,7 @@ mod tests {
             multicast_ip: Some("224.100.10.5".parse().unwrap()),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group = datastore
@@ -2588,7 +2621,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -2608,6 +2641,7 @@ mod tests {
             multicast_ip: Some("224.100.20.10".parse().unwrap()),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let params_2 = MulticastGroupCreate {
@@ -2618,6 +2652,7 @@ mod tests {
             multicast_ip: Some("224.100.20.11".parse().unwrap()),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let params_3 = MulticastGroupCreate {
@@ -2628,6 +2663,7 @@ mod tests {
             multicast_ip: Some("224.100.20.12".parse().unwrap()),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         // Create groups (all are fleet-scoped)
@@ -2717,7 +2753,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -2736,6 +2772,7 @@ mod tests {
             multicast_ip: Some("224.100.30.5".parse().unwrap()),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         // Create group - starts in "Creating" state
@@ -3054,7 +3091,7 @@ mod tests {
             .expect("Should add ASM range to pool");
 
         // Link pool to silo as default
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -3075,6 +3112,7 @@ mod tests {
             multicast_ip: None, // No explicit IP - triggers pool auto-selection
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         // This should succeed via ASM pool (no SSM pool exists)
@@ -3145,7 +3183,7 @@ mod tests {
             .await
             .expect("Should add ASM range to pool");
 
-        let asm_link = IpPoolResource {
+        let asm_link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: asm_ip_pool.id(),
@@ -3165,6 +3203,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: true,
+            ip_version: None,
         };
         let fallback_group = datastore
             .multicast_group_create(&opctx, &fallback_params, None)
@@ -3217,7 +3256,7 @@ mod tests {
             .await
             .expect("Should add SSM range to pool");
 
-        let ssm_link = IpPoolResource {
+        let ssm_link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ssm_ip_pool.id(),
@@ -3237,6 +3276,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: true,
+            ip_version: None,
         };
         let ssm_group = datastore
             .multicast_group_create(&opctx, &ssm_params, None)
@@ -3260,6 +3300,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
         let asm_group = datastore
             .multicast_group_create(&opctx, &asm_params, None)
@@ -3324,7 +3365,7 @@ mod tests {
             .await
             .expect("Should add SSM range");
 
-        let ssm_link = IpPoolResource {
+        let ssm_link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ssm_ip_pool.id(),
@@ -3373,7 +3414,7 @@ mod tests {
             .await
             .expect("Should add ASM range");
 
-        let asm_link = IpPoolResource {
+        let asm_link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: asm_ip_pool.id(),
@@ -3394,6 +3435,7 @@ mod tests {
             multicast_ip: None,
             mvlan: None,
             has_sources: true,
+            ip_version: None,
         };
         let group = datastore
             .multicast_group_create(&opctx, &params, Some(asm_authz_pool))
@@ -3454,7 +3496,7 @@ mod tests {
             .expect("Should add multicast range");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -3474,6 +3516,7 @@ mod tests {
             multicast_ip: Some("224.10.1.1".parse().unwrap()),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
         let external_group1 = datastore
             .multicast_group_create(&opctx, &params1, Some(authz_pool.clone()))
@@ -3489,6 +3532,7 @@ mod tests {
             multicast_ip: Some("224.10.1.2".parse().unwrap()),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
         let external_group2 = datastore
             .multicast_group_create(&opctx, &params2, Some(authz_pool.clone()))
@@ -3592,7 +3636,7 @@ mod tests {
             .expect("Should add multicast range");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -3612,6 +3656,7 @@ mod tests {
             multicast_ip: Some("224.20.1.1".parse().unwrap()),
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
         let external_group = datastore
             .multicast_group_create(&opctx, &params, Some(authz_pool.clone()))

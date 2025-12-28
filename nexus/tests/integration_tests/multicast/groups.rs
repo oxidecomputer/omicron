@@ -26,14 +26,15 @@ use dpd_client::types as dpd_types;
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::dpd_client;
 use nexus_test_utils::http_testing::{
     AuthnMode, Collection, NexusRequest, RequestBuilder,
 };
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_project, object_create,
-    object_create_error, object_delete, object_delete_error, object_get,
-    object_get_error, object_put_error,
+    create_default_ip_pool, create_instance, create_project, link_ip_pool,
+    object_create, object_create_error, object_delete, object_delete_error,
+    object_get, object_get_error, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -1179,9 +1180,16 @@ async fn test_default_pool_on_implicit_creation(
     object_put_error(client, &join_url, &join_params, StatusCode::BAD_REQUEST)
         .await;
 
-    // Create a default multicast pool
-    let mcast_pool =
-        create_multicast_ip_pool(&client, "default-mcast-pool").await;
+    // Create a multicast pool using resource_helpers (doesn't auto-link)
+    let (mcast_pool, _) = nexus_test_utils::resource_helpers::create_multicast_ip_pool(
+        &client,
+        "default-mcast-pool",
+        None,
+    )
+    .await;
+
+    // Link as default so it can be auto-discovered when joining by name
+    link_ip_pool(&client, "default-mcast-pool", &DEFAULT_SILO.id(), true).await;
 
     // Case: Joining when multicast pool exists - should succeed (pool auto-discovered)
     multicast_group_attach(cptestctx, project_name, instance_name, group_name2)
@@ -1553,4 +1561,85 @@ async fn test_multiple_ssm_groups_same_pool(
     for (group_name, _) in &group_configs {
         wait_for_group_deleted(client, group_name).await;
     }
+}
+
+/// Test multicast pool selection with custom ASM range.
+///
+/// Verifies that joining a multicast group by name correctly allocates
+/// from a linked multicast pool, and that joining by explicit IP also works.
+///
+/// Note: The V4+V6 conflict scenario (where both default pools exist and the
+/// system cannot determine which to use) is tested at the datastore level in
+/// `nexus/db-queries/src/db/datastore/ip_pool.rs::test_ip_pools_fetch_asm_multicast_version_conflict`
+/// because IPv6 ranges cannot be added via the HTTP API (they're rejected).
+#[nexus_test]
+async fn test_multicast_group_ip_version_conflict(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Setup: create project and default unicast IP pool
+    let project_name = "ip-version-conflict-project";
+    let instance_name = "ip-version-conflict-instance";
+    let (_, _) = ops::join2(
+        create_project(client, project_name),
+        create_default_ip_pool(client),
+    )
+    .await;
+
+    // Create IPv4 multicast pool using local helper (creates + adds range + links)
+    let v4_pool = create_multicast_ip_pool_with_range(
+        client,
+        "v4-mcast-conflict-pool",
+        (224, 11, 0, 1),
+        (224, 11, 0, 100),
+    )
+    .await;
+
+    // Create instance for joining
+    create_instance(client, project_name, instance_name).await;
+
+    // Join by name should succeed (V4 pool auto-discovered)
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/conflict-test-group?project={project_name}"
+    );
+    put_upsert::<_, MulticastGroupMember>(
+        client,
+        &join_url,
+        &InstanceMulticastGroupJoin { source_ips: None },
+    )
+    .await;
+
+    // Join by explicit IP should also succeed (pool auto-discovered from IP)
+    let explicit_ip = "224.11.0.50";
+    let explicit_ip_join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{explicit_ip}?project={project_name}"
+    );
+    put_upsert::<_, MulticastGroupMember>(
+        client,
+        &explicit_ip_join_url,
+        &InstanceMulticastGroupJoin { source_ips: None },
+    )
+    .await;
+
+    // Wait for group to become active
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+    // Verify the group was created with IPv4 address from V4 pool
+    let groups: ResultsPage<MulticastGroup> =
+        object_get(client, "/v1/multicast-groups").await;
+    let group = groups
+        .items
+        .iter()
+        .find(|g| g.multicast_ip == explicit_ip.parse::<IpAddr>().unwrap())
+        .expect("Should find group with explicit IP");
+
+    assert!(group.multicast_ip.is_ipv4(), "Expected IPv4 address");
+    assert_eq!(group.ip_pool_id, v4_pool.identity.id, "Should use V4 pool");
+
+    // Cleanup
+    let expected_group_name =
+        format!("mcast-{}", explicit_ip.replace('.', "-"));
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+    wait_for_group_deleted(client, &expected_group_name).await;
 }

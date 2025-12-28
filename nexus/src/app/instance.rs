@@ -14,6 +14,7 @@ use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::NexusSaga;
+use crate::db::datastore::Disk;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
@@ -48,6 +49,7 @@ use omicron_common::api::external::Hostname;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
@@ -73,6 +75,7 @@ use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use sagas::instance_common::ExternalIpAttach;
 use sagas::instance_start;
 use sagas::instance_update;
+use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
 use std::collections::{HashMap, HashSet};
@@ -1422,6 +1425,35 @@ impl super::Nexus {
             )
             .await?;
 
+        // Each Disk::LocalStorage will require a delegated zvol entry.
+        let mut delegated_zvols: Vec<DelegatedZvol> =
+            Vec::with_capacity(disks.len());
+
+        for disk in &disks {
+            let local_storage_disk = match disk {
+                Disk::Crucible(_) => {
+                    continue;
+                }
+
+                Disk::LocalStorage(local_storage_disk) => local_storage_disk,
+            };
+
+            let Some(local_storage_dataset_allocation) =
+                &local_storage_disk.local_storage_dataset_allocation
+            else {
+                return Err(Error::internal_error(&format!(
+                    "local storage disk {} allocation is None!",
+                    disk.id()
+                ))
+                .into());
+            };
+
+            delegated_zvols.push(DelegatedZvol::LocalStorage {
+                zpool_id: local_storage_dataset_allocation.pool_id(),
+                dataset_id: local_storage_dataset_allocation.id(),
+            });
+        }
+
         let nics = self
             .db_datastore
             .derive_guest_network_interface_info(&opctx, &authz_instance)
@@ -1549,7 +1581,7 @@ impl super::Nexus {
                 host_domain: None,
                 search_domains: Vec::new(),
             },
-            delegated_zvols: vec![],
+            delegated_zvols,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
@@ -2212,6 +2244,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         pool: Option<NameOrId>,
+        ip_version: Option<IpVersion>,
     ) -> UpdateResult<views::ExternalIp> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -2220,7 +2253,7 @@ impl super::Nexus {
             opctx,
             authz_instance,
             authz_project.id(),
-            ExternalIpAttach::Ephemeral { pool },
+            ExternalIpAttach::Ephemeral { pool, ip_version },
         )
         .await
     }

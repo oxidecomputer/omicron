@@ -5,8 +5,8 @@
 use assert_matches::assert_matches;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
-use clickhouse_admin_types::KeeperId;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::KeeperId;
 use expectorate::assert_contents;
 use iddqd::IdOrdMap;
 use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
@@ -3571,7 +3571,7 @@ fn test_update_cockroach() {
         let mut result = BTreeMap::new();
         for i in 1..=COCKROACHDB_REDUNDANCY {
             result.insert(
-                cockroach_admin_types::NodeId(i.to_string()),
+                cockroach_admin_types::node::InternalNodeId(i.to_string()),
                 CockroachStatus {
                     ranges_underreplicated: Some(0),
                     liveness_live_nodes: Some(GOAL_REDUNDANCY),

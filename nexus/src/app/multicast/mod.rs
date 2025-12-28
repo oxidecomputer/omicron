@@ -442,6 +442,8 @@ impl super::Nexus {
             multicast_ip: Some(ip),
             mvlan: None,
             has_sources,
+            // IP version is determined by the multicast IP address itself
+            ip_version: None,
         };
 
         // Create the group; on conflict -> re-lookup
@@ -520,6 +522,8 @@ impl super::Nexus {
             multicast_ip: None,
             mvlan: None,
             has_sources,
+            // No explicit IP, defaults to V4 when allocating from pool
+            ip_version: None,
         };
 
         // Create the group; on conflict -> re-lookup

@@ -1506,7 +1506,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk (
      */
     attach_instance_id UUID,
     state_generation INT NOT NULL,
-    slot INT2 CHECK (slot >= 0 AND slot < 8),
+    slot INT2 CHECK (slot >= 0 AND slot < 12),
     time_state_updated TIMESTAMPTZ NOT NULL,
 
     /* Disk configuration */
@@ -1883,9 +1883,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
     is_primary BOOL NOT NULL,
 
     /*
-     * A supplementary list of addresses/CIDR blocks which a NIC is
+     * A supplementary list of IPv4 addresses/CIDR blocks which a NIC is
      * *allowed* to send/receive traffic on, in addition to its
      * assigned address.
+     *
+     * NOTE: Despite the name, these are always IPv4 networks or addresses.
+     * We've kept the original name since renaming columns idempotently is difficult
+     * in CRDB right now.
      */
     transit_ips INET[] NOT NULL DEFAULT ARRAY[],
 
@@ -1895,11 +1899,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
      */
     ipv6 INET,
 
+    /*
+     * A supplementary list of IPv6 addresses/CIDR blocks which a NIC is
+     * *allowed* to send/receive traffic on, in addition to its
+     * assigned address.
+     */
+    transit_ips_v6 INET[] NOT NULL DEFAULT ARRAY[],
+
     /* Constraint ensuring we have at least one IP address from either family.
      * Both may be specified.
      */
     CONSTRAINT at_least_one_ip_address CHECK (
         ip IS NOT NULL OR ipv6 IS NOT NULL
+    ),
+
+    /* Constraint ensuring that if we have transit IPs of a specific version, we
+     * also have a corresponding IP address.
+     */
+    CONSTRAINT transit_ips_require_ip_address CHECK (
+        (array_length(transit_ips, 1) = 0 OR ip IS NOT NULL) AND
+        (array_length(transit_ips_v6, 1) = 0 OR ipv6 IS NOT NULL)
     )
 );
 
@@ -1923,7 +1942,8 @@ SELECT
     ipv6,
     slot,
     is_primary,
-    transit_ips
+    transit_ips as transit_ips_v4,
+    transit_ips_v6
 FROM
     omicron.public.network_interface
 WHERE
@@ -2284,6 +2304,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
     resource_type omicron.public.ip_pool_resource_type NOT NULL,
     resource_id UUID NOT NULL,
     is_default BOOL NOT NULL,
+    -- Denormalized from ip_pool for efficient default pool lookups
+    pool_type omicron.public.ip_pool_type NOT NULL,
+    ip_version omicron.public.ip_version NOT NULL,
     -- TODO: timestamps for soft deletes?
 
     -- resource_type is redundant because resource IDs are globally unique, but
@@ -2291,9 +2314,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
     PRIMARY KEY (ip_pool_id, resource_type, resource_id)
 );
 
--- a given resource can only have one default ip pool
-CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.public.ip_pool_resource (
-    resource_id
+-- One default pool per (resource, pool_type, ip_version) combination
+-- Allows silos to have separate default pools for each IP version and pool type
+CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource_type_version ON omicron.public.ip_pool_resource (
+    resource_id,
+    pool_type,
+    ip_version
 ) where
     is_default = true;
 
@@ -7473,7 +7499,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '214.0.0', NULL)
+    (TRUE, NOW(), NOW(), '217.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

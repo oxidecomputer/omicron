@@ -94,6 +94,7 @@ ring.workspace = true
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
+seq-macro.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
@@ -107,6 +108,7 @@ slog-dtrace.workspace = true
 slog-error-chain.workspace = true
 display-error-chain.workspace = true
 slog-term.workspace = true
+static_assertions.workspace = true
 steno.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true

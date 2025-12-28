@@ -601,7 +601,9 @@ table! {
         ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
+        // NOTE: These are the IPv4 transit IPs specifically.
         transit_ips -> Array<Inet>,
+        transit_ips_v6 -> Array<Inet>,
     }
 }
 
@@ -621,7 +623,8 @@ table! {
         ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
-        transit_ips -> Array<Inet>,
+        transit_ips_v4 -> Array<Inet>,
+        transit_ips_v6 -> Array<Inet>,
     }
 }
 joinable!(instance_network_interface -> instance (instance_id));
@@ -666,6 +669,8 @@ table! {
         resource_type -> crate::enums::IpPoolResourceTypeEnum,
         resource_id -> Uuid,
         is_default -> Bool,
+        pool_type -> crate::enums::IpPoolTypeEnum,
+        ip_version -> crate::enums::IpVersionEnum,
     }
 }
 
@@ -1849,6 +1854,9 @@ table! {
         total_size -> Int8,
     }
 }
+
+allow_tables_to_appear_in_same_query!(zpool, inv_zpool);
+allow_tables_to_appear_in_same_query!(inv_zpool, physical_disk);
 
 table! {
     inv_dataset (inv_collection_id, sled_id, name) {

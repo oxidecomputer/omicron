@@ -726,6 +726,7 @@ impl MulticastGroupReconciler {
             // Converts `IpAddr` to `IpNetwork` for DPD API (creates /32 for IPv4, /128 for IPv6).
             let sources_as_networks: Vec<IpNetwork> =
                 member_sources.iter().map(|ip| IpNetwork::from(*ip)).collect();
+
             match dataplane_client
                 .update_groups(GroupUpdateParams {
                     external_group: group,

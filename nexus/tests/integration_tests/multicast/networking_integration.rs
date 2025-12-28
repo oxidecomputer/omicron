@@ -127,6 +127,7 @@ async fn test_multicast_with_external_ip_basic(
         RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
             .body(Some(&EphemeralIpCreate {
                 pool: None, // Use default pool
+                ip_version: None,
             }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
@@ -296,6 +297,7 @@ async fn test_multicast_external_ip_lifecycle(
             RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
                 .body(Some(&EphemeralIpCreate {
                     pool: None, // Use default pool
+                    ip_version: None,
                 }))
                 .expect_status(Some(StatusCode::ACCEPTED)),
         )
@@ -395,7 +397,8 @@ async fn test_multicast_with_external_ip_at_creation(
     .await;
 
     // Create instance with external IP specified at creation
-    let external_ip_param = ExternalIpCreate::Ephemeral { pool: None };
+    let external_ip_param =
+        ExternalIpCreate::Ephemeral { pool: None, ip_version: None };
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
