@@ -51,7 +51,7 @@ async fn test_multicast_with_external_ip_basic(
     let instance_name = "external-ip-mcast-instance";
 
     // Setup: project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pool(client), // For external IPs
         create_multicast_ip_pool_with_range(
@@ -217,7 +217,7 @@ async fn test_multicast_external_ip_lifecycle(
     let instance_name = "external-ip-lifecycle-instance";
 
     // Setup in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pool(client),
         create_multicast_ip_pool_with_range(
@@ -384,7 +384,7 @@ async fn test_multicast_with_external_ip_at_creation(
     let instance_name = "creation-mixed-instance";
 
     // Setup - parallelize project and pool creation
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pool(client),
         create_multicast_ip_pool_with_range(
@@ -491,7 +491,7 @@ async fn test_multicast_with_floating_ip_basic(
     let floating_ip_name = "floating-ip-mcast-ip";
 
     // Setup: project and IP pools - parallelize creation
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pool(client), // For floating IPs
         create_multicast_ip_pool_with_range(

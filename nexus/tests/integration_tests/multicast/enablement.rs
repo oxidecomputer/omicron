@@ -38,7 +38,7 @@ async fn test_multicast_enablement() {
     let client = &cptestctx.external_client;
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_default_ip_pool(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(client, "test-pool"),

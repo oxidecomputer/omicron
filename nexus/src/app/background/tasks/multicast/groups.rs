@@ -73,18 +73,17 @@
 //! - **DB failures**: Operations retried in subsequent reconciler passes
 //! - **Partial cleanup**: "Deleting" state preserved until complete cleanup
 
-use std::net::IpAddr;
-
 use anyhow::Context;
 use chrono::Utc;
 use futures::stream::{self, StreamExt};
-use ipnetwork::IpNetwork;
 use slog::{debug, error, info, trace, warn};
 
 use nexus_db_model::{MulticastGroup, MulticastGroupState, SqlU8};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::multicast::EnsureUnderlayResult;
+use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
+use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{self, DataPageParams};
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
@@ -116,32 +115,55 @@ fn dpd_state_matches_tag(
     }
 }
 
-/// Check if DPD sources match computed member sources.
+/// Check if DPD sources match the expected state based on source filter.
 ///
-/// Source IPs are per-member in the database, but per-group in DPD.
-/// DPD filters at the group level before replicating packets to members,
-/// so it receives the union of all member source IPs.
+/// Source filtering logic per RFC 4607 (mirrors dataplane code):
+/// - SSM (232/8, ff3x::/32): MUST have specific sources. `has_any_source_member`
+///   is ignored because API validation prevents SSM joins without sources.
+/// - ASM: Currently expects `None` (Dendrite doesn't support ASM filtering yet).
+///
+/// TODO: Once Dendrite accepts ASM source filtering, enable it for ASM groups
+/// where `has_any_source_member=false`.
 fn dpd_state_matches_sources(
     dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
-    member_sources: &[IpAddr],
+    source_filter: &SourceFilterState,
+    group: &MulticastGroup,
 ) -> bool {
-    let db_sources: Vec<_> = member_sources.to_vec();
-    let dpd_sources = dpd_group.sources.clone().unwrap_or_default();
+    let dpd_sources = dpd_group.sources.clone();
+    let group_ip = group.multicast_ip.ip();
 
-    // Extract exact IPs from DPD sources (filter out subnets)
-    let mut dpd_ips: Vec<_> = dpd_sources
-        .into_iter()
-        .filter_map(|src| match src {
-            dpd_client::types::IpSrc::Exact(ip) => Some(ip),
-            dpd_client::types::IpSrc::Subnet(_) => None,
-        })
-        .collect();
+    // Expected DPD state based on source filter logic (RFC 4607)
+    let expected_sources = if is_ssm_address(group_ip) {
+        // SSM: always expect specific sources
+        Some(&source_filter.specific_sources)
+    } else {
+        // ASM: Dendrite doesn't support ASM filtering yet
+        // Future: check `has_any_source_member` to enable/disable filtering
+        None
+    };
 
-    let mut db_sources_sorted = db_sources;
-    dpd_ips.sort();
-    db_sources_sorted.sort();
+    match (dpd_sources, expected_sources) {
+        (None, None) => true,
+        (Some(_), None) => false, // DPD has sources but shouldn't
+        (None, Some(_)) => false, // DPD missing sources
+        (Some(dpd_srcs), Some(expected)) => {
+            // Extract exact IPs from DPD sources
+            let mut dpd_ips: Vec<_> = dpd_srcs
+                .into_iter()
+                .filter_map(|src| match src {
+                    dpd_client::types::IpSrc::Exact(ip) => Some(ip),
+                    _ => None, // Subnet matching removed in follow-up Dendrite TODO
+                })
+                .collect();
+            dpd_ips.sort();
 
-    dpd_ips == db_sources_sorted
+            let mut expected_sorted: Vec<_> =
+                expected.iter().copied().collect();
+            expected_sorted.sort();
+
+            dpd_ips == expected_sorted
+        }
+    }
 }
 
 /// Check if DPD vlan_id matches database mvlan.
@@ -309,9 +331,8 @@ impl MulticastGroupReconciler {
         // Exhausted all 256 possible salt values (0-255)
         anyhow::bail!(
             "failed to find non-colliding underlay IP after {} attempts \
-             (salt range {}..={})",
+             (salt range {initial_salt}..={})",
             u16::from(u8::MAX) - u16::from(initial_salt) + 1,
-            initial_salt,
             u8::MAX
         )
     }
@@ -645,16 +666,15 @@ impl MulticastGroupReconciler {
             .underlay_group_id
             .context("active multicast group missing underlay_group_id")?;
 
-        // Compute union of member source IPs for DPD comparison/update.
-        // Source IPs are per-member in DB but per-group in DPD.
+        // Get source filter state for DPD comparison/update.
         let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
-        let source_ips_map = self
+        let filter_state_map = self
             .datastore
-            .multicast_groups_source_ips_union(opctx, &[group_id])
+            .multicast_groups_source_filter_state(opctx, &[group_id])
             .await
-            .context("failed to fetch member source IPs union")?;
-        let member_sources =
-            source_ips_map.get(&group.id()).cloned().unwrap_or_default();
+            .context("failed to fetch source filter state")?;
+        let source_filter =
+            filter_state_map.get(&group.id()).cloned().unwrap_or_default();
 
         // Check if DPD state matches DB state (read-before-write for drift detection)
         let needs_update = match dataplane_client
@@ -663,8 +683,11 @@ impl MulticastGroupReconciler {
         {
             Ok(Some(dpd_group)) => {
                 let tag_matches = dpd_state_matches_tag(&dpd_group, group);
-                let sources_match =
-                    dpd_state_matches_sources(&dpd_group, &member_sources);
+                let sources_match = dpd_state_matches_sources(
+                    &dpd_group,
+                    &source_filter,
+                    group,
+                );
                 let mvlan_matches = dpd_state_matches_mvlan(&dpd_group, group);
 
                 let needs_update =
@@ -723,16 +746,12 @@ impl MulticastGroupReconciler {
 
             // Direct dataplane call for drift correction
             // If update fails, we leave existing state and retry on next RPW cycle.
-            // Converts `IpAddr` to `IpNetwork` for DPD API (creates /32 for IPv4, /128 for IPv6).
-            let sources_as_networks: Vec<IpNetwork> =
-                member_sources.iter().map(|ip| IpNetwork::from(*ip)).collect();
-
             match dataplane_client
                 .update_groups(GroupUpdateParams {
                     external_group: group,
                     underlay_group: &underlay_group,
                     new_name: group.name().as_str(),
-                    new_sources: &sources_as_networks,
+                    source_filter: &source_filter,
                 })
                 .await
             {
@@ -905,5 +924,175 @@ impl MulticastGroupReconciler {
             .context("failed to complete external group deletion")?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::collections::BTreeSet;
+    use std::net::IpAddr;
+
+    use uuid::Uuid;
+
+    use nexus_db_model::{
+        ExternalMulticastGroup, ExternalMulticastGroupIdentity, Generation,
+        MulticastGroupState, Vni,
+    };
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+
+    fn create_dpd_group(
+        sources: Option<Vec<dpd_client::types::IpSrc>>,
+    ) -> dpd_client::types::MulticastGroupExternalResponse {
+        dpd_client::types::MulticastGroupExternalResponse {
+            group_ip: "232.1.1.1".parse().unwrap(),
+            sources,
+            tag: Some("test-tag".to_string()),
+            external_group_id: 1,
+            external_forwarding: dpd_client::types::ExternalForwarding {
+                vlan_id: None,
+            },
+            internal_forwarding: dpd_client::types::InternalForwarding {
+                nat_target: None,
+            },
+        }
+    }
+
+    fn create_group(multicast_ip: &str) -> MulticastGroup {
+        ExternalMulticastGroup {
+            identity: ExternalMulticastGroupIdentity::new(
+                Uuid::new_v4(),
+                IdentityMetadataCreateParams {
+                    name: "test-group".parse().unwrap(),
+                    description: "test".to_string(),
+                },
+            ),
+            ip_pool_id: Uuid::new_v4(),
+            ip_pool_range_id: Uuid::new_v4(),
+            vni: Vni(omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI),
+            multicast_ip: multicast_ip.parse().unwrap(),
+            mvlan: None,
+            underlay_group_id: None,
+            underlay_salt: None,
+            tag: Some("test-tag".to_string()),
+            state: MulticastGroupState::Active,
+            version_added: Generation::new(),
+            version_removed: None,
+        }
+    }
+
+    #[test]
+    fn test_dpd_state_matches_sources_ssm_with_sources() {
+        // SSM address (232.x.x.x) with specific sources from all members
+        let source_filter = SourceFilterState {
+            specific_sources: BTreeSet::from([
+                "10.0.0.1".parse::<IpAddr>().unwrap(),
+                "10.0.0.2".parse::<IpAddr>().unwrap(),
+            ]),
+            has_any_source_member: false,
+        };
+
+        let group = create_group("232.1.1.1"); // SSM address
+
+        // DPD has matching sources
+        let dpd_group = create_dpd_group(Some(vec![
+            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            dpd_client::types::IpSrc::Exact("10.0.0.2".parse().unwrap()),
+        ]));
+        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD has sources in different order (should still match)
+        let dpd_group = create_dpd_group(Some(vec![
+            dpd_client::types::IpSrc::Exact("10.0.0.2".parse().unwrap()),
+            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
+        ]));
+        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD missing sources (mismatch)
+        let dpd_group = create_dpd_group(None);
+        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD has wrong sources (mismatch)
+        let dpd_group = create_dpd_group(Some(vec![
+            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            dpd_client::types::IpSrc::Exact("10.0.0.3".parse().unwrap()), // wrong
+        ]));
+        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+    }
+
+    #[test]
+    fn test_dpd_state_matches_sources_ssm_ignores_has_any_source_member() {
+        // SSM address with has_any_source_member=true should still use specific_sources
+        // per RFC 4607: SSM MUST have source specification. The has_any_source_member
+        // flag is ignored for SSM because API validation prevents SSM joins without
+        // sources. This is defense-in-depth.
+        let source_filter = SourceFilterState {
+            specific_sources: BTreeSet::from([
+                "10.0.0.1".parse::<IpAddr>().unwrap(),
+                "10.0.0.2".parse::<IpAddr>().unwrap(),
+            ]),
+            has_any_source_member: true, // Ignored for SSM
+        };
+
+        let group = create_group("232.1.1.1"); // SSM address
+
+        // DPD should have specific sources (RFC 4607 compliance)
+        let dpd_group = create_dpd_group(Some(vec![
+            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            dpd_client::types::IpSrc::Exact("10.0.0.2".parse().unwrap()),
+        ]));
+        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD has None (mismatch: SSM must have sources)
+        let dpd_group = create_dpd_group(None);
+        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+    }
+
+    #[test]
+    fn test_dpd_state_matches_sources_asm_address() {
+        // ASM address (not 232.x.x.x) - should always expect None from DPD
+        // regardless of specific_sources (Dendrite limitation, see TODO)
+        let source_filter = SourceFilterState {
+            specific_sources: BTreeSet::from(["10.0.0.1"
+                .parse::<IpAddr>()
+                .unwrap()]),
+            has_any_source_member: false,
+        };
+
+        let group = create_group("224.1.1.1"); // ASM address (not 232.x.x.x)
+
+        // DPD has None (correct for ASM)
+        let dpd_group = create_dpd_group(None);
+        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD has sources (mismatch: ASM should have none)
+        let dpd_group =
+            create_dpd_group(Some(vec![dpd_client::types::IpSrc::Exact(
+                "10.0.0.1".parse().unwrap(),
+            )]));
+        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+    }
+
+    #[test]
+    fn test_dpd_state_matches_sources_asm_with_any_source_member() {
+        // ASM address with has_any_source_member=true - expects None from DPD
+        let source_filter = SourceFilterState {
+            specific_sources: BTreeSet::new(),
+            has_any_source_member: true,
+        };
+
+        let group = create_group("224.1.1.1"); // ASM address
+
+        // DPD has None (correct for ASM with any-source members)
+        let dpd_group = create_dpd_group(None);
+        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD has sources (mismatch: should be none)
+        let dpd_group =
+            create_dpd_group(Some(vec![dpd_client::types::IpSrc::Exact(
+                "10.0.0.1".parse().unwrap(),
+            )]));
+        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
     }
 }

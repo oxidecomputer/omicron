@@ -241,12 +241,14 @@ impl super::Nexus {
     ) -> Result<views::MulticastGroup, external::Error> {
         let group_id = MulticastGroupUuid::from_untyped_uuid(group.identity.id);
 
-        let source_ips_map = self
+        let filter_state_map = self
             .db_datastore
-            .multicast_groups_source_ips_union(opctx, &[group_id])
+            .multicast_groups_source_filter_state(opctx, &[group_id])
             .await?;
-        let source_ips =
-            source_ips_map.get(&group.identity.id).cloned().unwrap_or_default();
+        let source_ips = filter_state_map
+            .get(&group.identity.id)
+            .map(|state| state.specific_sources.iter().copied().collect())
+            .unwrap_or_default();
 
         ExternalMulticastGroupWithSources { group, source_ips }.try_into()
     }
@@ -302,17 +304,19 @@ impl super::Nexus {
             .iter()
             .map(|g| MulticastGroupUuid::from_untyped_uuid(g.identity.id))
             .collect();
-        let source_ips_map = self
+        let filter_state_map = self
             .db_datastore
-            .multicast_groups_source_ips_union(opctx, &group_ids)
+            .multicast_groups_source_filter_state(opctx, &group_ids)
             .await?;
 
         groups
             .into_iter()
             .map(|group| {
-                let source_ips = source_ips_map
+                let source_ips = filter_state_map
                     .get(&group.identity.id)
-                    .cloned()
+                    .map(|state| {
+                        state.specific_sources.iter().copied().collect()
+                    })
                     .unwrap_or_default();
                 ExternalMulticastGroupWithSources { group, source_ips }
                     .try_into()
@@ -803,8 +807,6 @@ impl super::Nexus {
             .collect::<Result<Vec<_>, _>>()
     }
 }
-
-// Private helpers for join logic
 
 /// Validate that source IPs match the multicast group's address family.
 fn validate_source_address_family(

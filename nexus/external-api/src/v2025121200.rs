@@ -28,8 +28,9 @@ use omicron_common::api::external::{
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, NameOrId,
 };
 
-// Re-export multicast types from v2025122300 - they're identical for both versions
-// (both use NameOrId, explicit create/update, no source_ips per member)
+// Re-export multicast types from v2025122300.
+// They're identical for both versions (both use NameOrId, explicit
+// create/update, no source_ips per member)
 pub use super::v2025122300::{
     InstanceMulticastGroupPath, InstanceUpdate, MulticastGroup,
     MulticastGroupByIpPath, MulticastGroupCreate, MulticastGroupMember,

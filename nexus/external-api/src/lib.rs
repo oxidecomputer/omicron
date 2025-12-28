@@ -3158,8 +3158,8 @@ pub trait NexusExternalApi {
     /// - Maximum of 64 source IPs allowed (per RFC 3376, IGMPv3).
     /// - ASM: Sources are optional. Providing sources enables source
     ///   filtering via IGMPv3/MLDv2 even for ASM addresses.
-    /// - SSM: Sources are required. SSM addresses (232.x.x.x for IPv4,
-    ///   FF3x:: for IPv6) must have at least one source specified.
+    /// - SSM: Sources are required. SSM addresses (232.0.0.0/8 for IPv4,
+    ///   ff3x::/32 for IPv6) must have at least one source specified.
     #[endpoint {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",

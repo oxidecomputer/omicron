@@ -10,6 +10,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
+use serde::{Deserialize, Serialize};
 use slog::debug;
 use uuid::Uuid;
 
@@ -29,6 +30,39 @@ use crate::db::model::{
     DbTypedUuid, MulticastGroupMember, MulticastGroupMemberState,
 };
 use crate::db::pagination::paginated;
+
+/// Aggregated source filtering state for a multicast group.
+///
+/// Captures both the union of specific source IPs and whether any member
+/// wants "any source". Switch-level filtering behavior depends on address type:
+///
+/// - **SSM (232.0.0.0/8, ff3x::/32)**: Always use `specific_sources` per RFC 4607.
+///   The `has_any_source_member` flag is ignored because API validation
+///   prevents SSM joins without sources.
+/// - **ASM**: Currently always passes `None` to DPD (Dendrite doesn't support
+///   ASM filtering yet). TODO: if `has_any_source_member` is true, skip
+///   switch-level filtering; otherwise use `specific_sources`.
+/// - **OPTE**: Always uses per-member source lists for fine-grained filtering,
+///   regardless of switch-level behavior.
+///
+/// This follows the (S,G) model where the switch does coarse filtering
+/// and OPTE does fine-grained per-member filtering.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SourceFilterState {
+    /// Union of all specific source IPs from members (deduplicated).
+    ///
+    /// Contains only explicitly specified sources. Members with empty
+    /// `source_ips` (ASM members wanting any source) don't affect this field.
+    pub specific_sources: BTreeSet<IpAddr>,
+
+    /// True if any member has empty `source_ips` (wants any source).
+    ///
+    /// For ASM groups: currently unused (Dendrite doesn't support ASM filtering).
+    /// TODO: when true, switch-level filtering will be disabled.
+    /// For SSM groups: ignored per RFC 4607 (API validation prevents SSM joins
+    /// without sources).
+    pub has_any_source_member: bool,
+}
 
 impl DataStore {
     /// List members of a multicast group.
@@ -311,23 +345,29 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Compute source IPs union for one or more groups in a single query.
+    /// Compute source filtering state for one or more groups in a single query.
     ///
-    /// Returns a map from `group_id` to the union of source IPs for that group.
-    /// Groups with no members or no source IPs will have empty vectors.
+    /// Returns a map from `group_id` to [`SourceFilterState`] containing:
+    /// - `specific_sources`: Union of all explicitly specified source IPs
+    /// - `has_any_source_member`: `true` if any member has empty `source_ips`
+    ///
+    /// Groups with no members will have empty `specific_sources` and
+    /// `has_any_source_member: false`.
     ///
     /// # Batch Usage
     ///
-    /// This function is designed for batch lookups to avoid n+1 query patterns.
+    /// Designed for batch lookups to avoid n+1 query patterns. Pass multiple
+    /// group IDs to fetch in a single database round-trip.
     ///
-    /// Pass multiple group IDs to fetch source IPs for all groups in a single
-    /// database round-trip. Used by `multicast_groups_list` to efficiently
-    /// populate the `source_ips` field for paginated group listings.
-    pub async fn multicast_groups_source_ips_union(
+    /// # DPD Source Filtering
+    ///
+    /// When `has_any_source_member` is true, pass `None` to DPD for sources
+    /// (disabling switch-level filtering). Otherwise, use `specific_sources`.
+    pub async fn multicast_groups_source_filter_state(
         &self,
         opctx: &OpContext,
         group_ids: &[MulticastGroupUuid],
-    ) -> Result<HashMap<Uuid, Vec<IpAddr>>, external::Error> {
+    ) -> Result<HashMap<Uuid, SourceFilterState>, external::Error> {
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
         if group_ids.is_empty() {
@@ -337,12 +377,11 @@ impl DataStore {
         let group_uuids: Vec<Uuid> =
             group_ids.iter().map(|id| id.into_untyped_uuid()).collect();
 
-        // Init result map with empty sets for each requested group
-        let mut res: HashMap<Uuid, BTreeSet<IpAddr>> =
-            group_uuids.iter().map(|id| (*id, BTreeSet::new())).collect();
+        let mut res: HashMap<Uuid, SourceFilterState> = group_uuids
+            .iter()
+            .map(|id| (*id, SourceFilterState::default()))
+            .collect();
 
-        // Select only the columns we need to avoid loading full member records
-        // unnecessarily
         let rows: Vec<(Uuid, Vec<IpNetwork>)> = dsl::multicast_group_member
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::external_group_id.eq_any(group_uuids))
@@ -351,14 +390,21 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        // Group by group_id and compute union for each
         for (group_id, source_ips) in rows {
-            if let Some(set) = res.get_mut(&group_id) {
-                set.extend(source_ips.iter().map(|ip| ip.ip()));
+            if let Some(state) = res.get_mut(&group_id) {
+                if source_ips.is_empty() {
+                    // Member wants any source (ASM behavior)
+                    state.has_any_source_member = true;
+                } else {
+                    // Member has specific sources
+                    state
+                        .specific_sources
+                        .extend(source_ips.iter().map(|ip| ip.ip()));
+                }
             }
         }
 
-        Ok(res.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect())
+        Ok(res)
     }
 
     /// Atomically reconcile a member in "Joining" state.
@@ -1214,7 +1260,7 @@ mod tests {
             "sled_id should be cleared"
         );
 
-        // Verify instance1 memberships transitioned to Left state
+        // Verify instance1 memberships transitioned to "Left" state
         datastore
             .multicast_group_members_list_by_id(
                 &opctx,
@@ -1253,7 +1299,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(active_group2_members.len(), 0);
 
-        // Test idempotency - detaching again should be idempotent
+        // Test idempotency: detaching again should be idempotent
         datastore
             .multicast_group_members_detach_by_instance(
                 &opctx,
@@ -3513,13 +3559,18 @@ mod tests {
             .await
             .expect("Should add member1");
 
-        // Verify union with single member
-        let union_map = datastore
-            .multicast_groups_source_ips_union(&opctx, &[group_id])
+        // Verify filter state with single member
+        let state_map = datastore
+            .multicast_groups_source_filter_state(&opctx, &[group_id])
             .await
-            .expect("Should get union");
-        let union = union_map.get(&group.id()).cloned().unwrap_or_default();
-        assert_eq!(union.len(), 2, "Union should have 2 IPs from member1");
+            .expect("Should get filter state");
+        let state = state_map.get(&group.id()).cloned().unwrap_or_default();
+        assert_eq!(
+            state.specific_sources.len(),
+            2,
+            "Should have 2 IPs from member1"
+        );
+        assert!(!state.has_any_source_member, "No ASM member yet");
 
         // Add member2 with source IPs [10.0.0.2, 10.0.0.3] (10.0.0.2 overlaps)
         let instance2 = create_stopped_instance_record(
@@ -3543,17 +3594,18 @@ mod tests {
             .await
             .expect("Should add member2");
 
-        // Verify union deduplicates overlapping IPs
-        let union_map = datastore
-            .multicast_groups_source_ips_union(&opctx, &[group_id])
+        // Verify filter state deduplicates overlapping IPs
+        let state_map = datastore
+            .multicast_groups_source_filter_state(&opctx, &[group_id])
             .await
-            .expect("Should get union");
-        let union = union_map.get(&group.id()).cloned().unwrap_or_default();
+            .expect("Should get filter state");
+        let state = state_map.get(&group.id()).cloned().unwrap_or_default();
         assert_eq!(
-            union.len(),
+            state.specific_sources.len(),
             3,
-            "Union should have 3 unique IPs (10.0.0.1, 10.0.0.2, 10.0.0.3)"
+            "Should have 3 unique IPs (10.0.0.1, 10.0.0.2, 10.0.0.3)"
         );
+        assert!(!state.has_any_source_member, "Still no ASM member");
 
         // Add member3 with no source IPs (ASM member)
         let instance3 = create_stopped_instance_record(
@@ -3574,22 +3626,27 @@ mod tests {
             .await
             .expect("Should add ASM member");
 
-        // Union should still be 3 (ASM member contributes nothing)
-        let union_map = datastore
-            .multicast_groups_source_ips_union(&opctx, &[group_id])
+        // specific_sources should still be 3 (ASM member contributes nothing)
+        // but has_any_source_member=true
+        let state_map = datastore
+            .multicast_groups_source_filter_state(&opctx, &[group_id])
             .await
-            .expect("Should get union");
-        let union = union_map.get(&group.id()).cloned().unwrap_or_default();
+            .expect("Should get filter state");
+        let state = state_map.get(&group.id()).cloned().unwrap_or_default();
         assert_eq!(
-            union.len(),
+            state.specific_sources.len(),
             3,
-            "Union should still be 3 (ASM member has no sources)"
+            "specific_sources should still be 3 (ASM member contributes nothing)"
+        );
+        assert!(
+            state.has_any_source_member,
+            "ASM member joined with empty sources"
         );
 
-        // Verify actual IPs in union
-        assert!(union.contains(&"10.0.0.1".parse().unwrap()));
-        assert!(union.contains(&"10.0.0.2".parse().unwrap()));
-        assert!(union.contains(&"10.0.0.3".parse().unwrap()));
+        // Verify actual IPs in specific_sources
+        assert!(state.specific_sources.contains(&"10.0.0.1".parse().unwrap()));
+        assert!(state.specific_sources.contains(&"10.0.0.2".parse().unwrap()));
+        assert!(state.specific_sources.contains(&"10.0.0.3".parse().unwrap()));
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -3602,9 +3659,9 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Call with empty slice - should return empty map without hitting DB
+        // Call with empty slice (should return empty map without hitting DB)
         let result = datastore
-            .multicast_groups_source_ips_union(&opctx, &[])
+            .multicast_groups_source_filter_state(&opctx, &[])
             .await
             .expect("Empty input should succeed");
 
@@ -3643,19 +3700,23 @@ mod tests {
 
         // Query source IPs for group with no members
         let result = datastore
-            .multicast_groups_source_ips_union(&opctx, &[group_id])
+            .multicast_groups_source_filter_state(&opctx, &[group_id])
             .await
             .expect("Should succeed for group with no members");
 
-        // Group should be in result map with empty vector (not missing)
+        // Group should be in result map with default state (not missing)
         assert!(
             result.contains_key(&group.id()),
             "Group should be present in result map"
         );
-        let sources = result.get(&group.id()).unwrap();
+        let state = result.get(&group.id()).unwrap();
         assert!(
-            sources.is_empty(),
-            "Group with no members should have empty source_ips"
+            state.specific_sources.is_empty(),
+            "Group with no members should have empty specific_sources"
+        );
+        assert!(
+            !state.has_any_source_member,
+            "Group with no members should have has_any_source_member=false"
         );
 
         db.terminate().await;

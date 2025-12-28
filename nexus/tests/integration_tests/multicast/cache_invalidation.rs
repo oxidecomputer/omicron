@@ -50,7 +50,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_default_ip_pool(client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(client, "sled-move-pool"),
@@ -311,7 +311,7 @@ async fn test_cache_ttl_driven_refresh() {
     let client = &cptestctx.external_client;
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_default_ip_pool(client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(client, "ttl-test-pool"),
@@ -512,7 +512,7 @@ async fn test_backplane_cache_ttl_expiry() {
     let client = &cptestctx.external_client;
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_default_ip_pool(client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(client, "backplane-ttl-pool"),

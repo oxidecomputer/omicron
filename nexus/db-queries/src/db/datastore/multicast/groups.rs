@@ -315,12 +315,13 @@ impl DataStore {
     ) -> LookupResult<ExternalMulticastGroupWithSources> {
         let group = self.multicast_group_fetch(opctx, group_id).await?;
 
-        // Get source IPs union via batch method
-        let source_ips_map =
-            self.multicast_groups_source_ips_union(opctx, &[group_id]).await?;
-        let source_ips = source_ips_map
+        // Get source filter state via batch method
+        let filter_state_map = self
+            .multicast_groups_source_filter_state(opctx, &[group_id])
+            .await?;
+        let source_ips = filter_state_map
             .get(&group_id.into_untyped_uuid())
-            .cloned()
+            .map(|state| state.specific_sources.iter().copied().collect())
             .unwrap_or_default();
 
         Ok(ExternalMulticastGroupWithSources { group, source_ips })
@@ -460,7 +461,7 @@ impl DataStore {
     /// source IPs.
     ///
     /// Pool selection rule(s):
-    /// - If `has_sources` is true: try SSM pool (232/8) first, fall back to ASM
+    /// - If `has_sources` is true: try SSM pool (232/8) first, fallback to ASM
     ///   with sources
     /// - If `has_sources` is false: use ASM pool directly
     ///
@@ -482,7 +483,7 @@ impl DataStore {
             {
                 Ok((pool, _)) => Ok(pool),
                 Err(_) => {
-                    // SSM pool unavailable - fall back to ASM pool.
+                    // SSM pool unavailable -> fallback to ASM pool.
                     // Source filtering still works on ASM addresses via IGMPv3/MLDv2,
                     // just without SSM's network-level source guarantees.
                     info!(
@@ -748,7 +749,7 @@ impl DataStore {
                         })?;
 
                     if existing.tag == tag {
-                        // Idempotent - same external group
+                        // Same external group
                         info!(
                             opctx.log,
                             "Underlay multicast group exists (idempotent)";
@@ -756,7 +757,7 @@ impl DataStore {
                         );
                         EnsureUnderlayResult::Existing(existing)
                     } else {
-                        // Collision - different external group
+                        // Collision means different external group
                         info!(
                             opctx.log,
                             "Underlay IP {multicast_ip} collision";
@@ -3102,14 +3103,14 @@ mod tests {
             .await
             .expect("Should link ASM pool to silo");
 
-        // Create group without an explicit IP
-        // This should trigger fallback to ASM pool
+        // Create group without an explicit IP: this should trigger
+        // fallback to an ASM pool
         let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "source-filtered-group".parse().unwrap(),
                 description: "Group using ASM pool".to_string(),
             },
-            multicast_ip: None, // No explicit IP - triggers pool auto-selection
+            multicast_ip: None, // No explicit IP -> triggers pool auto-selection
             mvlan: None,
             has_sources: false,
             ip_version: None,

@@ -42,7 +42,6 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 
 use futures::future::try_join_all;
-use ipnetwork::IpNetwork;
 use oxnet::MulticastMac;
 use slog::{Logger, debug, error, info};
 
@@ -58,6 +57,7 @@ use dpd_client::types::{
 use internal_dns_resolver::Resolver;
 
 use nexus_db_model::{ExternalMulticastGroup, UnderlayMulticastGroup};
+use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{Error, SwitchLocation};
@@ -147,7 +147,7 @@ pub(crate) struct GroupUpdateParams<'a> {
     pub external_group: &'a ExternalMulticastGroup,
     pub underlay_group: &'a UnderlayMulticastGroup,
     pub new_name: &'a str,
-    pub new_sources: &'a [IpNetwork],
+    pub source_filter: &'a SourceFilterState,
 }
 
 impl MulticastDataplaneClient {
@@ -357,14 +357,14 @@ impl MulticastDataplaneClient {
 
     /// Apply multicast group configuration across switches (via DPD).
     ///
-    /// The `sources` parameter is the union of source IPs from all members.
-    /// Source IPs are stored per-member in the database, but DPD stores them
-    /// per-group. Pass empty slice for ASM (any-source multicast).
+    /// The `source_filter` contains the aggregated source filtering state from
+    /// all members. If any member wants "any source", switch-level filtering
+    /// is disabled.
     pub(crate) async fn create_groups(
         &self,
         external_group: &ExternalMulticastGroup,
         underlay_group: &UnderlayMulticastGroup,
-        sources: &[IpNetwork],
+        source_filter: &SourceFilterState,
     ) -> MulticastDataplaneResult<(
         MulticastGroupUnderlayResponse,
         MulticastGroupExternalResponse,
@@ -380,7 +380,8 @@ impl MulticastDataplaneClient {
             "switch_count" => self.switch_count(),
             "multicast_scope" => if external_group.multicast_ip.ip().is_ipv4() { "IPv4_External" } else { "IPv6_External" },
             "address_mode" => if is_ssm_address(external_group.multicast_ip.ip()) { "SSM" } else { "ASM" },
-            "has_sources" => !sources.is_empty(),
+            "has_any_source_member" => source_filter.has_any_source_member,
+            "specific_sources_count" => source_filter.specific_sources.len(),
             "dpd_operation" => "create_groups"
         );
 
@@ -417,17 +418,27 @@ impl MulticastDataplaneClient {
 
         let external_group_ip = external_group.multicast_ip.ip();
 
-        // TODO: ASM source filtering will be accepted in dendrite in a follow-up
-        // PR stacked on this one. For now, we only send sources to DPD for SSM
-        // groups. ASM groups get `None`, meaning "any source allowed".
+        // Source filtering logic per RFC 4607:
+        // - SSM (232/8, ff3x::/32): MUST use specific sources. SSM semantically
+        //   requires source specification; `has_any_source_member` is ignored
+        //   because API validation prevents SSM joins without sources.
+        // - ASM: Use `has_any_source_member` to decide filtering behavior.
+        //
+        // TODO: Once Dendrite accepts ASM source filtering, enable it for ASM
+        // groups where `has_any_source_member=false`. Currently ASM always gets
+        // `None` because Dendrite only supports SSM filtering.
         let sources_dpd = if is_ssm_address(external_group_ip) {
+            // SSM: always use specific sources (RFC 4607 compliance)
             Some(
-                sources
+                source_filter
+                    .specific_sources
                     .iter()
-                    .map(|ip| IpSrc::Exact(ip.ip()))
+                    .map(|ip| IpSrc::Exact(*ip))
                     .collect::<Vec<_>>(),
             )
         } else {
+            // ASM: Dendrite doesn't support ASM filtering yet
+            // Future: check `has_any_source_member` to enable/disable filtering
             None
         };
 
@@ -566,18 +577,28 @@ impl MulticastDataplaneClient {
         let new_name_str = params.new_name.to_string();
         let external_group_ip = params.external_group.multicast_ip.ip();
 
-        // TODO: ASM source filtering will be accepted in dendrite in a follow-up
-        // PR stacked on this one. For now, we only send sources to DPD for SSM
-        // groups. ASM groups get `None`, meaning "any source allowed".
+        // Source filtering logic per RFC 4607:
+        // - SSM (232/8, ff3x::/32): MUST use specific sources. SSM semantically
+        //   requires source specification; `has_any_source_member` is ignored
+        //   because API validation prevents SSM joins without sources.
+        // - ASM: Use `has_any_source_member` to decide filtering behavior.
+        //
+        // TODO: Once Dendrite accepts ASM source filtering, enable it for ASM
+        // groups where `has_any_source_member=false`. Currently ASM always gets
+        // `None` because Dendrite only supports SSM filtering.
         let sources_dpd = if is_ssm_address(external_group_ip) {
+            // SSM: always use specific sources (RFC 4607 compliance)
             Some(
                 params
-                    .new_sources
+                    .source_filter
+                    .specific_sources
                     .iter()
-                    .map(|ip| IpSrc::Exact(ip.ip()))
+                    .map(|ip| IpSrc::Exact(*ip))
                     .collect::<Vec<_>>(),
             )
         } else {
+            // ASM: Dendrite doesn't support ASM filtering yet
+            // Future: check `has_any_source_member` to enable/disable filtering
             None
         };
 

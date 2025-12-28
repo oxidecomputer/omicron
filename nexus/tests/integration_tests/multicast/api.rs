@@ -52,7 +52,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     let group_name = "api-edge-cases-group";
 
     // Setup in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pool(client),
         create_multicast_ip_pool(client, "api-edge-pool"),
@@ -558,7 +558,7 @@ async fn test_join_existing_ssm_group_by_id_without_sources_fails(
 
     let group_id = member_1.multicast_group_id;
 
-    // Second instance tries to join by group ID WITHOUT sources - should fail
+    // Second instance tries to join by group ID w/o sources
     let join_url_by_id = format!(
         "/v1/instances/ssm-id-inst-2/multicast-groups/{group_id}?project={project_name}"
     );
@@ -633,7 +633,7 @@ async fn test_join_existing_ssm_group_by_name_without_sources_fails(
     // Get the group's auto-generated name
     let expected_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
 
-    // Second instance tries to join by NAME without sources - should fail
+    // Second instance tries to join by NAME without sources
     let join_by_name_url = format!(
         "/v1/instances/ssm-name-inst-2/multicast-groups/{expected_group_name}?project={project_name}"
     );
@@ -766,7 +766,7 @@ async fn test_join_existing_ssm_group_by_ip_without_sources_fails(
 
     let expected_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
 
-    // Second instance tries to join by IP without sources - should fail
+    // Second instance tries to join by IP without sources
     // Even though the group exists, SSM still requires sources
     let join_url_2 = format!(
         "/v1/instances/ssm-ip-inst-2/multicast-groups/{ssm_ip}?project={project_name}"
@@ -812,7 +812,7 @@ async fn test_join_by_ip_not_in_pool_fails(
     let instance_name = "join-by-ip-nopool-inst";
 
     // Setup: only create a pool with limited range
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pool(client),
         create_multicast_ip_pool_with_range(
@@ -863,7 +863,7 @@ async fn test_join_by_ip_existing_group(cptestctx: &ControlPlaneTestContext) {
     let project_name = "join-by-ip-existing-project";
 
     // Setup
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pool(client),
         create_multicast_ip_pool_with_range(
@@ -1010,7 +1010,7 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
     let project_name = "join-by-ip-asm-sources-project";
 
     // Setup: project and pools
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pool(client),
         create_multicast_ip_pool_with_range(
@@ -1134,7 +1134,7 @@ async fn test_explicit_ip_bypasses_ssm_asm_selection(
     let instance_name = "explicit-ip-bypass-inst";
 
     // Setup: create BOTH SSM and ASM pools
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pool(client),
         create_multicast_ip_pool_with_range(
@@ -1156,7 +1156,7 @@ async fn test_explicit_ip_bypasses_ssm_asm_selection(
 
     create_instance(client, project_name, instance_name).await;
 
-    // Join by ASM IP WITH sources - should use ASM pool (IP determines pool)
+    // Join by ASM IP with sources -> should use ASM pool
     let asm_ip: IpAddr = "224.80.0.50".parse().unwrap();
     let source_ip: IpAddr = "10.80.80.1".parse().unwrap();
 

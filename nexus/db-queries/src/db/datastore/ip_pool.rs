@@ -3287,7 +3287,7 @@ mod test {
             .unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
-        // But fetch_any_by_type should succeed
+        // But `fetch_any_by_type` should succeed
         let found_pool = datastore
             .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast, None)
             .await
@@ -3323,7 +3323,7 @@ mod test {
             .await
             .expect("Could not link default multicast pool to silo");
 
-        // Now fetch_any_by_type should prefer the default pool
+        // Now `fetch_any_by_type` should prefer the default pool
         let found_pool = datastore
             .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast, None)
             .await
@@ -3456,8 +3456,8 @@ mod test {
             .await
             .expect("Should link IPv6 pool");
 
-        // With ip_version=None and both V4/V6 pools, should return an error
-        // asking to specify the IP version (check_ip_version_conflict)
+        // With ip_version=None and both V4/V6 pools, this should return an error
+        // asking to specify the IP version on conflict
         let error = datastore
             .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast, None)
             .await
@@ -3565,7 +3565,7 @@ mod test {
             LookupType::ById(ipv6_pool.id()),
         );
 
-        // Add IPv6 multicast range - use site-local scope (ff05::/16)
+        // Add IPv6 multicast range using site-local scope (ff05::/16)
         // Note: ff00::/16, ff01::/16, ff02::/16 are reserved
         let ipv6_range = IpRange::V6(
             Ipv6Range::new(
@@ -3603,8 +3603,8 @@ mod test {
     }
 
     /// Verify ASM pool selection selects pools whose ranges are not SSM
-    /// (e.g., IPv4 224/4 but not 232/8), and does not get confused by
-    /// alphabetical ordering or the presence of SSM pools.
+    /// (e.g., IPv4 224/4 but not 232/8), and does not confuse alphabetical
+    /// ordering or the presence of SSM pools.
     #[tokio::test]
     async fn test_ip_pools_fetch_asm_multicast() {
         let logctx = dev::test_setup_log("test_ip_pools_fetch_asm_multicast");
@@ -3613,9 +3613,11 @@ mod test {
 
         let authz_silo = opctx.authn.silo_required().unwrap();
 
-        // Initially no ASM pool - should fail
-        let error =
-            datastore.ip_pools_fetch_asm_multicast(&opctx, None).await.unwrap_err();
+        // Initially no ASM pool (should fail)
+        let error = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         // Create SSM pool first with a name that would sort first if chosen
@@ -3667,8 +3669,10 @@ mod test {
             .expect("Should link SSM pool to silo");
 
         // With only SSM pool linked, ASM lookup should still fail
-        let error =
-            datastore.ip_pools_fetch_asm_multicast(&opctx, None).await.unwrap_err();
+        let error = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         // Create ASM pool and link
@@ -3814,7 +3818,7 @@ mod test {
     }
 
     /// Verify SSM pool selection selects pools whose ranges are SSM (232/8),
-    /// and does not get confused by alphabetical ordering or the presence of
+    /// and does not get confused with alphabetical ordering or the presence of
     /// ASM pools.
     #[tokio::test]
     async fn test_ip_pools_fetch_ssm_multicast() {
@@ -5056,7 +5060,7 @@ mod test {
     }
 
     /// Test that default pool lookups correctly handle V4/V6 ordering when both
-    /// defaults exist - they should return an error unless an explicit ip_version
+    /// defaults exist. An error should returned unless an explicit IP version
     /// is explicitly specified.
     #[tokio::test]
     async fn test_default_pool_ipv4_ipv6_ordering() {
@@ -5136,7 +5140,7 @@ mod test {
             "Expected V4/V6 conflict error, got: {error}"
         );
 
-        // Also verify via `ip_pools_fetch_default` (which uses None for ip_version)
+        // Also verify via `ip_pools_fetch_default`
         let error = datastore
             .ip_pools_fetch_default(&opctx)
             .await

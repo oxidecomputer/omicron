@@ -145,7 +145,7 @@ async fn test_multicast_group_member_operations(
     let instance_name = "test-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client), // For instance networking
         create_multicast_ip_pool_with_range(
@@ -314,7 +314,7 @@ async fn test_instance_multicast_endpoints(
     let instance_name = "test-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool_with_range(
@@ -532,7 +532,7 @@ async fn test_multicast_group_member_errors(
     let nonexistent_instance = "nonexistent-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool_with_range(
@@ -581,7 +581,7 @@ async fn test_lookup_multicast_group_by_ip(
     let group_name = "test-lookup-group";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool_with_range(
@@ -635,7 +635,7 @@ async fn test_instance_deletion_removes_multicast_memberships(
     let instance_name = "deletion-test-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool_with_range(
@@ -677,7 +677,6 @@ async fn test_instance_deletion_removes_multicast_memberships(
     assert_eq!(members[0].instance_id, instance.identity.id);
 
     // Case: Instance deletion should clean up multicast memberships
-    // Use the helper function for proper instance deletion (handles Starting state)
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
 
     // Verify instance is gone
@@ -705,7 +704,7 @@ async fn test_member_response_includes_multicast_ip(
     let instance_name = "test-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool_with_range(
@@ -825,7 +824,7 @@ async fn test_cannot_delete_multicast_pool_with_groups(
     let instance_name = "pool-test-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool_with_range(
@@ -946,7 +945,7 @@ async fn test_source_ip_validation_on_join(
     let ssm_ip = "232.1.0.100";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool_with_range(
@@ -1165,7 +1164,7 @@ async fn test_default_pool_on_implicit_creation(
     let instance_name = "default-pool-test-instance";
 
     // Setup: project and default IP pool in parallel (but no multicast pool yet)
-    let (_, _) = ops::join2(
+    ops::join2(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
     )
@@ -1181,12 +1180,13 @@ async fn test_default_pool_on_implicit_creation(
         .await;
 
     // Create a multicast pool using resource_helpers (doesn't auto-link)
-    let (mcast_pool, _) = nexus_test_utils::resource_helpers::create_multicast_ip_pool(
-        &client,
-        "default-mcast-pool",
-        None,
-    )
-    .await;
+    let (mcast_pool, _) =
+        nexus_test_utils::resource_helpers::create_multicast_ip_pool(
+            &client,
+            "default-mcast-pool",
+            None,
+        )
+        .await;
 
     // Link as default so it can be auto-discovered when joining by name
     link_ip_pool(&client, "default-mcast-pool", &DEFAULT_SILO.id(), true).await;
@@ -1216,7 +1216,7 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
 
     // Create project and IP pools in parallel
     // Multicast pool has small range (3 IPs: 224.10.0.1-224.10.0.3)
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool_with_range(
@@ -1306,7 +1306,7 @@ async fn test_automatic_pool_selection(cptestctx: &ControlPlaneTestContext) {
     let instance_name = "pool-selection-instance";
 
     // Setup: project and default IP pool in parallel
-    let (_, _) = ops::join2(
+    ops::join2(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
     )
@@ -1351,7 +1351,7 @@ async fn test_pool_exhaustion(cptestctx: &ControlPlaneTestContext) {
     let project_name = "pool-exhaustion-test-project";
 
     // Create project and IP pools in parallel (multicast pool has single IP)
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool_with_range(
@@ -1581,7 +1581,7 @@ async fn test_multicast_group_ip_version_conflict(
     // Setup: create project and default unicast IP pool
     let project_name = "ip-version-conflict-project";
     let instance_name = "ip-version-conflict-instance";
-    let (_, _) = ops::join2(
+    ops::join2(
         create_project(client, project_name),
         create_default_ip_pool(client),
     )

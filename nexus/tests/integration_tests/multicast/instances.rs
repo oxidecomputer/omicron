@@ -290,7 +290,7 @@ async fn test_multicast_group_attach_conflicts(
     let client = &cptestctx.external_client;
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_default_ip_pool(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool_with_range(
@@ -475,7 +475,7 @@ async fn test_multicast_group_instance_state_transitions(
     let client = &cptestctx.external_client;
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_default_ip_pool(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -599,7 +599,7 @@ async fn test_multicast_group_persistence_through_stop_start(
     let client = &cptestctx.external_client;
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_default_ip_pool(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -953,7 +953,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
     let instance_name = "never-started-instance";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pool(client),
         create_multicast_ip_pool_with_range(
@@ -1518,7 +1518,7 @@ async fn test_multicast_group_concurrent_member_migrations(
 ///
 /// This verifies that when an instance is stopped and started:
 /// a) Member goes to "Left" state on stop
-/// b)  Member is reactivated on start
+/// b) Member is reactivated on start
 /// c) The `source_ips` configured via explicit API are not wiped
 #[nexus_test]
 async fn test_source_ips_preserved_on_instance_restart(

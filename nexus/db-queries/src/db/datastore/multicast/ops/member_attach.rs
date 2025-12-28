@@ -68,7 +68,7 @@ pub(crate) enum AttachMemberError {
 }
 
 impl AttachMemberError {
-    /// Construct an `AttachMemberError` from a database error.
+    /// Construct an [`AttachMemberError`] from a database error.
     ///
     /// This catches the sentinel errors that indicate validation failures
     /// (group not found, instance not found) as well as constraint violations.

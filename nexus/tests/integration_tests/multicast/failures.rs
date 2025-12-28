@@ -159,7 +159,7 @@ async fn test_multicast_reconciler_state_consistency_validation(
     let project_name = "test-project";
 
     // Setup: project and pools
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -263,7 +263,7 @@ async fn test_dpd_failure_during_creating_state(
     let instance_name = "creating-fail-instance";
 
     // Setup: project, pools
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -324,7 +324,7 @@ async fn test_dpd_failure_during_active_state(
     let instance_name = "active-fail-instance";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -400,7 +400,7 @@ async fn test_dpd_failure_during_deleting_state(
     let instance_name = "deleting-fail-instance";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -492,7 +492,7 @@ async fn test_multicast_group_members_during_dpd_failure(
     let instance_name = "member-test-instance";
 
     // Setup: project, pools
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -590,7 +590,7 @@ async fn test_implicit_creation_with_dpd_failure(
     let instance_name = "implicit-create-instance";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "implicit-create-pool"),
@@ -662,7 +662,7 @@ async fn test_implicit_deletion_with_dpd_failure(
     let instance_name = "implicit-delete-instance";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "implicit-delete-pool"),
@@ -741,7 +741,7 @@ async fn test_concurrent_implicit_creation_race(
     let group_name = "concurrent-implicit-create-group";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "concurrent-implicit-create-pool"),
@@ -828,7 +828,7 @@ async fn test_implicit_deletion_race_with_instance_join(
     let group_name = "delete-race-group";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "delete-race-pool"),
@@ -970,7 +970,7 @@ async fn test_multicast_join_deleted_instance(
     let remaining_instance = "remaining-instance";
 
     // Setup: project and pools
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -1034,7 +1034,7 @@ async fn test_drift_correction_missing_group_in_dpd(
     let instance_name = "drift-test-instance";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
         create_default_ip_pool(&client),
         create_multicast_ip_pool(&client, "drift-pool"),
@@ -1121,7 +1121,7 @@ async fn test_member_joining_to_left_on_instance_stop(
     let instance_name = "joining-to-left-instance";
 
     // Setup: Create project and pools
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_default_ip_pool(&client),
         create_project(client, project_name),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -1202,7 +1202,7 @@ async fn test_left_member_waits_for_group_active(
     let instance_name = "left-waits-instance";
 
     // Setup: Create project and pools
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_default_ip_pool(&client),
         create_project(client, project_name),
         create_multicast_ip_pool(&client, "mcast-pool"),
