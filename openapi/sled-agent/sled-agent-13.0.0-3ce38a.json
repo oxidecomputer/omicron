@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2.0.0"
+    "version": "13.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -209,16 +209,39 @@
         }
       }
     },
-    "/chicken-switch/destroy-orphaned-datasets": {
+    "/debug/switch-zone-policy": {
+      "get": {
+        "summary": "A debugging endpoint only used by `omdb` that allows us to test",
+        "description": "restarting the switch zone without restarting sled-agent. See <https://github.com/oxidecomputer/omicron/issues/8480> for context.",
+        "operationId": "debug_operator_switch_zone_policy_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSwitchZonePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "put": {
-        "summary": "This endpoint sets the `destroy_orphaned_datasets` chicken switch",
-        "description": "(allowing sled-agent to delete datasets it believes are orphaned). It will be removed with omicron#6177.",
-        "operationId": "chicken_switch_destroy_orphaned_datasets_put",
+        "summary": "A debugging endpoint only used by `omdb` that allows us to test",
+        "description": "restarting the switch zone without restarting sled-agent. See <https://github.com/oxidecomputer/omicron/issues/8480> for context.\n\nSetting the switch zone policy is asynchronous and inherently racy with the standard process of starting the switch zone. If the switch zone is in the process of being started or stopped when this policy is changed, the new policy may not take effect until that transition completes.",
+        "operationId": "debug_operator_switch_zone_policy_put",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChickenSwitchDestroyOrphanedDatasets"
+                "$ref": "#/components/schemas/OperatorSwitchZonePolicy"
               }
             }
           },
@@ -332,6 +355,84 @@
         }
       }
     },
+    "/local-storage/{zpool_id}/{dataset_id}": {
+      "post": {
+        "summary": "Create a local storage dataset",
+        "operationId": "local_storage_dataset_ensure",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DatasetUuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExternalZpoolUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalStorageDatasetEnsureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a local storage dataset",
+        "operationId": "local_storage_dataset_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DatasetUuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExternalZpoolUuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/network-bootstore-config": {
       "get": {
         "summary": "This API endpoint is only reading the local sled agent's view of the",
@@ -407,6 +508,34 @@
         }
       }
     },
+    "/probes": {
+      "put": {
+        "summary": "Update the entire set of probe zones on this sled.",
+        "description": "Probe zones are used to debug networking configuration. They look similar to instances, in that they have an OPTE port on a VPC subnet and external addresses, but no actual VM.",
+        "operationId": "probes_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sled-identifiers": {
       "get": {
         "summary": "Fetch sled identifiers",
@@ -418,29 +547,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SledIdentifiers"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sled-role": {
-      "get": {
-        "operationId": "sled_role_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledRole"
                 }
               }
             }
@@ -813,7 +919,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -822,7 +928,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -862,7 +968,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -871,7 +977,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -880,7 +986,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -913,7 +1019,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -922,7 +1028,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -931,7 +1037,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -967,7 +1073,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -976,7 +1082,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -985,7 +1091,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1018,7 +1124,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1027,7 +1133,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1036,7 +1142,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1071,7 +1177,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1089,7 +1195,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1098,7 +1204,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1131,7 +1237,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1149,7 +1255,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1158,7 +1264,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1186,7 +1292,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1195,7 +1301,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1204,7 +1310,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           },
           {
@@ -1256,7 +1362,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1265,7 +1371,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1274,7 +1380,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1307,7 +1413,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1316,7 +1422,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1325,7 +1431,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           }
         ],
@@ -1352,7 +1458,7 @@
             "description": "The dataset on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
           {
@@ -1361,7 +1467,7 @@
             "description": "The ID of the support bundle itself",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+              "$ref": "#/components/schemas/SupportBundleUuid"
             }
           },
           {
@@ -1370,7 +1476,7 @@
             "description": "The zpool on which this support bundle was provisioned",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              "$ref": "#/components/schemas/ZpoolUuid"
             }
           },
           {
@@ -1528,7 +1634,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1569,7 +1675,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1612,7 +1718,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1655,7 +1761,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1689,7 +1795,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1698,6 +1804,76 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/InstanceExternalIpBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}/multicast-group": {
+      "put": {
+        "operationId": "vmm_join_multicast_group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PropolisUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMulticastBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "vmm_leave_multicast_group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PropolisUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMulticastBody"
               }
             }
           },
@@ -1725,7 +1901,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -1756,7 +1932,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -2194,6 +2370,7 @@
         ]
       },
       "ArtifactConfig": {
+        "description": "Artifact configuration.\n\nThis type is used in both GET (response) and PUT (request) operations.",
         "type": "object",
         "properties": {
           "artifacts": {
@@ -2214,6 +2391,7 @@
         ]
       },
       "ArtifactCopyFromDepotBody": {
+        "description": "Request body for copying artifacts from a depot.",
         "type": "object",
         "properties": {
           "depot_base_url": {
@@ -2225,9 +2403,11 @@
         ]
       },
       "ArtifactCopyFromDepotResponse": {
+        "description": "Response for copying artifacts from a depot.",
         "type": "object"
       },
       "ArtifactListResponse": {
+        "description": "Response for listing artifacts.",
         "type": "object",
         "properties": {
           "generation": {
@@ -2248,6 +2428,7 @@
         ]
       },
       "ArtifactPutResponse": {
+        "description": "Response for putting an artifact.",
         "type": "object",
         "properties": {
           "datasets": {
@@ -2875,6 +3056,7 @@
         "additionalProperties": false
       },
       "BootstoreStatus": {
+        "description": "Status of the local bootstore node.",
         "type": "object",
         "properties": {
           "accepted_connections": {
@@ -2962,18 +3144,6 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
-      },
-      "ChickenSwitchDestroyOrphanedDatasets": {
-        "type": "object",
-        "properties": {
-          "destroy_orphans": {
-            "description": "If true, sled-agent will attempt to destroy durable ZFS datasets that it believes were associated with now-expunged Omicron zones.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "destroy_orphans"
-        ]
       },
       "Chipset": {
         "description": "A kind of virtual chipset.",
@@ -3822,7 +3992,7 @@
             "description": "The UUID of the dataset being requested",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+                "$ref": "#/components/schemas/DatasetUuid"
               }
             ]
           },
@@ -3876,6 +4046,43 @@
         "required": [
           "kind",
           "pool_name"
+        ]
+      },
+      "DatasetUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::DatasetUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "DelegatedZvol": {
+        "description": "Delegate a ZFS volume to a zone",
+        "oneOf": [
+          {
+            "description": "Delegate a slice of the local storage dataset present on this pool into the zone.",
+            "type": "object",
+            "properties": {
+              "dataset_id": {
+                "$ref": "#/components/schemas/DatasetUuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "local_storage"
+                ]
+              },
+              "zpool_id": {
+                "$ref": "#/components/schemas/ExternalZpoolUuid"
+              }
+            },
+            "required": [
+              "dataset_id",
+              "type",
+              "zpool_id"
+            ]
+          }
         ]
       },
       "DhcpConfig": {
@@ -4293,7 +4500,7 @@
         ]
       },
       "EarlyNetworkConfig": {
-        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`crate::rack_init::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
+        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from `RackInitializeRequest` necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
         "type": "object",
         "properties": {
           "body": {
@@ -4360,6 +4567,7 @@
         ]
       },
       "EstablishedConnection": {
+        "description": "An established connection to a bootstore peer.",
         "type": "object",
         "properties": {
           "addr": {
@@ -4372,6 +4580,117 @@
         "required": [
           "addr",
           "baseboard"
+        ]
+      },
+      "ExternalIp": {
+        "description": "An external IP address used by a probe.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "description": "The first port used by the address.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "description": "The external IP address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "description": "The kind of address this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpKind"
+              }
+            ]
+          },
+          "last_port": {
+            "description": "The last port used by the address.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "kind",
+          "last_port"
+        ]
+      },
+      "ExternalIpConfig": {
+        "description": "A single- or dual-stack external IP configuration.",
+        "oneOf": [
+          {
+            "description": "Single-stack IPv4 external IP configuration.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "v4"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/ExternalIpv4Config"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Single-stack IPv6 external IP configuration.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "v6"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/ExternalIpv6Config"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Both IPv4 and IPv6 external IP configuration.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dual_stack"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "v4": {
+                    "$ref": "#/components/schemas/ExternalIpv4Config"
+                  },
+                  "v6": {
+                    "$ref": "#/components/schemas/ExternalIpv6Config"
+                  }
+                },
+                "required": [
+                  "v4",
+                  "v6"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "ExternalIpGatewayMap": {
@@ -4396,6 +4715,79 @@
         "required": [
           "mappings"
         ]
+      },
+      "ExternalIpv4Config": {
+        "description": "External IP address configuration.\n\nThis encapsulates all the external addresses of a single IP version, including source NAT, Ephemeral, and Floating IPs. Note that not all of these need to be specified, but this type can only be constructed if _at least one_ of them is.",
+        "type": "object",
+        "properties": {
+          "ephemeral_ip": {
+            "nullable": true,
+            "description": "An Ephemeral address for in- and outbound connectivity.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "floating_ips": {
+            "description": "Additional Floating IPs for in- and outbound connectivity.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          },
+          "source_nat": {
+            "nullable": true,
+            "description": "Source NAT configuration, for outbound-only connectivity.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourceNatConfigV4"
+              }
+            ]
+          }
+        },
+        "required": [
+          "floating_ips"
+        ]
+      },
+      "ExternalIpv6Config": {
+        "description": "External IP address configuration.\n\nThis encapsulates all the external addresses of a single IP version, including source NAT, Ephemeral, and Floating IPs. Note that not all of these need to be specified, but this type can only be constructed if _at least one_ of them is.",
+        "type": "object",
+        "properties": {
+          "ephemeral_ip": {
+            "nullable": true,
+            "description": "An Ephemeral address for in- and outbound connectivity.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "floating_ips": {
+            "description": "Additional Floating IPs for in- and outbound connectivity.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          "source_nat": {
+            "nullable": true,
+            "description": "Source NAT configuration, for outbound-only connectivity.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourceNatConfigV6"
+              }
+            ]
+          }
+        },
+        "required": [
+          "floating_ips"
+        ]
+      },
+      "ExternalZpoolUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ExternalZpoolUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "FileStorageBackend": {
         "description": "A storage backend backed by a file in the host system's file system.",
@@ -4494,6 +4886,54 @@
         "type": "integer",
         "format": "uint8",
         "minimum": 0
+      },
+      "HealthMonitorInventory": {
+        "description": "Fields of sled-agent inventory reported by the health monitor subsystem.",
+        "type": "object",
+        "properties": {
+          "smf_services_in_maintenance": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SvcsInMaintenanceResult"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/SvcsInMaintenanceResult"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "smf_services_in_maintenance"
+        ]
       },
       "HostIdentifier": {
         "description": "A `HostIdentifier` represents either an IP host or network (v4 or v6), or an entire VPC (identified by its VNI). It is used in firewall rule host filters.",
@@ -4666,24 +5106,6 @@
         "minLength": 1,
         "maxLength": 7
       },
-      "IdMapDatasetConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/DatasetConfig"
-        }
-      },
-      "IdMapOmicronPhysicalDiskConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-        }
-      },
-      "IdMapOmicronZoneConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronZoneConfig"
-        }
-      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -4733,7 +5155,7 @@
             "description": "The ID of the instance for which this VMM is being created.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                "$ref": "#/components/schemas/InstanceUuid"
               }
             ]
           },
@@ -4863,18 +5285,76 @@
           "src_propolis_addr"
         ]
       },
+      "InstanceMulticastBody": {
+        "description": "Request body for multicast group operations.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "join": {
+                "$ref": "#/components/schemas/InstanceMulticastMembership"
+              }
+            },
+            "required": [
+              "join"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "leave": {
+                "$ref": "#/components/schemas/InstanceMulticastMembership"
+              }
+            },
+            "required": [
+              "leave"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "InstanceMulticastMembership": {
+        "description": "Represents a multicast group membership for an instance.\n\nIntroduced in v7.",
+        "type": "object",
+        "properties": {
+          "group_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        },
+        "required": [
+          "group_ip",
+          "sources"
+        ]
+      },
       "InstanceSledLocalConfig": {
         "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional.",
         "type": "object",
         "properties": {
+          "delegated_zvols": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DelegatedZvol"
+            }
+          },
           "dhcp_config": {
             "$ref": "#/components/schemas/DhcpConfig"
           },
-          "ephemeral_ip": {
+          "external_ips": {
             "nullable": true,
-            "description": "Zero or more external IP addresses (either floating or ephemeral), provided to an instance to allow inbound connectivity.",
-            "type": "string",
-            "format": "ip"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExternalIpConfig"
+              }
+            ]
           },
           "firewall_rules": {
             "type": "array",
@@ -4882,33 +5362,29 @@
               "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
             }
           },
-          "floating_ips": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
-            }
-          },
           "hostname": {
             "$ref": "#/components/schemas/Hostname"
+          },
+          "multicast_groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceMulticastMembership"
+            }
           },
           "nics": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NetworkInterface"
             }
-          },
-          "source_nat": {
-            "$ref": "#/components/schemas/SourceNatConfig"
           }
         },
         "required": [
+          "delegated_zvols",
           "dhcp_config",
           "firewall_rules",
-          "floating_ips",
           "hostname",
-          "nics",
-          "source_nat"
+          "multicast_groups",
+          "nics"
         ]
       },
       "InstanceSpecV0": {
@@ -4929,6 +5405,24 @@
           "components"
         ],
         "additionalProperties": false
+      },
+      "InstanceUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::InstanceUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "InternalZpoolUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::InternalZpoolUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "InternetGatewayRouterTarget": {
         "description": "An Internet Gateway router target.",
@@ -4992,6 +5486,9 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
+          "health_monitor": {
+            "$ref": "#/components/schemas/HealthMonitorInventory"
+          },
           "last_reconciliation": {
             "nullable": true,
             "allOf": [
@@ -5018,7 +5515,7 @@
             "type": "string"
           },
           "sled_id": {
-            "$ref": "#/components/schemas/TypedUuidForSledKind"
+            "$ref": "#/components/schemas/SledUuid"
           },
           "sled_role": {
             "$ref": "#/components/schemas/SledRole"
@@ -5046,6 +5543,7 @@
           "cpu_family",
           "datasets",
           "disks",
+          "health_monitor",
           "reconciler_status",
           "reservoir_size",
           "sled_agent_address",
@@ -5078,7 +5576,7 @@
             "description": "Although datasets mandated by the control plane will have UUIDs, datasets can be created (and have been created) without UUIDs.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+                "$ref": "#/components/schemas/DatasetUuid"
               }
             ]
           },
@@ -5176,7 +5674,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            "$ref": "#/components/schemas/ZpoolUuid"
           },
           "total_size": {
             "$ref": "#/components/schemas/ByteCount"
@@ -5185,6 +5683,15 @@
         "required": [
           "id",
           "total_size"
+        ]
+      },
+      "IpKind": {
+        "description": "The kind of external IP address of a probe.",
+        "type": "string",
+        "enum": [
+          "snat",
+          "ephemeral",
+          "floating"
         ]
       },
       "IpNet": {
@@ -5318,6 +5825,32 @@
           "status"
         ]
       },
+      "LocalStorageDatasetEnsureRequest": {
+        "description": "Dataset and Volume details for a Local Storage dataset ensure request.",
+        "type": "object",
+        "properties": {
+          "dataset_size": {
+            "description": "Size of the parent dataset",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "volume_size": {
+            "description": "Size of the zvol",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "dataset_size",
+          "volume_size"
+        ]
+      },
       "M2Slot": {
         "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
         "type": "string",
@@ -5334,6 +5867,151 @@
         "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
         "minLength": 5,
         "maxLength": 17
+      },
+      "ManifestBootInventory": {
+        "description": "Inventory representation of zone artifacts on the boot disk.\n\nPart of [`ManifestInventory`].",
+        "type": "object",
+        "properties": {
+          "artifacts": {
+            "title": "IdOrdMap",
+            "description": "The artifacts on disk.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ZoneArtifactInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneArtifactInventory"
+            },
+            "uniqueItems": true
+          },
+          "source": {
+            "description": "The manifest source.\n\nIn production this is [`OmicronInstallManifestSource::Installinator`], but in some development and testing flows Sled Agent synthesizes zone manifests. In those cases, the source is [`OmicronInstallManifestSource::SledAgent`].",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronInstallManifestSource"
+              }
+            ]
+          }
+        },
+        "required": [
+          "artifacts",
+          "source"
+        ]
+      },
+      "ManifestInventory": {
+        "description": "Inventory representation of a manifest.\n\nPart of [`ZoneImageResolverInventory`].\n\nA manifest is used for both zones and reference measurements. A zone manifest is a listing of all the zones present in a system's install dataset. A measurement manifset is a listing of all the reference measurements present in a system's install dataset. This struct contains information about the install dataset gathered from a system.",
+        "type": "object",
+        "properties": {
+          "boot_disk_path": {
+            "description": "The full path to the zone manifest file on the boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "boot_inventory": {
+            "description": "The manifest read from the boot disk, and whether the manifest is valid.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ManifestBootInventory"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/ManifestBootInventory"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "non_boot_status": {
+            "title": "IdOrdMap",
+            "description": "Information about the install dataset on non-boot disks.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ManifestNonBootInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManifestNonBootInventory"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "boot_disk_path",
+          "boot_inventory",
+          "non_boot_status"
+        ]
+      },
+      "ManifestNonBootInventory": {
+        "description": "Inventory representation of a zone manifest on a non-boot disk.\n\nUnlike [`ManifestBootInventory`] which is structured since Reconfigurator makes decisions based on it, information about non-boot disks is purely advisory. For simplicity, we store information in an unstructured format.",
+        "type": "object",
+        "properties": {
+          "is_valid": {
+            "description": "Whether the status is valid.",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "A message describing the status.\n\nIf `is_valid` is true, then the message describes the list of artifacts found and their hashes.\n\nIf `is_valid` is false, then this message describes the reason for the invalid status. This could include errors reading the zone manifest, or zone file mismatches.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The full path to the zone manifest JSON on the non-boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "zpool_id": {
+            "description": "The ID of the non-boot zpool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InternalZpoolUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "is_valid",
+          "message",
+          "path",
+          "zpool_id"
+        ]
       },
       "MigrationFailureInjector": {
         "description": "Describes a synthetic device that registers for VM lifecycle notifications and returns errors during attempts to migrate.\n\nThis is only supported by Propolis servers compiled with the `failure-injection` feature.",
@@ -5426,7 +6104,7 @@
             "description": "The ID of the MUPdate override.\n\nThis is unique and generated by Installinator each time it is run. During a MUPdate, each sled gets a MUPdate override ID. (The ID is shared across boot disks and non-boot disks, though.)",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+                "$ref": "#/components/schemas/MupdateOverrideUuid"
               }
             ]
           }
@@ -5537,7 +6215,7 @@
             "description": "The non-boot zpool ID.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForInternalZpoolKind"
+                "$ref": "#/components/schemas/InternalZpoolUuid"
               }
             ]
           }
@@ -5548,6 +6226,24 @@
           "path",
           "zpool_id"
         ]
+      },
+      "MupdateOverrideUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MupdateOverrideUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "MupdateUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MupdateUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "Name": {
         "title": "A name unique within the parent collection",
@@ -5565,9 +6261,8 @@
             "type": "string",
             "format": "uuid"
           },
-          "ip": {
-            "type": "string",
-            "format": "ip"
+          "ip_config": {
+            "$ref": "#/components/schemas/PrivateIpConfig"
           },
           "kind": {
             "$ref": "#/components/schemas/NetworkInterfaceKind"
@@ -5586,29 +6281,18 @@
             "format": "uint8",
             "minimum": 0
           },
-          "subnet": {
-            "$ref": "#/components/schemas/IpNet"
-          },
-          "transit_ips": {
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IpNet"
-            }
-          },
           "vni": {
             "$ref": "#/components/schemas/Vni"
           }
         },
         "required": [
           "id",
-          "ip",
+          "ip_config",
           "kind",
           "mac",
           "name",
           "primary",
           "slot",
-          "subnet",
           "vni"
         ]
       },
@@ -5716,17 +6400,61 @@
         ],
         "additionalProperties": false
       },
+      "OmicronInstallManifestSource": {
+        "description": "The source of truth for an Omicron zone manifest.",
+        "oneOf": [
+          {
+            "description": "The manifest was written out by installinator and the mupdate process.",
+            "type": "object",
+            "properties": {
+              "mupdate_id": {
+                "description": "The UUID of the mupdate.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/MupdateUuid"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "installinator"
+                ]
+              }
+            },
+            "required": [
+              "mupdate_id",
+              "source"
+            ]
+          },
+          {
+            "description": "The zone manifest was not found during the install process. A synthetic zone manifest was generated by Sled Agent by looking at all the `.tar.gz` files in the install dataset.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "sled_agent"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          }
+        ]
+      },
       "OmicronPhysicalDiskConfig": {
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+            "$ref": "#/components/schemas/PhysicalDiskUuid"
           },
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
           },
           "pool_id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            "$ref": "#/components/schemas/ZpoolUuid"
           }
         },
         "required": [
@@ -5740,10 +6468,38 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "$ref": "#/components/schemas/IdMapDatasetConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/DatasetConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DatasetConfig"
+            }
           },
           "disks": {
-            "$ref": "#/components/schemas/IdMapOmicronPhysicalDiskConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+            }
           },
           "generation": {
             "$ref": "#/components/schemas/Generation"
@@ -5767,12 +6523,26 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+                "$ref": "#/components/schemas/MupdateOverrideUuid"
               }
             ]
           },
           "zones": {
-            "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronZoneConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronZoneConfig"
+            }
           }
         },
         "required": [
@@ -5796,7 +6566,7 @@
             ]
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+            "$ref": "#/components/schemas/OmicronZoneUuid"
           },
           "image_source": {
             "default": {
@@ -5869,50 +6639,6 @@
           }
         ]
       },
-      "OmicronZoneManifestSource": {
-        "description": "The source of truth for an Omicron zone manifest.",
-        "oneOf": [
-          {
-            "description": "The manifest was written out by installinator and the mupdate process.",
-            "type": "object",
-            "properties": {
-              "mupdate_id": {
-                "description": "The UUID of the mupdate.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/TypedUuidForMupdateKind"
-                  }
-                ]
-              },
-              "source": {
-                "type": "string",
-                "enum": [
-                  "installinator"
-                ]
-              }
-            },
-            "required": [
-              "mupdate_id",
-              "source"
-            ]
-          },
-          {
-            "description": "The zone manifest was not found during the install process. A synthetic zone manifest was generated by Sled Agent by looking at all the `.tar.gz` files in the install dataset.",
-            "type": "object",
-            "properties": {
-              "source": {
-                "type": "string",
-                "enum": [
-                  "sled_agent"
-                ]
-              }
-            },
-            "required": [
-              "source"
-            ]
-          }
-        ]
-      },
       "OmicronZoneType": {
         "description": "Describes what kind of zone this is (i.e., what component is running in it) as well as any type-specific configuration",
         "oneOf": [
@@ -5951,7 +6677,7 @@
                 "description": "The SNAT configuration for outbound connections.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/SourceNatConfig"
+                    "$ref": "#/components/schemas/SourceNatConfigGeneric"
                   }
                 ]
               },
@@ -6220,6 +6946,13 @@
                 "description": "The address at which the internal nexus server is reachable.",
                 "type": "string"
               },
+              "lockstep_port": {
+                "description": "The port at which the internal lockstep server is reachable. This shares the same IP address with `internal_address`.",
+                "default": 12232,
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
               "nic": {
                 "description": "The service vNIC providing external connectivity using OPTE.",
                 "allOf": [
@@ -6264,6 +6997,50 @@
           }
         ]
       },
+      "OmicronZoneUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::OmicronZoneUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "OperatorSwitchZonePolicy": {
+        "description": "Policy allowing an operator (via `omdb`) to control whether the switch zone is started or stopped.\n\nThis is an _extremely_ dicey operation in general; a stopped switch zone leaves the rack inoperable! We are only adding this as a workaround and test tool for handling sidecar resets; see <https://github.com/oxidecomputer/omicron/issues/8480> for background.",
+        "oneOf": [
+          {
+            "description": "Start the switch zone if a switch is present.\n\nThis is the default policy.",
+            "type": "object",
+            "properties": {
+              "policy": {
+                "type": "string",
+                "enum": [
+                  "start_if_switch_present"
+                ]
+              }
+            },
+            "required": [
+              "policy"
+            ]
+          },
+          {
+            "description": "Even if a switch zone is present, stop the switch zone.",
+            "type": "object",
+            "properties": {
+              "policy": {
+                "type": "string",
+                "enum": [
+                  "stop_despite_switch_presence"
+                ]
+              }
+            },
+            "required": [
+              "policy"
+            ]
+          }
+        ]
+      },
       "OrphanedDataset": {
         "type": "object",
         "properties": {
@@ -6274,7 +7051,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+                "$ref": "#/components/schemas/DatasetUuid"
               }
             ]
           },
@@ -6384,6 +7161,15 @@
           "pci_path"
         ],
         "additionalProperties": false
+      },
+      "PhysicalDiskUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PhysicalDiskUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "PortConfigV2": {
         "type": "object",
@@ -6515,13 +7301,230 @@
         ]
       },
       "PriorityOrder": {
-        "description": "The priority order for bundles during cleanup.\n\nBundles are sorted along the dimensions in [`PriorityDimension`], with each dimension appearing exactly once. During cleanup, lesser-priority bundles are pruned first, to maintain the dataset quota. Note that bundles are sorted by each dimension in the order in which they appear, with each dimension having higher priority than the next.",
+        "description": "The priority order for bundles during cleanup.\n\nBundles are sorted along the dimensions in [`PriorityDimension`], with each dimension appearing exactly once. During cleanup, lesser-priority bundles are pruned first, to maintain the dataset quota. Note that bundles are sorted by each dimension in the order in which they appear, with each dimension having higher priority than the next.\n\nTODO: The serde deserializer does not currently verify uniqueness of dimensions.",
         "type": "array",
         "items": {
           "$ref": "#/components/schemas/PriorityDimension"
         },
         "minItems": 2,
         "maxItems": 2
+      },
+      "PrivateIpConfig": {
+        "description": "VPC-private IP address configuration for a network interface.",
+        "oneOf": [
+          {
+            "description": "The interface has only an IPv4 configuration.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "v4"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/PrivateIpv4Config"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The interface has only an IPv6 configuration.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "v6"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/PrivateIpv6Config"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The interface is dual-stack.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dual_stack"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "v4": {
+                    "description": "The interface's IPv4 configuration.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/PrivateIpv4Config"
+                      }
+                    ]
+                  },
+                  "v6": {
+                    "description": "The interface's IPv6 configuration.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/PrivateIpv6Config"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "v4",
+                  "v6"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "PrivateIpv4Config": {
+        "description": "VPC-private IPv4 configuration for a network interface.",
+        "type": "object",
+        "properties": {
+          "ip": {
+            "description": "VPC-private IP address.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "subnet": {
+            "description": "The IP subnet.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            ]
+          },
+          "transit_ips": {
+            "description": "Additional networks on which the interface can send / receive traffic.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv4Net"
+            }
+          }
+        },
+        "required": [
+          "ip",
+          "subnet"
+        ]
+      },
+      "PrivateIpv6Config": {
+        "description": "VPC-private IPv6 configuration for a network interface.",
+        "type": "object",
+        "properties": {
+          "ip": {
+            "description": "VPC-private IP address.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "subnet": {
+            "description": "The IP subnet.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
+          },
+          "transit_ips": {
+            "description": "Additional networks on which the interface can send / receive traffic.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv6Net"
+            }
+          }
+        },
+        "required": [
+          "ip",
+          "subnet",
+          "transit_ips"
+        ]
+      },
+      "ProbeCreate": {
+        "description": "Parameters used to create a probe.",
+        "type": "object",
+        "properties": {
+          "external_ips": {
+            "description": "The external IP addresses assigned to the probe.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalIp"
+            }
+          },
+          "id": {
+            "description": "The ID for the probe.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProbeUuid"
+              }
+            ]
+          },
+          "interface": {
+            "description": "The probe's networking interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NetworkInterface"
+              }
+            ]
+          }
+        },
+        "required": [
+          "external_ips",
+          "id",
+          "interface"
+        ]
+      },
+      "ProbeSet": {
+        "description": "A set of probes that the target sled should run.",
+        "type": "object",
+        "properties": {
+          "probes": {
+            "title": "IdHashMap",
+            "description": "The exact set of probes to run.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ProbeCreate"
+                }
+              ],
+              "path": "iddqd::IdHashMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeCreate"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "probes"
+        ]
+      },
+      "ProbeUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ProbeUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "QemuPvpanic": {
         "type": "object",
@@ -7139,6 +8142,15 @@
           }
         ]
       },
+      "SledUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::SledUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "SledVmmState": {
         "description": "A wrapper type containing a sled's total knowledge of the state of a VMM.",
         "type": "object",
@@ -7233,7 +8245,7 @@
         ],
         "additionalProperties": false
       },
-      "SourceNatConfig": {
+      "SourceNatConfigGeneric": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
         "properties": {
@@ -7247,6 +8259,62 @@
             "description": "The external address provided to the instance or service.",
             "type": "string",
             "format": "ip"
+          },
+          "last_port": {
+            "description": "The last port used for source NAT, also inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "last_port"
+        ]
+      },
+      "SourceNatConfigV4": {
+        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "description": "The first port used for source NAT, inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "description": "The external address provided to the instance or service.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "last_port": {
+            "description": "The last port used for source NAT, also inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "last_port"
+        ]
+      },
+      "SourceNatConfigV6": {
+        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "description": "The first port used for source NAT, inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "description": "The external address provided to the instance or service.",
+            "type": "string",
+            "format": "ipv6"
           },
           "last_port": {
             "description": "The last port used for source NAT, also inclusive.",
@@ -7316,7 +8384,7 @@
             "description": "Uuid of the Sled Agent to be created.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForSledKind"
+                "$ref": "#/components/schemas/SledUuid"
               }
             ]
           },
@@ -7357,14 +8425,14 @@
         "minimum": 0
       },
       "SupportBundleMetadata": {
-        "description": "Metadata about a support bundle",
+        "description": "Metadata about a support bundle.",
         "type": "object",
         "properties": {
           "state": {
             "$ref": "#/components/schemas/SupportBundleState"
           },
           "support_bundle_id": {
-            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            "$ref": "#/components/schemas/SupportBundleUuid"
           }
         },
         "required": [
@@ -7373,10 +8441,63 @@
         ]
       },
       "SupportBundleState": {
+        "description": "State of a support bundle.",
         "type": "string",
         "enum": [
           "complete",
           "incomplete"
+        ]
+      },
+      "SupportBundleUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::SupportBundleUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "SvcInMaintenance": {
+        "description": "Information about an SMF service that is enabled but not running",
+        "type": "object",
+        "properties": {
+          "fmri": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fmri",
+          "zone"
+        ]
+      },
+      "SvcsInMaintenanceResult": {
+        "description": "Lists services in maintenance status if any, and the time the health check for SMF services ran",
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SvcInMaintenance"
+            }
+          },
+          "time_of_status": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "errors",
+          "services"
         ]
       },
       "SwitchLocation": {
@@ -7448,46 +8569,6 @@
             "format": "int32"
           }
         }
-      },
-      "TypedUuidForDatasetKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForInstanceKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForInternalZpoolKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForMupdateKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForMupdateOverrideKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForOmicronZoneKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForPhysicalDiskKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSledKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSupportBundleKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForZpoolKind": {
-        "type": "string",
-        "format": "uuid"
       },
       "UplinkAddressConfig": {
         "type": "object",
@@ -7609,6 +8690,7 @@
         ]
       },
       "VmmIssueDiskSnapshotRequestBody": {
+        "description": "Request body for VMM disk snapshot requests.",
         "type": "object",
         "properties": {
           "snapshot_id": {
@@ -7621,6 +8703,7 @@
         ]
       },
       "VmmIssueDiskSnapshotRequestResponse": {
+        "description": "Response for VMM disk snapshot requests.",
         "type": "object",
         "properties": {
           "snapshot_id": {
@@ -7697,7 +8780,7 @@
         ]
       },
       "VmmSpec": {
-        "description": "Specifies the virtual hardware configuration of a new Propolis VMM in the form of a Propolis instance specification.\n\nSled-agent expects that when an instance spec is provided alongside an `InstanceSledLocalConfig` to initialize a new instance, the NIC IDs in that config's network interface list will match the IDs of the virtio network backends in the instance spec.",
+        "description": "Specifies the virtual hardware configuration of a new Propolis VMM in the form of a Propolis instance specification.",
         "allOf": [
           {
             "$ref": "#/components/schemas/InstanceSpecV0"
@@ -7973,7 +9056,7 @@
         ]
       },
       "ZoneArtifactInventory": {
-        "description": "Inventory representation of a single zone artifact on a boot disk.\n\nPart of [`ZoneManifestBootInventory`].",
+        "description": "Inventory representation of a single zone artifact on a boot disk.\n\nPart of [`ManifestBootInventory`].",
         "type": "object",
         "properties": {
           "expected_hash": {
@@ -8148,7 +9231,7 @@
             "description": "The zone manifest status.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ZoneManifestInventory"
+                "$ref": "#/components/schemas/ManifestInventory"
               }
             ]
           }
@@ -8158,158 +9241,27 @@
           "zone_manifest"
         ]
       },
-      "ZoneManifestBootInventory": {
-        "description": "Inventory representation of zone artifacts on the boot disk.\n\nPart of [`ZoneManifestInventory`].",
-        "type": "object",
-        "properties": {
-          "artifacts": {
-            "title": "IdOrdMap",
-            "description": "The artifacts on disk.",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/ZoneArtifactInventory"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ZoneArtifactInventory"
-            },
-            "uniqueItems": true
-          },
-          "source": {
-            "description": "The manifest source.\n\nIn production this is [`OmicronZoneManifestSource::Installinator`], but in some development and testing flows Sled Agent synthesizes zone manifests. In those cases, the source is [`OmicronZoneManifestSource::SledAgent`].",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/OmicronZoneManifestSource"
-              }
-            ]
-          }
-        },
-        "required": [
-          "artifacts",
-          "source"
-        ]
-      },
-      "ZoneManifestInventory": {
-        "description": "Inventory representation of a zone manifest.\n\nPart of [`ZoneImageResolverInventory`].\n\nA zone manifest is a listing of all the zones present in a system's install dataset. This struct contains information about the install dataset gathered from a system.",
-        "type": "object",
-        "properties": {
-          "boot_disk_path": {
-            "description": "The full path to the zone manifest file on the boot disk.",
-            "type": "string",
-            "format": "Utf8PathBuf"
-          },
-          "boot_inventory": {
-            "description": "The manifest read from the boot disk, and whether the manifest is valid.",
-            "x-rust-type": {
-              "crate": "std",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/ZoneManifestBootInventory"
-                },
-                {
-                  "type": "string"
-                }
-              ],
-              "path": "::std::result::Result",
-              "version": "*"
-            },
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "ok": {
-                    "$ref": "#/components/schemas/ZoneManifestBootInventory"
-                  }
-                },
-                "required": [
-                  "ok"
-                ]
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "err"
-                ]
-              }
-            ]
-          },
-          "non_boot_status": {
-            "title": "IdOrdMap",
-            "description": "Information about the install dataset on non-boot disks.",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/ZoneManifestNonBootInventory"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ZoneManifestNonBootInventory"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "boot_disk_path",
-          "boot_inventory",
-          "non_boot_status"
-        ]
-      },
-      "ZoneManifestNonBootInventory": {
-        "description": "Inventory representation of a zone manifest on a non-boot disk.\n\nUnlike [`ZoneManifestBootInventory`] which is structured since Reconfigurator makes decisions based on it, information about non-boot disks is purely advisory. For simplicity, we store information in an unstructured format.",
-        "type": "object",
-        "properties": {
-          "is_valid": {
-            "description": "Whether the status is valid.",
-            "type": "boolean"
-          },
-          "message": {
-            "description": "A message describing the status.\n\nIf `is_valid` is true, then the message describes the list of artifacts found and their hashes.\n\nIf `is_valid` is false, then this message describes the reason for the invalid status. This could include errors reading the zone manifest, or zone file mismatches.",
-            "type": "string"
-          },
-          "path": {
-            "description": "The full path to the zone manifest JSON on the non-boot disk.",
-            "type": "string",
-            "format": "Utf8PathBuf"
-          },
-          "zpool_id": {
-            "description": "The ID of the non-boot zpool.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForInternalZpoolKind"
-              }
-            ]
-          }
-        },
-        "required": [
-          "is_valid",
-          "message",
-          "path",
-          "zpool_id"
-        ]
-      },
       "ZpoolName": {
         "title": "The name of a Zpool",
         "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique",
         "type": "string",
         "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       },
-      "TypedUuidForPropolisKind": {
+      "ZpoolUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ZpoolUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "PropolisUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PropolisUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       }

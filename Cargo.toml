@@ -458,8 +458,8 @@ dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "ab30fa91227fd478bfe0e023310ca83dec0bc22b" }
 dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.2.4"
-dropshot-api-manager-types = "0.2.4"
+dropshot-api-manager = "0.3.0"
+dropshot-api-manager-types = "0.3.0"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -1001,8 +1001,8 @@ opt-level = 3
 # drift = { path = "../drift" }
 # dropshot = { path = "../dropshot/dropshot" }
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
-# dropshot-api-manager = { path = "../dropshot-api-manager/crates/dropshot-api-manager" }
-# dropshot-api-manager-types = { path = "../dropshot-api-manager/crates/dropshot-api-manager-types" }
+dropshot-api-manager = { git = "https://github.com/oxidecomputer/dropshot-api-manager", branch = "sunshowers/spr/add-git-ref-storage-for-older-api-versions" }
+dropshot-api-manager-types = { git = "https://github.com/oxidecomputer/dropshot-api-manager", branch = "sunshowers/spr/add-git-ref-storage-for-older-api-versions" }
 # progenitor = { path = "../progenitor/progenitor" }
 # progenitor-client = { path = "../progenitor/progenitor-client" }
 # steno = { path = "../steno" }
