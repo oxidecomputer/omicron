@@ -759,7 +759,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -782,7 +782,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -1745,7 +1745,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3094,9 +3094,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager"
-version = "0.2.4"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aee20ca777e652264a3334e41c9b548bdd848562e3918541ab04d6ceb3b7dd56"
+checksum = "f45b53c5eab26bfb0246e53c6c586558331c6e4efa3dc29ff9fb0373a6c3d87a"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3111,7 +3111,7 @@ dependencies = [
  "indent_write",
  "newtype_derive",
  "openapiv3",
- "owo-colors 4.2.2",
+ "owo-colors 4.2.3",
  "paste",
  "semver 1.0.27",
  "serde_json",
@@ -3124,9 +3124,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager-types"
-version = "0.2.4"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0103ef0b1a219c1a620e0b01659f6a27185df697876388144b1fb9637123e63"
+checksum = "b78a68bd7f0470aec18807e53b0f975661453dae80995c03bbb370d9d0c6eb6f"
 dependencies = [
  "anyhow",
  "camino",
@@ -8561,7 +8561,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "owo-colors 4.2.2",
+ "owo-colors 4.2.3",
  "oxide-tokio-rt",
  "oximeter-client",
  "oximeter-db",
@@ -9033,6 +9033,8 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.10.5",
+ "itertools 0.12.1",
+ "itertools 0.13.0",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -9342,9 +9344,9 @@ checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
 
 [[package]]
 name = "owo-colors"
-version = "4.2.2"
+version = "4.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48dd4f4a2c8405440fd0462561f0e5806bd0f77e86f51c761481bdd4018b545e"
+checksum = "9c6901729fa79e91a0913333229e9ca5dc725089d1c363b2f4b4760709dc4a52"
 
 [[package]]
 name = "oxide-client"
@@ -13497,7 +13499,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -15614,7 +15616,7 @@ dependencies = [
  "linear-map",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "owo-colors 4.2.2",
+ "owo-colors 4.2.3",
  "petgraph 0.8.2",
  "schemars 0.8.22",
  "serde",
@@ -16151,7 +16153,7 @@ dependencies = [
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
- "owo-colors 4.2.2",
+ "owo-colors 4.2.3",
  "proptest",
  "ratatui",
  "reqwest",
@@ -16194,7 +16196,7 @@ dependencies = [
  "maplit",
  "omicron-common",
  "omicron-workspace-hack",
- "owo-colors 4.2.2",
+ "owo-colors 4.2.3",
  "oxnet",
  "schemars 0.8.22",
  "serde",
