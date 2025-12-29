@@ -313,7 +313,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
 
     let apis = ManagedApis::new(apis)
         .context("error creating ManagedApis")?
-        .with_validation(validate);
+        .with_validation(validate)
+        .with_git_ref_storage();
 
     Ok(apis)
 }
