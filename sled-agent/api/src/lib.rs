@@ -34,6 +34,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (13, TEST_COMMIT_HASH),
     (12, ADD_SMF_SERVICES_HEALTH_CHECK),
     (11, ADD_DUAL_STACK_EXTERNAL_IP_CONFIG),
     (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
