@@ -914,7 +914,7 @@ impl Downloader<'_> {
 
         match os_name()? {
             Os::Linux => {
-                let filename = "lldp";
+                let filename = "lldpd";
                 let path = download_dir.join(filename);
                 download_file_and_verify(
                     &self.log,
