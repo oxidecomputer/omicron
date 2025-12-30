@@ -26,8 +26,8 @@ use slog_error_chain::SlogInlineError;
 )]
 #[schemars(transparent)]
 pub struct Sha3_256Digest(
-    #[serde_as(as = "Hex")]
-    #[schemars(with = "String")]
+    #[serde(with = "serde_human_bytes::hex_array")]
+    #[schemars(schema_with = "hex_schema::<32>")]
     pub [u8; 32],
 );
 
@@ -57,8 +57,8 @@ impl std::fmt::Debug for Sha3_256Digest {
 )]
 #[schemars(transparent)]
 pub struct Salt(
-    #[serde_as(as = "Hex")]
-    #[schemars(with = "String")]
+    #[serde(with = "serde_human_bytes::hex_array")]
+    #[schemars(schema_with = "hex_schema::<32>")]
     pub [u8; 32],
 );
 
@@ -80,8 +80,9 @@ pub struct EncryptedRackSecrets {
     /// A random value used to derive the key to encrypt the rack secrets for
     /// prior committed epochs.
     pub salt: Salt,
+    /// Encrypted data.
     #[serde_as(as = "Hex")]
-    #[schemars(with = "String")]
+    #[schemars(schema_with = "hex_schema_unbounded")]
     pub data: Box<[u8]>,
 }
 
@@ -159,4 +160,28 @@ pub enum DecryptionError {
     /// be decoded.
     #[error("Plaintext length is invalid")]
     InvalidLength,
+}
+
+/// Produce an OpenAPI schema describing a hex array of a specific length (e.g.,
+/// a hash digest).
+///
+/// This is ripped from Tufaceous:
+/// https://github.com/oxidecomputer/tufaceous/blob/1eacfcf0cade44f77d433f31744dbee4abb96465/artifact/src/artifact.rs#L139-L151
+fn hex_schema<const N: usize>(
+    generator: &mut schemars::SchemaGenerator,
+) -> schemars::schema::Schema {
+    let mut schema: schemars::schema::SchemaObject =
+        <String>::json_schema(generator).into();
+    schema.format = Some(format!("hex string ({N} bytes)"));
+    schema.into()
+}
+
+/// Produce an OpenAPI schema describing a hex array of unknown length.
+fn hex_schema_unbounded(
+    generator: &mut schemars::SchemaGenerator,
+) -> schemars::schema::Schema {
+    let mut schema: schemars::schema::SchemaObject =
+        <String>::json_schema(generator).into();
+    schema.format = Some("hex string".to_string());
+    schema.into()
 }

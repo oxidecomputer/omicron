@@ -61,7 +61,6 @@ use sled_agent_types::instance::{
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
-use sled_agent_types::sled::BaseboardId;
 use sled_agent_types::support_bundle::{
     RangeRequestHeaders, SupportBundleFilePathParam,
     SupportBundleFinalizeQueryParams, SupportBundleListPathParam,
@@ -69,19 +68,25 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    CommitRequest, CommitStatus, CoordinatorStatus, LrtqUpgradeMsg, NodeStatus,
-    PrepareAndCommitRequest, ProxyCommitRequest, ProxyPrepareAndCommitRequest,
-    ReconfigureMsg,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
 };
+use sled_hardware_types::BaseboardId;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use trust_quorum_protocol::CommitRequest;
+use trust_quorum_protocol::LrtqUpgradeMsg;
+use trust_quorum_protocol::PrepareAndCommitRequest;
+use trust_quorum_protocol::ReconfigureMsg;
+use trust_quorum_types::status::CommitStatus;
+use trust_quorum_types::status::CoordinatorStatus;
+use trust_quorum_types::status::NodeStatus;
 
 use super::sled_agent::SledAgent;
 

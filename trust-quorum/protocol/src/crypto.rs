@@ -4,11 +4,11 @@
 
 //! Internal cryptographic constructs used by trust quorum.
 //!
-//! This module contains internal types (RackSecret, ReconstructedRackSecret, PlaintextRackSecrets)
-//! and free functions for cryptographic operations.
+//! This module contains internal types and free functions for cryptographic
+//! operations.
 //!
-//! The published API types (Sha3_256Digest, Salt, EncryptedRackSecrets, etc.) are defined in
-//! trust-quorum-types and re-exported from this crate's lib.rs.
+//! The published API types (Sha3_256Digest, Salt, EncryptedRackSecrets, etc.)
+//! are defined in trust-quorum-types and re-exported from this crate's lib.rs.
 
 use bootstore::trust_quorum::RackSecret as LrtqRackSecret;
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, aead, aead::Aead};
@@ -234,17 +234,6 @@ impl PartialEq for RackSecret {
 
 impl Eq for RackSecret {}
 
-/// Generate a new random salt.
-///
-/// This is a free function because `Salt` is defined in `trust-quorum-types` (for API versioning
-/// akin to RFD 619).
-pub fn new_salt() -> Salt {
-    let mut rng = OsRng;
-    let mut salt = [0u8; 32];
-    rng.try_fill_bytes(&mut salt).expect("fetched random bytes from OsRng");
-    Salt(salt)
-}
-
 /// Decrypt rack secrets from an `EncryptedRackSecrets` structure.
 ///
 /// This is a free function because `EncryptedRackSecrets` is defined in `trust-quorum-types` (for
@@ -335,7 +324,7 @@ impl PlaintextRackSecrets {
 
         // We generate a fresh salt because we should only be encrypting
         // once for this epoch. This is also why we consume `self`.
-        let salt = new_salt();
+        let salt = Salt::new();
         let key = derive_encryption_key_for_rack_secrets(
             rack_id,
             new_epoch,

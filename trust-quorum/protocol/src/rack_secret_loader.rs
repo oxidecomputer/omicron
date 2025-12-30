@@ -9,11 +9,12 @@ use std::collections::BTreeMap;
 
 use crate::crypto::{ReconstructedRackSecret, decrypt_rack_secrets};
 use crate::{
-    Alarm, BaseboardId, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind,
-    RackSecret, Share,
+    BaseboardId, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, RackSecret,
+    Share,
 };
 use daft::{BTreeMapDiff, Diffable, Leaf};
 use slog::{Logger, error, info, o};
+use trust_quorum_types::alarm::Alarm;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum LoadRackSecretError {
@@ -362,7 +363,7 @@ impl ShareCollector {
 mod tests {
     use super::*;
     use crate::{
-        NodeCallerCtx, NodeCommonCtx, NodeCtx, Sha3_256Digest, Threshold,
+        NodeCallerCtx, NodeCommonCtx, NodeCtx, Sha3_256Digest,
         crypto::PlaintextRackSecrets,
     };
     use assert_matches::assert_matches;
@@ -371,6 +372,7 @@ mod tests {
     use secrecy::ExposeSecret;
     use sha3::digest::const_oid::db::rfc1274::LAST_MODIFIED_BY;
     use std::collections::BTreeSet;
+    use trust_quorum_types::types::Threshold;
 
     const NUM_INITIAL_MEMBERS: u8 = 5;
 

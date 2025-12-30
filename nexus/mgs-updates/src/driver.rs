@@ -26,7 +26,7 @@ use nexus_types::internal_api::views::UpdateCompletedHow;
 use nexus_types::internal_api::views::WaitingStatus;
 use omicron_uuid_kinds::SpUpdateUuid;
 use qorb::resolver::AllBackends;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::VecDeque;

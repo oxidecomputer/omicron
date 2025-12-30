@@ -12,19 +12,20 @@
 //! This proxy mechanism is also useful during RSS and for general debugging
 //! purposes.
 
-use crate::task::{CommitStatus, NodeApiRequest, NodeStatus};
+use crate::task::NodeApiRequest;
 use debug_ignore::DebugIgnore;
 use derive_more::From;
 use iddqd::{IdHashItem, IdHashMap, id_upcast};
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task;
-use trust_quorum_protocol::{
-    CommitError, Configuration, Epoch, PrepareAndCommitError,
-};
+use trust_quorum_protocol::{CommitError, PrepareAndCommitError};
+use trust_quorum_types::configuration::Configuration;
+use trust_quorum_types::status::{CommitStatus, NodeStatus};
+use trust_quorum_types::types::Epoch;
 use uuid::Uuid;
 
 /// Requests that can be proxied to another node. Proxied requests should not be

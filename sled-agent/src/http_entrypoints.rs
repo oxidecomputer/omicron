@@ -49,7 +49,6 @@ use sled_agent_types::instance::{
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
-use sled_agent_types::sled::BaseboardId;
 use sled_agent_types::support_bundle::{
     RangeRequestHeaders, SupportBundleFilePathParam,
     SupportBundleFinalizeQueryParams, SupportBundleListPathParam,
@@ -57,15 +56,20 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    CommitRequest, CommitStatus, CoordinatorStatus, LrtqUpgradeMsg, NodeStatus,
-    PrepareAndCommitRequest, ProxyCommitRequest, ProxyPrepareAndCommitRequest,
-    ReconfigureMsg,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     CleanupPeriod, StorageLimit, ZoneBundleFilter, ZoneBundleId,
     ZoneBundleMetadata, ZonePathParam,
 };
+use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
+use trust_quorum_protocol::{
+    CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
+};
+use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
+
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
 use sled_diagnostics::{
@@ -1192,10 +1196,9 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let msg = body.into_inner();
 
-        sa.trust_quorum()
-            .reconfigure(msg)
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        sa.trust_quorum().reconfigure(msg).await.map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
 
         Ok(HttpResponseUpdatedNoContent())
     }
@@ -1207,10 +1210,9 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let msg = body.into_inner();
 
-        sa.trust_quorum()
-            .upgrade_from_lrtq(msg)
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        sa.trust_quorum().upgrade_from_lrtq(msg).await.map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
 
         Ok(HttpResponseUpdatedNoContent())
     }
@@ -1226,7 +1228,11 @@ impl SledAgentApi for SledAgentImpl {
             .trust_quorum()
             .commit(request.rack_id, request.epoch)
             .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+            .map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?;
 
         // Pending is not expected for commit operations - it indicates an error
         if status == CommitStatus::Pending {
@@ -1243,11 +1249,12 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
         let sa = request_context.context();
 
-        let status = sa
-            .trust_quorum()
-            .coordinator_status()
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        let status =
+            sa.trust_quorum().coordinator_status().await.map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?;
 
         Ok(HttpResponseOk(status))
     }
@@ -1263,7 +1270,11 @@ impl SledAgentApi for SledAgentImpl {
             .trust_quorum()
             .prepare_and_commit(request.config)
             .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+            .map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?;
 
         Ok(HttpResponseOk(status))
     }
@@ -1284,7 +1295,11 @@ impl SledAgentApi for SledAgentImpl {
                 request.request.epoch,
             )
             .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+            .map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?;
 
         // Pending is not expected for commit operations - it indicates an error
         if status == CommitStatus::Pending {
@@ -1308,7 +1323,11 @@ impl SledAgentApi for SledAgentImpl {
             .proxy()
             .prepare_and_commit(request.destination, request.request.config)
             .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+            .map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?;
 
         Ok(HttpResponseOk(status))
     }
@@ -1320,12 +1339,14 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let destination = query_params.into_inner();
 
-        let status = sa
-            .trust_quorum()
-            .proxy()
-            .status(destination)
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        let status =
+            sa.trust_quorum().proxy().status(destination).await.map_err(
+                |e| {
+                    HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                },
+            )?;
 
         Ok(HttpResponseOk(status))
     }

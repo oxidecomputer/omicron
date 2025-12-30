@@ -204,6 +204,7 @@ impl std::fmt::Display for Baseboard {
     Diffable,
 )]
 #[daft(leaf)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct BaseboardId {
     /// Oxide Part Number
     pub part_number: String,

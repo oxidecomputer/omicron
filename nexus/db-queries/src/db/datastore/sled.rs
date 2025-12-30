@@ -59,7 +59,7 @@ use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;

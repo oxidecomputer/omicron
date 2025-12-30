@@ -37,7 +37,7 @@ use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SpUpdateUuid;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog::debug;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;

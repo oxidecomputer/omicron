@@ -1069,24 +1069,24 @@ pub trait SledAgentApi {
 
     /// Initiate a trust quorum reconfiguration
     #[endpoint {
-        method = PUT,
+        method = POST,
         path = "/trust-quorum/configuration",
         versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_reconfigure(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::trust_quorum::ReconfigureMsg>,
+        body: TypedBody<trust_quorum_types::messages::ReconfigureMsg>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Initiate an upgrade from LRTQ
     #[endpoint {
-        method = PUT,
+        method = POST,
         path = "/trust-quorum/upgrade",
         versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_upgrade_from_lrtq(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::trust_quorum::LrtqUpgradeMsg>,
+        body: TypedBody<trust_quorum_types::messages::LrtqUpgradeMsg>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Commit a trust quorum configuration
@@ -1097,7 +1097,7 @@ pub trait SledAgentApi {
     }]
     async fn trust_quorum_commit(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::trust_quorum::CommitRequest>,
+        body: TypedBody<trust_quorum_types::messages::CommitRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get the coordinator status if this node is coordinating a reconfiguration
@@ -1109,7 +1109,7 @@ pub trait SledAgentApi {
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<Option<latest::trust_quorum::CoordinatorStatus>>,
+        HttpResponseOk<Option<trust_quorum_types::status::CoordinatorStatus>>,
         HttpError,
     >;
 
@@ -1121,8 +1121,11 @@ pub trait SledAgentApi {
     }]
     async fn trust_quorum_prepare_and_commit(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<latest::trust_quorum::PrepareAndCommitRequest>,
-    ) -> Result<HttpResponseOk<latest::trust_quorum::CommitStatus>, HttpError>;
+        body: TypedBody<trust_quorum_types::messages::PrepareAndCommitRequest>,
+    ) -> Result<
+        HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+        HttpError,
+    >;
 
     /// Proxy a commit operation to another trust quorum node
     #[endpoint {
@@ -1144,7 +1147,10 @@ pub trait SledAgentApi {
     async fn trust_quorum_proxy_prepare_and_commit(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<latest::trust_quorum::ProxyPrepareAndCommitRequest>,
-    ) -> Result<HttpResponseOk<latest::trust_quorum::CommitStatus>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+        HttpError,
+    >;
 
     /// Proxy a status request to another trust quorum node
     #[endpoint {
@@ -1154,6 +1160,6 @@ pub trait SledAgentApi {
     }]
     async fn trust_quorum_proxy_status(
         request_context: RequestContext<Self::Context>,
-        query_params: Query<latest::sled::BaseboardId>,
-    ) -> Result<HttpResponseOk<latest::trust_quorum::NodeStatus>, HttpError>;
+        query_params: Query<sled_hardware_types::BaseboardId>,
+    ) -> Result<HttpResponseOk<trust_quorum_types::status::NodeStatus>, HttpError>;
 }

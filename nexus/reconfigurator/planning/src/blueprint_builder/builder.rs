@@ -74,7 +74,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::ZoneKind;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::debug;
 use slog::error;

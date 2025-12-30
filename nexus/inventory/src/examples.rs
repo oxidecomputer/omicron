@@ -52,7 +52,7 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZoneImageResolverInventory;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use sled_agent_types::zone_images::MeasurementManifestStatus;
 use sled_agent_types::zone_images::MupdateOverrideNonBootInfo;
 use sled_agent_types::zone_images::MupdateOverrideNonBootMismatch;

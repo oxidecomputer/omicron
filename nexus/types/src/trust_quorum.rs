@@ -8,9 +8,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::RackUuid;
-use sled_agent_types::sled::BaseboardId;
-use trust_quorum_protocol::{
-    EncryptedRackSecrets, Epoch, Sha3_256Digest, Threshold,
+use sled_hardware_types::BaseboardId;
+use trust_quorum_types::{
+    crypto::EncryptedRackSecrets, crypto::Sha3_256Digest, types::Epoch,
+    types::Threshold,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -10,10 +10,8 @@ use omicron_common::ledger::Ledgerable;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_hardware_types::BaseboardId;
 use uuid::Uuid;
-
-// Re-export BaseboardId and UnknownBaseboardError from sled-hardware-types
-pub use sled_hardware_types::{BaseboardId, UnknownBaseboardError};
 
 /// A request to Add a given sled after rack initialization has occurred
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]

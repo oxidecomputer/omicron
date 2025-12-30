@@ -13,6 +13,7 @@ use crate::ledgers::PersistentStateLedger;
 use crate::proxy;
 use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackUuid;
+use sled_hardware_types::BaseboardId;
 use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
@@ -23,14 +24,13 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 use trust_quorum_protocol::{
-    BaseboardId, CommitError, Configuration, Epoch, LoadRackSecretError,
-    LrtqUpgradeError, LrtqUpgradeMsg, Node, NodeCallerCtx, NodeCommonCtx,
-    NodeCtx, PrepareAndCommitError, ReconfigurationError, ReconfigureMsg,
-    ReconstructedRackSecret,
+    CommitError, LoadRackSecretError, LrtqUpgradeError, LrtqUpgradeMsg, Node,
+    NodeCallerCtx as _, NodeCommonCtx as _, NodeCtx, PrepareAndCommitError,
+    ReconfigurationError, ReconfigureMsg, ReconstructedRackSecret,
 };
-
-// Re-export types that need to be visible from this crate
-pub use trust_quorum_protocol::{CommitStatus, CoordinatorStatus, NodeStatus};
+use trust_quorum_types::configuration::Configuration;
+use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
+use trust_quorum_types::types::Epoch;
 
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
@@ -870,6 +870,7 @@ mod tests {
     use std::time::Duration;
     use tokio::task::JoinHandle;
     use trust_quorum_protocol::NodeHandlerCtx;
+    use trust_quorum_types::types::Threshold;
 
     fn pki_doc_to_node_configs(dir: Utf8PathBuf, n: usize) -> Vec<Config> {
         (1..=n)
@@ -1300,7 +1301,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other
@@ -1382,7 +1383,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell all but the last node how to reach each other
@@ -1517,7 +1518,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell all but the last node how to reach each other
@@ -1730,7 +1731,7 @@ mod tests {
             rack_id,
             epoch: Epoch(2),
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other
@@ -1819,7 +1820,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other
@@ -2104,7 +2105,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other

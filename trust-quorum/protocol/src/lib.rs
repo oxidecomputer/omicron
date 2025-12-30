@@ -12,7 +12,11 @@
 use daft::Diffable;
 use gfss::shamir::Share;
 use serde::{Deserialize, Serialize};
+use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, warn};
+use trust_quorum_types::configuration::Configuration;
+use trust_quorum_types::crypto::Sha3_256Digest;
+use trust_quorum_types::types::Epoch;
 
 mod compute_key_share;
 mod configuration;
@@ -25,25 +29,6 @@ mod persistent_state;
 #[allow(unused)]
 mod rack_secret_loader;
 mod validators;
-
-// Re-export types from trust-quorum-types for backward compatibility.
-// These types were previously defined in this crate but have been factored
-// out to support API versioning per RFD 619.
-pub use trust_quorum_types::alarm::Alarm;
-pub use trust_quorum_types::configuration::{
-    BaseboardId, Configuration, ConfigurationError, NewConfigParams,
-};
-pub use trust_quorum_types::crypto::{
-    DecryptionError, EncryptedRackSecrets, InvalidRackSecretSizeError,
-    RackSecretReconstructError, Salt, Sha3_256Digest,
-};
-pub use trust_quorum_types::persistent_state::{
-    ExpungedMetadata, PersistentStateSummary,
-};
-pub use trust_quorum_types::status::{
-    CommitStatus, CoordinatorStatus, NodePersistentStateSummary, NodeStatus,
-};
-pub use trust_quorum_types::types::{Epoch, Threshold};
 
 pub use coordinator_state::{
     CoordinatingMsg, CoordinatorOperation, CoordinatorState,
@@ -62,7 +47,7 @@ pub use configuration::configurations_equal_except_for_crypto_data;
 pub use configuration::new_configuration;
 pub use crypto::{
     PlaintextRackSecrets, RackSecret, ReconstructedRackSecret, SECRET_LEN,
-    decrypt_rack_secrets, new_salt,
+    decrypt_rack_secrets,
 };
 pub use messages::*;
 pub use node::{CommitError, Node, NodeDiff, PrepareAndCommitError};

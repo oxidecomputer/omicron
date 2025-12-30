@@ -6,7 +6,7 @@
 
 use crate::established_conn::EstablishedConn;
 use crate::proxy;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use trust_quorum_protocol::{Envelope, PeerMsg};
 
 // TODO: Move to this crate

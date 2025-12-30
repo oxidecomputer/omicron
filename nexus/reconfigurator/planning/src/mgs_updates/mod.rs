@@ -29,7 +29,7 @@ use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog::{error, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
@@ -798,7 +798,7 @@ mod test {
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::SpType;
     use omicron_test_utils::dev::LogContext;
-    use sled_agent_types::sled::BaseboardId;
+    use sled_hardware_types::BaseboardId;
     use sled_hardware_types::OxideSled;
     use std::collections::BTreeSet;
     use std::sync::Arc;

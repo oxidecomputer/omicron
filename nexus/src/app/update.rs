@@ -26,7 +26,7 @@ use omicron_common::api::external::Nullable;
 use omicron_common::api::external::{DataPageParams, Error};
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::iter;
 use tokio::sync::watch;

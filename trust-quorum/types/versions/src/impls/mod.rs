@@ -11,3 +11,4 @@
 //! functions when necessary.
 
 mod epoch;
+mod salt;

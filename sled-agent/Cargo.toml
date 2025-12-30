@@ -115,6 +115,7 @@ tokio-util.workspace = true
 toml.workspace = true
 trust-quorum.workspace = true
 trust-quorum-protocol.workspace = true
+trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-brand-metadata.workspace = true
 usdt.workspace = true

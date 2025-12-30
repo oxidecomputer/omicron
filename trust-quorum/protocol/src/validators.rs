@@ -5,15 +5,15 @@
 //! Various validation functions to be used by a [`crate::Node`]
 
 use crate::messages::ReconfigureMsg;
-use crate::{
-    BaseboardId, ConfigurationError, Epoch, LrtqUpgradeMsg, NewConfigParams,
-    NodeHandlerCtx, PersistentStateSummary, Threshold,
-};
+use crate::{BaseboardId, Epoch, LrtqUpgradeMsg, NodeHandlerCtx};
 use daft::{BTreeSetDiff, Diffable, Leaf};
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use slog::{Logger, error, info, warn};
 use std::collections::BTreeSet;
+use trust_quorum_types::configuration::{ConfigurationError, NewConfigParams};
+use trust_quorum_types::persistent_state::PersistentStateSummary;
+use trust_quorum_types::types::Threshold;
 
 /// Rack IDs must remain the same over the lifetime of a trust quorum instance
 pub fn check_rack_id(

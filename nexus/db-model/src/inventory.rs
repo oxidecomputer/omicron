@@ -93,7 +93,7 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddrV6};
 use std::time::Duration;
@@ -489,7 +489,7 @@ impl<'a> From<&'a Collection> for InvCollection {
     }
 }
 
-/// See [`sled_agent_types::sled::BaseboardId`].
+/// See [`sled_hardware_types::BaseboardId`].
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq, Eq)]
 #[diesel(table_name = hw_baseboard_id)]
 pub struct HwBaseboardId {

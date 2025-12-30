@@ -4,7 +4,6 @@
 
 //! State of a reconfiguration coordinator inside a [`crate::Node`]
 
-use crate::ConfigurationError;
 use crate::NodeHandlerCtx;
 use crate::configuration::new_configuration;
 use crate::crypto::{
@@ -21,7 +20,9 @@ use gfss::shamir::Share;
 use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem;
-use trust_quorum_types::configuration::ConfigurationDiff;
+use trust_quorum_types::configuration::{
+    ConfigurationDiff, ConfigurationError,
+};
 
 // A coordinator can be upgrading from LRTQ or reconfiguring a TQ config.
 #[derive(Clone, Debug, PartialEq, Eq, Diffable)]

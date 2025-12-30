@@ -152,7 +152,7 @@ pub use reconfigurator_config::ReconfiguratorConfigDisplay;
 pub use reconfigurator_config::ReconfiguratorConfigParam;
 pub use reconfigurator_config::ReconfiguratorConfigView;
 pub use reconfigurator_config::ReconfiguratorConfigViewDisplay;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
 pub use zone_type::blueprint_zone_type;
@@ -2525,7 +2525,7 @@ mod test {
     use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
     use gateway_types::component::SpType;
-    use sled_agent_types::sled::BaseboardId;
+    use sled_hardware_types::BaseboardId;
     use sled_hardware_types::GIMLET_SLED_MODEL;
 
     #[test]

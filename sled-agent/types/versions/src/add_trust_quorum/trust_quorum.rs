@@ -9,22 +9,10 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use super::super::v1::sled::BaseboardId;
-
-// Re-export core types from trust-quorum-types-versions.
-// These are the canonical type definitions used by the trust quorum protocol.
-pub use trust_quorum_types_versions::v1::alarm::Alarm;
-pub use trust_quorum_types_versions::v1::configuration::Configuration;
-pub use trust_quorum_types_versions::v1::crypto::EncryptedRackSecrets;
-pub use trust_quorum_types_versions::v1::messages::{
-    CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
+use sled_hardware_types::BaseboardId;
+use trust_quorum_types_versions::latest::messages::{
+    CommitRequest, PrepareAndCommitRequest,
 };
-pub use trust_quorum_types_versions::v1::persistent_state::ExpungedMetadata;
-pub use trust_quorum_types_versions::v1::status::{
-    CommitStatus, CoordinatorStatus, NodePersistentStateSummary, NodeStatus,
-};
-pub use trust_quorum_types_versions::v1::types::{Epoch, Threshold};
 
 /// Request to proxy a commit operation to another trust quorum node.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

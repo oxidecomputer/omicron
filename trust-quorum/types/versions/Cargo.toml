@@ -14,7 +14,9 @@ gfss.workspace = true
 iddqd.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
+rand = { workspace = true, features = ["os_rng"] }
 schemars.workspace = true
+serde_human_bytes.workspace = true
 serde.workspace = true
 serde_with = { workspace = true, features = ["hex", "schemars_0_8"] }
 sled-hardware-types.workspace = true

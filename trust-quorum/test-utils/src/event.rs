@@ -6,9 +6,10 @@
 
 use crate::nexus::{NexusConfig, NexusReply};
 use serde::{Deserialize, Serialize};
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
-use trust_quorum_protocol::{Envelope, Epoch};
+use trust_quorum_protocol::Envelope;
+use trust_quorum_types::types::Epoch;
 
 /// An event that can be fed into our system under test (SUT)
 ///

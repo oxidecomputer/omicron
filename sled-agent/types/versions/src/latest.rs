@@ -138,10 +138,8 @@ pub mod rack_init {
 
 pub mod sled {
     pub use crate::v1::sled::AddSledRequest;
-    pub use crate::v1::sled::BaseboardId;
     pub use crate::v1::sled::StartSledAgentRequest;
     pub use crate::v1::sled::StartSledAgentRequestBody;
-    pub use crate::v1::sled::UnknownBaseboardError;
 }
 
 pub mod support_bundle {
@@ -156,25 +154,11 @@ pub mod support_bundle {
 }
 
 pub mod trust_quorum {
-    // Core types re-exported from trust-quorum-types-versions
-    pub use crate::v13::trust_quorum::Alarm;
-    pub use crate::v13::trust_quorum::CommitStatus;
-    pub use crate::v13::trust_quorum::Configuration;
-    pub use crate::v13::trust_quorum::CoordinatorStatus;
-    pub use crate::v13::trust_quorum::EncryptedRackSecrets;
-    pub use crate::v13::trust_quorum::Epoch;
-    pub use crate::v13::trust_quorum::ExpungedMetadata;
-    pub use crate::v13::trust_quorum::NodePersistentStateSummary;
-    pub use crate::v13::trust_quorum::NodeStatus;
-    pub use crate::v13::trust_quorum::Threshold;
-
-    // HTTP request types specific to the sled-agent API
-    pub use crate::v13::trust_quorum::CommitRequest;
-    pub use crate::v13::trust_quorum::LrtqUpgradeMsg;
-    pub use crate::v13::trust_quorum::PrepareAndCommitRequest;
+    // HTTP request types specific to the sled-agent API: the rest of the types
+    // used in the API are inherent to the Trust Quorum protocol and are defined
+    // in the crate trust-quorum-types:
     pub use crate::v13::trust_quorum::ProxyCommitRequest;
     pub use crate::v13::trust_quorum::ProxyPrepareAndCommitRequest;
-    pub use crate::v13::trust_quorum::ReconfigureMsg;
 }
 
 pub mod zone_bundle {
