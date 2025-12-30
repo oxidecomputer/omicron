@@ -250,6 +250,9 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         for (_, mut mgd) in self.mgd {
             mgd.cleanup().await.unwrap();
         }
+        for (_, mut lldpd) in self.lldpd {
+            lldpd.cleanup().await.unwrap();
+        }
         self.logctx.cleanup_successful();
     }
 }
