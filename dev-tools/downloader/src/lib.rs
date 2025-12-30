@@ -910,7 +910,7 @@ impl Downloader<'_> {
             &destination_dir.join("root"),
         )?;
 
-        let binary_dir = destination_dir.join("root/opt/oxide/lldp/bin");
+        let binary_dir = destination_dir.join("root/opt/oxide/bin");
 
         match os_name()? {
             Os::Linux => {
