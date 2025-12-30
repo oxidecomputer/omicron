@@ -23,6 +23,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::sled::BaseboardId;
 use sled_agent_types_versions::latest::inventory::{SledCpuFamily, SledRole};
 use sled_agent_types_versions::latest::rack_init::RecoverySiloConfig;
 use sled_hardware_types::BaseboardId;
