@@ -106,12 +106,10 @@ async fn disks_list(client: &ClientTestContext, list_url: &str) -> Vec<Disk> {
 fn disks_eq(disk1: &Disk, disk2: &Disk) {
     identity_eq(&disk1.identity, &disk2.identity);
     assert_eq!(disk1.project_id, disk2.project_id);
-    assert_eq!(disk1.snapshot_id, disk2.snapshot_id);
-    assert_eq!(disk1.image_id, disk2.image_id);
+    assert_eq!(disk1.disk_type, disk2.disk_type);
     assert_eq!(disk1.size.to_bytes(), disk2.size.to_bytes());
     assert_eq!(disk1.block_size.to_bytes(), disk2.block_size.to_bytes());
     assert_eq!(disk1.state, disk2.state);
-    assert_eq!(disk1.device_path, disk2.device_path);
 }
 
 async fn create_disk_with_state_importing_blocks(client: &ClientTestContext) {

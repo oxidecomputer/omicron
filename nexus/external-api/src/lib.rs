@@ -36,6 +36,7 @@ use openapiv3::OpenAPI;
 /// Copies of data types that changed between versions
 mod v2025112000;
 mod v2025120300;
+mod v2025121200;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -65,6 +66,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2025121800, DISK_TYPE_DETAILS),
     (2025121200, BGP_PEER_COLLISION_STATE),
     (2025120300, LOCAL_STORAGE),
     (2025112000, INITIAL),
@@ -1439,10 +1441,35 @@ pub trait NexusExternalApi {
 
     /// List disks
     #[endpoint {
+        operation_id = "disk_list",
         method = GET,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_DISK_TYPE_DETAILS,
+    }]
+    async fn v2025121200_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025121200::Disk>>, HttpError> {
+        match Self::disk_list(rqctx, query_params).await {
+            Ok(page) => {
+                let new_page = ResultsPage {
+                    next_page: page.0.next_page,
+                    items: page.0.items.into_iter().map(Into::into).collect(),
+                };
+
+                Ok(HttpResponseOk(new_page))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// List disks
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_DISK_TYPE_DETAILS..,
     }]
     async fn disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -1476,10 +1503,32 @@ pub trait NexusExternalApi {
     // TODO-correctness See note about instance create.  This should be async.
     /// Create a disk
     #[endpoint {
+        operation_id = "disk_create",
         method = POST,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_DISK_TYPE_DETAILS,
+    }]
+    async fn v2025121200_disk_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_disk: TypedBody<params::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2025121200::Disk>, HttpError> {
+        match Self::disk_create(rqctx, query_params, new_disk).await {
+            Ok(HttpResponseCreated(disk)) => {
+                Ok(HttpResponseCreated(disk.into()))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create a disk
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_DISK_TYPE_DETAILS..,
     }]
     async fn disk_create(
         rqctx: RequestContext<Self::Context>,
@@ -1508,10 +1557,29 @@ pub trait NexusExternalApi {
 
     /// Fetch disk
     #[endpoint {
+        operation_id = "disk_view",
         method = GET,
         path = "/v1/disks/{disk}",
         tags = ["disks"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_DISK_TYPE_DETAILS,
+    }]
+    async fn v2025121200_disk_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::DiskPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2025121200::Disk>, HttpError> {
+        match Self::disk_view(rqctx, path_params, query_params).await {
+            Ok(HttpResponseOk(disk)) => Ok(HttpResponseOk(disk.into())),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fetch disk
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = VERSION_DISK_TYPE_DETAILS..,
     }]
     async fn disk_view(
         rqctx: RequestContext<Self::Context>,
@@ -1782,10 +1850,39 @@ pub trait NexusExternalApi {
 
     /// List disks for instance
     #[endpoint {
+        operation_id = "instance_disk_list",
         method = GET,
         path = "/v1/instances/{instance}/disks",
         tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_DISK_TYPE_DETAILS,
+    }]
+    async fn v2025121200_instance_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025121200::Disk>>, HttpError> {
+        match Self::instance_disk_list(rqctx, query_params, path_params).await {
+            Ok(page) => {
+                let page = ResultsPage {
+                    next_page: page.0.next_page,
+                    items: page.0.items.into_iter().map(Into::into).collect(),
+                };
+
+                Ok(HttpResponseOk(page))
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    /// List disks for instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = VERSION_DISK_TYPE_DETAILS..,
     }]
     async fn instance_disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -1827,10 +1924,40 @@ pub trait NexusExternalApi {
 
     /// Attach disk to instance
     #[endpoint {
+        operation_id = "instance_disk_attach",
         method = POST,
         path = "/v1/instances/{instance}/disks/attach",
         tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_DISK_TYPE_DETAILS,
+    }]
+    async fn v2025121200_instance_disk_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2025121200::Disk>, HttpError> {
+        match Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach,
+        )
+        .await
+        {
+            Ok(HttpResponseAccepted(disk)) => {
+                Ok(HttpResponseAccepted(disk.into()))
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Attach disk to instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = VERSION_DISK_TYPE_DETAILS..,
     }]
     async fn instance_disk_attach(
         rqctx: RequestContext<Self::Context>,
@@ -1871,10 +1998,40 @@ pub trait NexusExternalApi {
 
     /// Detach disk from instance
     #[endpoint {
+        operation_id = "instance_disk_detach",
         method = POST,
         path = "/v1/instances/{instance}/disks/detach",
         tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_DISK_TYPE_DETAILS,
+    }]
+    async fn v2025121200_instance_disk_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2025121200::Disk>, HttpError> {
+        match Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        {
+            Ok(HttpResponseAccepted(disk)) => {
+                Ok(HttpResponseAccepted(disk.into()))
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Detach disk from instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = VERSION_DISK_TYPE_DETAILS..,
     }]
     async fn instance_disk_detach(
         rqctx: RequestContext<Self::Context>,
