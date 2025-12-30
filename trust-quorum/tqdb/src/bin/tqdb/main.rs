@@ -18,13 +18,13 @@ use reedline::{
     FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline,
     ReedlineEvent, default_emacs_keybindings,
 };
+use sled_agent_types::sled::BaseboardId;
 use slog::{Logger, o};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::fs;
 use std::io::IsTerminal;
 use tabled::Tabled;
-use trust_quorum_protocol::BaseboardId;
 use trust_quorum_test_utils::{Event, TqState};
 
 fn main() -> Result<(), anyhow::Error> {

@@ -4,7 +4,6 @@
 
 use crate::deployment::PendingMgsUpdate;
 use crate::deployment::TargetReleaseDescription;
-use crate::inventory::BaseboardId;
 use crate::inventory::CabooseWhich;
 use crate::inventory::Collection;
 use crate::quiesce::SagaQuiesceStatus;
@@ -31,11 +30,12 @@ use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types_versions::latest::inventory::BootPartitionContents;
-use sled_agent_types_versions::latest::inventory::BootPartitionDetails;
-use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
-use sled_agent_types_versions::latest::inventory::OmicronZoneImageSource;
-use sled_agent_types_versions::latest::inventory::OmicronZoneType;
+use sled_agent_types::inventory::BootPartitionContents;
+use sled_agent_types::inventory::BootPartitionDetails;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::OmicronZoneImageSource;
+use sled_agent_types::inventory::OmicronZoneType;
+use sled_agent_types::sled::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fmt::Display;
@@ -1261,9 +1261,9 @@ mod test {
     use crate::deployment::PendingMgsUpdateDetails;
     use crate::deployment::PendingMgsUpdateSpDetails;
     use crate::internal_api::views::UpdateAttemptStatus;
-    use crate::inventory::BaseboardId;
     use chrono::Utc;
     use gateway_types::component::SpType;
+    use sled_agent_types::sled::BaseboardId;
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::Instant;

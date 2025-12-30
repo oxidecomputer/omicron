@@ -6,7 +6,8 @@
 
 use crate::established_conn::EstablishedConn;
 use crate::proxy;
-use trust_quorum_protocol::{BaseboardId, Envelope, PeerMsg};
+use sled_agent_types::sled::BaseboardId;
+use trust_quorum_protocol::{Envelope, PeerMsg};
 
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
@@ -502,7 +503,14 @@ impl ConnMgr {
                         Some(self.on_task_exit(task_id))
                     }
                     Err(err) => {
-                        warn!(self.log, "Connection task panic: {err}");
+                        if err.is_panic() {
+                            warn!(self.log, "Connection task panic: {err}");
+                        } else {
+                            debug!(
+                                self.log,
+                                "Connection task {} cancelled", err.id(),
+                            );
+                        }
                         Some(self.on_task_exit(err.id()))
                     }
                 }
