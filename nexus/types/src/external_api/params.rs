@@ -1116,9 +1116,10 @@ pub struct FloatingIpCreate {
     /// default pool is selected.
     pub pool: Option<NameOrId>,
 
-    /// Preferred IP version when allocating from the default pool.
+    /// IP version to use when allocating from the default pool.
     /// Only used when both `ip` and `pool` are not specified. Required if
-    /// multiple default pools of different IP versions exist.
+    /// multiple default pools of different IP versions exist. Allocation
+    /// fails if no pool of the requested version is available.
     #[serde(default)]
     pub ip_version: Option<IpVersion>,
 }
@@ -1220,9 +1221,10 @@ pub enum ExternalIpCreate {
     /// if not specified.
     Ephemeral {
         pool: Option<NameOrId>,
-        /// Preferred IP version when allocating from the default pool.
+        /// IP version to use when allocating from the default pool.
         /// Only used when `pool` is not specified. Required if multiple default
-        /// pools of different IP versions exist.
+        /// pools of different IP versions exist. Allocation fails if no pool
+        /// of the requested version is available.
         #[serde(default)]
         ip_version: Option<IpVersion>,
     },
@@ -1241,9 +1243,10 @@ pub struct EphemeralIpCreate {
     /// the default IP pool will be used.
     pub pool: Option<NameOrId>,
 
-    /// Preferred IP version when allocating from the default pool.
+    /// IP version to use when allocating from the default pool.
     /// Only used when `pool` is not specified. Required if multiple default
-    /// pools of different IP versions exist.
+    /// pools of different IP versions exist. Allocation fails if no pool
+    /// of the requested version is available.
     #[serde(default)]
     pub ip_version: Option<IpVersion>,
 }
