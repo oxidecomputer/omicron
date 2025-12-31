@@ -165,8 +165,8 @@ pub enum DecryptionError {
 /// Produce an OpenAPI schema describing a hex array of a specific length (e.g.,
 /// a hash digest).
 ///
-/// This is ripped from Tufaceous:
-/// https://github.com/oxidecomputer/tufaceous/blob/1eacfcf0cade44f77d433f31744dbee4abb96465/artifact/src/artifact.rs#L139-L151
+/// This is [ripped from
+/// Tufaceous](https://github.com/oxidecomputer/tufaceous/blob/1eacfcf0cade44f77d433f31744dbee4abb96465/artifact/src/artifact.rs#L139-L151)
 fn hex_schema<const N: usize>(
     generator: &mut schemars::SchemaGenerator,
 ) -> schemars::schema::Schema {
