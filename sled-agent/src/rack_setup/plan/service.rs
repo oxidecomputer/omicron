@@ -17,13 +17,13 @@ use internal_dns_types::config::{
 use internal_dns_types::names::ServiceName;
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
-    BlueprintHostPhase2DesiredSlots, BlueprintPhysicalDiskConfig,
-    BlueprintPhysicalDiskDisposition, BlueprintSledConfig, BlueprintSource,
-    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,
-    BlueprintZoneType, CockroachDbPreserveDowngrade,
-    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
-    OmicronZoneExternalSnatIp, OximeterReadMode, PendingMgsUpdates,
-    blueprint_zone_type,
+    BlueprintHostPhase2DesiredSlots,
+    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
+    BlueprintSledConfig, BlueprintSource, BlueprintZoneConfig,
+    BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
+    CockroachDbPreserveDowngrade, OmicronZoneExternalFloatingAddr,
+    OmicronZoneExternalFloatingIp, OmicronZoneExternalSnatIp, OximeterReadMode,
+    PendingMgsUpdates, blueprint_zone_type,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::{

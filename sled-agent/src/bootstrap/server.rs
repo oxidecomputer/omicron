@@ -204,6 +204,60 @@ impl Server {
         // enqueue another, and we can send back an HTTP busy.
         let (sled_reset_tx, sled_reset_rx) = mpsc::channel(1);
 
+        while let Err(
+            sled_agent_config_reconciler::InventoryError::WaitingOnLedger,
+        ) =
+            long_running_task_handles.config_reconciler.ledgered_sled_config()
+        {
+            // waiting for our ledger to run...
+        }
+
+        // Get our pre-boot measurements, first we check the ledger
+        let pre_boot = match long_running_task_handles
+            .config_reconciler
+            .ledgered_sled_config()
+        {
+            // Lie down. Try not to cry. Cry a lot.
+            Err(_) => {
+                vec![]
+            }
+            // We haven't run RSS, we'll take what we get from the measurement manifest
+            Ok(None) => match long_running_task_handles
+                .zone_image_resolver
+                .status()
+                .to_inventory()
+                .measurement_manifest
+                .boot_inventory
+            {
+                Err(_) => {
+                    vec![]
+                }
+                Ok(s) => s
+                    .artifacts
+                    .iter()
+                    .filter_map(|entry| match entry.status {
+                        Ok(_) => Some(entry.path.clone()),
+                        Err(_) => None,
+                    })
+                    .collect(),
+            },
+            // Do an early resolution
+            Ok(Some(s)) => {
+                long_running_task_handles
+                    .config_reconciler
+                    .bootstrap_measurement_reconciler(
+                        &long_running_task_handles.zone_image_resolver.status(),
+                        &long_running_task_handles
+                            .config_reconciler
+                            .internal_disks_rx()
+                            .current(),
+                        &s.measurements,
+                        &base_log,
+                    )
+                    .await
+            }
+        };
+
         // Start the bootstrap dropshot server.
         let bootstrap_context = BootstrapServerContext {
             base_log: base_log.clone(),
@@ -216,12 +270,23 @@ impl Server {
             sled_reset_tx,
             sprockets: config.sprockets.clone(),
             trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
+            measurements_rx: long_running_task_handles
+                .config_reconciler
+                .measurement_corpus_rx(pre_boot.clone())
+                .await
+                .clone(),
         };
         let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
 
         // Create a channel for proxying sled-initialization requests that land
         // in the sprockets server to our bootstrap agent `Inner` task.
         let (sled_init_tx, sled_init_rx) = mpsc::channel(1);
+
+        let measurements = long_running_task_handles
+            .config_reconciler
+            .measurement_corpus_rx(pre_boot)
+            .await
+            .clone();
 
         // We don't bother to wrap this bind in a
         // `wait_while_handling_hardware_updates()` because (a) binding should
@@ -235,6 +300,7 @@ impl Server {
                 0,
             ),
             sled_init_tx,
+            measurements,
             config.sprockets.clone(),
             &base_log,
         )
