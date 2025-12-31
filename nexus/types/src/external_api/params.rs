@@ -1538,6 +1538,93 @@ pub struct FloatingIpAttach {
     pub kind: FloatingIpParentKind,
 }
 
+// SUBNET POOLS AND EXTERNAL SUBNETS
+
+/// Creation parameters for a Subnet Pool.
+///
+/// A Subnet Pool is a container of IP subnets that are controlled by Oxide
+/// users. Portions of these subnets can be attached to Oxide instances. The
+/// control plane ensures that traffic to those subnets is directed to the
+/// instance, at which point the user can decide how to further route or forward
+/// the traffic.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SubnetPoolCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// The IP version of the subnets contained in the pool.
+    pub ip_version: IpVersion,
+}
+
+/// Creation parameters member in a Subnet Pool.
+///
+/// Subnet Pool members describe individual IP Subnets in a pool. They can be
+/// allocated in full or in part to an Oxide instance.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SubnetPoolMemberCreate {
+    /// The parent Subnet Pool in which to create this member.
+    pub pool: NameOrId,
+    /// The IP subnet for the member.
+    pub subnet: IpNet,
+    /// The minimum prefix length that can be allocated out of this member.
+    ///
+    /// This constrains the minimum length of any External Subnet object that
+    /// can be built from this pool member. Note that this defines the minimum
+    /// prefix, or equivalently the largest subnet that can built.
+    pub min_prefix_length: u8,
+    /// The maximum prefix length that can be allocated out of this member.
+    ///
+    /// This constrains the madximum length of any External Subnet object that
+    /// can be built from this pool member. Note that this defines the maximum
+    /// prefix, or equivalently the smallest subnet that can built.
+    pub max_prefix_length: u8,
+}
+
+/// Parameters for linking a Subnet Pool to a Silo.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SubnetPoolSiloLinkCreate {
+    /// The Silo to which to link the Subnet Pool.
+    pub silo: NameOrId,
+    /// Whether this Subnet Pool should be the default.
+    ///
+    /// A Silo can have at most one default Subnet Pool per IP version. The
+    /// default Subnet Pool is used when creating an External Subnet, and the
+    /// Subnet Pool is unspecified.
+    #[serde(default)]
+    pub is_default: bool,
+}
+
+/// Creation parameters for an External Subnet.
+///
+/// An External Subnet is taken from a Subnet Pool and attached to an Instance.
+/// The Oxide control plane will ensure that traffic into the track targeting
+/// that subnet will arrive at the Instance. From there, software on the
+/// Instance can decide how to further route or forward the traffic.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct ExternalSubnetCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// How to select the IP subnet for this External Subnet.
+    #[serde(flatten)]
+    pub subnet: ExternalSubnetSelector,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum ExternalSubnetSelector {
+    /// Select an explicit IP subnet.
+    Explicit {
+        /// The IP subnet to choose.
+        subnet: IpNet,
+    },
+    /// Automatically select the next IP subnet from a pool.
+    Auto {
+        /// How to select the Subnet Pool.
+        pool: PoolSelector,
+        /// The prefix size of the subnet to create from the pool.
+        prefix: u8,
+    },
+}
+
 // INSTANCES
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
@@ -1616,7 +1703,7 @@ pub struct InstanceDiskAttach {
     pub name: Name,
 }
 
-/// Specify which IP pool to allocate from.
+/// Specify which IP or Subnet Pool to allocate from.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PoolSelector {
