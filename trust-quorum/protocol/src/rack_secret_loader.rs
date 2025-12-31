@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::crypto::ReconstructedRackSecret;
+use crate::crypto::{ReconstructedRackSecret, decrypt_rack_secrets};
 use crate::{
     Alarm, BaseboardId, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind,
     RackSecret, Share,
@@ -281,7 +281,8 @@ impl ShareCollector {
                     "epoch" => %self.config.epoch
                 );
                 if let Some(encrypted) = &self.config.encrypted_rack_secrets {
-                    match encrypted.decrypt(
+                    match decrypt_rack_secrets(
+                        encrypted,
                         self.config.rack_id,
                         self.config.epoch,
                         &secret,

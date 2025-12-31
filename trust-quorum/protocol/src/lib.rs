@@ -10,13 +10,10 @@
 //! implementation.
 
 use daft::Diffable;
-use derive_more::Display;
 use gfss::shamir::Share;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::sled::BaseboardId;
 use slog::{Logger, error, warn};
 
-mod alarm;
 mod compute_key_share;
 mod configuration;
 mod coordinator_state;
@@ -29,7 +26,25 @@ mod persistent_state;
 mod rack_secret_loader;
 mod validators;
 
-pub use configuration::Configuration;
+// Re-export types from trust-quorum-types for backward compatibility.
+// These types were previously defined in this crate but have been factored
+// out to support API versioning per RFD 619.
+pub use trust_quorum_types::alarm::Alarm;
+pub use trust_quorum_types::configuration::{
+    BaseboardId, Configuration, ConfigurationError, NewConfigParams,
+};
+pub use trust_quorum_types::crypto::{
+    DecryptionError, EncryptedRackSecrets, InvalidRackSecretSizeError,
+    RackSecretReconstructError, Salt, Sha3_256Digest,
+};
+pub use trust_quorum_types::persistent_state::{
+    ExpungedMetadata, PersistentStateSummary,
+};
+pub use trust_quorum_types::status::{
+    CommitStatus, CoordinatorStatus, NodePersistentStateSummary, NodeStatus,
+};
+pub use trust_quorum_types::types::{Epoch, Threshold};
+
 pub use coordinator_state::{
     CoordinatingMsg, CoordinatorOperation, CoordinatorState,
     CoordinatorStateDiff,
@@ -40,65 +55,21 @@ pub use validators::{
     ValidatedReconfigureMsgDiff,
 };
 
-pub use alarm::Alarm;
+// These crypto types and functions are NOT in trust-quorum-types because they
+// contain sensitive data or have complex implementations tied to this crate.
+#[cfg(feature = "testing")]
+pub use configuration::configurations_equal_except_for_crypto_data;
+pub use configuration::new_configuration;
 pub use crypto::{
-    EncryptedRackSecrets, RackSecret, ReconstructedRackSecret, Salt,
-    Sha3_256Digest,
+    PlaintextRackSecrets, RackSecret, ReconstructedRackSecret, SECRET_LEN,
+    decrypt_rack_secrets, new_salt,
 };
 pub use messages::*;
 pub use node::{CommitError, Node, NodeDiff, PrepareAndCommitError};
 // public only for docs.
 pub use node_ctx::NodeHandlerCtx;
 pub use node_ctx::{NodeCallerCtx, NodeCommonCtx, NodeCtx, NodeCtxDiff};
-pub use persistent_state::{
-    ExpungedMetadata, PersistentState, PersistentStateSummary,
-};
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    Display,
-    Diffable,
-)]
-#[daft(leaf)]
-pub struct Epoch(pub u64);
-
-impl Epoch {
-    pub fn next(&self) -> Epoch {
-        Epoch(self.0.checked_add(1).expect("fewer than 2^64 epochs"))
-    }
-
-    pub fn previous(&self) -> Option<Epoch> {
-        self.0.checked_sub(1).map(Epoch)
-    }
-}
-
-/// The number of shares required to reconstruct the rack secret
-///
-/// Typically referred to as `k` in the docs
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    Display,
-    Diffable,
-)]
-#[daft(leaf)]
-pub struct Threshold(pub u8);
+pub use persistent_state::PersistentState;
 
 /// A container to make messages between trust quorum nodes routable
 #[derive(Debug, Clone, Serialize, Deserialize, Diffable)]

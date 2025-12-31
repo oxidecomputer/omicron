@@ -5,7 +5,6 @@
 //! Sled-related types for the Sled Agent API.
 
 use async_trait::async_trait;
-use daft::Diffable;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use omicron_common::ledger::Ledgerable;
 use omicron_uuid_kinds::SledUuid;
@@ -13,36 +12,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A representation of a Baseboard ID as used in the inventory subsystem
-/// This type is essentially the same as a `Baseboard` except it doesn't have a
-/// revision or HW type (Gimlet, PC, Unknown).
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    JsonSchema,
-    Diffable,
-)]
-#[daft(leaf)]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
-pub struct BaseboardId {
-    /// Oxide Part Number
-    pub part_number: String,
-    /// Serial number (unique for a given part number)
-    pub serial_number: String,
-}
-
-impl std::fmt::Display for BaseboardId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.part_number, self.serial_number)
-    }
-}
+// Re-export BaseboardId and UnknownBaseboardError from sled-hardware-types
+pub use sled_hardware_types::{BaseboardId, UnknownBaseboardError};
 
 /// A request to Add a given sled after rack initialization has occurred
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -95,31 +66,6 @@ pub struct StartSledAgentRequestBody {
 
     /// Portion of the IP space to be managed by the Sled Agent.
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Baseboard is of unknown type")]
-pub struct UnknownBaseboardError;
-
-impl TryFrom<sled_hardware_types::Baseboard> for BaseboardId {
-    type Error = UnknownBaseboardError;
-
-    fn try_from(
-        value: sled_hardware_types::Baseboard,
-    ) -> Result<Self, Self::Error> {
-        use sled_hardware_types::Baseboard;
-        match value {
-            Baseboard::Gimlet { identifier, model, .. } => Ok(BaseboardId {
-                part_number: model,
-                serial_number: identifier,
-            }),
-            Baseboard::Pc { identifier, model } => Ok(BaseboardId {
-                part_number: model,
-                serial_number: identifier,
-            }),
-            Baseboard::Unknown => Err(UnknownBaseboardError),
-        }
-    }
 }
 
 #[async_trait]

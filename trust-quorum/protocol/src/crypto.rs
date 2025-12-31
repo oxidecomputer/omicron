@@ -2,12 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Various cryptographic constructs used by trust quroum.
+//! Internal cryptographic constructs used by trust quorum.
+//!
+//! This module contains internal types (RackSecret, ReconstructedRackSecret, PlaintextRackSecrets)
+//! and free functions for cryptographic operations.
+//!
+//! The published API types (Sha3_256Digest, Salt, EncryptedRackSecrets, etc.) are defined in
+//! trust-quorum-types and re-exported from this crate's lib.rs.
 
 use bootstore::trust_quorum::RackSecret as LrtqRackSecret;
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, aead, aead::Aead};
 use derive_more::From;
-use gfss::shamir::{self, CombineError, SecretShares, Share, SplitError};
+use gfss::shamir::{self, SecretShares, Share, SplitError};
 use hkdf::Hkdf;
 use omicron_uuid_kinds::RackUuid;
 use rand::TryRngCore;
@@ -15,14 +21,17 @@ use rand::rngs::OsRng;
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use slog_error_chain::SlogInlineError;
 use static_assertions::const_assert_eq;
 use std::collections::BTreeMap;
-use std::fmt::Debug;
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-use crate::{Epoch, Threshold};
+// Import published types from trust-quorum-types
+use trust_quorum_types::crypto::{
+    DecryptionError, EncryptedRackSecrets, InvalidRackSecretSizeError,
+    RackSecretReconstructError, Salt, Sha3_256Digest,
+};
+use trust_quorum_types::types::{Epoch, Threshold};
 
 /// Each share contains a byte for the y-coordinate of 32 points on 32 different
 /// polynomials over Ed25519. All points share an x-coordinate, which is the 0th
@@ -78,21 +87,6 @@ impl LrtqShare {
 )]
 pub struct ShareDigestLrtq(Sha3_256Digest);
 
-#[derive(
-    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub struct Sha3_256Digest(pub [u8; 32]);
-
-impl std::fmt::Debug for Sha3_256Digest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "sha3 digest: ")?;
-        for v in self.0.as_slice() {
-            write!(f, "{:x?}", v)?;
-        }
-        Ok(())
-    }
-}
-
 impl From<ShareDigestLrtq> for bootstore::Sha3_256Digest {
     fn from(value: ShareDigestLrtq) -> Self {
         bootstore::Sha3_256Digest::new(value.0.0)
@@ -137,20 +131,6 @@ impl PartialEq for ReconstructedRackSecret {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    thiserror::Error,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
-#[error("invalid rack secret size")]
-pub struct InvalidRackSecretSizeError;
-
 impl TryFrom<SecretBox<[u8]>> for ReconstructedRackSecret {
     type Error = InvalidRackSecretSizeError;
     fn try_from(value: SecretBox<[u8]>) -> Result<Self, Self::Error> {
@@ -191,29 +171,6 @@ impl From<RackSecret> for ReconstructedRackSecret {
         let RackSecret { secret } = value;
         ReconstructedRackSecret { secret }
     }
-}
-
-#[derive(
-    Debug,
-    Clone,
-    thiserror::Error,
-    PartialEq,
-    Eq,
-    SlogInlineError,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
-pub enum RackSecretReconstructError {
-    #[error("share combine error")]
-    Combine(
-        #[from]
-        #[source]
-        CombineError,
-    ),
-    #[error(transparent)]
-    Size(#[from] InvalidRackSecretSizeError),
 }
 
 /// A shared secret based on GF256
@@ -277,111 +234,61 @@ impl PartialEq for RackSecret {
 
 impl Eq for RackSecret {}
 
-/// Some public randomness for cryptographic operations
-#[derive(
-    Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub struct Salt(pub [u8; 32]);
-
-impl Salt {
-    pub fn new() -> Salt {
-        let mut rng = OsRng;
-        let mut salt = [0u8; 32];
-        rng.try_fill_bytes(&mut salt).expect("fetched random bytes from OsRng");
-        Salt(salt)
-    }
+/// Generate a new random salt.
+///
+/// This is a free function because `Salt` is defined in `trust-quorum-types` (for API versioning
+/// akin to RFD 619).
+pub fn new_salt() -> Salt {
+    let mut rng = OsRng;
+    let mut salt = [0u8; 32];
+    rng.try_fill_bytes(&mut salt).expect("fetched random bytes from OsRng");
+    Salt(salt)
 }
 
-impl Default for Salt {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+/// Decrypt rack secrets from an `EncryptedRackSecrets` structure.
+///
+/// This is a free function because `EncryptedRackSecrets` is defined in `trust-quorum-types` (for
+/// API versioning akin to RFD 619) and Rust doesn't allow adding inherent methods to types from
+/// other crates.
+pub fn decrypt_rack_secrets(
+    encrypted: &EncryptedRackSecrets,
+    rack_id: RackUuid,
+    epoch: Epoch,
+    rack_secret: &ReconstructedRackSecret,
+) -> Result<PlaintextRackSecrets, DecryptionError> {
+    let key = derive_encryption_key_for_rack_secrets(
+        rack_id,
+        epoch,
+        encrypted.salt,
+        rack_secret,
+    );
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
-/// All possibly relevant __encrypted__ rack secrets for _prior_ committed
-/// configurations
-pub struct EncryptedRackSecrets {
-    /// A random value used to derive the key to encrypt the rack secrets for
-    /// prior committed epochs.
-    pub salt: Salt,
-    pub data: Box<[u8]>,
-}
+    // This key only encrypts a single plaintext and so a nonce of all zeroes
+    // is all that's required.
+    let nonce = [0u8; CHACHA20POLY1305_NONCE_LEN].into();
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    thiserror::Error,
-    SlogInlineError,
-    Serialize,
-    Deserialize,
-)]
-pub enum DecryptionError {
-    // An opaque error indicating decryption failed
-    #[error("Failed to decrypt rack secrets")]
-    Aead,
+    let plaintext = Zeroizing::new(
+        key.decrypt(&nonce, encrypted.data.as_ref())
+            .map_err(|_| DecryptionError::Aead)?,
+    );
 
-    // The length of the plaintext is not the correct size and cannot
-    // be decoded.
-    #[error("Plaintext length is invalid")]
-    InvalidLength,
-}
-
-impl From<aead::Error> for DecryptionError {
-    fn from(_: aead::Error) -> Self {
-        DecryptionError::Aead
-    }
-}
-
-impl EncryptedRackSecrets {
-    pub fn new(salt: Salt, data: Box<[u8]>) -> Self {
-        EncryptedRackSecrets { salt, data }
+    if plaintext.len() % (SECRET_LEN + EPOCH_LEN) != 0 {
+        return Err(DecryptionError::InvalidLength);
     }
 
-    pub fn decrypt(
-        &self,
-        rack_id: RackUuid,
-        epoch: Epoch,
-        rack_secret: &ReconstructedRackSecret,
-    ) -> Result<PlaintextRackSecrets, DecryptionError> {
-        let key = derive_encryption_key_for_rack_secrets(
-            rack_id,
-            epoch,
-            self.salt,
-            rack_secret,
-        );
+    let mut plaintext_secrets = PlaintextRackSecrets::new();
 
-        // This key only encrypts a single plaintext and so a nonce of all zeroes
-        // is all that's required.
-        let nonce = [0u8; CHACHA20POLY1305_NONCE_LEN].into();
-
-        let plaintext =
-            Zeroizing::new(key.decrypt(&nonce, self.data.as_ref())?);
-
-        if plaintext.len() % (SECRET_LEN + EPOCH_LEN) != 0 {
-            return Err(DecryptionError::InvalidLength);
-        }
-
-        let mut plaintext_secrets = PlaintextRackSecrets::new();
-
-        for p in plaintext.chunks_exact(SECRET_LEN + EPOCH_LEN) {
-            // SAFETY: Neither of these unwraps will ever fail as we've checked
-            // the validity of plaintext length above.
-            let epoch =
-                Epoch(u64::from_be_bytes(p[0..EPOCH_LEN].try_into().unwrap()));
-            let secret: ReconstructedRackSecret =
-                p[EPOCH_LEN..].try_into().unwrap();
-            plaintext_secrets.insert(epoch, secret);
-        }
-
-        Ok(plaintext_secrets)
+    for p in plaintext.chunks_exact(SECRET_LEN + EPOCH_LEN) {
+        // SAFETY: Neither of these unwraps will ever fail as we've checked
+        // the validity of plaintext length above.
+        let epoch =
+            Epoch(u64::from_be_bytes(p[0..EPOCH_LEN].try_into().unwrap()));
+        let secret: ReconstructedRackSecret =
+            p[EPOCH_LEN..].try_into().unwrap();
+        plaintext_secrets.insert(epoch, secret);
     }
+
+    Ok(plaintext_secrets)
 }
 
 /// All possibly relevant __unencrypted__ rack secrets for _prior_ committed
@@ -428,7 +335,7 @@ impl PlaintextRackSecrets {
 
         // We generate a fresh salt because we should only be encrypting
         // once for this epoch. This is also why we consume `self`.
-        let salt = Salt::new();
+        let salt = new_salt();
         let key = derive_encryption_key_for_rack_secrets(
             rack_id,
             new_epoch,
@@ -453,7 +360,7 @@ impl PlaintextRackSecrets {
         let nonce = [0u8; CHACHA20POLY1305_NONCE_LEN].into();
         let encrypted =
             key.encrypt(&nonce, plaintext.as_ref())?.into_boxed_slice();
-        Ok(EncryptedRackSecrets { salt, data: encrypted })
+        Ok(EncryptedRackSecrets::new(salt, encrypted))
     }
 }
 
@@ -564,8 +471,13 @@ mod tests {
         let new_rack_secret = RackSecret::new().into();
         let encrypted =
             plaintext.encrypt(rack_id, new_epoch, &new_rack_secret).unwrap();
-        let decrypted =
-            encrypted.decrypt(rack_id, new_epoch, &new_rack_secret).unwrap();
+        let decrypted = decrypt_rack_secrets(
+            &encrypted,
+            rack_id,
+            new_epoch,
+            &new_rack_secret,
+        )
+        .unwrap();
 
         // We don't actually do any comparisons of rack secrets outside this
         // test and we don't want to derive `PartialEq` due to data dependent
@@ -594,29 +506,47 @@ mod tests {
 
         // Decrypting with wrong rack_id fails.
         assert!(
-            encrypted
-                .decrypt(RackUuid::new_v4(), new_epoch, &new_rack_secret)
-                .is_err()
+            decrypt_rack_secrets(
+                &encrypted,
+                RackUuid::new_v4(),
+                new_epoch,
+                &new_rack_secret
+            )
+            .is_err()
         );
 
         // Decrypting with wrong epoch fails.
         assert!(
-            encrypted
-                .decrypt(RackUuid::new_v4(), Epoch(99), &new_rack_secret)
-                .is_err()
+            decrypt_rack_secrets(
+                &encrypted,
+                RackUuid::new_v4(),
+                Epoch(99),
+                &new_rack_secret
+            )
+            .is_err()
         );
 
         // Decrypting with the wrong secret fails
         assert!(
-            encrypted
-                .decrypt(rack_id, new_epoch, &RackSecret::new().into())
-                .is_err()
+            decrypt_rack_secrets(
+                &encrypted,
+                rack_id,
+                new_epoch,
+                &RackSecret::new().into()
+            )
+            .is_err()
         );
 
         // Decrypting with corrupted plaintext is invalid
         encrypted.data = vec![0u8, 1u8].into_boxed_slice();
         assert!(
-            encrypted.decrypt(rack_id, new_epoch, &new_rack_secret).is_err()
+            decrypt_rack_secrets(
+                &encrypted,
+                rack_id,
+                new_epoch,
+                &new_rack_secret
+            )
+            .is_err()
         );
     }
 }

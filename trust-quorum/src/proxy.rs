@@ -12,10 +12,7 @@
 //! This proxy mechanism is also useful during RSS and for general debugging
 //! purposes.
 
-use crate::{
-    CommitStatus,
-    task::{NodeApiRequest, NodeStatus},
-};
+use crate::task::{CommitStatus, NodeApiRequest, NodeStatus};
 use debug_ignore::DebugIgnore;
 use derive_more::From;
 use iddqd::{IdHashItem, IdHashMap, id_upcast};

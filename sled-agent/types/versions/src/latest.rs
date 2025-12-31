@@ -156,15 +156,21 @@ pub mod support_bundle {
 }
 
 pub mod trust_quorum {
-    pub use crate::v13::trust_quorum::TrustQuorumAlarm;
+    // Core types re-exported from trust-quorum-types-versions
+    pub use crate::v13::trust_quorum::Alarm;
+    pub use crate::v13::trust_quorum::CommitStatus;
+    pub use crate::v13::trust_quorum::Configuration;
+    pub use crate::v13::trust_quorum::CoordinatorStatus;
+    pub use crate::v13::trust_quorum::EncryptedRackSecrets;
+    pub use crate::v13::trust_quorum::Epoch;
+    pub use crate::v13::trust_quorum::ExpungedMetadata;
+    pub use crate::v13::trust_quorum::NodePersistentStateSummary;
+    pub use crate::v13::trust_quorum::NodeStatus;
+    pub use crate::v13::trust_quorum::Threshold;
+
+    // HTTP request types specific to the sled-agent API
     pub use crate::v13::trust_quorum::TrustQuorumCommitRequest;
-    pub use crate::v13::trust_quorum::TrustQuorumCommitResponse;
-    pub use crate::v13::trust_quorum::TrustQuorumConfiguration;
-    pub use crate::v13::trust_quorum::TrustQuorumCoordinatorStatus;
-    pub use crate::v13::trust_quorum::TrustQuorumEncryptedRackSecrets;
     pub use crate::v13::trust_quorum::TrustQuorumLrtqUpgradeRequest;
-    pub use crate::v13::trust_quorum::TrustQuorumNodeStatus;
-    pub use crate::v13::trust_quorum::TrustQuorumPersistentStateSummary;
     pub use crate::v13::trust_quorum::TrustQuorumPrepareAndCommitRequest;
     pub use crate::v13::trust_quorum::TrustQuorumProxyCommitRequest;
     pub use crate::v13::trust_quorum::TrustQuorumProxyPrepareAndCommitRequest;
