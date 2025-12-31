@@ -159,11 +159,6 @@ pub(super) async fn convert_legacy_ledgers(
             "Failed to convert OmicronSledConfigV10 to OmicronSledConfigV11: {e}"
         ));
 
-    let sled_config : OmicronSledConfigV12 = OmicronSledConfigV12::try_from(sled_config)
-        .unwrap_or_else(|e| panic!(
-            "Failed to convert OmicronSledConfigV10 to OmicronSledConfigV11: {e}"
-        ));
-
     let sled_config = OmicronSledConfig::try_from(sled_config)
         .unwrap_or_else(|e| panic!(
             "Failed to convert OmicronSledConfigV11 to the current version: {e}"
