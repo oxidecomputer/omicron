@@ -163,6 +163,23 @@ impl DataStore {
             .map_err(|err| err.into_public_ignore_retries())
     }
 
+    /// Get the trust quorum configuration from the database for the given Epoch
+    pub async fn tq_get_config(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> OptionalLookupResult<TrustQuorumConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+
+        Self::tq_get_config_with_members_from_epoch_conn(
+            opctx, conn, rack_id, epoch,
+        )
+        .await
+        .map_err(|err| err.into_public_ignore_retries())
+    }
+
     async fn tq_get_latest_config_with_members_conn(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
