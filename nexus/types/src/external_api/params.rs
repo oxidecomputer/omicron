@@ -1080,7 +1080,10 @@ pub struct IpPoolLinkSilo {
     pub silo: NameOrId,
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
 }
 
@@ -1088,9 +1091,12 @@ pub struct IpPoolLinkSilo {
 pub struct IpPoolSiloUpdate {
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo, so when a pool is
-    /// made default, an existing default will remain linked but will no longer
-    /// be the default.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total. When a pool is made default, an existing default
+    /// of the same type and version will remain linked but will no longer be
+    /// the default.
     pub is_default: bool,
 }
 
@@ -1109,6 +1115,13 @@ pub struct FloatingIpCreate {
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
     pub pool: Option<NameOrId>,
+
+    /// IP version to use when allocating from the default pool.
+    /// Only used when both `ip` and `pool` are not specified. Required if
+    /// multiple default pools of different IP versions exist. Allocation
+    /// fails if no pool of the requested version is available.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1206,7 +1219,15 @@ pub enum ExternalIpCreate {
     /// An IP address providing both inbound and outbound access. The address is
     /// automatically assigned from the provided IP pool or the default IP pool
     /// if not specified.
-    Ephemeral { pool: Option<NameOrId> },
+    Ephemeral {
+        pool: Option<NameOrId>,
+        /// IP version to use when allocating from the default pool.
+        /// Only used when `pool` is not specified. Required if multiple default
+        /// pools of different IP versions exist. Allocation fails if no pool
+        /// of the requested version is available.
+        #[serde(default)]
+        ip_version: Option<IpVersion>,
+    },
     /// An IP address providing both inbound and outbound access. The address is
     /// an existing floating IP object assigned to the current project.
     ///
@@ -1221,6 +1242,13 @@ pub struct EphemeralIpCreate {
     /// Name or ID of the IP pool used to allocate an address. If unspecified,
     /// the default IP pool will be used.
     pub pool: Option<NameOrId>,
+
+    /// IP version to use when allocating from the default pool.
+    /// Only used when `pool` is not specified. Required if multiple default
+    /// pools of different IP versions exist. Allocation fails if no pool
+    /// of the requested version is available.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 /// Parameters for detaching an external IP from an instance.
