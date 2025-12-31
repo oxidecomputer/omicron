@@ -18949,7 +18949,7 @@
         "properties": {
           "ip_version": {
             "nullable": true,
-            "description": "Preferred IP version when allocating from the default pool. Only used when `pool` is not specified. Required if multiple default pools of different IP versions exist.",
+            "description": "IP version to use when allocating from the default pool. Only used when `pool` is not specified. Required if multiple default pools of different IP versions exist. Allocation fails if no pool of the requested version is available.",
             "default": null,
             "allOf": [
               {
@@ -19136,7 +19136,7 @@
             "properties": {
               "ip_version": {
                 "nullable": true,
-                "description": "Preferred IP version when allocating from the default pool. Only used when `pool` is not specified. Required if multiple default pools of different IP versions exist.",
+                "description": "IP version to use when allocating from the default pool. Only used when `pool` is not specified. Required if multiple default pools of different IP versions exist. Allocation fails if no pool of the requested version is available.",
                 "default": null,
                 "allOf": [
                   {
@@ -19667,7 +19667,7 @@
           },
           "ip_version": {
             "nullable": true,
-            "description": "Preferred IP version when allocating from the default pool. Only used when both `ip` and `pool` are not specified. Required if multiple default pools of different IP versions exist.",
+            "description": "IP version to use when allocating from the default pool. Only used when both `ip` and `pool` are not specified. Required if multiple default pools of different IP versions exist. Allocation fails if no pool of the requested version is available.",
             "default": null,
             "allOf": [
               {
