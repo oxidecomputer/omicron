@@ -1,12 +1,9 @@
--- Make columns NOT NULL and create new unique index
-ALTER TABLE omicron.public.ip_pool_resource
-    ALTER COLUMN pool_type SET NOT NULL,
-    ALTER COLUMN ip_version SET NOT NULL;
-
--- One default pool per (resource, pool_type, ip_version) combination
-CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource_type_version
-ON omicron.public.ip_pool_resource (
-    resource_id,
-    pool_type,
-    ip_version
-) WHERE is_default = true;
+-- Backfill pool_type and ip_version from ip_pool table
+SET LOCAL disallow_full_table_scans = off;
+UPDATE omicron.public.ip_pool_resource AS resource
+SET
+    pool_type = pool.pool_type,
+    ip_version = pool.ip_version
+FROM omicron.public.ip_pool AS pool
+WHERE resource.ip_pool_id = pool.id
+  AND (resource.pool_type IS NULL OR resource.ip_version IS NULL);

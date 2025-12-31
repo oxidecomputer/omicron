@@ -1,9 +1,4 @@
--- Backfill pool_type and ip_version from ip_pool table
-SET LOCAL disallow_full_table_scans = off;
-UPDATE omicron.public.ip_pool_resource AS resource
-SET
-    pool_type = pool.pool_type,
-    ip_version = pool.ip_version
-FROM omicron.public.ip_pool AS pool
-WHERE resource.ip_pool_id = pool.id
-  AND (resource.pool_type IS NULL OR resource.ip_version IS NULL);
+-- Add denormalized columns (nullable initially for backfill)
+ALTER TABLE omicron.public.ip_pool_resource
+    ADD COLUMN IF NOT EXISTS pool_type omicron.public.ip_pool_type,
+    ADD COLUMN IF NOT EXISTS ip_version omicron.public.ip_version;

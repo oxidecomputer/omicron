@@ -2996,3 +2996,37 @@ table! {
 
 allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
+
+table! {
+    trust_quorum_configuration (rack_id, epoch) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        last_committed_epoch -> Nullable<Int8>,
+        state -> crate::enums::TrustQuorumConfigurationStateEnum,
+        threshold -> Int2,
+        commit_crash_tolerance -> Int2,
+        coordinator -> Uuid,
+        encrypted_rack_secrets_salt -> Nullable<Text>,
+        encrypted_rack_secrets -> Nullable<Binary>,
+        time_created -> Timestamptz,
+        time_committing -> Nullable<Timestamptz>,
+        time_committed -> Nullable<Timestamptz>,
+        time_aborted -> Nullable<Timestamptz>,
+        abort_reason -> Nullable<Text>,
+    }
+}
+
+table! {
+    trust_quorum_member (rack_id, epoch, hw_baseboard_id) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        hw_baseboard_id -> Uuid,
+        state -> crate::enums::TrustQuorumMemberStateEnum,
+        share_digest -> Nullable<Text>,
+        time_prepared -> Nullable<Timestamptz>,
+        time_committed -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(trust_quorum_member, hw_baseboard_id);
+joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));

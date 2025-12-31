@@ -47,9 +47,8 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
-    BaseboardId, Caboose, CockroachStatus, Collection,
-    InternalDnsGenerationStatus, NvmeFirmware, PowerState, RotPage, RotSlot,
-    TimeSync,
+    Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
+    NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -94,6 +93,7 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
+use sled_agent_types::sled::BaseboardId;
 use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddrV6};
 use std::time::Duration;
@@ -489,8 +489,8 @@ impl<'a> From<&'a Collection> for InvCollection {
     }
 }
 
-/// See [`nexus_types::inventory::BaseboardId`].
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+/// See [`sled_agent_types::sled::BaseboardId`].
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq, Eq)]
 #[diesel(table_name = hw_baseboard_id)]
 pub struct HwBaseboardId {
     pub id: Uuid,

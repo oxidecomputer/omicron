@@ -36,6 +36,7 @@ use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
+use nexus_db_model::DbTypedUuid;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
@@ -54,8 +55,11 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackKind;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::sled::BaseboardId;
 use slog::Logger;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -710,6 +714,27 @@ impl DataStore {
         );
 
         Ok(())
+    }
+
+    // Return the rack id of a commissioned sled if it exists, given its
+    // `BaseboardId`.
+    pub async fn sled_get_rack_id_if_commissioned_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        baseboard_id: &BaseboardId,
+    ) -> Result<Option<RackUuid>, TransactionError<Error>> {
+        use nexus_db_schema::schema::sled::dsl;
+        let rack_id = dsl::sled
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::part_number.eq(baseboard_id.part_number.clone()))
+            .filter(dsl::serial_number.eq(baseboard_id.serial_number.clone()))
+            .sled_filter(SledFilter::Commissioned)
+            .select(dsl::rack_id)
+            .get_result_async::<DbTypedUuid<RackKind>>(conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(rack_id.map(RackUuid::from))
     }
 
     pub async fn sled_list(

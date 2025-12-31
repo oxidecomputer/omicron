@@ -31,6 +31,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{self, Visitor},
 };
+use sled_agent_types::sled::BaseboardId;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::num::NonZeroU32;
 use std::{
@@ -85,6 +86,12 @@ macro_rules! id_path_param {
 pub struct UninitializedSledId {
     pub serial: String,
     pub part: String,
+}
+
+impl From<UninitializedSledId> for BaseboardId {
+    fn from(value: UninitializedSledId) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
 }
 
 path_param!(AffinityGroupPath, affinity_group, "affinity group");
@@ -1114,9 +1121,10 @@ pub struct FloatingIpCreate {
     /// default pool is selected.
     pub pool: Option<NameOrId>,
 
-    /// Preferred IP version when allocating from the default pool.
+    /// IP version to use when allocating from the default pool.
     /// Only used when both `ip` and `pool` are not specified. Required if
-    /// multiple default pools of different IP versions exist.
+    /// multiple default pools of different IP versions exist. Allocation
+    /// fails if no pool of the requested version is available.
     #[serde(default)]
     pub ip_version: Option<IpVersion>,
 }
@@ -1218,9 +1226,10 @@ pub enum ExternalIpCreate {
     /// if not specified.
     Ephemeral {
         pool: Option<NameOrId>,
-        /// Preferred IP version when allocating from the default pool.
+        /// IP version to use when allocating from the default pool.
         /// Only used when `pool` is not specified. Required if multiple default
-        /// pools of different IP versions exist.
+        /// pools of different IP versions exist. Allocation fails if no pool
+        /// of the requested version is available.
         #[serde(default)]
         ip_version: Option<IpVersion>,
     },
@@ -1239,9 +1248,10 @@ pub struct EphemeralIpCreate {
     /// the default IP pool will be used.
     pub pool: Option<NameOrId>,
 
-    /// Preferred IP version when allocating from the default pool.
+    /// IP version to use when allocating from the default pool.
     /// Only used when `pool` is not specified. Required if multiple default
-    /// pools of different IP versions exist.
+    /// pools of different IP versions exist. Allocation fails if no pool
+    /// of the requested version is available.
     #[serde(default)]
     pub ip_version: Option<IpVersion>,
 }

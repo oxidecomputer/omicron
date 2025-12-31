@@ -1548,6 +1548,37 @@ async fn test_ephemeral_ip_ip_version_conflict(
     );
 }
 
+/// Test that specifying both `pool` and IP version where the pool's version
+/// doesn't match the requested version returns an error.
+#[nexus_test]
+async fn test_ephemeral_ip_pool_version_mismatch(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create default IPv4 pool
+    create_default_ip_pool(&client).await;
+    create_project(&client, PROJECT_NAME).await;
+    instance_for_external_ips(client, INSTANCE_NAMES[0], false, false, &[])
+        .await;
+
+    let url = instance_ephemeral_ip_url(INSTANCE_NAMES[0], PROJECT_NAME);
+
+    // Request IPv6 from the IPv4 pool -> should fail
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::EphemeralIpCreate {
+                pool: Some(NameOrId::Name("default".parse().unwrap())),
+                ip_version: Some(views::IpVersion::V6),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
 #[nexus_test]
 async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;

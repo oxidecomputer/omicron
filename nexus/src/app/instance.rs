@@ -2246,6 +2246,27 @@ impl super::Nexus {
         pool: Option<NameOrId>,
         ip_version: Option<IpVersion>,
     ) -> UpdateResult<views::ExternalIp> {
+        // Validate pool/ip_version compatibility upfront for clear error
+        // communication.
+        //
+        // The saga will look up the pool again, but this ensures the user gets
+        // a direct error before any saga machinery starts, and without changing
+        // the `Ephemeral` type fields.
+        if let (Some(pool_id), Some(requested_version)) = (&pool, ip_version) {
+            let (_, db_pool) = self
+                .ip_pool_lookup(opctx, pool_id)?
+                .fetch_for(authz::Action::CreateChild)
+                .await?;
+            let db_version: IpVersion = db_pool.ip_version.into();
+            if db_version != requested_version {
+                return Err(Error::invalid_request(format!(
+                    "requested IP version ({requested_version}) does not match \
+                     pool '{}' version ({db_version})",
+                    db_pool.name().as_str(),
+                )));
+            }
+        }
+
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 

@@ -2481,7 +2481,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=0df320d42b356e689a3c7a7600eec9b16770237a#0df320d42b356e689a3c7a7600eec9b16770237a"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=205b3ccf75b527ac7a565285fdcc0c78f4fcee95#205b3ccf75b527ac7a565285fdcc0c78f4fcee95"
 dependencies = [
  "oxnet",
  "progenitor 0.11.2",
@@ -6348,7 +6348,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=0df320d42b356e689a3c7a7600eec9b16770237a#0df320d42b356e689a3c7a7600eec9b16770237a"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=205b3ccf75b527ac7a565285fdcc0c78f4fcee95#205b3ccf75b527ac7a565285fdcc0c78f4fcee95"
 dependencies = [
  "chrono",
  "colored 3.0.0",
@@ -6784,6 +6784,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.17",
  "tokio",
+ "trust-quorum-protocol",
  "tufaceous-artifact",
  "uuid",
  "vergen-gitcl",
@@ -6877,6 +6878,7 @@ dependencies = [
  "term 0.7.0",
  "thiserror 2.0.17",
  "tokio",
+ "trust-quorum-protocol",
  "tufaceous-artifact",
  "url",
  "usdt 0.5.0",
@@ -7314,6 +7316,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pq-sys",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
 ]
@@ -7535,6 +7538,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "sled-agent-types",
  "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
@@ -7548,6 +7552,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tough",
+ "trust-quorum-protocol",
  "tufaceous-artifact",
  "unicode-width 0.1.14",
  "update-engine",
@@ -11407,7 +11412,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=0df320d42b356e689a3c7a7600eec9b16770237a#0df320d42b356e689a3c7a7600eec9b16770237a"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=205b3ccf75b527ac7a565285fdcc0c78f4fcee95#205b3ccf75b527ac7a565285fdcc0c78f4fcee95"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -11489,6 +11494,7 @@ dependencies = [
  "oxide-tokio-rt",
  "qorb",
  "serde_json",
+ "sled-agent-types",
  "slog",
  "swrite",
  "tokio",
@@ -13069,6 +13075,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9)",
+ "proptest",
  "rcgen",
  "schemars 0.8.22",
  "serde",
@@ -13080,6 +13087,7 @@ dependencies = [
  "slog-error-chain",
  "strum 0.27.2",
  "swrite",
+ "test-strategy",
  "thiserror 2.0.17",
  "toml 0.8.23",
  "tufaceous-artifact",
@@ -14841,6 +14849,7 @@ dependencies = [
  "reconfigurator-cli",
  "reedline",
  "serde_json",
+ "sled-agent-types",
  "slog",
  "tabled 0.15.0",
  "trust-quorum-protocol",
@@ -15122,6 +15131,7 @@ dependencies = [
  "secrecy 0.10.3",
  "serde",
  "serde_json",
+ "sled-agent-types",
  "sled-hardware-types",
  "slog",
  "trust-quorum-protocol",
