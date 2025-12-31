@@ -542,6 +542,22 @@ impl<'a> LookupPath<'a> {
     {
         ScimClientBearerToken::PrimaryKey(Root { lookup_root: self }, id)
     }
+
+    /// Select a resource of type [`SubnetPool`], identified by its UUID.
+    pub fn subnet_pool_id<'b>(self, id: SubnetPoolUuid) -> SubnetPool<'b>
+    where
+        'a: 'b,
+    {
+        SubnetPool::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type [`SubnetPool`], identified by its Name.
+    pub fn subnet_pool_name<'b>(self, name: Name) -> SubnetPool<'b>
+    where
+        'a: 'b,
+    {
+        SubnetPool::OwnedName(Root { lookup_root: self }, name)
+    }
 }
 
 /// Represents the head of the selection path for a resource
@@ -955,6 +971,28 @@ lookup_resource! {
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
     visible_outside_silo = true
+}
+
+lookup_resource! {
+    name = "SubnetPool",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = SubnetPoolKind }
+    ],
+    visible_outside_silo = true
+}
+
+lookup_resource! {
+    name = "ExternalSubnet",
+    ancestors = [ "Silo", "Project" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = ExternalSubnetKind }
+    ],
+    visible_outside_silo = false,
 }
 
 // Helpers for unifying the interfaces around images
