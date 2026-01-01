@@ -834,33 +834,6 @@ impl DataStore {
         };
         let stopped = db::model::InstanceState::NoVmm;
 
-        // Fetch the IP versions for all external addresses attached to this
-        // instance.
-        let ip_versions_query = {
-            use nexus_db_schema::schema::external_ip::dsl;
-            dsl::external_ip
-                .filter(dsl::parent_id.eq(instance_id))
-                .filter(dsl::time_deleted.is_null())
-                // NOTE: We would like to use the `family()` function, but this
-                // confuses Diesel. It expects that to return an `i32`, but CRDB
-                // returns an `INT` which is an alias for an `i64`.
-                // Deserialization fails.
-                .select(diesel::dsl::sql::<diesel::sql_types::BigInt>(
-                    "family(ip)",
-                ))
-                .distinct()
-        };
-
-        // And, if needed, whether the secondary we're promoting has IPv4 and
-        // IPv6 stacks, to support all the external addresses for the instance.
-        let secondary_ip_stacks_query = {
-            use nexus_db_schema::schema::instance_network_interface::dsl;
-            dsl::instance_network_interface
-                .find(interface_id)
-                .filter(dsl::time_deleted.is_null())
-                .select((dsl::ipv4.is_not_null(), dsl::ipv6.is_not_null()))
-        };
-
         // This is the actual query to update the target interface.
         // Unlike Postgres, CockroachDB doesn't support inserting or updating a view
         // so we need to use the underlying table, taking care to constrain
@@ -892,7 +865,6 @@ impl DataStore {
                 .transaction(&conn, |conn| {
                     let err = err.clone();
                     let update_target_query = update_target_query.clone();
-                    let ip_versions_query = ip_versions_query.clone();
                     async move {
                         let instance_runtime =
                             instance_query.get_result_async(&conn).await?.runtime_state;
@@ -926,12 +898,36 @@ impl DataStore {
                             // Ensure that the new secondary has VPC-private IP
                             // addresses of the same family as any external IP
                             // addresses.
-                            let ip_versions = ip_versions_query
-                                .get_results_async(&conn)
-                                .await?;
-                            let (secondary_has_ipv4, secondary_has_ipv6): (bool, bool) = secondary_ip_stacks_query
-                                .get_result_async(&conn)
-                                .await?;
+                            //
+                            // Fetch the IP versions for all external addresses
+                            // attached to this instance, and whether the
+                            // secondary we're trying to make into primary has
+                            // the private IP stacks to support those.
+                            let ip_versions = {
+                                use nexus_db_schema::schema::external_ip::dsl;
+                                dsl::external_ip
+                                    .filter(dsl::parent_id.eq(instance_id))
+                                    .filter(dsl::time_deleted.is_null())
+                                    // NOTE: We would like to use the `family()` function, but this
+                                    // confuses Diesel. It expects that to return an `i32`, but CRDB
+                                    // returns an `INT` which is an alias for an `i64`.
+                                    // Deserialization fails.
+                                    .select(diesel::dsl::sql::<diesel::sql_types::BigInt>(
+                                        "family(ip)",
+                                    ))
+                                    .distinct()
+                                    .get_results_async(&conn)
+                                    .await?
+                            };
+                            let (secondary_has_ipv4, secondary_has_ipv6): (bool, bool) = {
+                                use nexus_db_schema::schema::instance_network_interface::dsl;
+                                dsl::instance_network_interface
+                                    .find(interface_id)
+                                    .filter(dsl::time_deleted.is_null())
+                                    .select((dsl::ipv4.is_not_null(), dsl::ipv6.is_not_null()))
+                                    .get_result_async(&conn)
+                                    .await?
+                            };
                             if ip_versions.contains(&4) && !secondary_has_ipv4 {
                                 return
                                     Err(err.bail(NetworkInterfaceUpdateError::CandidatePrimaryMissingIpStack(4)));

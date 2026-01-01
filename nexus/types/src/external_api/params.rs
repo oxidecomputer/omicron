@@ -1418,7 +1418,7 @@ pub enum InstanceNetworkInterfaceAttachment {
     /// designated the primary interface for the instance.
     Create(Vec<InstanceNetworkInterfaceCreate>),
 
-    /// Create a single primary interface with an automatically-assigned IPv6
+    /// Create a single primary interface with an automatically-assigned IPv4
     /// address.
     ///
     /// The IP will be pulled from the Project's default VPC / VPC Subnet.

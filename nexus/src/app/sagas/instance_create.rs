@@ -532,13 +532,17 @@ async fn sic_add_to_anti_affinity_group(
 /// This panics if the attachment isn't one of the "default" variants.
 fn nic_attachment_to_ip_config(
     attachment: &params::InstanceNetworkInterfaceAttachment,
-) -> PrivateIpStackCreate {
+) -> Result<PrivateIpStackCreate, ActionError> {
     use params::InstanceNetworkInterfaceAttachment::*;
     match attachment {
-        DefaultIpv4 => PrivateIpStackCreate::auto_ipv4(),
-        DefaultIpv6 => PrivateIpStackCreate::auto_ipv6(),
-        DefaultDualStack => PrivateIpStackCreate::auto_dual_stack(),
-        Create(_) | None => panic!("Only works for default variants"),
+        DefaultIpv4 => Ok(PrivateIpStackCreate::auto_ipv4()),
+        DefaultIpv6 => Ok(PrivateIpStackCreate::auto_ipv6()),
+        DefaultDualStack => Ok(PrivateIpStackCreate::auto_dual_stack()),
+        Create(_) | None => {
+            Err(ActionError::action_failed(Error::internal_error(
+                "This should only be used with the automatic variants",
+            )))
+        }
     }
 }
 
@@ -558,7 +562,7 @@ async fn sic_create_network_interface(
         params::InstanceNetworkInterfaceAttachment::DefaultIpv4
         | params::InstanceNetworkInterfaceAttachment::DefaultIpv6
         | params::InstanceNetworkInterfaceAttachment::DefaultDualStack => {
-            let ip_config = nic_attachment_to_ip_config(interface_params);
+            let ip_config = nic_attachment_to_ip_config(interface_params)?;
             create_default_primary_network_interface(
                 &sagactx,
                 &saga_params,

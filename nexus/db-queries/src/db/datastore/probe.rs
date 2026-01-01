@@ -258,7 +258,7 @@ impl super::DataStore {
                     probe.name(),
                 ),
             },
-            PrivateIpStackCreate::auto_ipv4(),
+            PrivateIpStackCreate::auto_dual_stack(),
             None, //Request MAC address assignment
         )?;
 
