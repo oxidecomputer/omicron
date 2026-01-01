@@ -1575,7 +1575,7 @@
       }
     },
     "/trust-quorum/configuration": {
-      "put": {
+      "post": {
         "summary": "Initiate a trust quorum reconfiguration",
         "operationId": "trust_quorum_reconfigure",
         "requestBody": {
@@ -1765,7 +1765,7 @@
       }
     },
     "/trust-quorum/upgrade": {
-      "put": {
+      "post": {
         "summary": "Initiate an upgrade from LRTQ",
         "operationId": "trust_quorum_upgrade_from_lrtq",
         "requestBody": {
@@ -4367,7 +4367,8 @@
           },
           "share_digest": {
             "description": "The SHA3-256 hash of the member's key share.",
-            "type": "string"
+            "type": "string",
+            "format": "hex string (32 bytes)"
           }
         },
         "required": [
@@ -5094,11 +5095,14 @@
         "type": "object",
         "properties": {
           "data": {
-            "type": "string"
+            "description": "Encrypted data.",
+            "type": "string",
+            "format": "hex string"
           },
           "salt": {
             "description": "A random value used to derive the key to encrypt the rack secrets for prior committed epochs.",
-            "type": "string"
+            "type": "string",
+            "format": "hex string (32 bytes)"
           }
         },
         "required": [
