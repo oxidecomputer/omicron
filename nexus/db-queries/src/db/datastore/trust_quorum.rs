@@ -32,10 +32,11 @@ use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
 use rand::rng;
 use rand::seq::IteratorRandom;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use std::collections::{BTreeMap, BTreeSet};
-use trust_quorum_protocol::{
-    EncryptedRackSecrets, Epoch, Salt, Sha3_256Digest, Threshold,
+use trust_quorum_types::{
+    crypto::{EncryptedRackSecrets, Salt, Sha3_256Digest},
+    types::{Epoch, Threshold},
 };
 
 macro_rules! bail_txn {
@@ -588,7 +589,7 @@ impl DataStore {
     pub async fn tq_update_prepare_status(
         &self,
         opctx: &OpContext,
-        config: trust_quorum_protocol::Configuration,
+        config: trust_quorum_types::configuration::Configuration,
         acked_prepares: BTreeSet<BaseboardId>,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -1656,18 +1657,19 @@ mod tests {
 
         // A configuration returned from a coordinator is part of the trust
         // quorum protocol
-        let coordinator_config = trust_quorum_protocol::Configuration {
-            rack_id: config.rack_id,
-            epoch: config.epoch,
-            coordinator: hw_ids.first().unwrap().clone().into(),
-            members: members
-                .clone()
-                .into_iter()
-                .map(|id| (id, Sha3_256Digest([0u8; 32])))
-                .collect(),
-            threshold: TrustQuorumConfig::threshold(members.len() as u8),
-            encrypted_rack_secrets: None,
-        };
+        let coordinator_config =
+            trust_quorum_types::configuration::Configuration {
+                rack_id: config.rack_id,
+                epoch: config.epoch,
+                coordinator: hw_ids.first().unwrap().clone().into(),
+                members: members
+                    .clone()
+                    .into_iter()
+                    .map(|id| (id, Sha3_256Digest([0u8; 32])))
+                    .collect(),
+                threshold: TrustQuorumConfig::threshold(members.len() as u8),
+                encrypted_rack_secrets: None,
+            };
 
         // Ack only the coordinator
         datastore
@@ -1889,18 +1891,19 @@ mod tests {
         }
 
         // Create a config to simulate retrieving one from a coordinator
-        let coordinator_config = trust_quorum_protocol::Configuration {
-            rack_id: config.rack_id,
-            epoch: config.epoch,
-            coordinator: hw_ids.first().unwrap().clone().into(),
-            members: members
-                .clone()
-                .into_iter()
-                .map(|id| (id, Sha3_256Digest([0u8; 32])))
-                .collect(),
-            threshold: TrustQuorumConfig::threshold(members.len() as u8),
-            encrypted_rack_secrets: None,
-        };
+        let coordinator_config =
+            trust_quorum_types::configuration::Configuration {
+                rack_id: config.rack_id,
+                epoch: config.epoch,
+                coordinator: hw_ids.first().unwrap().clone().into(),
+                members: members
+                    .clone()
+                    .into_iter()
+                    .map(|id| (id, Sha3_256Digest([0u8; 32])))
+                    .collect(),
+                threshold: TrustQuorumConfig::threshold(members.len() as u8),
+                encrypted_rack_secrets: None,
+            };
 
         // This is how we actually try to trigger commit operations. This should
         // fail outright.
@@ -1950,10 +1953,11 @@ mod tests {
             .unwrap_err();
 
         // Commit the new config
-        let coordinator_config2 = trust_quorum_protocol::Configuration {
-            epoch: config2.epoch,
-            ..coordinator_config
-        };
+        let coordinator_config2 =
+            trust_quorum_types::configuration::Configuration {
+                epoch: config2.epoch,
+                ..coordinator_config
+            };
         let acked_prepares = (coordinator_config.threshold.0
             + TrustQuorumConfig::commit_crash_tolerance(members.len() as u8))
             as usize;

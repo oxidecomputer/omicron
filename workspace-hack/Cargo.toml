@@ -67,6 +67,7 @@ getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", defaul
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.16.1", default-features = false, features = ["allocator-api2", "inline-more"] }
 heck = { version = "0.4.1", features = ["unicode"] }
+hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.8.1", features = ["full"] }
@@ -121,7 +122,7 @@ semver = { version = "1.0.27", features = ["serde"] }
 serde = { version = "1.0.228", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.228", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.145", features = ["alloc", "raw_value", "unbounded_depth"] }
-serde_with = { version = "3.14.0" }
+serde_with = { version = "3.14.0", features = ["hex", "schemars_0_8"] }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
 sha3 = { version = "0.10.8", features = ["oid"] }
@@ -207,6 +208,7 @@ getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", defaul
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.16.1", default-features = false, features = ["allocator-api2", "inline-more"] }
 heck = { version = "0.4.1", features = ["unicode"] }
+hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.8.1", features = ["full"] }
@@ -261,7 +263,8 @@ semver = { version = "1.0.27", features = ["serde"] }
 serde = { version = "1.0.228", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.228", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.145", features = ["alloc", "raw_value", "unbounded_depth"] }
-serde_with = { version = "3.14.0" }
+serde_with = { version = "3.14.0", features = ["hex", "schemars_0_8"] }
+serde_with_macros = { version = "3.14.0", default-features = false, features = ["schemars_0_8"] }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
 sha3 = { version = "0.10.8", features = ["oid"] }

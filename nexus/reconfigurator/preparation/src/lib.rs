@@ -53,7 +53,7 @@ use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::error;
 use slog_error_chain::InlineErrorChain;

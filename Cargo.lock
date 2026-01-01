@@ -4087,6 +4087,7 @@ dependencies = [
  "omicron-workspace-hack",
  "proptest",
  "rand 0.9.2",
+ "schemars 0.8.22",
  "secrecy 0.10.3",
  "serde",
  "subtle",
@@ -6777,6 +6778,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "steno",
@@ -6868,6 +6870,7 @@ dependencies = [
  "sha2",
  "sled-agent-client",
  "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "static_assertions",
@@ -6879,6 +6882,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "trust-quorum-protocol",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "url",
  "usdt 0.5.0",
@@ -6986,6 +6990,7 @@ dependencies = [
  "sled-agent-types",
  "sled-agent-types-versions",
  "sled-agent-zone-images-examples",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "strum 0.27.2",
@@ -7109,6 +7114,7 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-types",
  "sled-diagnostics",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "sp-sim",
@@ -7116,6 +7122,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -7316,6 +7323,7 @@ dependencies = [
  "omicron-workspace-hack",
  "pq-sys",
  "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
 ]
@@ -7552,6 +7560,7 @@ dependencies = [
  "tokio",
  "tough",
  "trust-quorum-protocol",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "unicode-width 0.1.14",
  "update-engine",
@@ -8437,6 +8446,7 @@ dependencies = [
  "similar-asserts",
  "sled-agent-client",
  "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-async",
  "slog-dtrace",
@@ -8576,6 +8586,7 @@ dependencies = [
  "sigpipe",
  "sled-agent-client",
  "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "steno",
@@ -8896,6 +8907,7 @@ dependencies = [
  "toml 0.8.23",
  "trust-quorum",
  "trust-quorum-protocol",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "tufaceous-brand-metadata",
  "usdt 0.5.0",
@@ -9021,6 +9033,7 @@ dependencies = [
  "group",
  "hashbrown 0.16.1",
  "heck 0.4.1",
+ "hex",
  "hickory-proto 0.25.2",
  "hmac",
  "hyper",
@@ -9085,6 +9098,7 @@ dependencies = [
  "serde_core",
  "serde_json",
  "serde_with",
+ "serde_with_macros",
  "sha1",
  "sha2",
  "sha3",
@@ -11493,6 +11507,7 @@ dependencies = [
  "qorb",
  "serde_json",
  "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "swrite",
  "tokio",
@@ -12724,6 +12739,7 @@ dependencies = [
  "hex",
  "indexmap 1.9.3",
  "indexmap 2.12.1",
+ "schemars 0.8.22",
  "schemars 0.9.0",
  "schemars 1.0.4",
  "serde",
@@ -12955,6 +12971,7 @@ dependencies = [
  "sled-agent-types-versions",
  "sled-diagnostics",
  "sled-hardware-types",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -13115,12 +13132,14 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "serde_with",
  "sha3",
  "sled-hardware-types",
  "slog",
  "strum 0.27.2",
  "test-strategy",
  "thiserror 2.0.17",
+ "trust-quorum-types-versions",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -13238,12 +13257,17 @@ dependencies = [
 name = "sled-hardware-types"
 version = "0.1.0"
 dependencies = [
+ "daft",
  "illumos-utils",
  "macaddr",
  "omicron-common",
  "omicron-workspace-hack",
+ "proptest",
  "schemars 0.8.22",
  "serde",
+ "slog",
+ "test-strategy",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -14847,7 +14871,7 @@ dependencies = [
  "reconfigurator-cli",
  "reedline",
  "serde_json",
- "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "tabled 0.15.0",
  "trust-quorum-protocol",
@@ -15070,6 +15094,7 @@ dependencies = [
  "tokio",
  "trust-quorum-protocol",
  "trust-quorum-test-utils",
+ "trust-quorum-types",
  "uuid",
  "zeroize",
 ]
@@ -15103,6 +15128,7 @@ dependencies = [
  "serde_with",
  "sha3",
  "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "static_assertions",
@@ -15110,6 +15136,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.17",
  "trust-quorum-test-utils",
+ "trust-quorum-types",
  "uuid",
  "zeroize",
 ]
@@ -15133,6 +15160,36 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "trust-quorum-protocol",
+ "trust-quorum-types",
+]
+
+[[package]]
+name = "trust-quorum-types"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "trust-quorum-types-versions",
+]
+
+[[package]]
+name = "trust-quorum-types-versions"
+version = "0.1.0"
+dependencies = [
+ "daft",
+ "derive_more 0.99.20",
+ "gfss",
+ "iddqd",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "rand 0.9.2",
+ "schemars 0.8.22",
+ "serde",
+ "serde_human_bytes",
+ "serde_with",
+ "sled-hardware-types",
+ "slog",
+ "slog-error-chain",
+ "thiserror 2.0.17",
 ]
 
 [[package]]

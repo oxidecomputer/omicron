@@ -31,7 +31,7 @@ use omicron_common::disk::M2Slot;
 use omicron_repl_utils::run_repl_on_stdin;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;

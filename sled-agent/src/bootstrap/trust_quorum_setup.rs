@@ -8,7 +8,7 @@
 use super::config::TRUST_QUORUM_PORT;
 use super::server::StartError;
 use camino::Utf8PathBuf;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use sled_storage::dataset::CLUSTER_DATASET;
 use sprockets_tls::keys::SprocketsConfig;
 use std::net::{Ipv6Addr, SocketAddrV6};
