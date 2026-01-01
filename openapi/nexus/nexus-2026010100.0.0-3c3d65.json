@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2025121800.0.0"
+    "version": "2026010100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -21405,7 +21405,7 @@
             ]
           },
           {
-            "description": "Create a single primary interface with an automatically-assigned IPv6 address.\n\nThe IP will be pulled from the Project's default VPC / VPC Subnet.",
+            "description": "Create a single primary interface with an automatically-assigned IPv4 address.\n\nThe IP will be pulled from the Project's default VPC / VPC Subnet.",
             "type": "object",
             "properties": {
               "type": {

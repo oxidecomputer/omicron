@@ -36,7 +36,7 @@ use openapiv3::OpenAPI;
 /// Copies of data types that changed between versions
 mod v2025112000;
 mod v2025120300;
-mod v2025121800;
+mod v2026010100;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -66,7 +66,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2025121800, DUAL_STACK_NICS),
+    (2026010100, DUAL_STACK_NICS),
     (2025121200, BGP_PEER_COLLISION_STATE),
     (2025120300, LOCAL_STORAGE),
     (2025112000, INITIAL),
@@ -1614,7 +1614,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         new_instance: TypedBody<v2025112000::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::v2025121800_instance_create(
+        Self::v2026010100_instance_create(
             rqctx,
             query_params,
             new_instance.map(Into::into),
@@ -1630,10 +1630,10 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = VERSION_LOCAL_STORAGE..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121800_instance_create(
+    async fn v2026010100_instance_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<v2025121800::InstanceCreate>,
+        new_instance: TypedBody<v2026010100::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
         Self::instance_create(
             rqctx,
@@ -2799,18 +2799,18 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121800_instance_network_interface_list(
+    async fn v2026010100_instance_network_interface_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId<params::InstanceSelector>>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2025121800::InstanceNetworkInterface>>,
+        HttpResponseOk<ResultsPage<v2026010100::InstanceNetworkInterface>>,
         HttpError,
     > {
         let HttpResponseOk(ResultsPage { next_page, items }) =
             Self::instance_network_interface_list(rqctx, query_params).await?;
         items
             .into_iter()
-            .map(v2025121800::InstanceNetworkInterface::try_from)
+            .map(v2026010100::InstanceNetworkInterface::try_from)
             .collect::<Result<_, _>>()
             .map(|items| HttpResponseOk(ResultsPage { next_page, items }))
             .map_err(HttpError::from)
@@ -2837,14 +2837,14 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121800_instance_network_interface_create(
+    async fn v2026010100_instance_network_interface_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::InstanceSelector>,
         interface_params: TypedBody<
-            v2025121800::InstanceNetworkInterfaceCreate,
+            v2026010100::InstanceNetworkInterfaceCreate,
         >,
     ) -> Result<
-        HttpResponseCreated<v2025121800::InstanceNetworkInterface>,
+        HttpResponseCreated<v2026010100::InstanceNetworkInterface>,
         HttpError,
     > {
         let interface_params = interface_params.try_map(TryInto::try_into)?;
@@ -2895,11 +2895,11 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121800_instance_network_interface_view(
+    async fn v2026010100_instance_network_interface_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::NetworkInterfacePath>,
         query_params: Query<params::OptionalInstanceSelector>,
-    ) -> Result<HttpResponseOk<v2025121800::InstanceNetworkInterface>, HttpError>
+    ) -> Result<HttpResponseOk<v2026010100::InstanceNetworkInterface>, HttpError>
     {
         let HttpResponseOk(nic) = Self::instance_network_interface_view(
             rqctx,
@@ -2932,12 +2932,12 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121800_instance_network_interface_update(
+    async fn v2026010100_instance_network_interface_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::NetworkInterfacePath>,
         query_params: Query<params::OptionalInstanceSelector>,
         updated_iface: TypedBody<params::InstanceNetworkInterfaceUpdate>,
-    ) -> Result<HttpResponseOk<v2025121800::InstanceNetworkInterface>, HttpError>
+    ) -> Result<HttpResponseOk<v2026010100::InstanceNetworkInterface>, HttpError>
     {
         let HttpResponseOk(iface) = Self::instance_network_interface_update(
             rqctx,
@@ -3234,12 +3234,12 @@ pub trait NexusExternalApi {
         tags = ["vpcs"],
         versions =  ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121800_vpc_subnet_list_network_interfaces(
+    async fn v2026010100_vpc_subnet_list_network_interfaces(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPath>,
         query_params: Query<PaginatedByNameOrId<params::OptionalVpcSelector>>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2025121800::InstanceNetworkInterface>>,
+        HttpResponseOk<ResultsPage<v2026010100::InstanceNetworkInterface>>,
         HttpError,
     > {
         let HttpResponseOk(ResultsPage { items, next_page }) =
@@ -4284,10 +4284,10 @@ pub trait NexusExternalApi {
         tags = ["experimental"], // system/probes: only one tag is allowed
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121800_probe_list(
+    async fn v2026010100_probe_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025121800::ProbeInfo>>, HttpError>
+    ) -> Result<HttpResponseOk<ResultsPage<v2026010100::ProbeInfo>>, HttpError>
     {
         let HttpResponseOk(ResultsPage { items, next_page }) =
             Self::probe_list(rqctx, query_params).await?;
@@ -4320,11 +4320,11 @@ pub trait NexusExternalApi {
         tags = ["experimental"], // system/probes: only one tag is allowed
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2025121800_probe_view(
+    async fn v2026010100_probe_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ProbePath>,
         query_params: Query<params::ProjectSelector>,
-    ) -> Result<HttpResponseOk<v2025121800::ProbeInfo>, HttpError> {
+    ) -> Result<HttpResponseOk<v2026010100::ProbeInfo>, HttpError> {
         let HttpResponseOk(info) =
             Self::probe_view(rqctx, path_params, query_params).await?;
         info.try_into().map(HttpResponseOk).map_err(HttpError::from)

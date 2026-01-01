@@ -6,7 +6,7 @@
 
 use std::net::IpAddr;
 
-use crate::v2025121800;
+use crate::v2026010100;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -224,20 +224,6 @@ pub enum InstanceNetworkInterfaceAttachment {
     None,
 }
 
-impl From<InstanceNetworkInterfaceAttachment>
-    for v2025121800::InstanceNetworkInterfaceAttachment
-{
-    fn from(value: InstanceNetworkInterfaceAttachment) -> Self {
-        match value {
-            InstanceNetworkInterfaceAttachment::Create(nics) => {
-                Self::Create(nics.into_iter().map(Into::into).collect())
-            }
-            InstanceNetworkInterfaceAttachment::Default => Self::Default,
-            InstanceNetworkInterfaceAttachment::None => Self::None,
-        }
-    }
-}
-
 /// Create-time parameters for an `InstanceNetworkInterface`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceNetworkInterfaceCreate {
@@ -253,20 +239,6 @@ pub struct InstanceNetworkInterfaceCreate {
     /// receive traffic on.
     #[serde(default)]
     pub transit_ips: Vec<IpNet>,
-}
-
-impl From<InstanceNetworkInterfaceCreate>
-    for v2025121800::InstanceNetworkInterfaceCreate
-{
-    fn from(value: InstanceNetworkInterfaceCreate) -> Self {
-        Self {
-            identity: value.identity,
-            vpc_name: value.vpc_name,
-            subnet_name: value.subnet_name,
-            ip: value.ip,
-            transit_ips: value.transit_ips,
-        }
-    }
 }
 
 /// Create-time parameters for an `Instance`
@@ -385,9 +357,37 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<external::InstanceCpuPlatform>,
 }
 
-impl From<InstanceCreate> for v2025121800::InstanceCreate {
-    fn from(old: InstanceCreate) -> v2025121800::InstanceCreate {
-        v2025121800::InstanceCreate {
+impl From<InstanceNetworkInterfaceAttachment>
+    for v2026010100::InstanceNetworkInterfaceAttachment
+{
+    fn from(value: InstanceNetworkInterfaceAttachment) -> Self {
+        match value {
+            InstanceNetworkInterfaceAttachment::Create(nics) => {
+                Self::Create(nics.into_iter().map(Into::into).collect())
+            }
+            InstanceNetworkInterfaceAttachment::Default => Self::Default,
+            InstanceNetworkInterfaceAttachment::None => Self::None,
+        }
+    }
+}
+
+impl From<InstanceNetworkInterfaceCreate>
+    for v2026010100::InstanceNetworkInterfaceCreate
+{
+    fn from(value: InstanceNetworkInterfaceCreate) -> Self {
+        Self {
+            identity: value.identity,
+            vpc_name: value.vpc_name,
+            subnet_name: value.subnet_name,
+            ip: value.ip,
+            transit_ips: value.transit_ips,
+        }
+    }
+}
+
+impl From<InstanceCreate> for v2026010100::InstanceCreate {
+    fn from(old: InstanceCreate) -> v2026010100::InstanceCreate {
+        v2026010100::InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,
             memory: old.memory,
