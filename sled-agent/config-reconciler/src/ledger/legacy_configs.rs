@@ -18,7 +18,6 @@ use sled_agent_types_versions::v4::inventory::OmicronSledConfig as OmicronSledCo
 use sled_agent_types_versions::v4::inventory::OmicronZoneConfig as OmicronZoneConfigV4;
 use sled_agent_types_versions::v10::inventory::OmicronSledConfig as OmicronSledConfigV10;
 use sled_agent_types_versions::v11::inventory::OmicronSledConfig as OmicronSledConfigV11;
-use sled_agent_types_versions::v12::inventory::OmicronSledConfig as OmicronSledConfigV12;
 use slog::Logger;
 use slog::error;
 use slog::warn;
