@@ -16,8 +16,7 @@ use omicron_uuid_kinds::{GenericUuid, RackUuid};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-// Re-export API types from trust-quorum-types
-pub use trust_quorum_types::persistent_state::{
+use trust_quorum_types::persistent_state::{
     ExpungedMetadata, PersistentStateSummary,
 };
 pub use trust_quorum_types::status::NodePersistentStateSummary;

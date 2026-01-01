@@ -12,13 +12,6 @@ use gfss::shamir::Share;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 
-// Re-export message types from trust-quorum-types for backward compatibility.
-// These types were previously defined here but have been moved to support
-// API versioning per RFD 619.
-pub use trust_quorum_types::messages::{
-    CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
-};
-
 /// Messages sent between trust quorum members over a sprockets channel
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]

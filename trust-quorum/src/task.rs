@@ -24,11 +24,12 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 use trust_quorum_protocol::{
-    CommitError, LoadRackSecretError, LrtqUpgradeError, LrtqUpgradeMsg, Node,
+    CommitError, LoadRackSecretError, LrtqUpgradeError, Node,
     NodeCallerCtx as _, NodeCommonCtx as _, NodeCtx, PrepareAndCommitError,
-    ReconfigurationError, ReconfigureMsg, ReconstructedRackSecret,
+    ReconfigurationError, ReconstructedRackSecret,
 };
 use trust_quorum_types::configuration::Configuration;
+use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 use trust_quorum_types::types::Epoch;
 

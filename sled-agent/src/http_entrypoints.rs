@@ -65,7 +65,7 @@ use sled_agent_types::zone_bundle::{
 };
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
-use trust_quorum_protocol::{
+use trust_quorum_types::messages::{
     CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
 };
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};

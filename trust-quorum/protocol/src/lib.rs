@@ -49,7 +49,7 @@ pub use crypto::{
     PlaintextRackSecrets, RackSecret, ReconstructedRackSecret, SECRET_LEN,
     decrypt_rack_secrets,
 };
-pub use messages::*;
+pub use messages::{PeerMsg, PeerMsgKind};
 pub use node::{CommitError, Node, NodeDiff, PrepareAndCommitError};
 // public only for docs.
 pub use node_ctx::NodeHandlerCtx;

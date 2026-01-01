@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use slog::{Logger, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
 use trust_quorum_types::alarm::Alarm;
+use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
 use trust_quorum_types::persistent_state::ExpungedMetadata;
 
 /// An entity capable of participating in trust quorum

@@ -80,10 +80,9 @@ use sled_agent_types_versions::v1;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use trust_quorum_protocol::CommitRequest;
-use trust_quorum_protocol::LrtqUpgradeMsg;
-use trust_quorum_protocol::PrepareAndCommitRequest;
-use trust_quorum_protocol::ReconfigureMsg;
+use trust_quorum_types::messages::{
+    CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
+};
 use trust_quorum_types::status::CommitStatus;
 use trust_quorum_types::status::CoordinatorStatus;
 use trust_quorum_types::status::NodeStatus;

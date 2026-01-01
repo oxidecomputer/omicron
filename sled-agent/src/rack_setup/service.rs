@@ -131,6 +131,7 @@ use thiserror::Error;
 use tokio::sync::watch;
 use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
+use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 
 pub(crate) use crate::rack_setup::plan::service::Plan as ServicePlan;
 pub(crate) use crate::rack_setup::plan::service::PlannedSledDescription;
@@ -1505,7 +1506,7 @@ async fn init_trust_quorum(
 
     let initial_epoch = trust_quorum_types::types::Epoch(1);
 
-    let msg = trust_quorum_protocol::ReconfigureMsg {
+    let msg = TqReconfigureMsg {
         rack_id,
         epoch: initial_epoch,
         last_committed_epoch: None,
