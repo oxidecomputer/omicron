@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-recursion.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 camino.workspace = true
@@ -46,6 +47,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+camino-tempfile-ext.workspace = true
 expectorate.workspace = true
 illumos-utils = { workspace = true, features = ["testing"] }
 omicron-common = { workspace = true, features = ["testing"] }
