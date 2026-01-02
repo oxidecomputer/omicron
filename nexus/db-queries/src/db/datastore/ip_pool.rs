@@ -300,7 +300,9 @@ impl DataStore {
         //     .await?;
 
         let lookup_type = LookupType::ByOther(format!(
-            "default {pool_type} IP pool for current silo"
+            "default {} IP{} pool for current silo",
+            pool_type,
+            ip_version.map(|v| v.to_string()).unwrap_or_else(String::new),
         ));
 
         let mut query = ip_pool::table
@@ -385,6 +387,21 @@ impl DataStore {
         // Default to unicast pools (existing behavior), no version preference
         self.ip_pools_fetch_default_by_type(opctx, IpPoolType::Unicast, None)
             .await
+    }
+
+    /// Fetch the default IP Pool for the current silo of the provided version.
+    pub async fn ip_pools_fetch_default_by_version(
+        &self,
+        opctx: &OpContext,
+        ip_version: IpVersion,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        // Default to unicast pools (existing behavior), no version preference
+        self.ip_pools_fetch_default_by_type(
+            opctx,
+            IpPoolType::Unicast,
+            Some(ip_version),
+        )
+        .await
     }
 
     /// Pool resolution for allocation by pool type.

@@ -28,7 +28,6 @@ use nexus_db_model::InstanceIntendedState as IntendedState;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
-use nexus_db_model::IpVersion;
 use nexus_db_model::Vmm as DbVmm;
 use nexus_db_model::VmmRuntimeState;
 use nexus_db_model::VmmState as DbVmmState;

@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use crate::Nexus;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
-    ByteCount, ExternalIp, InstanceState, IpAttachState, IpVersion, NatEntry,
+    ByteCount, ExternalIp, InstanceState, IpAttachState, NatEntry,
     SledReservationConstraints, SledResourceVmm, VmmCpuPlatform, VmmState,
 };
 use nexus_db_queries::authz;
@@ -535,5 +535,5 @@ pub(super) async fn instance_ip_remove_opte(
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ExternalIpAttach {
     Ephemeral { pool: Option<NameOrId>, ip_version: Option<IpVersion> },
-    Floating { floating_ip: authz::FloatingIp },
+    Floating { floating_ip: authz::FloatingIp, ip_version: IpVersion },
 }

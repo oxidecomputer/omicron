@@ -4,6 +4,8 @@
 
 //! Nexus external types that changed from 2025112000 to 2025120300
 
+use crate::v2025121200;
+use crate::v2025122300;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use schemars::JsonSchema;
@@ -211,7 +213,7 @@ pub struct InstanceCreate {
 
     /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interfaces: params::InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: v2025122300::InstanceNetworkInterfaceAttachment,
 
     /// The external IP addresses provided to this instance.
     ///
@@ -219,7 +221,7 @@ pub struct InstanceCreate {
     /// connectivity. These external addresses can be used to provide a fixed,
     /// known IP address for making inbound connections to the instance.
     #[serde(default)]
-    pub external_ips: Vec<params::ExternalIpCreate>,
+    pub external_ips: Vec<v2025121200::ExternalIpCreate>,
 
     /// The multicast groups this instance should join.
     ///
@@ -299,16 +301,20 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<external::InstanceCpuPlatform>,
 }
 
-impl From<InstanceCreate> for params::InstanceCreate {
-    fn from(old: InstanceCreate) -> params::InstanceCreate {
-        params::InstanceCreate {
+impl From<InstanceCreate> for v2025121200::InstanceCreate {
+    fn from(old: InstanceCreate) -> v2025121200::InstanceCreate {
+        v2025121200::InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,
             memory: old.memory,
             hostname: old.hostname,
             user_data: old.user_data,
             network_interfaces: old.network_interfaces,
-            external_ips: old.external_ips,
+            external_ips: old
+                .external_ips
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             multicast_groups: old.multicast_groups,
             disks: old.disks.into_iter().map(Into::into).collect(),
             boot_disk: old.boot_disk.map(Into::into),

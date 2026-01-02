@@ -3910,6 +3910,7 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool: Some(v4_pool.identity.id.into()),
+            ip_version: None,
         }],
         disks: vec![],
         boot_disk: None,

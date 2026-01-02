@@ -205,7 +205,7 @@ impl super::Nexus {
                     opctx,
                     &instance,
                     authz_fip,
-                    ip_version,
+                    ip_version.into(),
                     authz_project,
                 )
                 .await

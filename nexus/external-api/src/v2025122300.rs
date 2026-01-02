@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2025120300 to 2025121800
+//! Nexus external types that changed from 2025122300 to 2026010100
 
 use api_identity::ObjectIdentity;
 use itertools::Either;
@@ -182,7 +182,6 @@ impl TryFrom<external::InstanceNetworkInterface> for InstanceNetworkInterface {
                 v6.ip.into(),
                 v6.transit_ips.into_iter().map(Into::into).collect(),
             ),
-            // TODO(ben): Should we just return the V4 addr here?
             PrivateIpStack::DualStack { v4, v6 } => {
                 return Err(external::Error::invalid_request(format!(
                     "The network interface with ID '{}' is \

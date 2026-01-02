@@ -7,7 +7,7 @@ use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DiskBackend, DiskCreate, DiskSource, ExternalIp,
     ExternalIpCreate, InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
-    InstanceNetworkInterfaceAttachment, InstanceState, SshKeyCreate, IpVersion,
+    InstanceNetworkInterfaceAttachment, InstanceState, IpVersion, SshKeyCreate,
 };
 use oxide_client::{ClientCurrentUserExt, ClientDisksExt, ClientInstancesExt};
 use russh::{ChannelMsg, Disconnect};

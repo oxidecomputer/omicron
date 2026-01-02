@@ -131,7 +131,7 @@ async fn siia_begin_attach_ip(
             .floating_ip_begin_attach(
                 &opctx,
                 floating_ip,
-                *ip_version,
+                (*ip_version).into(),
                 instance_id,
                 false,
             )
@@ -386,7 +386,8 @@ pub(crate) mod test {
             let ip_version = match db_fip.ip {
                 ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
                 ipnetwork::IpNetwork::V6(_) => IpVersion::V6,
-            };
+            }
+            .into();
             ExternalIpAttach::Floating { floating_ip, ip_version }
         } else {
             ExternalIpAttach::Ephemeral { pool: None, ip_version: None }

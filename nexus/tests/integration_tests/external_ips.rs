@@ -1563,7 +1563,7 @@ async fn test_ephemeral_ip_pool_version_mismatch(
     let client = &cptestctx.external_client;
 
     // Create default IPv4 pool
-    create_default_ip_pool(&client).await;
+    let (_v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
     create_project(&client, PROJECT_NAME).await;
     instance_for_external_ips(client, INSTANCE_NAMES[0], false, false, &[])
         .await;
@@ -1574,7 +1574,7 @@ async fn test_ephemeral_ip_pool_version_mismatch(
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::EphemeralIpCreate {
-                pool: Some(NameOrId::Name("default".parse().unwrap())),
+                pool: Some(NameOrId::Name("default-v4".parse().unwrap())),
                 ip_version: Some(views::IpVersion::V6),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -1596,7 +1596,7 @@ async fn cannot_attach_floating_ipv4_to_instance_missing_ipv4_stack(
 
     // Create an instance with only a private IPv6 address.
     let instance_name = &INSTANCE_NAMES[0];
-    create_instance_with(
+    let inst = create_instance_with(
         client,
         PROJECT_NAME,
         instance_name,
@@ -1621,7 +1621,7 @@ async fn cannot_attach_floating_ipv4_to_instance_missing_ipv4_stack(
     )
     .await;
     let url = attach_floating_ip_url(fip_name, PROJECT_NAME);
-    NexusRequest::new(
+    let result = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::FloatingIpAttach {
                 kind: params::FloatingIpParentKind::Instance,
@@ -1632,10 +1632,22 @@ async fn cannot_attach_floating_ipv4_to_instance_missing_ipv4_stack(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect_err(
+    .expect(
         "Should fail to attach IPv4 Floating IP to instance without private IPv4 stack"
+    )
+    .parsed_body::<HttpErrorResponseBody>()
+    .expect("an HTTP error making this API call");
+    assert_eq!(
+        result.message,
+        format!(
+            "The floating external IP is an IPv4 address, but \
+            the instance with ID {} does not have a primary \
+            network interface with a VPC-private IPv4 address. \
+            Add a VPC-private IPv4 address to the interface, \
+            or attach a different IP address",
+            inst.identity.id,
+        ),
     );
-    todo!("TODO(ben): Finish this test");
 }
 
 #[nexus_test]
@@ -1712,7 +1724,7 @@ async fn cannot_attach_ephemeral_ipv4_to_instance_missing_ipv4_stack(
 
     // Create an instance with only a private IPv6 address.
     let instance_name = &INSTANCE_NAMES[0];
-    create_instance_with(
+    let inst = create_instance_with(
         client,
         PROJECT_NAME,
         instance_name,
@@ -1728,18 +1740,31 @@ async fn cannot_attach_ephemeral_ipv4_to_instance_missing_ipv4_stack(
 
     // Now try to attach an Ephemeral IPv4 address.
     let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
-    let _err = NexusRequest::new(
+    let result = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::EphemeralIpCreate {
                 pool: Some(v4_pool.identity.name.clone().into()),
+                ip_version: None,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect_err("Should fail attaching Ephemeral IPv4 address");
-    todo!("TODO(ben): Finish this test");
+    .expect("Should fail attaching Ephemeral IPv4 address")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .expect("an error response");
+    assert_eq!(
+        result.message,
+        format!(
+            "The ephemeral external IP is an IPv4 address, but \
+            the instance with ID {} does not have a primary \
+            network interface with a VPC-private IPv4 address. \
+            Add a VPC-private IPv4 address to the interface, \
+            or attach a different IP address",
+            inst.identity.id,
+        ),
+    );
 }
 
 #[nexus_test]
@@ -1773,6 +1798,7 @@ async fn cannot_attach_ephemeral_ipv6_to_instance_missing_ipv6_stack(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::EphemeralIpCreate {
                 pool: Some(v6_pool.identity.name.clone().into()),
+                ip_version: None,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -1905,6 +1931,7 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
         /* disks = */ vec![],
         vec![params::ExternalIpCreate::Ephemeral {
             pool: Some(v6_pool.identity.id.into()),
+            ip_version: None,
         }],
         /* start = */ false,
         /* auto_restart_policy = */ Default::default(),
@@ -1992,6 +2019,10 @@ async fn can_create_instance_with_floating_ipv6_address(
     };
     let expected_ip = IpAddr::V6(*first);
 
+    // We're creating the FIP first, explicity. The SNAT is allocated
+    // automatically during instance creation, and so takes the next address.
+    let expected_snat_ip = IpAddr::V6(Ipv6Addr::from(u128::from(*first) + 1));
+
     // Create a floating IP, from the IPv6 Pool.
     let fip_name = FIP_NAMES[0];
     let fip = create_floating_ip(
@@ -2042,37 +2073,47 @@ async fn can_create_instance_with_floating_ipv6_address(
         2,
         "Instance should have been created with exactly 2 external IPs"
     );
+
+    let ip = ips
+        .iter()
+        .find(|ip| matches!(ip, oxide_client::types::ExternalIp::Snat { .. }))
+        .expect("Should contain an SNAT IP");
     let oxide_client::types::ExternalIp::Snat {
         ip,
         ip_pool_id,
         first_port,
         last_port,
-    } = &ips[0]
+    } = ip
     else {
         panic!("Expected an SNAT external IP, found {:?}", &ips[0]);
     };
     assert_eq!(ip_pool_id, &v6_pool.identity.id);
-    assert_eq!(ip, &expected_ip);
+    assert_eq!(ip, &expected_snat_ip);
 
     // Port ranges are half-open on the right, e.g., [0, 16384).
     assert_eq!(*first_port, 0);
     assert_eq!(*last_port, NUM_SOURCE_NAT_PORTS - 1);
 
-    // Now check the Floating IPv6 address.
+    // Then check the Floating IPv6 address.
+    let ip = ips
+        .iter()
+        .find(|ip| {
+            matches!(ip, oxide_client::types::ExternalIp::Floating { .. })
+        })
+        .expect("Should contain an SNAT IP");
     let oxide_client::types::ExternalIp::Floating {
         id,
         instance_id,
         ip,
         ip_pool_id,
         ..
-    } = &ips[1]
+    } = ip
     else {
         panic!("Expected a Floating external IP, found {:?}", &ips[1]);
     };
     assert_eq!(id, &fip.identity.id);
     assert_eq!(instance_id, &Some(instance.identity.id));
     assert_eq!(ip_pool_id, &v6_pool.identity.id);
-    let expected_ip = IpAddr::V6(Ipv6Addr::from_bits(first.to_bits() + 1));
     assert_eq!(ip, &expected_ip);
 }
 

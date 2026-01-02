@@ -847,11 +847,8 @@ async fn sic_allocate_instance_snat_ip_impl(
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
     let ancestor_node_name = format!("snat_ip{}_id", ip_version);
     let ip_id = sagactx.lookup::<Uuid>(&ancestor_node_name)?;
-
-    // TODO(ben): Merge Zeeshan's work, and then fetch the default for the
-    // provided version.
     let (.., pool) = datastore
-        .ip_pools_fetch_default(&opctx /*, ip_version */)
+        .ip_pools_fetch_default_by_version(&opctx, ip_version)
         .await
         .map_err(ActionError::action_failed)?;
     let pool_id = pool.identity.id;

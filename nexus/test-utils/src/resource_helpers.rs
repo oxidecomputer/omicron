@@ -370,9 +370,7 @@ pub async fn create_default_ip_pools(
     link_ip_pool(&client, "default-v4", &DEFAULT_SILO.id(), true).await;
     let (v6_pool, ..) =
         create_ip_pool(&client, "default-v6", Some(ranges[1])).await;
-    // TODO(ben) default = false here is not what we want. Need to merge in
-    // Zeeshan's work.
-    link_ip_pool(&client, "default-v6", &DEFAULT_SILO.id(), false).await;
+    link_ip_pool(&client, "default-v6", &DEFAULT_SILO.id(), true).await;
     (v4_pool, v6_pool)
 }
 

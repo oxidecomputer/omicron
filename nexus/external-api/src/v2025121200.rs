@@ -28,6 +28,8 @@ use omicron_common::api::external::{
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, NameOrId,
 };
 
+use crate::v2025122300;
+
 /// Parameters for creating an ephemeral IP address for an instance.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EphemeralIpCreate {
@@ -116,7 +118,7 @@ pub struct InstanceCreate {
     pub user_data: Vec<u8>,
     /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interfaces: params::InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: v2025122300::InstanceNetworkInterfaceAttachment,
     /// The external IP addresses provided to this instance.
     #[serde(default)]
     pub external_ips: Vec<ExternalIpCreate>,
@@ -145,9 +147,9 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
-impl From<InstanceCreate> for params::InstanceCreate {
-    fn from(old: InstanceCreate) -> params::InstanceCreate {
-        params::InstanceCreate {
+impl From<InstanceCreate> for v2025122300::InstanceCreate {
+    fn from(old: InstanceCreate) -> v2025122300::InstanceCreate {
+        v2025122300::InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,
             memory: old.memory,
