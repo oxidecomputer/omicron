@@ -310,11 +310,7 @@ impl From<InstanceCreate> for v2025121200::InstanceCreate {
             hostname: old.hostname,
             user_data: old.user_data,
             network_interfaces: old.network_interfaces,
-            external_ips: old
-                .external_ips
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            external_ips: old.external_ips,
             multicast_groups: old.multicast_groups,
             disks: old.disks.into_iter().map(Into::into).collect(),
             boot_disk: old.boot_disk.map(Into::into),
