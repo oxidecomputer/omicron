@@ -30,8 +30,8 @@ pub struct PostgresConfigWithUrl {
 }
 
 impl PostgresConfigWithUrl {
-    pub fn url(&self) -> String {
-        self.url_raw.clone()
+    pub fn url(&self) -> &str {
+        &self.url_raw
     }
 
     /// Accesses the first ip / port pair within the URL.
