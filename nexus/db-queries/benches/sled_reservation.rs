@@ -496,6 +496,9 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
                     // std::sync::LazyLock as of Rust 1.87, because we need
                     // into_value which isn't available yet.)
                     let log = logctx.log.clone();
+
+                    // The clippy::disallowed_methods expect is for Lazy::new.
+                    #[expect(clippy::disallowed_methods)]
                     let harness = Lazy::new(|| {
                         rt.block_on(async move {
                             TestHarness::new(&log, sleds).await
