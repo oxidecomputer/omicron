@@ -134,10 +134,10 @@ pub enum SledKind {
         zone1: BlueprintZoneConfig,
         zone2: BlueprintZoneConfig,
     },
-    /// A sled has two zones that are not members of the same sled subnet.
-    SledWithMixedUnderlaySubnets {
-        zone1: BlueprintZoneConfig,
-        zone2: BlueprintZoneConfig,
+    /// A sled has a zone with an IP that isn't a member of its subnet.
+    UnderlayIpOnWrongSubnet {
+        zone: BlueprintZoneConfig,
+        subnet: Ipv6Subnet<SLED_PREFIX>,
     },
     /// Two sleds are using the same sled subnet.
     ConflictingSledSubnets {
@@ -259,17 +259,14 @@ impl fmt::Display for SledKind {
                     zone2.id,
                 )
             }
-            SledKind::SledWithMixedUnderlaySubnets { zone1, zone2 } => {
+            SledKind::UnderlayIpOnWrongSubnet { zone, subnet } => {
                 write!(
                     f,
-                    "zones have underlay IPs on two different sled subnets: \
-                     {:?} {} ({}) and {:?} {} ({})",
-                    zone1.zone_type.kind(),
-                    zone1.id,
-                    zone1.underlay_ip(),
-                    zone2.zone_type.kind(),
-                    zone2.id,
-                    zone2.underlay_ip(),
+                    "{:?} zone {} underlay IP {} is outside the sled subnet {}",
+                    zone.zone_type.kind(),
+                    zone.id,
+                    zone.underlay_ip(),
+                    subnet,
                 )
             }
             SledKind::ConflictingSledSubnets { other_sled, subnet } => {
