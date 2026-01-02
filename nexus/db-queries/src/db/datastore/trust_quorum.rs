@@ -129,7 +129,7 @@ impl DataStore {
     ///
     /// For reconfiguration and lrtq upgrade we always call
     /// `tq_insert_latest_config`.
-    pub async fn insert_rss_config_after_handoff(
+    pub async fn tq_insert_rss_config_after_handoff(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
@@ -1507,7 +1507,7 @@ mod tests {
         let coordinator = members.first().unwrap().clone();
 
         // Insert an initial config
-        DataStore::insert_rss_config_after_handoff(
+        DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
             rack_id,
@@ -1590,7 +1590,7 @@ mod tests {
         let coordinator = members.first().unwrap().clone();
 
         // Insert an initial config
-        DataStore::insert_rss_config_after_handoff(
+        DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
             rack_id,
@@ -1843,7 +1843,7 @@ mod tests {
         let coordinator = members.first().unwrap().clone();
 
         // Insert an initial config
-        DataStore::insert_rss_config_after_handoff(
+        DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
             rack_id,
@@ -2015,7 +2015,7 @@ mod tests {
                 rack2_members = members.clone();
             }
             let coordinator = members.first().unwrap().clone();
-            DataStore::insert_rss_config_after_handoff(
+            DataStore::tq_insert_rss_config_after_handoff(
                 opctx,
                 &conn,
                 rack_id,

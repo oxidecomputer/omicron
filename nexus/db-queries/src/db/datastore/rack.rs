@@ -57,6 +57,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
+use nexus_types::internal_api::params::InitialTrustQuorumConfig;
 use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
@@ -70,6 +71,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -96,6 +98,7 @@ pub struct RackInit {
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
     pub allowed_source_ips: AllowedSourceIps,
+    pub initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
 }
 
 /// Possible errors while trying to initialize rack
@@ -116,6 +119,7 @@ enum RackInitError {
     Database(DieselError),
     // Error adding initial allowed source IP list
     AllowedSourceIpError(Error),
+    TrustQuorum(Error),
 }
 
 impl From<DieselError> for RackInitError {
@@ -177,6 +181,9 @@ impl From<RackInitError> for Error {
                 err
             )),
             RackInitError::AllowedSourceIpError(err) => err,
+            RackInitError::TrustQuorum(err) => err.internal_context(
+                "failed to insert initial trust quorum configuration",
+            ),
         }
     }
 }
@@ -976,6 +983,20 @@ impl DataStore {
                         DieselError::RollbackTransaction
                     })?;
 
+                    // Insert the initial trust quorum configuration
+                    if let Some(tq_config) = rack_init.initial_trust_quorum_configuration {
+                        Self::tq_insert_rss_config_after_handoff(
+                            opctx,
+                            &conn,
+                            RackUuid::from_untyped_uuid(rack_id),
+                            tq_config.members,
+                            tq_config.coordinator
+                        ).await.map_err(|e| {
+                            err.set(RackInitError::TrustQuorum(e)).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
+                    }
+
                     let rack = diesel::update(rack_dsl::rack)
                         .filter(rack_dsl::id.eq(rack_id))
                         .set((
@@ -1167,6 +1188,7 @@ mod test {
                     "test suite".to_string(),
                 ),
                 allowed_source_ips: AllowedSourceIps::Any,
+                initial_trust_quorum_configuration: None
             }
         }
     }

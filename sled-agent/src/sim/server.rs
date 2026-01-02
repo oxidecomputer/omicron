@@ -644,6 +644,7 @@ pub async fn run_standalone_server(
             bfd: Vec::new(),
         },
         allowed_source_ips: AllowedSourceIps::Any,
+        initial_trust_quorum_configuration: None,
     };
 
     let mut nexus_lockstep_address = config.nexus_address;
