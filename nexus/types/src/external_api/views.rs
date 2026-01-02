@@ -89,12 +89,13 @@ pub struct SiloQuotas {
 /// View of the current silo's resource utilization and capacity
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Utilization {
-    /// Accounts for resources allocated to running instances or storage allocated via disks or snapshots
-    /// Note that CPU and memory resources associated with a stopped instances are not counted here
-    /// whereas associated disks will still be counted
+    /// Accounts for resources allocated to running instances or storage allocated via disks or snapshots.
+    ///
+    /// Note that CPU and memory resources associated with stopped instances are not counted here,
+    /// whereas associated disks will still be counted.
     pub provisioned: VirtualResourceCounts,
-    /// The total amount of resources that can be provisioned in this silo
-    /// Actions that would exceed this limit will fail
+    /// The total amount of resources that can be provisioned in this silo.
+    /// Actions that would exceed this limit will fail.
     pub capacity: VirtualResourceCounts,
 }
 
@@ -104,10 +105,12 @@ pub struct Utilization {
 pub struct SiloUtilization {
     pub silo_id: Uuid,
     pub silo_name: Name,
-    /// Accounts for resources allocated by in silos like CPU or memory for running instances and storage for disks and snapshots
-    /// Note that CPU and memory resources associated with a stopped instances are not counted here
+    /// Accounts for the total resources allocated by the silo, including CPU and memory for
+    /// running instances and storage for disks and snapshots.
+    ///
+    /// Note that CPU and memory resources associated with stopped instances are not counted here.
     pub provisioned: VirtualResourceCounts,
-    /// Accounts for the total amount of resources reserved for silos via their quotas
+    /// Accounts for the total amount of resources reserved for silos via their quotas.
     pub allocated: VirtualResourceCounts,
 }
 
@@ -251,10 +254,10 @@ pub struct Image {
     /// Hash of the image contents, if applicable
     pub digest: Option<Digest>,
 
-    /// size of blocks in bytes
+    /// Size of blocks in bytes
     pub block_size: ByteCount,
 
-    /// total size in bytes
+    /// Total size in bytes
     pub size: ByteCount,
 }
 
@@ -291,10 +294,10 @@ pub struct Vpc {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// id for the project containing this VPC
+    /// ID for the project containing this VPC
     pub project_id: Uuid,
 
-    /// id for the system router where subnet default routes are registered
+    /// ID for the system router where subnet default routes are registered
     pub system_router_id: Uuid,
 
     /// The unique local IPv6 address range for subnets in this VPC
@@ -306,10 +309,10 @@ pub struct Vpc {
 }
 
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
-/// them, within a IPv4 subnetwork or optionally an IPv6 subnetwork.
+/// them, within an IPv4 subnetwork or optionally an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
@@ -337,7 +340,7 @@ pub enum VpcRouterKind {
 /// should be sent depending on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouter {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
@@ -382,14 +385,14 @@ pub struct InternetGatewayIpAddress {
     /// The associated internet gateway.
     pub internet_gateway_id: Uuid,
 
-    /// The associated IP address,
+    /// The associated IP address.
     pub address: IpAddr,
 }
 
 // IP POOLS
 
 /// A collection of IP ranges. If a pool is linked to a silo, IP addresses from
-/// the pool can be allocated within that silo
+/// the pool can be allocated within that silo.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPool {
     #[serde(flatten)]
@@ -588,7 +591,7 @@ pub struct MulticastGroupMember {
 
 // RACKS
 
-/// View of an Rack
+/// View of a Rack
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Rack {
     #[serde(flatten)]
@@ -1025,8 +1028,9 @@ pub struct SshKey {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct DeviceAccessToken {
     /// A unique, immutable, system-controlled identifier for the token.
+    ///
     /// Note that this ID is not the bearer token itself, which starts with
-    /// "oxide-token-"
+    /// "oxide-token-".
     pub id: Uuid,
     pub time_created: DateTime<Utc>,
 
@@ -1311,8 +1315,8 @@ impl PartialEq<AlertReceiver> for WebhookReceiver {
 pub struct WebhookReceiverConfig {
     /// The URL that webhook notification requests are sent to.
     pub endpoint: Url,
-    // A list containing the IDs of the secret keys used to sign payloads sent
-    // to this receiver.
+    /// A list containing the IDs of the secret keys used to sign payloads sent
+    /// to this receiver.
     pub secrets: Vec<WebhookSecret>,
 }
 
