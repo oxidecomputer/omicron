@@ -160,9 +160,8 @@ const LOGADM_CONFIG_FILE: &str = "/etc/logadm.d/chrony.logadm.conf";
 const ROOT: &str = "root";
 const SYS: &str = "sys";
 
-#[tokio::main]
-async fn main() {
-    if let Err(err) = do_run().await {
+fn main() {
+    if let Err(err) = oxide_tokio_rt::run(do_run()) {
         fatal(CmdError::Failure(err));
     }
 }

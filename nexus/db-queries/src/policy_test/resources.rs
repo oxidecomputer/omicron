@@ -9,8 +9,9 @@ use super::resource_builder::ResourceSet;
 use nexus_auth::authz;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::AccessTokenKind;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TypedUuid;
 use oso::PolarClass;
@@ -75,8 +76,12 @@ pub async fn make_resources(
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
     builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
+    builder.new_resource(authz::MULTICAST_GROUP_LIST);
+    builder.new_resource(authz::QUIESCE_STATE);
+    builder.new_resource(authz::UPDATE_TRUST_ROOT_LIST);
     builder.new_resource(authz::TARGET_RELEASE_CONFIG);
     builder.new_resource(authz::ALERT_CLASS_LIST);
+    builder.new_resource(authz::AUDIT_LOG);
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
@@ -94,14 +99,14 @@ pub async fn make_resources(
     builder.new_resource(authz::Sled::new(
         authz::FLEET,
         sled_id,
-        LookupType::ById(sled_id),
+        LookupType::by_id(sled_id),
     ));
 
     let zpool_id = "aaaaaaaa-1233-af7d-9220-afe1d8090900".parse().unwrap();
     builder.new_resource(authz::Zpool::new(
         authz::FLEET,
         zpool_id,
-        LookupType::ById(zpool_id),
+        LookupType::by_id(zpool_id),
     ));
 
     make_services(&mut builder).await;
@@ -111,7 +116,7 @@ pub async fn make_resources(
     builder.new_resource(authz::PhysicalDisk::new(
         authz::FLEET,
         physical_disk_id,
-        LookupType::ById(physical_disk_id.into_untyped_uuid()),
+        LookupType::by_id(physical_disk_id),
     ));
 
     let support_bundle_id: SupportBundleUuid =
@@ -119,7 +124,7 @@ pub async fn make_resources(
     builder.new_resource(authz::SupportBundle::new(
         authz::FLEET,
         support_bundle_id,
-        LookupType::ById(support_bundle_id.into_untyped_uuid()),
+        LookupType::by_id(support_bundle_id),
     ));
 
     let device_user_code = String::from("a-device-user-code");
@@ -134,7 +139,7 @@ pub async fn make_resources(
     builder.new_resource(authz::DeviceAccessToken::new(
         authz::FLEET,
         device_access_token_id,
-        LookupType::ById(device_access_token_id.into_untyped_uuid()),
+        LookupType::by_id(device_access_token_id),
     ));
 
     let blueprint_id = "b9e923f6-caf3-4c83-96f9-8ffe8c627dd2".parse().unwrap();
@@ -148,7 +153,7 @@ pub async fn make_resources(
     builder.new_resource(authz::TufRepo::new(
         authz::FLEET,
         tuf_repo_id,
-        LookupType::ById(tuf_repo_id.into_untyped_uuid()),
+        LookupType::by_id(tuf_repo_id),
     ));
 
     let tuf_artifact_id =
@@ -156,7 +161,15 @@ pub async fn make_resources(
     builder.new_resource(authz::TufArtifact::new(
         authz::FLEET,
         tuf_artifact_id,
-        LookupType::ById(tuf_artifact_id.into_untyped_uuid()),
+        LookupType::by_id(tuf_artifact_id),
+    ));
+
+    let tuf_trust_root_id =
+        "b2c043c7-5eaa-40b5-a0a2-cdf97b2e66b3".parse().unwrap();
+    builder.new_resource(authz::TufTrustRoot::new(
+        authz::FLEET,
+        tuf_trust_root_id,
+        LookupType::by_id(tuf_trust_root_id),
     ));
 
     let address_lot_id =
@@ -172,7 +185,7 @@ pub async fn make_resources(
     builder.new_resource(authz::LoopbackAddress::new(
         authz::FLEET,
         loopback_address_id,
-        LookupType::ById(loopback_address_id.into_untyped_uuid()),
+        LookupType::by_id(loopback_address_id),
     ));
 
     let webhook_alert_id =
@@ -180,7 +193,7 @@ pub async fn make_resources(
     builder.new_resource(authz::Alert::new(
         authz::FLEET,
         webhook_alert_id,
-        LookupType::ById(webhook_alert_id.into_untyped_uuid()),
+        LookupType::by_id(webhook_alert_id),
     ));
 
     make_webhook_rx(&mut builder).await;
@@ -247,7 +260,8 @@ async fn make_silo(
     ));
 
     builder.new_resource(authz::SiloUserList::new(silo.clone()));
-    let silo_user_id = Uuid::new_v4();
+    builder.new_resource(authz::SiloGroupList::new(silo.clone()));
+    let silo_user_id = SiloUserUuid::new_v4();
     let silo_user = authz::SiloUser::new(
         silo.clone(),
         silo_user_id,
@@ -256,11 +270,11 @@ async fn make_silo(
     builder.new_resource(silo_user.clone());
     let ssh_key_id = Uuid::new_v4();
     builder.new_resource(authz::SshKey::new(
-        silo_user,
+        silo_user.clone(),
         ssh_key_id,
         LookupType::ByName(format!("{}-user-ssh-key", silo_name)),
     ));
-    let silo_group_id = Uuid::new_v4();
+    let silo_group_id = SiloGroupUuid::new_v4();
     builder.new_resource(authz::SiloGroup::new(
         silo.clone(),
         silo_group_id,
@@ -272,6 +286,8 @@ async fn make_silo(
         silo_image_id,
         LookupType::ByName(format!("{}-silo-image", silo_name)),
     ));
+    builder.new_resource(authz::SiloUserSessionList::new(silo_user.clone()));
+    builder.new_resource(authz::SiloUserTokenList::new(silo_user));
 
     // Image is a special case in that this resource is technically just a
     // pass-through for `SiloImage` and `ProjectImage` resources.
@@ -288,6 +304,16 @@ async fn make_silo(
         let create_project_users = first_branch && i == 0;
         make_project(builder, &silo, &project_name, create_project_users).await;
     }
+
+    let scim_client_bearer_token_id =
+        "7885144e-9c75-47f7-a97d-7dfc58e1186c".parse().unwrap();
+
+    builder.new_resource(authz::ScimClientBearerToken::new(
+        silo.clone(),
+        scim_client_bearer_token_id,
+        LookupType::by_id(scim_client_bearer_token_id),
+    ));
+    builder.new_resource(authz::ScimClientBearerTokenList::new(silo.clone()));
 }
 
 /// Helper for `make_resources()` that constructs a small Project hierarchy
@@ -343,6 +369,14 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(disk_name.clone()),
     ));
+
+    let multicast_group_name = format!("{project_name}-multicast-group1");
+    builder.new_resource(authz::MulticastGroup::new(
+        authz::FLEET,
+        Uuid::new_v4(),
+        LookupType::ByName(multicast_group_name),
+    ));
+
     builder.new_resource(affinity_group.clone());
     builder.new_resource(anti_affinity_group.clone());
     builder.new_resource(instance.clone());
@@ -351,6 +385,7 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(format!("{}-nic1", instance_name)),
     ));
+    builder.new_resource(authz::VpcList::new(project.clone()));
     builder.new_resource(vpc1.clone());
     // Test a resource nested two levels below Project
     builder.new_resource(authz::VpcSubnet::new(
@@ -418,7 +453,7 @@ async fn make_webhook_rx(builder: &mut ResourceBuilder<'_>) {
     builder.new_resource(authz::WebhookSecret::new(
         webhook_rx,
         webhook_secret_id,
-        LookupType::ById(webhook_secret_id.into_untyped_uuid()),
+        LookupType::by_id(webhook_secret_id),
     ));
 }
 
@@ -465,7 +500,6 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::VpcRouter::get_polar_class(),
         authz::RouterRoute::get_polar_class(),
         authz::ConsoleSession::get_polar_class(),
-        authz::RoleBuiltin::get_polar_class(),
         authz::UserBuiltin::get_polar_class(),
     ]
     .into_iter()

@@ -2,17 +2,45 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, DistributedDdlQueue,
-    GenerateConfigResult, KeeperConf, KeeperConfigurableSettings, Lgif,
-    MetricInfoPath, RaftConfig, ServerConfigurableSettings, SystemTimeSeries,
-    TimeSeriesSettingsQuery,
-};
+use clickhouse_admin_types_versions::latest;
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
+use dropshot_api_manager_types::api_versions;
 use omicron_common::api::external::Generation;
+
+api_versions!([
+    // NOTE: These versions will be used across **all three** APIs defined in
+    // this file. When we need to add the next version, consider carefully if
+    // these APIs should be split into separate modules or crates with their
+    // own versions.
+
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- Pick a new semver and define it in the list below.  The list MUST
+    // |  remain sorted, which generally means that your version should go at
+    // |  the very top.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // v
+    // (next_int, IDENT), // NOTE: read the note at the start of this macro!
+    (1, INITIAL),
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2, ADD_FOOBAR)
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
 
 /// API interface for our clickhouse-admin-keeper server
 ///
@@ -40,8 +68,11 @@ pub trait ClickhouseAdminKeeperApi {
     }]
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<KeeperConfigurableSettings>,
-    ) -> Result<HttpResponseCreated<GenerateConfigResult>, HttpError>;
+        body: TypedBody<latest::keeper::KeeperConfigurableSettings>,
+    ) -> Result<
+        HttpResponseCreated<latest::config::GenerateConfigResult>,
+        HttpError,
+    >;
 
     /// Retrieve the generation number of a configuration
     #[endpoint {
@@ -61,7 +92,7 @@ pub trait ClickhouseAdminKeeperApi {
     }]
     async fn lgif(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Lgif>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::keeper::Lgif>, HttpError>;
 
     /// Retrieve information from ClickHouse virtual node /keeper/config which
     /// contains last committed cluster configuration.
@@ -71,7 +102,7 @@ pub trait ClickhouseAdminKeeperApi {
     }]
     async fn raft_config(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RaftConfig>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::keeper::RaftConfig>, HttpError>;
 
     /// Retrieve configuration information from a keeper node.
     #[endpoint {
@@ -80,7 +111,7 @@ pub trait ClickhouseAdminKeeperApi {
     }]
     async fn keeper_conf(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<KeeperConf>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::keeper::KeeperConf>, HttpError>;
 
     /// Retrieve cluster membership information from a keeper node.
     #[endpoint {
@@ -89,7 +120,10 @@ pub trait ClickhouseAdminKeeperApi {
     }]
     async fn keeper_cluster_membership(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ClickhouseKeeperClusterMembership>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::keeper::ClickhouseKeeperClusterMembership>,
+        HttpError,
+    >;
 }
 
 /// API interface for our clickhouse-admin-server server
@@ -115,8 +149,11 @@ pub trait ClickhouseAdminServerApi {
     }]
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<ServerConfigurableSettings>,
-    ) -> Result<HttpResponseCreated<GenerateConfigResult>, HttpError>;
+        body: TypedBody<latest::server::ServerConfigurableSettings>,
+    ) -> Result<
+        HttpResponseCreated<latest::config::GenerateConfigResult>,
+        HttpError,
+    >;
 
     /// Retrieve the generation number of a configuration
     #[endpoint {
@@ -135,7 +172,10 @@ pub trait ClickhouseAdminServerApi {
     }]
     async fn distributed_ddl_queue(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<Vec<latest::server::DistributedDdlQueue>>,
+        HttpError,
+    >;
 
     /// Retrieve time series from the system database.
     ///
@@ -148,9 +188,9 @@ pub trait ClickhouseAdminServerApi {
     }]
     async fn system_timeseries_avg(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<MetricInfoPath>,
-        query_params: Query<TimeSeriesSettingsQuery>,
-    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
+        path_params: Path<latest::server::MetricInfoPath>,
+        query_params: Query<latest::server::TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<latest::server::SystemTimeSeries>>, HttpError>;
 
     /// Idempotently initialize a replicated ClickHouse cluster database.
     #[endpoint {
@@ -192,7 +232,7 @@ pub trait ClickhouseAdminSingleApi {
     }]
     async fn system_timeseries_avg(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<MetricInfoPath>,
-        query_params: Query<TimeSeriesSettingsQuery>,
-    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
+        path_params: Path<latest::server::MetricInfoPath>,
+        query_params: Query<latest::server::TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<latest::server::SystemTimeSeries>>, HttpError>;
 }

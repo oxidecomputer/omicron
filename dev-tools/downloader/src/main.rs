@@ -5,6 +5,11 @@
 use clap::Parser;
 use xtask_downloader::{DownloadArgs, run_cmd};
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "this is a dev-tool, and avoiding a dependency on \
+     `oxide-tokio-rt` helps minimize compile time."
+)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = DownloadArgs::parse();

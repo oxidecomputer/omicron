@@ -10,7 +10,7 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
-use nexus_client::types::LastResult;
+use nexus_lockstep_client::types::LastResult;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -19,6 +19,8 @@ use nexus_types::external_api::shared::SupportBundleInfo;
 use nexus_types::external_api::shared::SupportBundleState;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleCollectionStep;
+use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
@@ -143,8 +145,20 @@ async fn bundle_delete(
 async fn bundle_create(
     client: &ClientTestContext,
 ) -> Result<SupportBundleInfo> {
+    bundle_create_with_comment(client, None).await
+}
+
+async fn bundle_create_with_comment(
+    client: &ClientTestContext,
+    user_comment: Option<String>,
+) -> Result<SupportBundleInfo> {
+    use nexus_types::external_api::params::SupportBundleCreate;
+
+    let create_params = SupportBundleCreate { user_comment };
+
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, BUNDLES_URL)
+            .body(Some(&create_params))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -160,8 +174,12 @@ async fn bundle_create_expect_fail(
     expected_status: StatusCode,
     expected_message: &str,
 ) -> Result<()> {
+    use nexus_types::external_api::params::SupportBundleCreate;
+
+    let create_params = SupportBundleCreate { user_comment: None };
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, BUNDLES_URL)
+            .body(Some(&create_params))
             .expect_status(Some(expected_status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -189,7 +207,7 @@ async fn bundle_download(
     let body = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, &url)
             .expect_status(Some(StatusCode::OK))
-            .expect_range_requestable(),
+            .expect_range_requestable("application/zip"),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -208,7 +226,7 @@ async fn bundle_download_head(
     let len = NexusRequest::new(
         RequestBuilder::new(client, Method::HEAD, &url)
             .expect_status(Some(StatusCode::OK))
-            .expect_range_requestable(),
+            .expect_range_requestable("application/zip"),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -240,7 +258,7 @@ async fn bundle_download_range(
                 http::header::CONTENT_RANGE,
                 expected_content_range,
             )
-            .expect_range_requestable(),
+            .expect_range_requestable("application/zip"),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -279,6 +297,29 @@ async fn bundle_download_expect_fail(
     Ok(())
 }
 
+async fn bundle_update_comment(
+    client: &ClientTestContext,
+    id: SupportBundleUuid,
+    comment: Option<String>,
+) -> Result<SupportBundleInfo> {
+    use nexus_types::external_api::params::SupportBundleUpdate;
+
+    let url = format!("{BUNDLES_URL}/{id}");
+    let update = SupportBundleUpdate { user_comment: comment };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &url)
+            .body(Some(&update))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .context("failed to update bundle comment")?
+    .parsed_body()
+    .context("failed to parse 'update bundle comment' response")
+}
+
 // -- Background Task --
 //
 // The following logic helps us trigger and observe the output of the support
@@ -298,7 +339,7 @@ async fn activate_bundle_collection_background_task(
     use nexus_test_utils::background::activate_background_task;
 
     let task = activate_background_task(
-        &cptestctx.internal_client,
+        &cptestctx.lockstep_client,
         "support_bundle_collector",
     )
     .await;
@@ -446,15 +487,41 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
         output.cleanup_report,
         Some(SupportBundleCleanupReport { ..Default::default() })
     );
+
+    let report = output.collection_report.as_ref().expect("Missing report");
+    assert_eq!(report.bundle, bundle.id);
+    assert!(report.activated_in_db_ok);
     assert_eq!(
-        output.collection_report,
-        Some(SupportBundleCollectionReport {
-            bundle: bundle.id,
-            listed_in_service_sleds: true,
-            listed_sps: true,
-            activated_in_db_ok: true,
+        report.ereports,
+        Some(SupportBundleEreportStatus {
+            n_collected: 0,
+            n_found: 0,
+            errors: Vec::new()
         })
     );
+
+    // Verify that steps were recorded with reasonable timing data
+    assert!(!report.steps.is_empty(), "Should have recorded some steps");
+    for step in &report.steps {
+        assert!(
+            step.end >= step.start,
+            "Step '{}' end time should be >= start time",
+            step.name
+        );
+    }
+
+    // Verify that we successfully spawned steps to query sleds and SPs
+    let step_names: Vec<_> =
+        report.steps.iter().map(|s| s.name.as_str()).collect();
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS),
+        "Should have attempted to list in-service sleds"
+    );
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS),
+        "Should have attempted to list service processors"
+    );
+
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
     assert_eq!(bundle.state, SupportBundleState::Active);
 
@@ -463,6 +530,8 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let archive = ZipArchive::new(Cursor::new(&contents)).unwrap();
     let mut names = archive.file_names();
     assert_eq!(names.next(), Some("bundle_id.txt"));
+    assert_eq!(names.next(), Some("meta/"));
+    assert_eq!(names.next(), Some("meta/trace.json"));
     assert_eq!(names.next(), Some("rack/"));
     assert!(names.any(|n| n == "sp_task_dumps/"));
     // There's much more data in the bundle, but validating it isn't the point
@@ -543,15 +612,40 @@ async fn test_support_bundle_range_requests(
     // Finish collection, activate the bundle.
     let output = activate_bundle_collection_background_task(&cptestctx).await;
     assert_eq!(output.collection_err, None);
+    let report = output.collection_report.as_ref().expect("Missing report");
+    assert_eq!(report.bundle, bundle.id);
+    assert!(report.activated_in_db_ok);
     assert_eq!(
-        output.collection_report,
-        Some(SupportBundleCollectionReport {
-            bundle: bundle.id,
-            listed_in_service_sleds: true,
-            listed_sps: true,
-            activated_in_db_ok: true,
+        report.ereports,
+        Some(SupportBundleEreportStatus {
+            n_collected: 0,
+            n_found: 0,
+            errors: Vec::new()
         })
     );
+
+    // Verify that steps were recorded with reasonable timing data
+    assert!(!report.steps.is_empty(), "Should have recorded some steps");
+    for step in &report.steps {
+        assert!(
+            step.end >= step.start,
+            "Step '{}' end time should be >= start time",
+            step.name
+        );
+    }
+
+    // Verify that we successfully spawned steps to query sleds and SPs
+    let step_names: Vec<_> =
+        report.steps.iter().map(|s| s.name.as_str()).collect();
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS),
+        "Should have attempted to list in-service sleds"
+    );
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS),
+        "Should have attempted to list service processors"
+    );
+
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
     assert_eq!(bundle.state, SupportBundleState::Active);
 
@@ -590,4 +684,158 @@ async fn test_support_bundle_range_requests(
     .await
     .unwrap();
     assert_eq!(second_half, full_contents[first_half.len()..]);
+}
+
+// Test that support bundle listing returns bundles ordered by creation time
+#[nexus_test]
+async fn test_support_bundle_list_time_ordering(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a disk test with multiple zpools to allow multiple bundles
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(3).build().await;
+
+    // Create multiple bundles with delays to ensure different creation times
+    let mut bundle_ids = Vec::new();
+
+    for _ in 0..3 {
+        let bundle = bundle_create(&client).await.unwrap();
+        bundle_ids.push(bundle.id);
+
+        // Small delay to ensure different creation times
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
+
+    // List all bundles
+    let bundles = bundles_list(&client).await.unwrap();
+    assert_eq!(bundles.len(), 3, "Should have created 3 bundles");
+
+    // Verify bundles are ordered by creation time (ascending)
+    for i in 0..bundles.len() - 1 {
+        assert!(
+            bundles[i].time_created <= bundles[i + 1].time_created,
+            "Bundles should be ordered by creation time (ascending). Bundle at index {} has time {:?}, but bundle at index {} has time {:?}",
+            i,
+            bundles[i].time_created,
+            i + 1,
+            bundles[i + 1].time_created
+        );
+    }
+
+    // Verify that all our created bundles are present
+    let returned_ids: Vec<_> = bundles.iter().map(|b| b.id).collect();
+    for bundle_id in &bundle_ids {
+        assert!(
+            returned_ids.contains(bundle_id),
+            "Bundle ID {:?} should be in the returned list",
+            bundle_id
+        );
+    }
+}
+
+// Test updating bundle comments
+#[nexus_test]
+async fn test_support_bundle_update_comment(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(1).build().await;
+
+    // Create a bundle
+    let bundle = bundle_create(&client).await.unwrap();
+    assert_eq!(bundle.user_comment, None);
+
+    // Update the comment
+    let comment = Some("Test comment".to_string());
+    let updated_bundle =
+        bundle_update_comment(&client, bundle.id, comment.clone())
+            .await
+            .unwrap();
+    assert_eq!(updated_bundle.user_comment, comment);
+
+    // Update with a different comment
+    let new_comment = Some("Updated comment".to_string());
+    let updated_bundle =
+        bundle_update_comment(&client, bundle.id, new_comment.clone())
+            .await
+            .unwrap();
+    assert_eq!(updated_bundle.user_comment, new_comment);
+
+    // Clear the comment
+    let updated_bundle =
+        bundle_update_comment(&client, bundle.id, None).await.unwrap();
+    assert_eq!(updated_bundle.user_comment, None);
+
+    // Test maximum length validation (4096 bytes)
+    let max_comment = "a".repeat(4096);
+    let updated_bundle =
+        bundle_update_comment(&client, bundle.id, Some(max_comment.clone()))
+            .await
+            .unwrap();
+    assert_eq!(updated_bundle.user_comment, Some(max_comment));
+
+    // Test exceeding maximum length (4097 bytes)
+    let too_long_comment = "a".repeat(4097);
+    let url = format!("{BUNDLES_URL}/{}", bundle.id);
+    let update = nexus_types::external_api::params::SupportBundleUpdate {
+        user_comment: Some(too_long_comment),
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &url)
+            .body(Some(&update))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .context("failed to update bundle comment")
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .context("failed to parse error response")
+    .unwrap();
+
+    assert!(error.message.contains("cannot exceed 4096 bytes"));
+
+    // Clean up
+    bundle_delete(&client, bundle.id).await.unwrap();
+}
+
+// Test creating bundles with comments
+#[nexus_test]
+async fn test_support_bundle_create_with_comment(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(3).build().await;
+
+    // Create a bundle without comment
+    let bundle_no_comment =
+        bundle_create_with_comment(&client, None).await.unwrap();
+    assert_eq!(bundle_no_comment.user_comment, None);
+
+    // Create a bundle with comment
+    let comment = Some("Test comment during creation".to_string());
+    let bundle_with_comment =
+        bundle_create_with_comment(&client, comment.clone()).await.unwrap();
+    assert_eq!(bundle_with_comment.user_comment, comment);
+
+    // Create a bundle with empty comment
+    let empty_comment = Some("".to_string());
+    let bundle_empty_comment =
+        bundle_create_with_comment(&client, empty_comment.clone())
+            .await
+            .unwrap();
+    assert_eq!(bundle_empty_comment.user_comment, empty_comment);
+
+    // Clean up
+    bundle_delete(&client, bundle_no_comment.id).await.unwrap();
+    bundle_delete(&client, bundle_with_comment.id).await.unwrap();
+    bundle_delete(&client, bundle_empty_comment.id).await.unwrap();
 }

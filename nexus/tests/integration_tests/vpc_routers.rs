@@ -510,12 +510,15 @@ async fn test_vpc_routers_custom_delivered_to_instance(
                     vpc_name: vpc.name().clone(),
                     subnet_name: subnet_name.parse().unwrap(),
                     ip: Some(format!("192.168.{i}.10").parse().unwrap()),
+                    transit_ips: vec![],
                 },
             ]),
             vec![],
             vec![],
             true,
             Default::default(),
+            None,
+            Vec::new(),
         )
         .await;
         instance_simulate(
@@ -638,10 +641,19 @@ async fn test_vpc_routers_custom_delivered_to_instance(
     .await;
 
     assert_eq!(last_routes[0].0, new_system);
-    assert!(new_custom.contains(&ResolvedVpcRoute {
-        dest: "2.0.7.0/24".parse().unwrap(),
-        target: RouterTarget::Ip(instance_nics[INSTANCE_NAMES[1]][0].ip),
-    }));
+    assert!(
+        new_custom.contains(&ResolvedVpcRoute {
+            dest: "2.0.7.0/24".parse().unwrap(),
+            target: RouterTarget::Ip(
+                instance_nics[INSTANCE_NAMES[1]][0]
+                    .ip_config
+                    .ipv4_addr()
+                    .copied()
+                    .unwrap()
+                    .into()
+            ),
+        })
+    );
 
     // Swapping router should change the installed routes at that sled.
     set_custom_router(

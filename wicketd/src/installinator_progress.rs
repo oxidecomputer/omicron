@@ -15,7 +15,10 @@ use std::{
 use installinator_api::EventReportStatus;
 use omicron_uuid_kinds::MupdateUuid;
 use tokio::sync::{oneshot, watch};
-use update_engine::events::StepEventIsTerminal;
+use update_engine::{
+    NestedSpec,
+    events::{EventReport, StepEventIsTerminal},
+};
 
 /// Creates the artifact server and update tracker's interfaces to the
 /// installinator progress tracker.
@@ -52,7 +55,7 @@ impl IprArtifactServer {
     pub(crate) fn report_progress(
         &self,
         update_id: MupdateUuid,
-        report: installinator_common::EventReport,
+        report: EventReport<NestedSpec>,
     ) -> EventReportStatus {
         let mut running_updates = self.running_updates.lock().unwrap();
         if let Some(update) = running_updates.get_mut(&update_id) {
@@ -154,22 +157,20 @@ impl IprUpdateTracker {
 /// Type alias for the receiver that resolves when the first message from the
 /// installinator has been received.
 pub(crate) type IprStartReceiver =
-    oneshot::Receiver<watch::Receiver<installinator_common::EventReport>>;
+    oneshot::Receiver<watch::Receiver<EventReport<NestedSpec>>>;
 
 #[derive(Debug)]
 #[must_use]
 enum RunningUpdate {
     /// This is the initial state: the first message from the installinator
     /// hasn't been received yet.
-    Initial(
-        oneshot::Sender<watch::Receiver<installinator_common::EventReport>>,
-    ),
+    Initial(oneshot::Sender<watch::Receiver<EventReport<NestedSpec>>>),
 
     /// Reports from the installinator have been received.
     ///
     /// This is an `UnboundedSender` to avoid cancel-safety issues (see
     /// <https://github.com/oxidecomputer/omicron/pull/3579>).
-    ReportsReceived(watch::Sender<installinator_common::EventReport>),
+    ReportsReceived(watch::Sender<EventReport<NestedSpec>>),
 
     /// All messages have been received.
     ///
@@ -202,14 +203,15 @@ impl RunningUpdate {
             }
         }
     }
+
     fn take(&mut self) -> Self {
         std::mem::replace(self, Self::Invalid)
     }
 
     fn send_and_next_state(
         log: &slog::Logger,
-        sender: watch::Sender<installinator_common::EventReport>,
-        report: installinator_common::EventReport,
+        sender: watch::Sender<EventReport<NestedSpec>>,
+        report: EventReport<NestedSpec>,
     ) -> (Self, EventReportStatus) {
         let is_terminal = Self::is_terminal(&report);
         match sender.send(report) {
@@ -257,7 +259,7 @@ impl RunningUpdate {
         }
     }
 
-    fn is_terminal(report: &installinator_common::EventReport) -> bool {
+    fn is_terminal(report: &EventReport<NestedSpec>) -> bool {
         report
             .step_events
             .last()
@@ -362,8 +364,14 @@ mod tests {
                 kind: StepEventKind::ExecutionCompleted {
                     last_step: StepInfoWithMetadata {
                         info: StepInfo {
-                            id: InstallinatorStepId::Write,
-                            component: InstallinatorComponent::Both,
+                            id: serde_json::to_value(
+                                InstallinatorStepId::Write,
+                            )
+                            .expect("serialized step ID"),
+                            component: serde_json::to_value(
+                                InstallinatorComponent::Both,
+                            )
+                            .expect("serialized component"),
                             description: "Fake step".into(),
                             index: 0,
                             component_index: 0,
@@ -375,16 +383,22 @@ mod tests {
                     last_outcome: StepOutcome::Success {
                         message: Some("Message".into()),
                         metadata: Some(
-                            InstallinatorCompletionMetadata::Write {
-                                output: WriteOutput {
-                                    slots_attempted: vec![M2Slot::A, M2Slot::B]
+                            serde_json::to_value(
+                                InstallinatorCompletionMetadata::Write {
+                                    output: WriteOutput {
+                                        slots_attempted: vec![
+                                            M2Slot::A,
+                                            M2Slot::B,
+                                        ]
                                         .into_iter()
                                         .collect(),
-                                    slots_written: vec![M2Slot::A]
-                                        .into_iter()
-                                        .collect(),
+                                        slots_written: vec![M2Slot::A]
+                                            .into_iter()
+                                            .collect(),
+                                    },
                                 },
-                            },
+                            )
+                            .expect("serialized metadata"),
                         ),
                     },
                     step_elapsed: Duration::from_secs(1),

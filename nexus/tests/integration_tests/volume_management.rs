@@ -29,6 +29,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleResources;
 use nexus_db_queries::db::datastore::DestVolume;
+use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::ExistingTarget;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
@@ -54,11 +55,10 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
+use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
-use omicron_common::api::internal;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
@@ -69,7 +69,6 @@ use omicron_uuid_kinds::UpstairsRepairUuid;
 use omicron_uuid_kinds::UpstairsSessionUuid;
 use omicron_uuid_kinds::UpstairsUuid;
 use omicron_uuid_kinds::VolumeUuid;
-use omicron_uuid_kinds::ZpoolUuid;
 use rand::prelude::SliceRandom;
 use rand::{SeedableRng, rngs::StdRng};
 use sled_agent_client::{CrucibleOpts, VolumeConstructionRequest};
@@ -143,14 +142,18 @@ async fn create_base_disk(
     image: &views::Image,
     disks_url: &String,
     base_disk_name: &Name,
-) -> Disk {
+) -> external::Disk {
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -410,7 +413,11 @@ async fn test_snapshot_prevents_other_disk(
             name: next_disk_name.clone(),
             description: String::from("will fail"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -435,7 +442,7 @@ async fn test_snapshot_prevents_other_disk(
     assert!(disk_test.crucible_resources_deleted().await);
 
     // Disk allocation will work now
-    let _next_disk: Disk = NexusRequest::new(
+    let _next_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&next_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -476,13 +483,15 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
             name: first_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
 
-    let first_disk: Disk = NexusRequest::new(
+    let first_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&first_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -518,13 +527,15 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
             name: second_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
 
-    let second_disk: Disk = NexusRequest::new(
+    let second_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&second_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -611,13 +622,15 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
             name: first_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
 
-    let first_disk: Disk = NexusRequest::new(
+    let first_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&first_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -653,13 +666,15 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
             name: second_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
 
-    let second_disk: Disk = NexusRequest::new(
+    let second_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&second_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -741,13 +756,15 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             name: layer_1_disk_name.clone(),
             description: String::from("layer 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
 
-    let layer_1_disk: Disk = NexusRequest::new(
+    let layer_1_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&layer_1_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -783,13 +800,15 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             name: layer_2_disk_name.clone(),
             description: String::from("layer 2"),
         },
-        disk_source: params::DiskSource::Snapshot {
-            snapshot_id: layer_1_snapshot.identity.id,
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Snapshot {
+                snapshot_id: layer_1_snapshot.identity.id,
+            },
         },
         size: disk_size,
     };
 
-    let layer_2_disk: Disk = NexusRequest::new(
+    let layer_2_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&layer_2_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -825,13 +844,15 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             name: layer_3_disk_name.clone(),
             description: String::from("layer 3"),
         },
-        disk_source: params::DiskSource::Snapshot {
-            snapshot_id: layer_2_snapshot.identity.id,
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Snapshot {
+                snapshot_id: layer_2_snapshot.identity.id,
+            },
         },
         size: disk_size,
     };
 
-    let layer_3_disk: Disk = NexusRequest::new(
+    let layer_3_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&layer_3_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -965,7 +986,7 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
             DeleteObject::Snapshot("layer-3-snapshot".to_string()),
         ];
 
-        let mut rng = StdRng::from_entropy();
+        let mut rng = StdRng::from_os_rng();
         objects.shuffle(&mut rng);
 
         objects
@@ -1178,13 +1199,15 @@ async fn delete_image_test(
             name: base_disk_name.clone(),
             description: String::from("all your base disk are belong to us"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
 
-    let _base_disk: Disk = NexusRequest::new(
+    let _base_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&base_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -1615,19 +1638,10 @@ async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
 
     println!("Created this volume: {:?}", volume_id);
     // disk to volume id, to then remove ROP?
-    let int_client = &cptestctx.internal_client;
-    let rop_url = format!("/volume/{}/remove-read-only-parent", volume_id);
+    let int_client = cptestctx.internal_client();
 
     // Call the internal API endpoint for removal of the read only parent
-    int_client
-        .make_request(
-            Method::POST,
-            &rop_url,
-            None as Option<&serde_json::Value>,
-            StatusCode::NO_CONTENT,
-        )
-        .await
-        .unwrap();
+    int_client.cpapi_volume_remove_read_only_parent(&volume_id).await.unwrap();
 
     let new_vol = datastore
         .volume_checkout(
@@ -1678,17 +1692,11 @@ async fn test_volume_remove_rop_saga_twice(
 
     println!("Created this volume: {:?}", volume_id);
     // disk to volume id, to then remove ROP?
-    let int_client = &cptestctx.internal_client;
-    let rop_url = format!("/volume/{}/remove-read-only-parent", volume_id);
+    let int_client = cptestctx.internal_client();
 
     // Call the internal API endpoint for removal of the read only parent
     let res = int_client
-        .make_request(
-            Method::POST,
-            &rop_url,
-            None as Option<&serde_json::Value>,
-            StatusCode::NO_CONTENT,
-        )
+        .cpapi_volume_remove_read_only_parent(&volume_id)
         .await
         .unwrap();
 
@@ -1719,12 +1727,7 @@ async fn test_volume_remove_rop_saga_twice(
 
     // Call the internal API endpoint a second time. Should be okay.
     let res = int_client
-        .make_request(
-            Method::POST,
-            &rop_url,
-            None as Option<&serde_json::Value>,
-            StatusCode::NO_CONTENT,
-        )
+        .cpapi_volume_remove_read_only_parent(&volume_id)
         .await
         .unwrap();
 
@@ -1739,19 +1742,10 @@ async fn test_volume_remove_rop_saga_no_volume(
     let volume_id = VolumeUuid::new_v4();
 
     println!("Non-existant volume: {:?}", volume_id);
-    let int_client = &cptestctx.internal_client;
-    let rop_url = format!("/volume/{}/remove-read-only-parent", volume_id);
+    let int_client = cptestctx.internal_client();
 
     // Call the internal API endpoint for removal of the read only parent
-    int_client
-        .make_request(
-            Method::POST,
-            &rop_url,
-            None as Option<&serde_json::Value>,
-            StatusCode::NO_CONTENT,
-        )
-        .await
-        .unwrap();
+    int_client.cpapi_volume_remove_read_only_parent(&volume_id).await.unwrap();
 }
 
 #[nexus_test]
@@ -1776,20 +1770,10 @@ async fn test_volume_remove_rop_saga_volume_not_volume(
         .await
         .unwrap();
 
-    let int_client = &cptestctx.internal_client;
-    // Call the saga on this volume
-    let rop_url = format!("/volume/{}/remove-read-only-parent", volume_id);
+    let int_client = cptestctx.internal_client();
 
     // Call the internal API endpoint for removal of the read only parent
-    int_client
-        .make_request(
-            Method::POST,
-            &rop_url,
-            None as Option<&serde_json::Value>,
-            StatusCode::NO_CONTENT,
-        )
-        .await
-        .unwrap();
+    int_client.cpapi_volume_remove_read_only_parent(&volume_id).await.unwrap();
 }
 
 #[nexus_test]
@@ -1815,19 +1799,10 @@ async fn test_volume_remove_rop_saga_deleted_volume(
     // Soft delete the volume
     let _cr = datastore.soft_delete_volume(volume_id).await.unwrap();
 
-    let int_client = &cptestctx.internal_client;
-    let rop_url = format!("/volume/{}/remove-read-only-parent", volume_id);
+    let int_client = cptestctx.internal_client();
 
     // Call the internal API endpoint for removal of the read only parent
-    int_client
-        .make_request(
-            Method::POST,
-            &rop_url,
-            None as Option<&serde_json::Value>,
-            StatusCode::NO_CONTENT,
-        )
-        .await
-        .unwrap();
+    int_client.cpapi_volume_remove_read_only_parent(&volume_id).await.unwrap();
 
     let new_vol = datastore
         .volume_checkout(
@@ -2267,7 +2242,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -2387,7 +2362,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -2521,8 +2496,10 @@ async fn test_disk_create_saga_unwinds_correctly(
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -2565,13 +2542,16 @@ async fn test_snapshot_create_saga_unwinds_correctly(
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
 
-    let _disk: Disk = object_create(client, &disks_url, &base_disk).await;
+    let _disk: external::Disk =
+        object_create(client, &disks_url, &base_disk).await;
 
     // Set the third agent to fail creating the region for the snapshot
     let zpool =
@@ -2618,14 +2598,14 @@ async fn test_snapshot_create_saga_unwinds_correctly(
 // and UUID you passed in.
 fn create_region(
     block_size: u64,
-    gen: u64,
+    generation: u64,
     id: Uuid,
 ) -> VolumeConstructionRequest {
     VolumeConstructionRequest::Region {
         block_size,
         blocks_per_extent: 1,
         extent_count: 1,
-        gen,
+        generation,
         opts: CrucibleOpts {
             id,
             target: Vec::new(),
@@ -2668,10 +2648,10 @@ fn volume_match_gen(
                         block_size: _,
                         blocks_per_extent: _,
                         extent_count: _,
-                        gen,
+                        generation,
                         opts: _,
                     } => {
-                        assert_eq!(*gen, expected_gen[index].unwrap());
+                        assert_eq!(*generation, expected_gen[index].unwrap());
                     }
                     _ => {
                         assert!(expected_gen[index].is_none());
@@ -2718,7 +2698,7 @@ async fn test_volume_hard_delete_idempotent(
 async fn test_upstairs_repair_notify_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let int_client = &cptestctx.internal_client;
+    let int_client = cptestctx.internal_client();
 
     let upstairs_id = UpstairsUuid::new_v4();
     let session_id = UpstairsSessionUuid::new_v4();
@@ -2726,49 +2706,34 @@ async fn test_upstairs_repair_notify_idempotent(
     let region_id = DownstairsRegionUuid::new_v4();
 
     // Send the same start request.
-    let notify_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
-
-    let request = internal::nexus::RepairStartInfo {
+    let request = nexus_client::types::RepairStartInfo {
         time: Utc::now(),
         session_id,
         repair_id,
-        repair_type: internal::nexus::UpstairsRepairType::Live,
-        repairs: vec![internal::nexus::DownstairsUnderRepair {
+        repair_type: nexus_client::types::UpstairsRepairType::Live,
+        repairs: vec![nexus_client::types::DownstairsUnderRepair {
             region_uuid: region_id,
             target_addr: "[fd00:1122:3344:101::8]:12345".parse().unwrap(),
         }],
     };
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_url,
-            Some(request.clone()),
-            StatusCode::NO_CONTENT,
-        )
+        .cpapi_upstairs_repair_start(&upstairs_id, &request)
         .await
         .unwrap();
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_url,
-            Some(request),
-            StatusCode::NO_CONTENT,
-        )
+        .cpapi_upstairs_repair_start(&upstairs_id, &request)
         .await
         .unwrap();
 
     // Send the same finish request.
-    let notify_url =
-        format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
-
-    let request = internal::nexus::RepairFinishInfo {
+    let request = nexus_client::types::RepairFinishInfo {
         time: Utc::now(),
         session_id,
         repair_id,
-        repair_type: internal::nexus::UpstairsRepairType::Live,
-        repairs: vec![internal::nexus::DownstairsUnderRepair {
+        repair_type: nexus_client::types::UpstairsRepairType::Live,
+        repairs: vec![nexus_client::types::DownstairsUnderRepair {
             region_uuid: region_id,
             target_addr: "[fd00:1122:3344:101::8]:12345".parse().unwrap(),
         }],
@@ -2776,22 +2741,12 @@ async fn test_upstairs_repair_notify_idempotent(
     };
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_url,
-            Some(request.clone()),
-            StatusCode::NO_CONTENT,
-        )
+        .cpapi_upstairs_repair_finish(&upstairs_id, &request)
         .await
         .unwrap();
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_url,
-            Some(request),
-            StatusCode::NO_CONTENT,
-        )
+        .cpapi_upstairs_repair_finish(&upstairs_id, &request)
         .await
         .unwrap();
 }
@@ -2802,59 +2757,53 @@ async fn test_upstairs_repair_notify_idempotent(
 async fn test_upstairs_repair_notify_different_finish_status(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let int_client = &cptestctx.internal_client;
+    let int_client = cptestctx.internal_client();
 
     let upstairs_id = UpstairsUuid::new_v4();
     let session_id = UpstairsSessionUuid::new_v4();
     let repair_id = UpstairsRepairUuid::new_v4();
     let region_id = DownstairsRegionUuid::new_v4();
 
-    let notify_url =
-        format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
-
     int_client
-        .make_request(
-            Method::POST,
-            &notify_url,
-            Some(internal::nexus::RepairFinishInfo {
+        .cpapi_upstairs_repair_finish(
+            &upstairs_id,
+            &nexus_client::types::RepairFinishInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
                 aborted: false, // live repair was ok
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
 
-    int_client
-        .make_request(
-            Method::POST,
-            &notify_url,
-            Some(internal::nexus::RepairFinishInfo {
+    let err = int_client
+        .cpapi_upstairs_repair_finish(
+            &upstairs_id,
+            &nexus_client::types::RepairFinishInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
                 aborted: true, // live repair failed?
-            }),
-            StatusCode::CONFLICT,
+            },
         )
         .await
         .unwrap_err();
+    assert_eq!(err.status(), Some(StatusCode::CONFLICT));
 }
 
 /// Test that the same Upstairs can rerun a repair again.
@@ -2862,7 +2811,7 @@ async fn test_upstairs_repair_notify_different_finish_status(
 async fn test_upstairs_repair_same_upstairs_retry(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let int_client = &cptestctx.internal_client;
+    let int_client = cptestctx.internal_client();
 
     let upstairs_id = UpstairsUuid::new_v4();
     let session_id = UpstairsSessionUuid::new_v4();
@@ -2871,50 +2820,41 @@ async fn test_upstairs_repair_same_upstairs_retry(
 
     // Simulate one failed repair
 
-    let notify_start_url =
-        format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
-    let notify_finish_url =
-        format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
-
     int_client
-        .make_request(
-            Method::POST,
-            &notify_start_url,
-            Some(internal::nexus::RepairStartInfo {
+        .cpapi_upstairs_repair_start(
+            &upstairs_id,
+            &nexus_client::types::RepairStartInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_finish_url,
-            Some(internal::nexus::RepairFinishInfo {
+        .cpapi_upstairs_repair_finish(
+            &upstairs_id,
+            &nexus_client::types::RepairFinishInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
                 aborted: true,
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
@@ -2924,44 +2864,40 @@ async fn test_upstairs_repair_same_upstairs_retry(
     let repair_id = UpstairsRepairUuid::new_v4();
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_start_url,
-            Some(internal::nexus::RepairStartInfo {
+        .cpapi_upstairs_repair_start(
+            &upstairs_id,
+            &nexus_client::types::RepairStartInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_finish_url,
-            Some(internal::nexus::RepairFinishInfo {
+        .cpapi_upstairs_repair_finish(
+            &upstairs_id,
+            &nexus_client::types::RepairFinishInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
                 aborted: false,
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
@@ -2972,7 +2908,7 @@ async fn test_upstairs_repair_same_upstairs_retry(
 async fn test_upstairs_repair_different_upstairs_retry(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let int_client = &cptestctx.internal_client;
+    let int_client = cptestctx.internal_client();
 
     let upstairs_id = UpstairsUuid::new_v4();
     let session_id = UpstairsSessionUuid::new_v4();
@@ -2981,50 +2917,41 @@ async fn test_upstairs_repair_different_upstairs_retry(
 
     // Simulate one failed repair by one Upstairs
 
-    let notify_start_url =
-        format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
-    let notify_finish_url =
-        format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
-
     int_client
-        .make_request(
-            Method::POST,
-            &notify_start_url,
-            Some(internal::nexus::RepairStartInfo {
+        .cpapi_upstairs_repair_start(
+            &upstairs_id,
+            &nexus_client::types::RepairStartInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_finish_url,
-            Some(internal::nexus::RepairFinishInfo {
+        .cpapi_upstairs_repair_finish(
+            &upstairs_id,
+            &nexus_client::types::RepairFinishInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
                 aborted: true,
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
@@ -3035,44 +2962,40 @@ async fn test_upstairs_repair_different_upstairs_retry(
     let repair_id = UpstairsRepairUuid::new_v4();
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_start_url,
-            Some(internal::nexus::RepairStartInfo {
+        .cpapi_upstairs_repair_start(
+            &upstairs_id,
+            &nexus_client::types::RepairStartInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_finish_url,
-            Some(internal::nexus::RepairFinishInfo {
+        .cpapi_upstairs_repair_finish(
+            &upstairs_id,
+            &nexus_client::types::RepairFinishInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
                 aborted: false,
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
@@ -3083,7 +3006,7 @@ async fn test_upstairs_repair_different_upstairs_retry(
 async fn test_upstairs_repair_different_upstairs_retry_interrupted(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let int_client = &cptestctx.internal_client;
+    let int_client = cptestctx.internal_client();
 
     let upstairs_id = UpstairsUuid::new_v4();
     let session_id = UpstairsSessionUuid::new_v4();
@@ -3093,28 +3016,21 @@ async fn test_upstairs_repair_different_upstairs_retry_interrupted(
     // Simulate one failed repair by one Upstairs, which was interrupted (which
     // leads to no finish message).
 
-    let notify_start_url =
-        format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
-    let notify_finish_url =
-        format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
-
     int_client
-        .make_request(
-            Method::POST,
-            &notify_start_url,
-            Some(internal::nexus::RepairStartInfo {
+        .cpapi_upstairs_repair_start(
+            &upstairs_id,
+            &nexus_client::types::RepairStartInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
@@ -3126,44 +3042,40 @@ async fn test_upstairs_repair_different_upstairs_retry_interrupted(
     let repair_id = UpstairsRepairUuid::new_v4();
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_start_url,
-            Some(internal::nexus::RepairStartInfo {
+        .cpapi_upstairs_repair_start(
+            &upstairs_id,
+            &nexus_client::types::RepairStartInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
 
     int_client
-        .make_request(
-            Method::POST,
-            &notify_finish_url,
-            Some(internal::nexus::RepairFinishInfo {
+        .cpapi_upstairs_repair_finish(
+            &upstairs_id,
+            &nexus_client::types::RepairFinishInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
                 aborted: false,
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
@@ -3174,58 +3086,52 @@ async fn test_upstairs_repair_different_upstairs_retry_interrupted(
 async fn test_upstairs_repair_repair_id_and_type_conflict(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let int_client = &cptestctx.internal_client;
+    let int_client = cptestctx.internal_client();
 
     let upstairs_id = UpstairsUuid::new_v4();
     let session_id = UpstairsSessionUuid::new_v4();
     let repair_id = UpstairsRepairUuid::new_v4();
     let region_id = DownstairsRegionUuid::new_v4();
 
-    let notify_start_url =
-        format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
-
     int_client
-        .make_request(
-            Method::POST,
-            &notify_start_url,
-            Some(internal::nexus::RepairStartInfo {
+        .cpapi_upstairs_repair_start(
+            &upstairs_id,
+            &nexus_client::types::RepairStartInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
 
-    int_client
-        .make_request(
-            Method::POST,
-            &notify_start_url,
-            Some(internal::nexus::RepairStartInfo {
+    let err = int_client
+        .cpapi_upstairs_repair_start(
+            &upstairs_id,
+            &nexus_client::types::RepairStartInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
                 repair_type:
-                    internal::nexus::UpstairsRepairType::Reconciliation,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    nexus_client::types::UpstairsRepairType::Reconciliation,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
-            }),
-            StatusCode::CONFLICT,
+            },
         )
         .await
         .unwrap_err();
+    assert_eq!(err.status(), Some(StatusCode::CONFLICT));
 }
 
 /// Test that an Upstairs can submit progress for a repair
@@ -3233,7 +3139,7 @@ async fn test_upstairs_repair_repair_id_and_type_conflict(
 async fn test_upstairs_repair_submit_progress(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let int_client = &cptestctx.internal_client;
+    let int_client = cptestctx.internal_client();
 
     let upstairs_id = UpstairsUuid::new_v4();
     let session_id = UpstairsSessionUuid::new_v4();
@@ -3242,45 +3148,35 @@ async fn test_upstairs_repair_submit_progress(
 
     // A repair must be started before progress can be submitted
 
-    let notify_start_url =
-        format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
-
     int_client
-        .make_request(
-            Method::POST,
-            &notify_start_url,
-            Some(internal::nexus::RepairStartInfo {
+        .cpapi_upstairs_repair_start(
+            &upstairs_id,
+            &nexus_client::types::RepairStartInfo {
                 time: Utc::now(),
                 session_id,
                 repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                repair_type: nexus_client::types::UpstairsRepairType::Live,
+                repairs: vec![nexus_client::types::DownstairsUnderRepair {
                     region_uuid: region_id,
                     target_addr: "[fd00:1122:3344:101::8]:12345"
                         .parse()
                         .unwrap(),
                 }],
-            }),
-            StatusCode::NO_CONTENT,
+            },
         )
         .await
         .unwrap();
 
-    let progress_url = format!(
-        "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress"
-    );
-
     for i in 0..100 {
         int_client
-            .make_request(
-                Method::POST,
-                &progress_url,
-                Some(internal::nexus::RepairProgress {
+            .cpapi_upstairs_repair_progress(
+                &upstairs_id,
+                &repair_id,
+                &nexus_client::types::RepairProgress {
                     time: Utc::now(),
                     current_item: i,
                     total_items: 100,
-                }),
-                StatusCode::NO_CONTENT,
+                },
             )
             .await
             .unwrap();
@@ -3292,28 +3188,24 @@ async fn test_upstairs_repair_submit_progress(
 async fn test_upstairs_repair_reject_submit_progress_when_no_repair(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let int_client = &cptestctx.internal_client;
+    let int_client = cptestctx.internal_client();
 
     let upstairs_id = UpstairsUuid::new_v4();
     let repair_id = UpstairsRepairUuid::new_v4();
 
-    let progress_url = format!(
-        "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress"
-    );
-
-    int_client
-        .make_request(
-            Method::POST,
-            &progress_url,
-            Some(internal::nexus::RepairProgress {
+    let err = int_client
+        .cpapi_upstairs_repair_progress(
+            &upstairs_id,
+            &repair_id,
+            &nexus_client::types::RepairProgress {
                 time: Utc::now(),
                 current_item: 10,
                 total_items: 100,
-            }),
-            StatusCode::NOT_FOUND,
+            },
         )
         .await
         .unwrap_err();
+    assert_eq!(err.status(), Some(StatusCode::NOT_FOUND));
 }
 
 /// Test that an Upstairs can notify Nexus when a Downstairs client task is
@@ -3322,74 +3214,66 @@ async fn test_upstairs_repair_reject_submit_progress_when_no_repair(
 async fn test_upstairs_notify_downstairs_client_stop_request(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let int_client = &cptestctx.internal_client;
+    let int_client = cptestctx.internal_client();
 
     let upstairs_id = UpstairsUuid::new_v4();
     let downstairs_id = DownstairsUuid::new_v4();
 
-    let stop_request_url = format!(
-        "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request"
-    );
-
     // Make sure an Upstairs can re-send the notification
 
-    let request = internal::nexus::DownstairsClientStopRequest {
+    let request = nexus_client::types::DownstairsClientStopRequest {
         time: Utc::now(),
         reason:
-            internal::nexus::DownstairsClientStopRequestReason::TooManyOutstandingJobs,
+            nexus_client::types::DownstairsClientStopRequestReason::TooManyOutstandingJobs,
     };
 
     int_client
-        .make_request(
-            Method::POST,
-            &stop_request_url,
-            Some(request.clone()),
-            StatusCode::NO_CONTENT,
+        .cpapi_downstairs_client_stop_request(
+            &upstairs_id,
+            &downstairs_id,
+            &request,
         )
         .await
         .unwrap();
 
     int_client
-        .make_request(
-            Method::POST,
-            &stop_request_url,
-            Some(request),
-            StatusCode::NO_CONTENT,
+        .cpapi_downstairs_client_stop_request(
+            &upstairs_id,
+            &downstairs_id,
+            &request,
         )
         .await
         .unwrap();
 
     // The client can be requested to stop for the same reason a different time
 
-    let request = internal::nexus::DownstairsClientStopRequest {
+    let request = nexus_client::types::DownstairsClientStopRequest {
         time: Utc::now(),
         reason:
-            internal::nexus::DownstairsClientStopRequestReason::TooManyOutstandingJobs,
+            nexus_client::types::DownstairsClientStopRequestReason::TooManyOutstandingJobs,
     };
 
     int_client
-        .make_request(
-            Method::POST,
-            &stop_request_url,
-            Some(request),
-            StatusCode::NO_CONTENT,
+        .cpapi_downstairs_client_stop_request(
+            &upstairs_id,
+            &downstairs_id,
+            &request,
         )
         .await
         .unwrap();
 
     // The client can also be requested to stop for a different reason
 
-    let request = internal::nexus::DownstairsClientStopRequest {
+    let request = nexus_client::types::DownstairsClientStopRequest {
         time: Utc::now(),
-        reason: internal::nexus::DownstairsClientStopRequestReason::IOError,
+        reason: nexus_client::types::DownstairsClientStopRequestReason::IOError,
     };
 
     int_client
-        .make_request(
-            Method::POST,
-            &stop_request_url,
-            Some(request),
-            StatusCode::NO_CONTENT,
+        .cpapi_downstairs_client_stop_request(
+            &upstairs_id,
+            &downstairs_id,
+            &request,
         )
         .await
         .unwrap();
@@ -3400,73 +3284,49 @@ async fn test_upstairs_notify_downstairs_client_stop_request(
 async fn test_upstairs_notify_downstairs_client_stops(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let int_client = &cptestctx.internal_client;
+    let int_client = cptestctx.internal_client();
 
     let upstairs_id = UpstairsUuid::new_v4();
     let downstairs_id = DownstairsUuid::new_v4();
 
-    let stopped_url = format!(
-        "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped"
-    );
-
     // Make sure an Upstairs can re-send the notification
 
-    let request = internal::nexus::DownstairsClientStopped {
+    let request = nexus_client::types::DownstairsClientStopped {
         time: Utc::now(),
-        reason: internal::nexus::DownstairsClientStoppedReason::ReadFailed,
+        reason: nexus_client::types::DownstairsClientStoppedReason::ReadFailed,
     };
 
     int_client
-        .make_request(
-            Method::POST,
-            &stopped_url,
-            Some(request.clone()),
-            StatusCode::NO_CONTENT,
-        )
+        .cpapi_downstairs_client_stopped(&upstairs_id, &downstairs_id, &request)
         .await
         .unwrap();
 
     int_client
-        .make_request(
-            Method::POST,
-            &stopped_url,
-            Some(request),
-            StatusCode::NO_CONTENT,
-        )
+        .cpapi_downstairs_client_stopped(&upstairs_id, &downstairs_id, &request)
         .await
         .unwrap();
 
     // The client can stop for the same reason a different time
 
-    let request = internal::nexus::DownstairsClientStopped {
+    let request = nexus_client::types::DownstairsClientStopped {
         time: Utc::now(),
-        reason: internal::nexus::DownstairsClientStoppedReason::ReadFailed,
+        reason: nexus_client::types::DownstairsClientStoppedReason::ReadFailed,
     };
 
     int_client
-        .make_request(
-            Method::POST,
-            &stopped_url,
-            Some(request),
-            StatusCode::NO_CONTENT,
-        )
+        .cpapi_downstairs_client_stopped(&upstairs_id, &downstairs_id, &request)
         .await
         .unwrap();
 
     // The client can also stop for a different reason
 
-    let request = internal::nexus::DownstairsClientStopped {
+    let request = nexus_client::types::DownstairsClientStopped {
         time: Utc::now(),
-        reason: internal::nexus::DownstairsClientStoppedReason::Timeout,
+        reason: nexus_client::types::DownstairsClientStoppedReason::Timeout,
     };
 
     int_client
-        .make_request(
-            Method::POST,
-            &stopped_url,
-            Some(request),
-            StatusCode::NO_CONTENT,
-        )
+        .cpapi_downstairs_client_stopped(&upstairs_id, &downstairs_id, &request)
         .await
         .unwrap();
 }
@@ -3484,13 +3344,15 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
             name: "disk".parse().unwrap(),
             description: String::from("disk"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(2),
     };
 
-    let disk: Disk = NexusRequest::new(
+    let disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -3510,11 +3372,13 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
 
     let disk_id = disk.identity.id;
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk_id)
         .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -3635,7 +3499,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         block_size: 512,
                         blocks_per_extent: self.region.blocks_per_extent(),
                         extent_count: self.region.extent_count() as u32,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![self.region_address.into()],
@@ -3773,7 +3637,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             block_size: 512,
                             blocks_per_extent: self.region.blocks_per_extent(),
                             extent_count: self.region.extent_count() as u32,
-                            gen: 1,
+                            generation: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![self.region_address.into()],
@@ -3805,7 +3669,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         block_size: 512,
                         blocks_per_extent: self.region.blocks_per_extent(),
                         extent_count: self.region.extent_count() as u32,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![self.region_address.into()],
@@ -3839,7 +3703,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             block_size: 512,
                             blocks_per_extent: self.region.blocks_per_extent(),
                             extent_count: self.region.extent_count() as u32,
-                            gen: 1,
+                            generation: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![self.region_address.into()],
@@ -4063,7 +3927,7 @@ async fn test_read_only_region_reference_counting(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -4096,11 +3960,13 @@ async fn test_read_only_region_reference_counting(
     // Perform region snapshot replacement for one of the snapshot's regions,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -4120,7 +3986,7 @@ async fn test_read_only_region_reference_counting(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     // The snapshot's allocated regions should have the one read-only region
 
@@ -4146,16 +4012,18 @@ async fn test_read_only_region_reference_counting(
 
     // The disk-from-snap VCR should also reference that read-only region
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_from_snapshot.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk_from_snapshot) = datastore
+        .disk_get(&opctx, disk_from_snapshot.identity.id)
         .await
         .unwrap_or_else(|_| {
             panic!(
                 "disk_from_snapshot {:?} should exist",
                 disk_from_snapshot.identity.id
             )
-        });
+        })
+    else {
+        unreachable!()
+    };
 
     let read_only_region_address: SocketAddrV6 =
         nexus.region_addr(&opctx.log, read_only_region.id()).await.unwrap();
@@ -4212,8 +4080,7 @@ async fn test_read_only_region_reference_counting(
     let mut region_still_state_crated = false;
 
     for sled_agent in cptestctx.all_sled_agents() {
-        let zpool_id =
-            ZpoolUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
+        let zpool_id = db_read_only_dataset.pool_id();
         if !sled_agent.sled_agent.has_zpool(zpool_id) {
             continue;
         }
@@ -4296,8 +4163,7 @@ async fn test_read_only_region_reference_counting(
     let mut region_destroyed = false;
 
     for sled_agent in cptestctx.all_sled_agents() {
-        let zpool_id =
-            ZpoolUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
+        let zpool_id = db_read_only_dataset.pool_id();
         if !sled_agent.sled_agent.has_zpool(zpool_id) {
             continue;
         }
@@ -4333,7 +4199,7 @@ async fn test_read_only_region_reference_counting_layers(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -4366,11 +4232,13 @@ async fn test_read_only_region_reference_counting_layers(
     // Perform region snapshot replacement for one of the snapshot's regions,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -4390,7 +4258,7 @@ async fn test_read_only_region_reference_counting_layers(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     // Grab the read-only region in the snapshot volume
 
@@ -4411,16 +4279,18 @@ async fn test_read_only_region_reference_counting_layers(
 
     // The disk-from-snap VCR should also reference that read-only region
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_from_snapshot.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk_from_snapshot) = datastore
+        .disk_get(&opctx, disk_from_snapshot.identity.id)
         .await
         .unwrap_or_else(|_| {
             panic!(
                 "disk_from_snapshot {:?} should exist",
                 disk_from_snapshot.identity.id
             )
-        });
+        })
+    else {
+        unreachable!()
+    };
 
     let read_only_region_address: SocketAddrV6 =
         nexus.region_addr(&opctx.log, read_only_region.id()).await.unwrap();
@@ -4599,11 +4469,13 @@ async fn test_volume_replace_snapshot_respects_accounting(
 
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -4805,11 +4677,13 @@ async fn test_volume_remove_rop_respects_accounting(
 
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -4835,16 +4709,18 @@ async fn test_volume_remove_rop_respects_accounting(
     )
     .await;
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_from_snapshot.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk_from_snapshot) = datastore
+        .disk_get(&opctx, disk_from_snapshot.identity.id)
         .await
         .unwrap_or_else(|_| {
             panic!(
                 "disk_from_snapshot {:?} should exist",
                 disk_from_snapshot.identity.id
             )
-        });
+        })
+    else {
+        unreachable!()
+    };
 
     // Assert the correct volume resource usage records before the removal:
     // both the snapshot volume and disk_from_snapshot volume should have usage
@@ -4968,11 +4844,13 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
 
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -4998,16 +4876,18 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     )
     .await;
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_from_snapshot.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk_from_snapshot) = datastore
+        .disk_get(&opctx, disk_from_snapshot.identity.id)
         .await
         .unwrap_or_else(|_| {
             panic!(
                 "disk_from_snapshot {:?} should exist",
                 disk_from_snapshot.identity.id
             )
-        });
+        })
+    else {
+        unreachable!()
+    };
 
     let another_disk_from_snapshot = create_disk_from_snapshot(
         &client,
@@ -5017,17 +4897,18 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     )
     .await;
 
-    let (.., db_another_disk_from_snapshot) =
-        LookupPath::new(&opctx, datastore)
-            .disk_id(another_disk_from_snapshot.identity.id)
-            .fetch()
-            .await
-            .unwrap_or_else(|_| {
-                panic!(
-                    "another_disk_from_snapshot {:?} should exist",
-                    another_disk_from_snapshot.identity.id
-                )
-            });
+    let Disk::Crucible(db_another_disk_from_snapshot) = datastore
+        .disk_get(&opctx, another_disk_from_snapshot.identity.id)
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "another_disk_from_snapshot {:?} should exist",
+                another_disk_from_snapshot.identity.id
+            )
+        })
+    else {
+        unreachable!()
+    };
 
     // Assert the correct volume resource usage records before the removal: the
     // snapshot volume, disk_from_snapshot volume, and
@@ -5175,7 +5056,8 @@ async fn get_volume_resource_usage_records(
     use nexus_db_schema::schema::volume_resource_usage::dsl;
 
     let mut records: Vec<VolumeResourceUsageRecord> = Vec::new();
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
     let conn = datastore.pool_connection_for_tests().await.unwrap();
 
     while let Some(p) = paginator.next() {
@@ -5470,7 +5352,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -5507,7 +5389,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -5583,7 +5465,7 @@ async fn test_double_layer_with_read_only_region_delete(
     // 6) At the end, assert that all Crucible resources were cleaned up
 
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -5624,11 +5506,13 @@ async fn test_double_layer_with_read_only_region_delete(
     // Perform region snapshot replacement for one of the snapshot's targets,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -5648,7 +5532,7 @@ async fn test_double_layer_with_read_only_region_delete(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 
@@ -5708,7 +5592,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     // 6) At the end, assert that all Crucible resources were cleaned up
 
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -5733,11 +5617,13 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     // Perform region snapshot replacement for two of the snapshot's targets,
     // causing two read-only regions to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
-        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -5759,7 +5645,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     wait_for_condition(
         || {
@@ -5805,7 +5691,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 
@@ -5834,7 +5720,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 
@@ -6081,7 +5967,7 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
                     block_size: 512,
                     blocks_per_extent: 1,
                     extent_count: 1,
-                    gen: 1,
+                    generation: 1,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
@@ -6266,7 +6152,7 @@ async fn test_no_zombie_read_write_regions(
                     block_size: 512,
                     blocks_per_extent: 1,
                     extent_count: 1,
-                    gen: 1,
+                    generation: 1,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
@@ -6445,7 +6331,7 @@ async fn test_proper_region_sled_redundancy(
                         .unwrap()
                 };
 
-                zpool.sled_id
+                zpool.sled_id()
             };
 
             assert!(
@@ -6518,4 +6404,91 @@ async fn test_volume_create_wont_use_deleted_region_snapshots(
         serde_json::from_str(volume_copy.data()).unwrap();
 
     assert!(datastore.volume_create(VolumeUuid::new_v4(), vcr).await.is_err());
+}
+
+// Test VolumeConstructionRequest::Region generation/gen field
+// serialization compatibility
+#[test]
+fn test_volume_construction_request_region_gen_serialization() {
+    // Test that VolumeConstructionRequest::Region with Rust field
+    // "generation" serializes to JSON as "gen" and can be deserialized back
+    let vcr = VolumeConstructionRequest::Region {
+        block_size: 512,
+        blocks_per_extent: 100,
+        extent_count: 10,
+        opts: CrucibleOpts {
+            id: uuid::Uuid::parse_str("12345678-1234-1234-1234-123456789abc")
+                .unwrap(),
+            target: vec![
+                "[::1]:3810".parse::<SocketAddr>().unwrap(),
+                "[::1]:3820".parse::<SocketAddr>().unwrap(),
+                "[::1]:3830".parse::<SocketAddr>().unwrap(),
+            ],
+            lossy: false,
+            flush_timeout: None,
+            key: None,
+            cert_pem: None,
+            key_pem: None,
+            root_cert_pem: None,
+            control: None,
+            read_only: false,
+        },
+        generation: 42,
+    };
+
+    // Serialize to JSON
+    let json = serde_json::to_string(&vcr).unwrap();
+
+    // Verify JSON uses "gen" not "generation"
+    assert!(
+        json.contains("\"gen\""),
+        "JSON should contain 'gen' field, got: {}",
+        json
+    );
+    assert!(
+        !json.contains("\"generation\""),
+        "JSON should not contain 'generation' field, got: {}",
+        json
+    );
+
+    // Deserialize back and verify value
+    let deserialized: VolumeConstructionRequest =
+        serde_json::from_str(&json).expect("Failed to deserialize");
+
+    if let VolumeConstructionRequest::Region { generation, .. } = deserialized {
+        assert_eq!(generation, 42, "generation field should be 42");
+    } else {
+        panic!("Expected Region variant");
+    }
+
+    // Also verify that manually created JSON with "gen" works
+    let manual_json = r#"{
+        "type": "region",
+        "block_size": 512,
+        "blocks_per_extent": 100,
+        "extent_count": 10,
+        "opts": {
+            "id": "12345678-1234-1234-1234-123456789abc",
+            "target": ["[::1]:3810", "[::1]:3820", "[::1]:3830"],
+            "lossy": false,
+            "flush_timeout": null,
+            "key": null,
+            "cert_pem": null,
+            "key_pem": null,
+            "root_cert_pem": null,
+            "control": null,
+            "read_only": false
+        },
+        "gen": 99
+    }"#;
+
+    let manual_vcr: VolumeConstructionRequest =
+        serde_json::from_str(manual_json)
+            .expect("Failed to deserialize manual JSON");
+
+    if let VolumeConstructionRequest::Region { generation, .. } = manual_vcr {
+        assert_eq!(generation, 99, "generation field should be 99");
+    } else {
+        panic!("Expected Region variant");
+    }
 }

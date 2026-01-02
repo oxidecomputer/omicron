@@ -180,7 +180,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external;
     use omicron_uuid_kinds::DatasetUuid;
-    use omicron_uuid_kinds::GenericUuid;
+
     use omicron_uuid_kinds::VolumeUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::VolumeConstructionRequest;
@@ -298,7 +298,7 @@ mod test {
                     volume_id: volume_id.into(),
                     destination_volume_id: VolumeUuid::new_v4().into(),
 
-                    gen: Generation::new(),
+                    generation: Generation::new(),
                     state: SnapshotState::Creating,
                     block_size: BlockSize::Traditional,
 
@@ -316,7 +316,7 @@ mod test {
             disk_test.zpools().next().expect("Expected at least one zpool");
 
         let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-            .zpool_id(first_zpool.id.into_untyped_uuid())
+            .zpool_id(first_zpool.id)
             .fetch()
             .await
             .unwrap();
@@ -324,7 +324,7 @@ mod test {
         datastore
             .physical_disk_update_policy(
                 &opctx,
-                db_zpool.physical_disk_id.into(),
+                db_zpool.physical_disk_id(),
                 PhysicalDiskPolicy::Expunged,
             )
             .await

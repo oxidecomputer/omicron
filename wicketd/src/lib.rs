@@ -231,6 +231,12 @@ impl Server {
                 log,
             )
             .config(installinator_config)
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    installinator_api::latest_version(),
+                ),
+            )))
             .start()
             .map_err(|err| {
                 anyhow!(err)

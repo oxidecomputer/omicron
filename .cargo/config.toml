@@ -11,8 +11,15 @@
 # - .github/buildomat/jobs/check-features.sh
 # - .github/workflows/rust.yml
 #
+# WARNING: If you're setting `RUSTFLAGS` in a global `~/.cargo/config.toml`, or
+# as an environment variable in your shell, this will CONFLICT WITH THE
+# CONFIGURATION HERE, as `build.rustflags` configuration is NOT ADDITIVE.
+# This is particularly relevant for folks using the `mold` linker via
+# `RUSTFLAGS`. `mold` users should consider using `mold -run cargo` instead, as
+# described here: https://github.com/rui314/mold#how-to-use
 [build]
 rustdocflags = "--document-private-items"
+rustflags = "--cfg tokio_unstable"
 
 # On illumos, use `-znocompstrtab` to reduce link time. We also add the Oxide
 # specific platform directory to the RPATH where additional libraries can be
@@ -57,7 +64,9 @@ rustdocflags = "--document-private-items"
 # variety of things such as host OS.
 [target.x86_64-unknown-illumos]
 rustflags = [
-    "-C", "link-arg=-Wl,-znocompstrtab,-R/usr/platform/oxide/lib/amd64"
+    "-C", "link-arg=-Wl,-znocompstrtab,-R/usr/platform/oxide/lib/amd64",
+    # enable the `tokio-unstable` config for `tokio-dtrace` probes
+    "--cfg", "tokio_unstable"
 ]
 
 # Set up `cargo xtask`.

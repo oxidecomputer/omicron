@@ -13,7 +13,6 @@ use http::method::Method;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
-use nexus_test_utils::load_test_config;
 use nexus_test_utils::resource_helpers::create_certificate;
 use nexus_test_utils::resource_helpers::delete_certificate;
 use nexus_test_utils_macros::nexus_test;
@@ -25,6 +24,8 @@ use omicron_common::api::internal::nexus::Certificate as InternalCertificate;
 use omicron_test_utils::certificates::CertificateChain;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use oxide_client::ClientCurrentUserExt;
 use oxide_client::ClientSilosExt;
 use oxide_client::ClientSystemSilosExt;
@@ -342,18 +343,14 @@ async fn test_silo_certificates() {
     let silo3 = SiloCert::new("silo3".parse().unwrap());
 
     // Start Nexus with a TLS server instead of its usual HTTP server.
-    let cptestctx = {
-        let mut config = load_test_config();
-        config.deployment.dropshot_external.tls = true;
-        nexus_test_utils::test_setup_with_config::<omicron_nexus::Server>(
-            "test_silo_certificates",
-            &mut config,
-            omicron_sled_agent::sim::SimMode::Explicit,
-            Some(silo1.cert.clone()),
-            0,
-        )
-        .await
-    };
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_silo_certificates")
+            .customize_nexus_config(&|config| {
+                config.deployment.dropshot_external.tls = true;
+            })
+            .with_tls_cert(Some(silo1.cert.clone()))
+            .start::<omicron_nexus::Server>()
+            .await;
 
     let nexus_port = cptestctx.external_client.bind_address.port();
 
@@ -409,19 +406,23 @@ async fn test_silo_certificates() {
         .expect("failed to create Silo");
 
     // Create a local user in that Silo.
-    let silo2_user = silo1_client
-        .local_idp_user_create()
-        .silo(silo2.silo_name.clone())
-        .body(
-            oxide_client::types::UserCreate::builder()
-                .external_id("testuser-silo2")
-                .password(oxide_client::types::UserPassword::LoginDisallowed),
-        )
-        .send()
-        .await
-        .expect("failed to create user")
-        .into_inner()
-        .id;
+    let silo2_user: SiloUserUuid = SiloUserUuid::from_untyped_uuid(
+        silo1_client
+            .local_idp_user_create()
+            .silo(silo2.silo_name.clone())
+            .body(
+                oxide_client::types::UserCreate::builder()
+                    .external_id("testuser-silo2")
+                    .password(
+                        oxide_client::types::UserPassword::LoginDisallowed,
+                    ),
+            )
+            .send()
+            .await
+            .expect("failed to create user")
+            .into_inner()
+            .id,
+    );
 
     // Grant that user admin privileges on that Silo.
     let mut silo2_policy = silo1_client
@@ -433,7 +434,7 @@ async fn test_silo_certificates() {
         .into_inner();
     silo2_policy.role_assignments.push(
         oxide_client::types::SiloRoleRoleAssignment::builder()
-            .identity_id(silo2_user)
+            .identity_id(silo2_user.into_untyped_uuid())
             .identity_type(oxide_client::types::IdentityType::SiloUser)
             .role_name(oxide_client::types::SiloRole::Admin)
             .try_into()
@@ -472,19 +473,24 @@ async fn test_silo_certificates() {
         .send()
         .await
         .expect("failed to create Silo");
-    let silo3_user = silo1_client
-        .local_idp_user_create()
-        .silo(silo3.silo_name.clone())
-        .body(
-            oxide_client::types::UserCreate::builder()
-                .external_id("testuser-silo3")
-                .password(oxide_client::types::UserPassword::LoginDisallowed),
-        )
-        .send()
-        .await
-        .expect("failed to create user")
-        .into_inner()
-        .id;
+
+    let silo3_user: SiloUserUuid = SiloUserUuid::from_untyped_uuid(
+        silo1_client
+            .local_idp_user_create()
+            .silo(silo3.silo_name.clone())
+            .body(
+                oxide_client::types::UserCreate::builder()
+                    .external_id("testuser-silo3")
+                    .password(
+                        oxide_client::types::UserPassword::LoginDisallowed,
+                    ),
+            )
+            .send()
+            .await
+            .expect("failed to create user")
+            .into_inner()
+            .id,
+    );
 
     // Grant that user admin privileges on that Silo.
     let mut silo3_policy = silo1_client
@@ -496,7 +502,7 @@ async fn test_silo_certificates() {
         .into_inner();
     silo3_policy.role_assignments.push(
         oxide_client::types::SiloRoleRoleAssignment::builder()
-            .identity_id(silo3_user)
+            .identity_id(silo3_user.into_untyped_uuid())
             .identity_type(oxide_client::types::IdentityType::SiloUser)
             .role_name(oxide_client::types::SiloRole::Admin)
             .try_into()
@@ -542,7 +548,10 @@ async fn test_silo_certificates() {
         || async {
             match silo3_client.current_user_view().send().await {
                 Ok(result) => {
-                    assert_eq!(result.into_inner().id, silo3_user);
+                    assert_eq!(
+                        SiloUserUuid::from_untyped_uuid(result.into_inner().id),
+                        silo3_user
+                    );
                     Ok(())
                 }
                 Err(oxide_client::Error::CommunicationError(error))

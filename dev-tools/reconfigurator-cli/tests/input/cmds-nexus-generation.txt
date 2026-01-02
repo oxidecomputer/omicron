@@ -1,0 +1,18 @@
+# Load example system
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Print the initial configuration
+show
+sled-list
+
+# Try to bump the Nexus generation.  This should not work because you can't
+# bump it to a generation that has no Nexus instances deployed.
+blueprint-edit dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 bump-nexus-generation
+
+# Now, deploy a Nexus instance at the next generation.
+blueprint-edit dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 add-nexus serial0 2
+blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+
+# Now we can bump the Nexus generation to trigger a handoff.
+blueprint-edit 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 bump-nexus-generation
+blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4

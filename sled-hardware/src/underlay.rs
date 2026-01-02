@@ -4,7 +4,7 @@
 
 //! Finding the underlay network physical links and address objects.
 
-use crate::is_gimlet;
+use crate::is_oxide_sled;
 use illumos_utils::addrobj;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
@@ -25,7 +25,7 @@ pub enum Error {
     #[error(transparent)]
     BadAddrObj(#[from] addrobj::ParseError),
 
-    #[error("Could not determine if host is a Gimlet: {0}")]
+    #[error("Could not determine if host is an Oxide sled: {0}")]
     SystemDetection(#[source] anyhow::Error),
 
     #[error("Could not enumerate physical links: {0}")]
@@ -63,13 +63,13 @@ pub async fn find_nics(
 
 /// Return the Chelsio links on the system.
 ///
-/// For a real Gimlet, this should return the devices like `cxgbeN`. For a
-/// developer machine, or generally a non-Gimlet, this will return the
+/// For a real Oxide sled, this should return the devices like `cxgbeN`. For a
+/// developer machine, or generally a non-sled, this will return the
 /// VNICs we use to emulate those Chelsio links.
 pub async fn find_chelsio_links(
     config_data_links: &[String; 2],
 ) -> Result<Vec<PhysicalLink>, Error> {
-    if is_gimlet().map_err(Error::SystemDetection)? {
+    if is_oxide_sled().map_err(Error::SystemDetection)? {
         Dladm::list_physical().await.map_err(Error::FindLinks).map(|links| {
             links
                 .into_iter()

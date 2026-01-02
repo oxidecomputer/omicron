@@ -8,11 +8,13 @@ use std::net::Ipv6Addr;
 
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::{context::OpContext, db::DataStore};
-use nexus_types::deployment::{
-    Blueprint, PendingMgsUpdates,
-    execution::{EventBuffer, Overridables},
+use nexus_types::{
+    deployment::{
+        Blueprint, BlueprintZoneDisposition, PendingMgsUpdates,
+        execution::{EventBuffer, Overridables},
+    },
+    quiesce::SagaQuiesceHandle,
 };
-use omicron_uuid_kinds::OmicronZoneUuid;
 use update_engine::TerminalKind;
 
 use crate::{RealizeBlueprintOutput, RequiredRealizeArgs};
@@ -37,7 +39,20 @@ pub(crate) async fn realize_blueprint_and_expect(
 
     // This helper function does not support MGS-managed updates.
     let (mgs_updates, _rx) = watch::channel(PendingMgsUpdates::new());
-    let nexus_id = OmicronZoneUuid::new_v4();
+    // This helper function does not mess with quiescing.
+    let saga_quiesce = SagaQuiesceHandle::new(opctx.log.clone());
+    // Act on behalf of one of the Nexus instances that could be currently
+    // active in the blueprint.
+    let nexus_id = blueprint
+        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .find_map(|(_sled_id, zone_config, nexus_config)| {
+            (nexus_config.nexus_generation == blueprint.nexus_generation)
+                .then_some(zone_config.id)
+        })
+        .expect(
+            "no Nexus found in blueprint that matches the blueprint's \
+             Nexus generation",
+        );
     let output = crate::realize_blueprint(
         RequiredRealizeArgs {
             opctx,
@@ -47,9 +62,10 @@ pub(crate) async fn realize_blueprint_and_expect(
             blueprint,
             sender,
             mgs_updates,
+            saga_quiesce,
         }
         .with_overrides(overrides)
-        .as_nexus(OmicronZoneUuid::new_v4()),
+        .as_nexus(nexus_id),
     )
     .await
     // We expect here rather than in the caller because we want to assert that
@@ -93,15 +109,14 @@ pub fn overridables_for_test(
     for (id_str, switch_location) in scrimlets {
         let sled_id = id_str.parse().unwrap();
         let ip = Ipv6Addr::LOCALHOST;
-        let mgs_port = cptestctx
-            .gateway
+        let mgs_port = cptestctx.gateway.get(&switch_location).unwrap().port;
+        let dendrite_port = cptestctx
+            .dendrite
+            .read()
+            .unwrap()
             .get(&switch_location)
             .unwrap()
-            .client
-            .bind_address
-            .port();
-        let dendrite_port =
-            cptestctx.dendrite.get(&switch_location).unwrap().port;
+            .port;
         let mgd_port = cptestctx.mgd.get(&switch_location).unwrap().port;
         overrides.override_switch_zone_ip(sled_id, ip);
         overrides.override_dendrite_port(sled_id, dendrite_port);

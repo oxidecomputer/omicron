@@ -4,6 +4,7 @@
 
 //! Management of and access to Support Bundles
 
+use crate::sim;
 use async_trait::async_trait;
 use bytes::Bytes;
 use camino::Utf8Path;
@@ -13,21 +14,18 @@ use dropshot::HttpError;
 use futures::Stream;
 use futures::StreamExt;
 use illumos_utils::zfs::DatasetProperties;
-use omicron_common::api::external::Error as ExternalError;
+use illumos_utils::zfs::DestroyDatasetError;
+use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use rand::distributions::Alphanumeric;
-use rand::{Rng, thread_rng};
 use range_requests::PotentialRange;
 use range_requests::SingleRange;
-use sha2::{Digest, Sha256};
-use sled_agent_api::*;
+use sha2::Digest;
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
 use sled_agent_config_reconciler::DatasetTaskError;
 use sled_agent_config_reconciler::InventoryError;
@@ -36,10 +34,14 @@ use sled_agent_config_reconciler::NestedDatasetEnsureError;
 use sled_agent_config_reconciler::NestedDatasetListError;
 use sled_agent_config_reconciler::NestedDatasetMountError;
 use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
-use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME_SUFFIX;
-use sled_storage::manager::NestedDatasetConfig;
-use sled_storage::manager::NestedDatasetListOptions;
-use sled_storage::manager::NestedDatasetLocation;
+use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME;
+use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
+use sled_agent_types::support_bundle::{
+    SupportBundleMetadata, SupportBundleState,
+};
+use sled_storage::nested_dataset::NestedDatasetConfig;
+use sled_storage::nested_dataset::NestedDatasetListOptions;
+use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::io::Write;
@@ -80,8 +82,11 @@ pub enum Error {
     )]
     DatasetExistsOnWrongZpool { wanted: ZpoolUuid, actual: ZpoolUuid },
 
+    #[error("Bundle not found")]
+    BundleNotFound,
+
     #[error(transparent)]
-    Storage(#[from] sled_storage::error::Error),
+    TryFromInt(#[from] std::num::TryFromIntError),
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -125,10 +130,18 @@ impl From<Error> for HttpError {
             Error::DatasetNotFound => {
                 HttpError::for_not_found(None, "Dataset not found".to_string())
             }
+            Error::NestedDatasetDestroyError(
+                NestedDatasetDestroyError::DestroyFailed(DestroyDatasetError {
+                    err: DestroyDatasetErrorVariant::NotFound,
+                    ..
+                }),
+            ) => HttpError::for_not_found(
+                Some(NESTED_DATASET_NOT_FOUND.to_string()),
+                NESTED_DATASET_NOT_FOUND.to_string(),
+            ),
             Error::NotAFile => {
                 HttpError::for_bad_request(None, "Not a file".to_string())
             }
-            Error::Storage(err) => HttpError::from(ExternalError::from(err)),
             Error::Zip(err) => match err {
                 ZipError::FileNotFound => HttpError::for_not_found(
                     None,
@@ -154,8 +167,11 @@ pub trait LocalStorage: Sync {
     // implementation, then a "missing function" dispatches to the trait instead
     // and results in infinite recursion.
 
-    /// Returns all configured datasets
-    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error>;
+    /// Returns the config of a particular dataset
+    async fn dyn_dataset_config(
+        &self,
+        dataset_id: &DatasetUuid,
+    ) -> Result<DatasetConfig, Error>;
 
     /// Returns properties about a dataset
     async fn dyn_dataset_get(
@@ -192,23 +208,18 @@ pub trait LocalStorage: Sync {
 /// This implementation is effectively a pass-through to the real methods
 #[async_trait]
 impl LocalStorage for ConfigReconcilerHandle {
-    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
-        // TODO-cleanup This is super gross; add a better API (maybe fetch a
-        // single dataset by ID, since that's what our caller wants?)
+    async fn dyn_dataset_config(
+        &self,
+        dataset_id: &DatasetUuid,
+    ) -> Result<DatasetConfig, Error> {
+        // This gives us a local clone of the sled config; we call
+        // `remove(dataset_id)` below to avoid having to also clone the dataset
+        // config we want to return.
         let sled_config =
             self.ledgered_sled_config().map_err(Error::LedgeredSledConfig)?;
-        let sled_config = match sled_config {
-            Some(config) => config,
-            None => return Ok(DatasetsConfig::default()),
-        };
-        Ok(DatasetsConfig {
-            generation: sled_config.generation,
-            datasets: sled_config
-                .datasets
-                .into_iter()
-                .map(|d| (d.id, d))
-                .collect(),
-        })
+        sled_config
+            .and_then(|mut sled_config| sled_config.datasets.remove(dataset_id))
+            .ok_or(Error::DatasetNotFound)
     }
 
     async fn dyn_dataset_get(
@@ -216,7 +227,7 @@ impl LocalStorage for ConfigReconcilerHandle {
         dataset_name: &String,
     ) -> Result<DatasetProperties, Error> {
         let Some(dataset) = illumos_utils::zfs::Zfs::get_dataset_properties(
-            &[dataset_name.clone()],
+            std::slice::from_ref(dataset_name),
             illumos_utils::zfs::WhichDatasets::SelfOnly,
         )
         .await
@@ -277,9 +288,16 @@ impl LocalStorage for ConfigReconcilerHandle {
 
 /// This implementation allows storage bundles to be stored on simulated storage
 #[async_trait]
-impl LocalStorage for crate::sim::Storage {
-    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
-        self.lock().datasets_config_list().map_err(|err| err.into())
+impl LocalStorage for sim::Storage {
+    async fn dyn_dataset_config(
+        &self,
+        dataset_id: &DatasetUuid,
+    ) -> Result<DatasetConfig, Error> {
+        // This gives us a local clone of the datasets config; we call
+        // `remove(dataset_id)` below to avoid having to also clone the dataset
+        // config we want to return.
+        let mut config = self.lock().datasets_config_list()?;
+        config.datasets.remove(dataset_id).ok_or(Error::DatasetNotFound)
     }
 
     async fn dyn_dataset_get(
@@ -293,8 +311,8 @@ impl LocalStorage for crate::sim::Storage {
         &self,
         dataset: NestedDatasetLocation,
     ) -> Result<Utf8PathBuf, Error> {
-        let slf = self.lock();
-        // Simulated storage treats all datasets as mounted.
+        let mut slf = self.lock();
+        slf.nested_dataset_set_mounted(&dataset, true)?;
         Ok(dataset.mountpoint(slf.root()))
     }
 
@@ -487,11 +505,7 @@ impl<'a> SupportBundleManager<'a> {
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Result<DatasetConfig, Error> {
-        let datasets_config = self.storage.dyn_datasets_config_list().await?;
-        let dataset = datasets_config
-            .datasets
-            .get(&dataset_id)
-            .ok_or_else(|| Error::DatasetNotFound)?;
+        let dataset = self.storage.dyn_dataset_config(&dataset_id).await?;
 
         let dataset_props =
             self.storage.dyn_dataset_get(&dataset.name.full_name()).await?;
@@ -535,7 +549,8 @@ impl<'a> SupportBundleManager<'a> {
 
         let mut bundles = Vec::with_capacity(datasets.len());
         for dataset in datasets {
-            // We should be able to parse each dataset name as a support bundle UUID
+            // We should be able to parse each dataset name as a support bundle
+            // UUID
             let Ok(support_bundle_id) =
                 dataset.name.path.parse::<SupportBundleUuid>()
             else {
@@ -587,47 +602,47 @@ impl<'a> SupportBundleManager<'a> {
         return Ok(digest.as_slice() == expected.as_ref());
     }
 
-    // A helper function which streams the contents of a bundle to a file.
+    // A helper function which streams the contents of a bundle to a file,
+    // and flushes it to the filesystem.
     //
-    // If at any point this function fails, the temporary file still exists,
-    // and should be removed.
-    async fn write_and_finalize_bundle(
+    // Note that this doesn't necessarily "sync" it to the underlying disk,
+    // but that's fine -- we just want to make sure the next call to "finalize"
+    // will reliably see what we last wrote.
+    async fn stream_bundle(
         mut tmp_file: tokio::fs::File,
-        from: &Utf8Path,
-        to: &Utf8Path,
-        expected_hash: ArtifactHash,
         stream: impl Stream<Item = Result<Bytes, HttpError>>,
     ) -> Result<(), Error> {
         futures::pin_mut!(stream);
 
         // Write the body to the file
-        let mut hasher = Sha256::new();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
-            hasher.update(&chunk);
             tmp_file.write_all(&chunk).await?;
         }
-        let digest = hasher.finalize();
-        if digest.as_slice() != expected_hash.as_ref() {
-            return Err(Error::HashMismatch);
-        }
 
-        // Rename the file to indicate it's ready
-        tokio::fs::rename(from, to).await?;
+        // From the tokio docs:
+        //
+        // > A file will not be closed immediately when it goes out of scope if
+        // > there are any IO operations that have not yet completed. To ensure
+        // > that a file is closed immediately when it is dropped, you should
+        // > call flush before dropping it.
+        //
+        // It is possible, although uncommon, for us to write to this file,
+        // drop the handle to it, and for it to have not been fully written to
+        // storage.
+        tmp_file.flush().await?;
         Ok(())
     }
 
-    /// Creates a new support bundle on a dataset.
-    pub async fn create(
+    /// Start creating a new support bundle on a dataset.
+    pub async fn start_creation(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
         support_bundle_id: SupportBundleUuid,
-        expected_hash: ArtifactHash,
-        stream: impl Stream<Item = Result<Bytes, HttpError>>,
     ) -> Result<SupportBundleMetadata, Error> {
         let log = self.log.new(o!(
-            "operation" => "support_bundle_create",
+            "operation" => "support_bundle_start_creation",
             "zpool_id" => zpool_id.to_string(),
             "dataset_id" => dataset_id.to_string(),
             "bundle_id" => support_bundle_id.to_string(),
@@ -659,27 +674,11 @@ impl<'a> SupportBundleManager<'a> {
         let support_bundle_dir =
             self.storage.dyn_ensure_mounted_and_get_mountpoint(dataset).await?;
         let support_bundle_path = support_bundle_dir.join(BUNDLE_FILE_NAME);
-        let support_bundle_path_tmp = support_bundle_dir.join(format!(
-            "{}-{BUNDLE_TMP_FILE_NAME_SUFFIX}",
-            thread_rng()
-                .sample_iter(Alphanumeric)
-                .take(6)
-                .map(char::from)
-                .collect::<String>()
-        ));
+        let support_bundle_path_tmp =
+            support_bundle_dir.join(BUNDLE_TMP_FILE_NAME);
 
         // Exit early if the support bundle already exists
         if tokio::fs::try_exists(&support_bundle_path).await? {
-            if !Self::sha2_checksum_matches(
-                &support_bundle_path,
-                &expected_hash,
-            )
-            .await?
-            {
-                warn!(log, "Support bundle exists, but the hash doesn't match");
-                return Err(Error::HashMismatch);
-            }
-
             info!(log, "Support bundle already exists");
             let metadata = SupportBundleMetadata {
                 support_bundle_id,
@@ -688,6 +687,55 @@ impl<'a> SupportBundleManager<'a> {
             return Ok(metadata);
         }
 
+        // Create the temporary file for access by subsequent transfer calls.
+        //
+        // Note that this truncates the tempfile if it already existed, for any
+        // reason (e.g., incomplete transfer).
+        info!(
+            log,
+            "Creating temp storage for support bundle";
+            "path" => ?support_bundle_path_tmp,
+        );
+        let _ = tokio::fs::File::create(&support_bundle_path_tmp).await?;
+
+        let metadata = SupportBundleMetadata {
+            support_bundle_id,
+            state: SupportBundleState::Incomplete,
+        };
+        Ok(metadata)
+    }
+
+    /// Transfer a new support bundle to a dataset
+    pub async fn transfer(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+        offset: u64,
+        stream: impl Stream<Item = Result<Bytes, HttpError>>,
+    ) -> Result<SupportBundleMetadata, Error> {
+        let log = self.log.new(o!(
+            "operation" => "support_bundle_transfer",
+            "zpool_id" => zpool_id.to_string(),
+            "dataset_id" => dataset_id.to_string(),
+            "bundle_id" => support_bundle_id.to_string(),
+            "offset" => offset,
+        ));
+        info!(log, "transferring support bundle");
+
+        // Access the parent dataset (presumably "crypt/debug")
+        // where the support bundled will be mounted.
+        let root =
+            self.get_mounted_dataset_config(zpool_id, dataset_id).await?.name;
+        let dataset =
+            NestedDatasetLocation { path: support_bundle_id.to_string(), root };
+
+        // The mounted root of the support bundle dataset
+        let support_bundle_dir =
+            self.storage.dyn_ensure_mounted_and_get_mountpoint(dataset).await?;
+        let support_bundle_path_tmp =
+            support_bundle_dir.join(BUNDLE_TMP_FILE_NAME);
+
         // Stream the file into the dataset, first as a temporary file,
         // and then renaming to the final location.
         info!(
@@ -695,18 +743,20 @@ impl<'a> SupportBundleManager<'a> {
             "Streaming bundle to storage";
             "path" => ?support_bundle_path_tmp,
         );
-        let tmp_file =
-            tokio::fs::File::create(&support_bundle_path_tmp).await?;
 
-        if let Err(err) = Self::write_and_finalize_bundle(
-            tmp_file,
-            &support_bundle_path_tmp,
-            &support_bundle_path,
-            expected_hash,
-            stream,
-        )
-        .await
-        {
+        // Open the file which should have been created for us during "start
+        // creation".
+        let mut tmp_file = tokio::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(false)
+            .truncate(false)
+            .open(&support_bundle_path_tmp)
+            .await?;
+
+        tmp_file.seek(tokio::io::SeekFrom::Start(offset)).await?;
+
+        if let Err(err) = Self::stream_bundle(tmp_file, stream).await {
             warn!(log, "Failed to write bundle to storage"; "error" => ?err);
             if let Err(unlink_err) =
                 tokio::fs::remove_file(support_bundle_path_tmp).await
@@ -719,9 +769,102 @@ impl<'a> SupportBundleManager<'a> {
         info!(log, "Bundle written successfully");
         let metadata = SupportBundleMetadata {
             support_bundle_id,
-            state: SupportBundleState::Complete,
+            state: SupportBundleState::Incomplete,
         };
         Ok(metadata)
+    }
+
+    /// Finishes transferring a new support bundle to a dataset
+    pub async fn finalize(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+        expected_hash: ArtifactHash,
+    ) -> Result<SupportBundleMetadata, Error> {
+        let log = self.log.new(o!(
+            "operation" => "support_bundle_finalize",
+            "zpool_id" => zpool_id.to_string(),
+            "dataset_id" => dataset_id.to_string(),
+            "bundle_id" => support_bundle_id.to_string(),
+        ));
+        info!(log, "finalizing support bundle");
+
+        // Access the parent dataset (presumably "crypt/debug")
+        // where the support bundled will be mounted.
+        let root =
+            self.get_mounted_dataset_config(zpool_id, dataset_id).await?.name;
+        let dataset =
+            NestedDatasetLocation { path: support_bundle_id.to_string(), root };
+
+        // The mounted root of the support bundle dataset
+        let support_bundle_dir =
+            self.storage.dyn_ensure_mounted_and_get_mountpoint(dataset).await?;
+        let support_bundle_path = support_bundle_dir.join(BUNDLE_FILE_NAME);
+        let support_bundle_path_tmp =
+            support_bundle_dir.join(BUNDLE_TMP_FILE_NAME);
+
+        let metadata = SupportBundleMetadata {
+            support_bundle_id,
+            state: SupportBundleState::Complete,
+        };
+
+        // Deal with idempotency if the bundle has already been finalized.
+        if tokio::fs::try_exists(&support_bundle_path).await? {
+            if !Self::sha2_checksum_matches(
+                &support_bundle_path_tmp,
+                &expected_hash,
+            )
+            .await?
+            {
+                warn!(
+                    log,
+                    "Finalized support bundle exists, but the hash doesn't match"
+                );
+                return Err(Error::HashMismatch);
+            }
+            info!(log, "Support bundle already finalized");
+            return Ok(metadata);
+        }
+
+        // Otherwise, finalize the "temporary" -> "permanent" bundle transfer.
+        //
+        // (This is the normal case)
+        if !tokio::fs::try_exists(&support_bundle_path_tmp).await? {
+            return Err(Error::BundleNotFound);
+        }
+        if !Self::sha2_checksum_matches(
+            &support_bundle_path_tmp,
+            &expected_hash,
+        )
+        .await?
+        {
+            warn!(
+                log,
+                "In-progress support bundle exists, but the hash doesn't match"
+            );
+            return Err(Error::HashMismatch);
+        }
+
+        // Finalize the transfer of the bundle
+        tokio::fs::rename(&support_bundle_path_tmp, &support_bundle_path)
+            .await?;
+
+        // Sync the data (and parent directory) to durable storage.
+        //
+        // The ordering of these "sync" calls doesn't matter *too* much, because
+        // Nexus won't mark the support bundle as ready unless the call to
+        // "finalize" returns successfully. If we crash while any of these files
+        // are only partially written, the checksum would prevent corrupted
+        // bundles from being used.
+        tokio::fs::File::open(&support_bundle_path).await?.sync_all().await?;
+        if let Some(parent) = support_bundle_path.parent() {
+            // This really should never be "None"; there will always be a parent
+            // directory.
+            tokio::fs::File::open(parent).await?.sync_all().await?;
+        }
+
+        return Ok(metadata);
     }
 
     /// Destroys a support bundle that exists on a dataset.
@@ -738,8 +881,12 @@ impl<'a> SupportBundleManager<'a> {
             "bundle_id" => support_bundle_id.to_string(),
         ));
         info!(log, "Destroying support bundle");
+
         let root =
             self.get_mounted_dataset_config(zpool_id, dataset_id).await?.name;
+
+        // If we get a "not found" error destroying this dataset, it may have
+        // already been deleted.
         self.storage
             .dyn_nested_dataset_destroy(NestedDatasetLocation {
                 path: support_bundle_id.to_string(),
@@ -950,7 +1097,7 @@ impl<'a> SupportBundleManager<'a> {
     }
 }
 
-#[cfg(all(test, target_os = "illumos"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -965,107 +1112,35 @@ mod tests {
     use omicron_common::disk::DatasetsConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_storage::manager::StorageHandle;
-    use sled_storage::manager_test_harness::StorageManagerTestHarness;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use sha2::Sha256;
     use std::collections::BTreeMap;
+    use uuid::Uuid;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
 
-    // TODO-cleanup Should we rework these tests to not use StorageHandle (real
-    // code now goes through `ConfigReconcilerHandle`)?
-    #[async_trait]
-    impl LocalStorage for StorageHandle {
-        async fn dyn_datasets_config_list(
-            &self,
-        ) -> Result<DatasetsConfig, Error> {
-            self.datasets_config_list().await.map_err(|err| err.into())
-        }
-
-        async fn dyn_dataset_get(
-            &self,
-            dataset_name: &String,
-        ) -> Result<DatasetProperties, Error> {
-            let Some(dataset) =
-                illumos_utils::zfs::Zfs::get_dataset_properties(
-                    &[dataset_name.clone()],
-                    illumos_utils::zfs::WhichDatasets::SelfOnly,
-                )
-                .await
-                .map_err(|err| Error::DatasetLookup(err))?
-                .pop()
-            else {
-                // This should not be possible, unless the "zfs get" command is
-                // behaving unpredictably. We're only asking for a single dataset,
-                // so on success, we should see the result of that dataset.
-                return Err(Error::DatasetLookup(anyhow::anyhow!(
-                    "Zfs::get_dataset_properties returned an empty vec?"
-                )));
-            };
-
-            Ok(dataset)
-        }
-
-        async fn dyn_ensure_mounted_and_get_mountpoint(
-            &self,
-            dataset: NestedDatasetLocation,
-        ) -> Result<Utf8PathBuf, Error> {
-            dataset
-                .ensure_mounted_and_get_mountpoint(&self.mount_config().root)
-                .await
-                .map_err(|err| err.into())
-        }
-
-        async fn dyn_nested_dataset_list(
-            &self,
-            name: DatasetName,
-            options: NestedDatasetListOptions,
-        ) -> Result<Vec<NestedDatasetConfig>, Error> {
-            self.nested_dataset_list(
-                NestedDatasetLocation { path: String::new(), root: name },
-                options,
-            )
-            .await
-            .map_err(|err| err.into())
-        }
-
-        async fn dyn_nested_dataset_ensure(
-            &self,
-            config: NestedDatasetConfig,
-        ) -> Result<(), Error> {
-            self.nested_dataset_ensure(config).await.map_err(|err| err.into())
-        }
-
-        async fn dyn_nested_dataset_destroy(
-            &self,
-            name: NestedDatasetLocation,
-        ) -> Result<(), Error> {
-            self.nested_dataset_destroy(name).await.map_err(|err| err.into())
-        }
-    }
-
     struct SingleU2StorageHarness {
-        storage_test_harness: StorageManagerTestHarness,
+        storage_test_harness: sim::Storage,
         zpool_id: ZpoolUuid,
     }
 
     impl SingleU2StorageHarness {
         async fn new(log: &Logger) -> Self {
-            let mut harness = StorageManagerTestHarness::new(log).await;
-            harness.handle().key_manager_ready().await;
-            let _raw_internal_disks =
-                harness.add_vdevs(&["m2_left.vdev", "m2_right.vdev"]).await;
-
-            let raw_disks = harness.add_vdevs(&["u2_0.vdev"]).await;
-
-            let config = harness.make_config(1, &raw_disks);
-            let result = harness
-                .handle()
-                .omicron_physical_disks_ensure(config.clone())
-                .await
-                .expect("Failed to ensure disks");
-            assert!(!result.has_error(), "{result:?}");
-
-            let zpool_id = config.disks[0].pool_id;
+            let harness = sim::Storage::new(
+                Uuid::new_v4(),         /* sled_id */
+                0,                      /* sled_index */
+                "::1".parse().unwrap(), /* crucible_ip */
+                log.clone(),
+            );
+            let zpool_id = ZpoolUuid::new_v4();
+            {
+                let mut harness = harness.lock();
+                harness.insert_zpool(
+                    zpool_id,
+                    PhysicalDiskUuid::new_v4(), // doesn't matter
+                    100 * 1024 * 1024,          // doesn't matter
+                );
+            }
             Self { storage_test_harness: harness, zpool_id }
         }
 
@@ -1076,7 +1151,7 @@ mod tests {
         ) {
             let result = self
                 .storage_test_harness
-                .handle()
+                .lock()
                 .datasets_ensure(DatasetsConfig {
                     datasets: BTreeMap::from([(
                         dataset_id,
@@ -1091,13 +1166,25 @@ mod tests {
                     )]),
                     ..Default::default()
                 })
-                .await
                 .expect("Failed to ensure datasets");
             assert!(!result.has_error(), "{result:?}");
         }
 
-        async fn cleanup(mut self) {
-            self.storage_test_harness.cleanup().await
+        fn is_nested_dataset_mounted(
+            &self,
+            dataset: &NestedDatasetLocation,
+        ) -> bool {
+            self.storage_test_harness
+                .lock()
+                .nested_dataset_is_mounted(dataset)
+                .unwrap()
+        }
+
+        fn unmount_nested_dataset(&self, dataset: &NestedDatasetLocation) {
+            self.storage_test_harness
+                .lock()
+                .nested_dataset_set_mounted(dataset, false)
+                .unwrap()
         }
     }
 
@@ -1155,6 +1242,44 @@ mod tests {
         data
     }
 
+    async fn start_transfer_and_finalize(
+        mgr: &SupportBundleManager<'_>,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+        hash: ArtifactHash,
+        stream: impl Stream<Item = Result<Bytes, HttpError>>,
+    ) -> SupportBundleMetadata {
+        mgr.start_creation(zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have started creation");
+        mgr.transfer(zpool_id, dataset_id, support_bundle_id, 0, stream)
+            .await
+            .expect("Should have transferred bundle");
+        mgr.finalize(zpool_id, dataset_id, support_bundle_id, hash)
+            .await
+            .expect("Should have finalized bundle")
+    }
+
+    async fn start_transfer_and_finalize_expect_finalize_err(
+        mgr: &SupportBundleManager<'_>,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+        hash: ArtifactHash,
+        stream: impl Stream<Item = Result<Bytes, HttpError>>,
+    ) -> Error {
+        mgr.start_creation(zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have started creation");
+        mgr.transfer(zpool_id, dataset_id, support_bundle_id, 0, stream)
+            .await
+            .expect("Should have transferred bundle");
+        mgr.finalize(zpool_id, dataset_id, support_bundle_id, hash)
+            .await
+            .expect_err("Should have failed to finalize bundle")
+    }
+
     #[tokio::test]
     async fn basic_crud() {
         let logctx = test_setup_log("basic_crud");
@@ -1168,10 +1293,7 @@ mod tests {
         harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
 
         // Access the Support Bundle API
-        let mgr = SupportBundleManager::new(
-            log,
-            harness.storage_test_harness.handle(),
-        );
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
 
         // Create a fake support bundle -- really, just a zipfile.
         let support_bundle_id = SupportBundleUuid::new_v4();
@@ -1184,18 +1306,17 @@ mod tests {
         );
 
         // Create a new bundle
-        let bundle = mgr
-            .create(
-                harness.zpool_id,
-                dataset_id,
-                support_bundle_id,
-                hash,
-                stream::once(async {
-                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
-                }),
-            )
-            .await
-            .expect("Should have created support bundle");
+        let bundle = start_transfer_and_finalize(
+            &mgr,
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            hash,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await;
         assert_eq!(bundle.support_bundle_id, support_bundle_id);
         assert_eq!(bundle.state, SupportBundleState::Complete);
 
@@ -1368,12 +1489,311 @@ mod tests {
             .expect_err("Should not be able to HEAD directory");
         assert!(matches!(err, Error::NotAFile), "Unexpected error: {err:?}");
 
-        // DELETE the bundle on the dataset
+        // delete the bundle on the dataset
         mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
             .await
-            .expect("Should have been able to DELETE bundle");
+            .expect("Should have been able to delete bundle");
 
-        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn chunked_file_transfer() {
+        let logctx = test_setup_log("chunked_file_transfer");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // For this test, we'll add a dataset that can contain our bundles.
+        let dataset_id = DatasetUuid::new_v4();
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        // Access the Support Bundle API
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
+
+        // Create a fake support bundle -- really, just a zipfile.
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let zipfile_data = example_zipfile();
+        let hash = ArtifactHash(
+            Sha256::digest(zipfile_data.as_slice())
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        let zpool_id = harness.zpool_id;
+
+        mgr.start_creation(zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have started creation");
+
+        // Split the zipfile into halves, so we can transfer it in two chunks
+        let total_len = zipfile_data.len();
+        let chunk_size = total_len / 2;
+
+        let mut offset = 0;
+        while offset < total_len {
+            let end_offset = std::cmp::min(offset + chunk_size, total_len);
+            let chunk = &zipfile_data[offset..end_offset];
+
+            let stream =
+                stream::once(async move { Ok(Bytes::copy_from_slice(chunk)) });
+
+            mgr.transfer(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                offset as u64,
+                stream,
+            )
+            .await
+            .unwrap_or_else(|_| {
+                panic!("Should have transferred chunk at offset {}", offset)
+            });
+
+            offset = end_offset;
+        }
+        let bundle = mgr
+            .finalize(zpool_id, dataset_id, support_bundle_id, hash)
+            .await
+            .expect("Should have finalized bundle");
+        assert_eq!(bundle.support_bundle_id, support_bundle_id);
+        assert_eq!(bundle.state, SupportBundleState::Complete);
+
+        // GET the bundle we created, and observe the contents of the bundle
+        let mut response = mgr
+            .get(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Whole,
+            )
+            .await
+            .expect("Should have been able to GET bundle");
+        assert_eq!(read_body(&mut response).await, zipfile_data);
+        assert_eq!(response.headers().len(), 3);
+        assert_eq!(
+            response.headers()[CONTENT_LENGTH],
+            zipfile_data.len().to_string()
+        );
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/zip");
+        assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+
+        // delete the bundle on the dataset
+        mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have been able to delete bundle");
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn chunked_file_transfer_restart() {
+        let logctx = test_setup_log("chunked_file_transfer_restart");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // For this test, we'll add a dataset that can contain our bundles.
+        let dataset_id = DatasetUuid::new_v4();
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        // Access the Support Bundle API
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
+
+        // Create a fake support bundle -- really, just a zipfile.
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let zipfile_data = example_zipfile();
+        let hash = ArtifactHash(
+            Sha256::digest(zipfile_data.as_slice())
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        let zpool_id = harness.zpool_id;
+
+        mgr.start_creation(zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have started creation");
+
+        let bad_stream =
+            stream::once(async { Ok(Bytes::copy_from_slice(&[0, 0, 0, 0])) });
+
+        // Write some "bad bytes" and finalize it.
+        mgr.transfer(zpool_id, dataset_id, support_bundle_id, 0, bad_stream)
+            .await
+            .expect("Should have transferred bad bytes");
+        let err = mgr
+            .finalize(zpool_id, dataset_id, support_bundle_id, hash)
+            .await
+            .expect_err("Should have failed to finalize");
+        assert!(matches!(err, Error::HashMismatch), "Unexpected err: {err:?}");
+
+        // We can restart the stream if we invoke "start_creation" again.
+        mgr.start_creation(zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have started creation");
+
+        // Now transfer valid data
+        mgr.transfer(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            0,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await
+        .expect("Should have transferred bundle");
+        let bundle = mgr
+            .finalize(zpool_id, dataset_id, support_bundle_id, hash)
+            .await
+            .expect("Should have finalized bundle");
+        assert_eq!(bundle.support_bundle_id, support_bundle_id);
+        assert_eq!(bundle.state, SupportBundleState::Complete);
+
+        // GET the bundle we created, and observe the contents of the bundle
+        let mut response = mgr
+            .get(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Whole,
+            )
+            .await
+            .expect("Should have been able to GET bundle");
+        assert_eq!(read_body(&mut response).await, zipfile_data);
+        assert_eq!(response.headers().len(), 3);
+        assert_eq!(
+            response.headers()[CONTENT_LENGTH],
+            zipfile_data.len().to_string()
+        );
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/zip");
+        assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+
+        // Delete the bundle on the dataset
+        mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have been able to delete bundle");
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn try_to_write_after_finalize() {
+        let logctx = test_setup_log("try_to_write_after_finalize");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // For this test, we'll add a dataset that can contain our bundles.
+        let dataset_id = DatasetUuid::new_v4();
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        // Access the Support Bundle API
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
+
+        // Create a fake support bundle -- really, just a zipfile.
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let zipfile_data = example_zipfile();
+        let hash = ArtifactHash(
+            Sha256::digest(zipfile_data.as_slice())
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        let zpool_id = harness.zpool_id;
+
+        mgr.start_creation(zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have started creation");
+        mgr.transfer(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            0,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await
+        .expect("Should have transferred bundle");
+        let bundle = mgr
+            .finalize(zpool_id, dataset_id, support_bundle_id, hash)
+            .await
+            .expect("Should have finalized bundle");
+        assert_eq!(bundle.support_bundle_id, support_bundle_id);
+        assert_eq!(bundle.state, SupportBundleState::Complete);
+
+        // If we try to transfer again, we'll see a failure.
+        let err = mgr
+            .transfer(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                0,
+                stream::once(async {
+                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+                }),
+            )
+            .await
+            .expect_err("Should have failed to transfer bundle");
+        assert!(
+            matches!(err, Error::Io(ref io) if io.kind() == std::io::ErrorKind::NotFound),
+            "Unexpected err: {err:?}"
+        );
+
+        // If we try to finalize again, we'll see a failure.
+        let err = mgr
+            .finalize(zpool_id, dataset_id, support_bundle_id, hash)
+            .await
+            .expect_err("Should have failed to finalize bundle");
+        assert!(
+            matches!(err, Error::Io(ref io) if io.kind() == std::io::ErrorKind::NotFound),
+            "Unexpected err: {err:?}"
+        );
+
+        // If we try to create again, we'll see "OK" - but the
+        // bundle should already exist, so we can immediately "GET" it afterwards.
+        let metadata = mgr
+            .start_creation(zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Creation should have succeeded");
+        assert_eq!(metadata.state, SupportBundleState::Complete);
+
+        // GET the bundle we created, and observe the contents of the bundle
+        let mut response = mgr
+            .get(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Whole,
+            )
+            .await
+            .expect("Should have been able to GET bundle");
+        assert_eq!(read_body(&mut response).await, zipfile_data);
+        assert_eq!(response.headers().len(), 3);
+        assert_eq!(
+            response.headers()[CONTENT_LENGTH],
+            zipfile_data.len().to_string()
+        );
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/zip");
+        assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+
+        // Delete the bundle on the dataset
+        mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have been able to delete bundle");
+
         logctx.cleanup_successful();
     }
 
@@ -1386,10 +1806,7 @@ mod tests {
         let harness = SingleU2StorageHarness::new(log).await;
 
         // Access the Support Bundle API
-        let mgr = SupportBundleManager::new(
-            log,
-            harness.storage_test_harness.handle(),
-        );
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
 
         // Get a support bundle that we're ready to store.
         let support_bundle_id = SupportBundleUuid::new_v4();
@@ -1404,24 +1821,22 @@ mod tests {
         // Storing a bundle without a dataset should throw an error.
         let dataset_id = DatasetUuid::new_v4();
         let err = mgr
-            .create(
-                harness.zpool_id,
-                dataset_id,
-                support_bundle_id,
-                hash,
-                stream::once(async {
-                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
-                }),
-            )
+            .start_creation(harness.zpool_id, dataset_id, support_bundle_id)
             .await
             .expect_err("Bundle creation should fail without dataset");
-        assert!(matches!(err, Error::Storage(_)), "Unexpected error: {err:?}");
-        assert_eq!(HttpError::from(err).status_code, StatusCode::NOT_FOUND);
+        match err {
+            Error::HttpError(err) => {
+                assert_eq!(err.status_code, StatusCode::NOT_FOUND);
+                assert_eq!(err.internal_message, "No control plane datasets");
+            }
+            _ => panic!("Unexpected error: {err:?}"),
+        }
 
         // Configure the dataset now, so it'll exist for future requests.
         harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
 
-        mgr.create(
+        start_transfer_and_finalize(
+            &mgr,
             harness.zpool_id,
             dataset_id,
             support_bundle_id,
@@ -1430,10 +1845,8 @@ mod tests {
                 Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
             }),
         )
-        .await
-        .expect("Should have created support bundle");
+        .await;
 
-        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -1446,10 +1859,7 @@ mod tests {
         let harness = SingleU2StorageHarness::new(log).await;
 
         // Access the Support Bundle API
-        let mgr = SupportBundleManager::new(
-            log,
-            harness.storage_test_harness.handle(),
-        );
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
 
         // Get a support bundle that we're ready to store.
         let support_bundle_id = SupportBundleUuid::new_v4();
@@ -1473,18 +1883,17 @@ mod tests {
         );
 
         // Creating the bundle with a bad hash should fail.
-        let err = mgr
-            .create(
-                harness.zpool_id,
-                dataset_id,
-                support_bundle_id,
-                bad_hash,
-                stream::once(async {
-                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
-                }),
-            )
-            .await
-            .expect_err("Bundle creation should fail with bad hash");
+        let err = start_transfer_and_finalize_expect_finalize_err(
+            &mgr,
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            bad_hash,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await;
         assert!(
             matches!(err, Error::HashMismatch),
             "Unexpected error: {err:?}"
@@ -1499,18 +1908,15 @@ mod tests {
         assert_eq!(bundles[0].state, SupportBundleState::Incomplete);
 
         // Creating the bundle with bad data should fail
-        let err = mgr
-            .create(
-                harness.zpool_id,
-                dataset_id,
-                support_bundle_id,
-                hash,
-                stream::once(async {
-                    Ok(Bytes::from_static(b"Not a zipfile"))
-                }),
-            )
-            .await
-            .expect_err("Bundle creation should fail with bad hash");
+        let err = start_transfer_and_finalize_expect_finalize_err(
+            &mgr,
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            hash,
+            stream::once(async { Ok(Bytes::from_static(b"Not a zipfile")) }),
+        )
+        .await;
         assert!(
             matches!(err, Error::HashMismatch),
             "Unexpected error: {err:?}"
@@ -1523,7 +1929,8 @@ mod tests {
         assert_eq!(bundles[0].state, SupportBundleState::Incomplete);
 
         // Good hash + Good data -> creation should succeed
-        mgr.create(
+        start_transfer_and_finalize(
+            &mgr,
             harness.zpool_id,
             dataset_id,
             support_bundle_id,
@@ -1532,8 +1939,7 @@ mod tests {
                 Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
             }),
         )
-        .await
-        .expect("Should have created support bundle");
+        .await;
 
         // The bundle should now appear "Complete"
         let bundles = mgr.list(harness.zpool_id, dataset_id).await.unwrap();
@@ -1544,11 +1950,10 @@ mod tests {
         // We can delete the bundle, and it should no longer appear.
         mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
             .await
-            .expect("Should have been able to DELETE bundle");
+            .expect("Should have been able to delete bundle");
         let bundles = mgr.list(harness.zpool_id, dataset_id).await.unwrap();
         assert_eq!(bundles.len(), 0);
 
-        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -1561,10 +1966,7 @@ mod tests {
         let harness = SingleU2StorageHarness::new(log).await;
 
         // Access the Support Bundle API
-        let mgr = SupportBundleManager::new(
-            log,
-            harness.storage_test_harness.handle(),
-        );
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
 
         // Get a support bundle that we're ready to store
         let support_bundle_id = SupportBundleUuid::new_v4();
@@ -1582,18 +1984,17 @@ mod tests {
         );
 
         // Creating the bundle with a bad hash should fail.
-        let err = mgr
-            .create(
-                harness.zpool_id,
-                dataset_id,
-                support_bundle_id,
-                bad_hash,
-                stream::once(async {
-                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
-                }),
-            )
-            .await
-            .expect_err("Bundle creation should fail with bad hash");
+        let err = start_transfer_and_finalize_expect_finalize_err(
+            &mgr,
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            bad_hash,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await;
         assert!(
             matches!(err, Error::HashMismatch),
             "Unexpected error: {err:?}"
@@ -1610,31 +2011,11 @@ mod tests {
         // We can delete the bundle, and it should no longer appear.
         mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
             .await
-            .expect("Should have been able to DELETE bundle");
+            .expect("Should have been able to delete bundle");
         let bundles = mgr.list(harness.zpool_id, dataset_id).await.unwrap();
         assert_eq!(bundles.len(), 0);
 
-        harness.cleanup().await;
         logctx.cleanup_successful();
-    }
-
-    async fn is_mounted(dataset: &str) -> bool {
-        let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
-        let cmd = command.args(&["list", "-Hpo", "mounted", dataset]);
-        let output = cmd.output().await.unwrap();
-        assert!(output.status.success(), "Failed to list dataset: {output:?}");
-        String::from_utf8_lossy(&output.stdout).trim() == "yes"
-    }
-
-    async fn unmount(dataset: &str) {
-        let mut command = tokio::process::Command::new(illumos_utils::PFEXEC);
-        let cmd =
-            command.args(&[illumos_utils::zfs::ZFS, "unmount", "-f", dataset]);
-        let output = cmd.output().await.unwrap();
-        assert!(
-            output.status.success(),
-            "Failed to unmount dataset: {output:?}"
-        );
     }
 
     #[tokio::test]
@@ -1650,18 +2031,8 @@ mod tests {
         harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
 
         // Access the Support Bundle API
-        let mgr = SupportBundleManager::new(
-            log,
-            harness.storage_test_harness.handle(),
-        );
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
         let support_bundle_id = SupportBundleUuid::new_v4();
-        let zipfile_data = example_zipfile();
-        let hash = ArtifactHash(
-            Sha256::digest(zipfile_data.as_slice())
-                .as_slice()
-                .try_into()
-                .unwrap(),
-        );
 
         // Before we actually create the bundle:
         //
@@ -1673,22 +2044,19 @@ mod tests {
             .await
             .expect("Could not get parent dataset from test harness")
             .name;
-        let parent_dataset_name = parent_dataset.full_name();
-        assert!(is_mounted(&parent_dataset_name).await);
-        unmount(&parent_dataset_name).await;
-        assert!(!is_mounted(&parent_dataset_name).await);
+        {
+            let parent_as_nested = NestedDatasetLocation {
+                path: String::new(),
+                root: parent_dataset.clone(),
+            };
+            assert!(harness.is_nested_dataset_mounted(&parent_as_nested));
+            harness.unmount_nested_dataset(&parent_as_nested);
+            assert!(!harness.is_nested_dataset_mounted(&parent_as_nested));
+        }
 
         // Create a new bundle
         let err = mgr
-            .create(
-                harness.zpool_id,
-                dataset_id,
-                support_bundle_id,
-                hash,
-                stream::once(async {
-                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
-                }),
-            )
+            .start_creation(harness.zpool_id, dataset_id, support_bundle_id)
             .await
             .expect_err("Should not have been able to create support bundle");
         let Error::DatasetNotMounted { dataset } = err else {
@@ -1699,7 +2067,6 @@ mod tests {
             "Unexpected 'parent dataset' in error message"
         );
 
-        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -1716,10 +2083,7 @@ mod tests {
         harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
 
         // Access the Support Bundle API
-        let mgr = SupportBundleManager::new(
-            log,
-            harness.storage_test_harness.handle(),
-        );
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
         let support_bundle_id = SupportBundleUuid::new_v4();
         let zipfile_data = example_zipfile();
         let hash = ArtifactHash(
@@ -1730,18 +2094,17 @@ mod tests {
         );
 
         // Create a new bundle
-        let _ = mgr
-            .create(
-                harness.zpool_id,
-                dataset_id,
-                support_bundle_id,
-                hash,
-                stream::once(async {
-                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
-                }),
-            )
-            .await
-            .expect("Should have created support bundle");
+        let _ = start_transfer_and_finalize(
+            &mgr,
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            hash,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await;
 
         // Peek under the hood: We should be able to observe the support
         // bundle as a nested dataset.
@@ -1752,23 +2115,21 @@ mod tests {
             .name;
         let nested_dataset =
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
-        let nested_dataset_name = nested_dataset.full_name();
 
         // The dataset was mounted after creation.
-        assert!(is_mounted(&nested_dataset_name).await);
+        assert!(harness.is_nested_dataset_mounted(&nested_dataset));
 
         // We can manually unmount this dataset.
-        unmount(&nested_dataset_name).await;
-        assert!(!is_mounted(&nested_dataset_name).await);
+        harness.unmount_nested_dataset(&nested_dataset);
+        assert!(!harness.is_nested_dataset_mounted(&nested_dataset));
 
         // When we "list" this nested dataset, it'll be mounted once more.
         let _ = mgr
             .list(harness.zpool_id, dataset_id)
             .await
             .expect("Should have been able to list bundle");
-        assert!(is_mounted(&nested_dataset_name).await);
+        assert!(harness.is_nested_dataset_mounted(&nested_dataset));
 
-        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -1785,10 +2146,7 @@ mod tests {
         harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
 
         // Access the Support Bundle API
-        let mgr = SupportBundleManager::new(
-            log,
-            harness.storage_test_harness.handle(),
-        );
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
         let support_bundle_id = SupportBundleUuid::new_v4();
         let zipfile_data = example_zipfile();
         let hash = ArtifactHash(
@@ -1799,18 +2157,17 @@ mod tests {
         );
 
         // Create a new bundle
-        let _ = mgr
-            .create(
-                harness.zpool_id,
-                dataset_id,
-                support_bundle_id,
-                hash,
-                stream::once(async {
-                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
-                }),
-            )
-            .await
-            .expect("Should have created support bundle");
+        let _ = start_transfer_and_finalize(
+            &mgr,
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            hash,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await;
 
         // Peek under the hood: We should be able to observe the support
         // bundle as a nested dataset.
@@ -1821,14 +2178,13 @@ mod tests {
             .name;
         let nested_dataset =
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
-        let nested_dataset_name = nested_dataset.full_name();
 
         // The dataset was mounted after creation.
-        assert!(is_mounted(&nested_dataset_name).await);
+        assert!(harness.is_nested_dataset_mounted(&nested_dataset));
 
-        // We can manually unmount this dataset.
-        unmount(&nested_dataset_name).await;
-        assert!(!is_mounted(&nested_dataset_name).await);
+        // We can simulate unmounting this dataset.
+        harness.unmount_nested_dataset(&nested_dataset);
+        assert!(!harness.is_nested_dataset_mounted(&nested_dataset));
 
         // When we "get" this nested dataset, it'll be mounted once more.
         let _ = mgr
@@ -1841,9 +2197,8 @@ mod tests {
             )
             .await
             .expect("Should have been able to GET bundle");
-        assert!(is_mounted(&nested_dataset_name).await);
+        assert!(harness.is_nested_dataset_mounted(&nested_dataset));
 
-        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -1856,10 +2211,7 @@ mod tests {
         let harness = SingleU2StorageHarness::new(log).await;
 
         // Access the Support Bundle API
-        let mgr = SupportBundleManager::new(
-            log,
-            harness.storage_test_harness.handle(),
-        );
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
 
         // Get a support bundle that we're ready to store.
         let support_bundle_id = SupportBundleUuid::new_v4();
@@ -1876,7 +2228,8 @@ mod tests {
         harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
 
         // Create the bundle
-        mgr.create(
+        start_transfer_and_finalize(
+            &mgr,
             harness.zpool_id,
             dataset_id,
             support_bundle_id,
@@ -1885,39 +2238,16 @@ mod tests {
                 Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
             }),
         )
-        .await
-        .expect("Should have created support bundle");
+        .await;
 
         // Creating the dataset again should work.
-        mgr.create(
-            harness.zpool_id,
-            dataset_id,
-            support_bundle_id,
-            hash,
-            stream::once(async {
-                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
-            }),
-        )
-        .await
-        .expect("Support bundle should already exist");
+        let bundle = mgr
+            .start_creation(harness.zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Support bundle should already exist");
 
-        // This is an edge-case, but just to make sure the behavior
-        // is codified: If we are creating a bundle that already exists,
-        // we'll skip reading the body.
-        mgr.create(
-            harness.zpool_id,
-            dataset_id,
-            support_bundle_id,
-            hash,
-            stream::once(async {
-                // NOTE: This is different from the call above.
-                Ok(Bytes::from_static(b"Ignored"))
-            }),
-        )
-        .await
-        .expect("Support bundle should already exist");
+        assert_eq!(bundle.state, SupportBundleState::Complete);
 
-        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -1934,10 +2264,7 @@ mod tests {
         harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
 
         // Access the Support Bundle API
-        let mgr = SupportBundleManager::new(
-            log,
-            harness.storage_test_harness.handle(),
-        );
+        let mgr = harness.storage_test_harness.as_support_bundle_storage(log);
 
         // Create a fake support bundle -- really, just a zipfile.
         let support_bundle_id = SupportBundleUuid::new_v4();
@@ -1950,18 +2277,17 @@ mod tests {
         );
 
         // Create a new bundle
-        let bundle = mgr
-            .create(
-                harness.zpool_id,
-                dataset_id,
-                support_bundle_id,
-                hash,
-                stream::once(async {
-                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
-                }),
-            )
-            .await
-            .expect("Should have created support bundle");
+        let bundle = start_transfer_and_finalize(
+            &mgr,
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            hash,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await;
         assert_eq!(bundle.support_bundle_id, support_bundle_id);
         assert_eq!(bundle.state, SupportBundleState::Complete);
 
@@ -2110,12 +2436,11 @@ mod tests {
             .expect_err("Should not be able to HEAD directory");
         assert!(matches!(err, Error::NotAFile), "Unexpected error: {err:?}");
 
-        // DELETE the bundle on the dataset
+        // delete the bundle on the dataset
         mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
             .await
-            .expect("Should have been able to DELETE bundle");
+            .expect("Should have been able to delete bundle");
 
-        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 }

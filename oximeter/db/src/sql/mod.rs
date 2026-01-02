@@ -30,7 +30,6 @@
 use crate::DatumType;
 use crate::Error as OxdbError;
 use crate::FieldType;
-use crate::QuerySummary;
 use crate::TimeseriesName;
 use crate::TimeseriesSchema;
 use crate::query::field_table_name;
@@ -152,7 +151,7 @@ pub struct QueryResult {
     /// This is the query that is actually run in the database itself.
     pub rewritten_query: String,
     /// Summary of the resource usage of the query.
-    pub summary: QuerySummary,
+    pub summary: oxql_types::QuerySummary,
     /// The result of the query, with column names and rows.
     pub table: Table,
 }
@@ -838,7 +837,7 @@ impl RestrictedQuery {
         relation: &mut TableFactor,
     ) -> Result<IndexSet<TimeseriesName>, OxdbError> {
         match relation {
-            TableFactor::Table { ref mut name, args, with_hints, .. } => {
+            TableFactor::Table { name, args, with_hints, .. } => {
                 if args.is_some() || !with_hints.is_empty() {
                     return unsupported!(
                         "Table functions and hints are not supported"

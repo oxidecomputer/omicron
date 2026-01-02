@@ -7,12 +7,15 @@
 use super::Details;
 use super::SiloAuthnPolicy;
 use crate::authn;
+use crate::probes;
 use async_trait::async_trait;
 use authn::Reason;
+use omicron_uuid_kinds::SiloUserUuid;
 use slog::trace;
 use std::borrow::Borrow;
 use uuid::Uuid;
 
+pub mod scim;
 pub mod session_cookie;
 pub mod spoof;
 pub mod token;
@@ -55,7 +58,10 @@ where
     {
         let log = &rqctx.log;
         let ctx = rqctx.context().borrow();
-        let result = self.authn_request_generic(ctx, log, &rqctx.request).await;
+        let request_id = rqctx.request_id.as_str();
+        let result = self
+            .authn_request_generic(ctx, log, request_id, &rqctx.request)
+            .await;
         trace!(log, "authn result: {:?}", result);
         result
     }
@@ -65,6 +71,7 @@ where
         &self,
         ctx: &T,
         log: &slog::Logger,
+        request_id: &str,
         request: &dropshot::RequestInfo,
     ) -> Result<authn::Context, authn::Error> {
         // For debuggability, keep track of the schemes that we've tried.
@@ -72,8 +79,17 @@ where
         for scheme_impl in &self.allowed_schemes {
             let scheme_name = scheme_impl.name();
             trace!(log, "authn: trying {:?}", scheme_name);
+            probes::authn__start!(|| {
+                (
+                    request_id,
+                    scheme_name.to_string(),
+                    request.method().to_string(),
+                    request.uri().to_string(),
+                )
+            });
             schemes_tried.push(scheme_name);
             let result = scheme_impl.authn(ctx, log, request).await;
+            probes::authn__done!(|| (request_id, format!("{result:?}")));
             match result {
                 // TODO-security If the user explicitly failed one
                 // authentication scheme (i.e., a signature that didn't match,
@@ -139,7 +155,10 @@ pub enum SchemeResult {
 /// A context that can look up a Silo user's Silo.
 #[async_trait]
 pub trait SiloUserSilo {
-    async fn silo_user_silo(&self, silo_user_id: Uuid) -> Result<Uuid, Reason>;
+    async fn silo_user_silo(
+        &self,
+        silo_user_id: SiloUserUuid,
+    ) -> Result<Uuid, Reason>;
 }
 
 #[cfg(test)]
@@ -217,6 +236,7 @@ mod test {
                 SKIP => SchemeResult::NotRequested,
                 OK => SchemeResult::Authenticated(authn::Details {
                     actor: self.actor,
+                    device_token_expiration: None,
                 }),
                 FAIL => SchemeResult::Failed(Reason::BadCredentials {
                     actor: self.actor,
@@ -288,6 +308,7 @@ mod test {
             .authn_request_generic(
                 &TestAuthnContext::PolicyNone,
                 &log,
+                "rqid",
                 &dropshot::RequestInfo::new(
                     &request,
                     "0.0.0.0:0".parse().unwrap(),
@@ -310,6 +331,7 @@ mod test {
             .authn_request_generic(
                 &TestAuthnContext::PolicyOk,
                 &log,
+                "rqid",
                 &dropshot::RequestInfo::new(
                     &request,
                     "0.0.0.0:0".parse().unwrap(),
@@ -330,6 +352,7 @@ mod test {
             .authn_request_generic(
                 &TestAuthnContext::PolicyFail,
                 &log,
+                "rqid",
                 &dropshot::RequestInfo::new(
                     &request,
                     "0.0.0.0:0".parse().unwrap(),
@@ -357,6 +380,7 @@ mod test {
             .authn_request_generic(
                 &TestAuthnContext::PolicyNone,
                 &log,
+                "rqid",
                 &dropshot::RequestInfo::new(
                     &request,
                     "0.0.0.0:0".parse().unwrap(),
@@ -381,6 +405,7 @@ mod test {
             .authn_request_generic(
                 &TestAuthnContext::PolicyNone,
                 &log,
+                "rqid",
                 &dropshot::RequestInfo::new(
                     &request,
                     "0.0.0.0:0".parse().unwrap(),
@@ -404,6 +429,7 @@ mod test {
             .authn_request_generic(
                 &TestAuthnContext::PolicyNone,
                 &log,
+                "rqid",
                 &dropshot::RequestInfo::new(
                     &request,
                     "0.0.0.0:0".parse().unwrap(),

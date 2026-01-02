@@ -366,8 +366,11 @@ impl Dumper {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<()> {
     let args = Args::parse();
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator)
@@ -394,13 +397,13 @@ async fn main() -> Result<()> {
 
     match args.command {
         Command::State { sp } => {
-            let info = client.sp_get(sp.type_, sp.slot).await?.into_inner();
+            let info = client.sp_get(&sp.type_, sp.slot).await?.into_inner();
             dumper.dump(&info)?;
         }
         Command::Ignition { sp } => {
             if let Some(sp) = sp {
                 let info =
-                    client.ignition_get(sp.type_, sp.slot).await?.into_inner();
+                    client.ignition_get(&sp.type_, sp.slot).await?.into_inner();
                 dumper.dump(&info)?;
             } else {
                 let info = client.ignition_list().await?.into_inner();
@@ -408,13 +411,13 @@ async fn main() -> Result<()> {
             }
         }
         Command::IgnitionCommand { sp, command } => {
-            client.ignition_command(sp.type_, sp.slot, command).await?;
+            client.ignition_command(&sp.type_, sp.slot, command).await?;
         }
         Command::ComponentActiveSlot { sp, component, set_slot, persist } => {
             if let Some(slot) = set_slot {
                 client
                     .sp_component_active_slot_set(
-                        sp.type_,
+                        &sp.type_,
                         sp.slot,
                         &component,
                         persist,
@@ -423,7 +426,9 @@ async fn main() -> Result<()> {
                     .await?;
             } else {
                 let info = client
-                    .sp_component_active_slot_get(sp.type_, sp.slot, &component)
+                    .sp_component_active_slot_get(
+                        &sp.type_, sp.slot, &component,
+                    )
                     .await?
                     .into_inner();
                 dumper.dump(&info)?;
@@ -455,11 +460,11 @@ async fn main() -> Result<()> {
                     verbose: startup_verbose,
                 };
                 client
-                    .sp_startup_options_set(sp.type_, sp.slot, &options)
+                    .sp_startup_options_set(&sp.type_, sp.slot, &options)
                     .await?;
             } else {
                 let info = client
-                    .sp_startup_options_get(sp.type_, sp.slot)
+                    .sp_startup_options_get(&sp.type_, sp.slot)
                     .await?
                     .into_inner();
                 dumper.dump(&info)?;
@@ -474,7 +479,7 @@ async fn main() -> Result<()> {
         } => {
             if clear {
                 client
-                    .sp_installinator_image_id_delete(sp.type_, sp.slot)
+                    .sp_installinator_image_id_delete(&sp.type_, sp.slot)
                     .await?;
             } else {
                 // clap guarantees these are not `None` when `clear` is false.
@@ -483,7 +488,7 @@ async fn main() -> Result<()> {
                 let control_plane = control_plane.unwrap().to_string();
                 client
                     .sp_installinator_image_id_set(
-                        sp.type_,
+                        &sp.type_,
                         sp.slot,
                         &InstallinatorImageId {
                             update_id,
@@ -495,20 +500,22 @@ async fn main() -> Result<()> {
             }
         }
         Command::Inventory { sp } => {
-            let info =
-                client.sp_component_list(sp.type_, sp.slot).await?.into_inner();
+            let info = client
+                .sp_component_list(&sp.type_, sp.slot)
+                .await?
+                .into_inner();
             dumper.dump(&info)?;
         }
         Command::ComponentDetails { sp, component } => {
             let info = client
-                .sp_component_get(sp.type_, sp.slot, &component)
+                .sp_component_get(&sp.type_, sp.slot, &component)
                 .await?
                 .into_inner();
             dumper.dump(&info)?;
         }
         Command::ComponentClearStatus { sp, component } => {
             client
-                .sp_component_clear_status(sp.type_, sp.slot, &component)
+                .sp_component_clear_status(&sp.type_, sp.slot, &component)
                 .await?;
         }
         Command::UsartAttach {
@@ -521,7 +528,7 @@ async fn main() -> Result<()> {
         } => {
             let upgraded = client
                 .sp_component_serial_console_attach(
-                    sp.type_,
+                    &sp.type_,
                     sp.slot,
                     SERIAL_CONSOLE_COMPONENT,
                 )
@@ -547,7 +554,7 @@ async fn main() -> Result<()> {
         Command::UsartDetach { sp } => {
             client
                 .sp_component_serial_console_detach(
-                    sp.type_,
+                    &sp.type_,
                     sp.slot,
                     SERIAL_CONSOLE_COMPONENT,
                 )
@@ -572,7 +579,7 @@ async fn main() -> Result<()> {
         }
         Command::UpdateStatus { sp, component } => {
             let info = client
-                .sp_component_update_status(sp.type_, sp.slot, &component)
+                .sp_component_update_status(&sp.type_, sp.slot, &component)
                 .await?
                 .into_inner();
             dumper.dump(&info)?;
@@ -580,17 +587,19 @@ async fn main() -> Result<()> {
         Command::UpdateAbort { sp, component, update_id } => {
             let body = UpdateAbortBody { id: update_id };
             client
-                .sp_component_update_abort(sp.type_, sp.slot, &component, &body)
+                .sp_component_update_abort(
+                    &sp.type_, sp.slot, &component, &body,
+                )
                 .await?;
         }
         Command::PowerState { sp, new_power_state } => {
             if let Some(power_state) = new_power_state {
                 client
-                    .sp_power_state_set(sp.type_, sp.slot, power_state)
+                    .sp_power_state_set(&sp.type_, sp.slot, power_state)
                     .await?;
             } else {
                 let info = client
-                    .sp_power_state_get(sp.type_, sp.slot)
+                    .sp_power_state_get(&sp.type_, sp.slot)
                     .await?
                     .into_inner();
                 dumper.dump(&info)?;
@@ -599,10 +608,10 @@ async fn main() -> Result<()> {
         Command::Reset { sp } => {
             let component =
                 gateway_messages::SpComponent::SP_ITSELF.const_as_str();
-            client.sp_component_reset(sp.type_, sp.slot, component).await?;
+            client.sp_component_reset(&sp.type_, sp.slot, component).await?;
         }
         Command::ResetComponent { sp, component } => {
-            client.sp_component_reset(sp.type_, sp.slot, &component).await?;
+            client.sp_component_reset(&sp.type_, sp.slot, &component).await?;
         }
     }
 
@@ -622,14 +631,14 @@ async fn update(
 
     client
         .sp_component_update(
-            sp.type_, sp.slot, component, slot, &update_id, image,
+            &sp.type_, sp.slot, component, slot, &update_id, image,
         )
         .await
         .context("failed to start update")?;
 
     loop {
         let status = client
-            .sp_component_update_status(sp.type_, sp.slot, component)
+            .sp_component_update_status(&sp.type_, sp.slot, component)
             .await
             .context("failed to get update status")?
             .into_inner();

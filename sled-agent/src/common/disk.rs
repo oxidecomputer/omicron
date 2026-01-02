@@ -80,7 +80,7 @@ impl DiskStates {
         // TODO: Deal with no-op transition?
         self.current = DiskRuntimeState {
             disk_state: next,
-            gen: self.current.gen.next(),
+            generation: self.current.generation.next(),
             time_updated: Utc::now(),
         };
         self.desired = desired;

@@ -480,7 +480,8 @@ mod tests {
             }),
         };
         assert_eq!(
-            restrict_filter_idents(&filter, &[ident.clone()]).unwrap(),
+            restrict_filter_idents(&filter, std::slice::from_ref(&ident))
+                .unwrap(),
             filter
         );
         assert_eq!(restrict_filter_idents(&filter, &[]), None);

@@ -20,9 +20,10 @@ use nexus_types::external_api::params::{
 use nexus_types::external_api::views::Rack;
 use omicron_common::api::external::{
     self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
-    LinkSpeed, NameOrId, SwitchPort, SwitchPortSettings,
+    LinkSpeed, NameOrId, SwitchLocation, SwitchPort, SwitchPortSettings,
 };
 use omicron_common::api::external::{ImportExportPolicy, Name};
+use oxnet::IpNet;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -112,38 +113,70 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             description: "just a port".into(),
         });
 
-    let link_name =
+    let link0_name =
         Name::from_str("phy0").expect("phy0 should be a valid name");
 
-    let lldp_params = LldpLinkConfigCreate {
+    let lldp0_params = LldpLinkConfigCreate {
         enabled: true,
         link_name: Some("Link Name".into()),
-        link_description: Some("link_ Dscription".into()),
+        link_description: Some("link description".into()),
         chassis_id: Some("Chassis ID".into()),
         system_name: Some("System Name".into()),
         system_description: Some("System description".into()),
-        management_ip: None,
+        management_ip: Some(
+            "203.0.113.10"
+                .parse()
+                .expect("management_ip should be a valid address"),
+        ),
+    };
+
+    let link1_name =
+        Name::from_str("phy1").expect("phy1 should be a valid name");
+
+    let lldp1_params = LldpLinkConfigCreate {
+        enabled: true,
+        link_name: Some("Link Name 2".into()),
+        link_description: Some("link description".into()),
+        chassis_id: Some("Chassis ID".into()),
+        system_name: Some("System Name".into()),
+        system_description: Some("System description".into()),
+        management_ip: Some(
+            "203.0.113.10"
+                .parse()
+                .expect("management_ip should be a valid address"),
+        ),
     };
 
     // links
     settings.links.push(LinkConfigCreate {
-        link_name: link_name.clone(),
+        link_name: link0_name.clone(),
         mtu: 4700,
-        lldp: lldp_params.clone(),
+        lldp: lldp0_params.clone(),
         fec: Some(LinkFec::None),
         speed: LinkSpeed::Speed100G,
         autoneg: false,
         tx_eq: None,
     });
+
+    settings.links.push(LinkConfigCreate {
+        link_name: link1_name.clone(),
+        mtu: 4700,
+        lldp: lldp1_params.clone(),
+        fec: Some(LinkFec::None),
+        speed: LinkSpeed::Speed100G,
+        autoneg: false,
+        tx_eq: None,
+    });
+
     // interfaces
     settings.interfaces.push(SwitchInterfaceConfigCreate {
-        link_name: link_name.clone(),
+        link_name: link0_name.clone(),
         v6_enabled: true,
         kind: SwitchInterfaceKind::Primary,
     });
     // routes
     settings.routes.push(RouteConfig {
-        link_name: link_name.clone(),
+        link_name: link0_name.clone(),
         routes: vec![Route {
             dst: "1.2.3.0/24".parse().unwrap(),
             gw: "1.2.3.4".parse().unwrap(),
@@ -153,7 +186,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     });
     // addresses
     settings.addresses.push(AddressConfig {
-        link_name: link_name.clone(),
+        link_name: link0_name.clone(),
         addresses: vec![Address {
             address: "203.0.113.10/24".parse().unwrap(),
             vlan_id: None,
@@ -173,7 +206,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
-    assert_eq!(created.links.len(), 1);
+    assert_eq!(created.links.len(), 2);
     assert_eq!(created.routes.len(), 1);
     assert_eq!(created.addresses.len(), 1);
 
@@ -182,7 +215,14 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = link0.lldp_link_config.clone().unwrap();
-    assert_eq!(lldp0, lldp_params);
+    assert_eq!(lldp0, lldp0_params);
+
+    let link1 = &created.links[1];
+    assert_eq!(&link1.link_name.to_string(), "phy1");
+    assert_eq!(link1.mtu, 4700);
+
+    let lldp1 = link1.lldp_link_config.clone().unwrap();
+    assert_eq!(lldp1, lldp1_params);
 
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
@@ -190,11 +230,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
 
     let route0 = &created.routes[0];
-    assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());
+    assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
     assert_eq!(&route0.gw.to_string(), "1.2.3.4");
 
     let addr0 = &created.addresses[0];
-    assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
+    assert_eq!(addr0.address, IpNet::from_str("203.0.113.10/24").unwrap());
 
     // Get the port settings back
     let roundtrip: SwitchPortSettings = NexusRequest::object_get(
@@ -208,7 +248,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
-    assert_eq!(roundtrip.links.len(), 1);
+    assert_eq!(roundtrip.links.len(), 2);
     assert_eq!(roundtrip.routes.len(), 1);
     assert_eq!(roundtrip.addresses.len(), 1);
 
@@ -217,7 +257,14 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = link0.lldp_link_config.clone().unwrap();
-    assert_eq!(lldp0, lldp_params);
+    assert_eq!(lldp0, lldp0_params);
+
+    let link1 = &roundtrip.links[1];
+    assert_eq!(&link1.link_name.to_string(), "phy1");
+    assert_eq!(link1.mtu, 4700);
+
+    let lldp1 = link1.lldp_link_config.clone().unwrap();
+    assert_eq!(lldp1, lldp1_params);
 
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
@@ -225,11 +272,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
 
     let route0 = &roundtrip.routes[0];
-    assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());
+    assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
     assert_eq!(&route0.gw.to_string(), "1.2.3.4");
 
     let addr0 = &roundtrip.addresses[0];
-    assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
+    assert_eq!(addr0.address, IpNet::from_str("203.0.113.10/24").unwrap());
 
     // Delete port settings
     NexusRequest::object_delete(
@@ -259,7 +306,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
 
     // Update port settings. Should not see conflict.
     settings.bgp_peers.push(BgpPeerConfig {
-        link_name: link_name.clone(),
+        link_name: link0_name.clone(),
         peers: vec![BgpPeer {
             bgp_config: NameOrId::Name("as47".parse().unwrap()),
             interface_name: "phy0".parse().unwrap(),
@@ -306,7 +353,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .expect("Failed to list switch ports")
     .all_items;
 
-    assert_eq!(ports.len(), 1, "Expected one ports");
+    assert_eq!(ports.len(), 2, "Expected two ports");
 
     // apply port settings
 
@@ -351,4 +398,160 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
+}
+
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+
+    // Create a lot
+    let lot_name =
+        Name::from_str("subspace").expect("subspace should be a valid name");
+    let lot_params = AddressLotCreate {
+        identity: IdentityMetadataCreateParams {
+            name: lot_name.clone(),
+            description: "where the comms happen".into(),
+        },
+        kind: AddressLotKind::Infra,
+        blocks: vec![AddressLotBlockCreate {
+            first_address: "1701::a".parse().unwrap(),
+            last_address: "1701::e".parse().unwrap(),
+        }],
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &lot_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create port settings
+    let settings_name =
+        Name::from_str("nacelle").expect("nacell should be a valid name");
+    let mut settings =
+        SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
+            name: settings_name.clone(),
+            description: "just a port".into(),
+        });
+
+    let link_name =
+        Name::from_str("phy0").expect("phy0 should be a valid name");
+
+    settings.links.push(LinkConfigCreate {
+        link_name: link_name.clone(),
+        mtu: 1500,
+        lldp: LldpLinkConfigCreate {
+            enabled: false,
+            link_name: None,
+            link_description: None,
+            chassis_id: None,
+            system_name: None,
+            system_description: None,
+            management_ip: None,
+        },
+        fec: None,
+        speed: LinkSpeed::Speed100G,
+        autoneg: false,
+        tx_eq: None,
+    });
+
+    settings.interfaces.push(SwitchInterfaceConfigCreate {
+        link_name: link_name.clone(),
+        v6_enabled: true,
+        kind: SwitchInterfaceKind::Primary,
+    });
+
+    settings.addresses.push(AddressConfig {
+        link_name: link_name.clone(),
+        addresses: vec![Address {
+            address: "1701::d/64".parse().unwrap(),
+            vlan_id: None,
+            address_lot: NameOrId::Name(lot_name.clone()),
+        }],
+    });
+
+    settings.routes.push(RouteConfig {
+        link_name: link_name.clone(),
+        routes: vec![Route {
+            dst: "2000::/64".parse().unwrap(),
+            gw: "2000::1".parse().unwrap(),
+            vid: None,
+            rib_priority: None,
+        }],
+    });
+
+    let created: SwitchPortSettings = NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/switch-port-settings",
+        &settings,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    let addr = &created.addresses[0];
+    assert_eq!(addr.address, IpNet::from_str("1701::d/64").unwrap());
+
+    let route = &created.routes[0];
+    assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
+    assert_eq!(&route.gw.to_string(), "2000::1");
+
+    let mgd = &ctx.mgd[&SwitchLocation::Switch0];
+    let mgd_client = mg_admin_client::Client::new(
+        &format!("http://[::1]:{}", mgd.port),
+        ctx.logctx.log.clone(),
+    );
+
+    // apply port settings
+    let apply_settings = SwitchPortApplySettings {
+        port_settings: NameOrId::Name(settings_name.clone()),
+    };
+
+    let racks_url = "/v1/system/hardware/racks";
+    let racks: Vec<Rack> =
+        NexusRequest::iter_collection_authn(client, racks_url, "", None)
+            .await
+            .expect("failed to list racks")
+            .all_items;
+
+    let rack_id = racks[0].identity.id;
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+        )
+        .body(Some(&apply_settings))
+        .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // wait for routes to be reconciled to mgd
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        match mgd_client.static_list_v6_routes().await {
+            Ok(routes) => {
+                let n = routes.len();
+                if n == 1 {
+                    return;
+                } else {
+                    println!("expected 1 route got {n}")
+                }
+            }
+            Err(e) => {
+                println!("failed to contact mgd: {e:?}");
+            }
+        }
+    }
+    panic!("expected number of routes not found");
 }

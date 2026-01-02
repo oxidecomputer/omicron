@@ -8,6 +8,7 @@ use diesel::PgConnection;
 use diesel_dtrace::DTraceConnection;
 use nexus_auth::context::OpContext;
 use omicron_common::api::external::Error;
+use std::any::Any;
 
 /// The interface between lookups and the Nexus datastore.
 #[async_trait::async_trait]
@@ -48,5 +49,40 @@ where
 // If a more natural location becomes available in the future, consider moving
 // these aliases there.
 pub type DbConnection = DTraceConnection<PgConnection>;
-pub type DataStoreConnection =
-    qorb::claim::Handle<async_bb8_diesel::Connection<DbConnection>>;
+pub type AsyncConnection = async_bb8_diesel::Connection<DbConnection>;
+
+pub struct DataStoreConnection {
+    inner: qorb::claim::Handle<AsyncConnection>,
+
+    // `DataStoreConnection` is used by various packages that we'd like to not
+    // depend on `nexus-db-queries` (in order to parallelize compilation).
+    // However, we need to do some datastore-specific work around the lifecycle
+    // of this object (i.e., when it gets instantiated and when it gets
+    // dropped).  To achieve this, the caller in `nexus-db-queries` provides a
+    // `releaser` whose sole purpose is to be dropped when this object is
+    // dropped, allowing it to do the needed cleanup there.
+    #[allow(dead_code)]
+    releaser: Box<dyn Any + Send + Sync + 'static>,
+}
+
+impl DataStoreConnection {
+    pub fn new(
+        inner: qorb::claim::Handle<AsyncConnection>,
+        releaser: Box<dyn Any + Send + Sync + 'static>,
+    ) -> DataStoreConnection {
+        DataStoreConnection { inner, releaser }
+    }
+}
+
+impl std::ops::Deref for DataStoreConnection {
+    type Target = AsyncConnection;
+    fn deref(&self) -> &Self::Target {
+        self.inner.deref()
+    }
+}
+
+impl std::ops::DerefMut for DataStoreConnection {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.deref_mut()
+    }
+}

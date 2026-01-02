@@ -15,6 +15,7 @@ use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
@@ -32,7 +33,6 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
@@ -105,11 +105,15 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
-    let base_disk: Disk = NexusRequest::new(
+    let base_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&base_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -145,11 +149,13 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
             )),
+            cpu_platform: None,
             disks: Vec::new(),
             external_ips: vec![],
             start: true,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
         },
     )
     .await;
@@ -214,11 +220,15 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
-    let base_disk: Disk = NexusRequest::new(
+    let base_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&base_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -233,7 +243,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     // Assert disk is detached
     let disk_url =
         format!("/v1/disks/{}?project={}", base_disk_name, PROJECT_NAME);
-    let disk: Disk = NexusRequest::object_get(client, &disk_url)
+    let disk: external::Disk = NexusRequest::object_get(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -265,7 +275,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     // Assert disk is still detached
     let disk_url =
         format!("/v1/disks/{}?project={}", base_disk_name, PROJECT_NAME);
-    let disk: Disk = NexusRequest::object_get(client, &disk_url)
+    let disk: external::Disk = NexusRequest::object_get(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -311,11 +321,15 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
-    let base_disk: Disk = NexusRequest::new(
+    let base_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&base_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -351,11 +365,13 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
             )),
+            cpu_platform: None,
             disks: Vec::new(),
             external_ips: vec![],
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
         },
     )
     .await;
@@ -399,13 +415,15 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
 
-    let base_disk: Disk = NexusRequest::new(
+    let base_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&base_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -460,13 +478,15 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
             name: snap_disk_name.clone(),
             description: String::from("snapshot of 'sells rainsticks'"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
 
-    let _snap_disk: Disk = NexusRequest::new(
+    let _snap_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&snap_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -580,7 +600,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
 
-                gen: db::model::Generation::new(),
+                generation: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
                 block_size: db::model::BlockSize::AdvancedFormat,
 
@@ -603,8 +623,10 @@ async fn test_reject_creating_disk_from_snapshot(
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(
@@ -635,8 +657,10 @@ async fn test_reject_creating_disk_from_snapshot(
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
@@ -668,8 +692,10 @@ async fn test_reject_creating_disk_from_snapshot(
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(
@@ -733,7 +759,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
 
-                gen: db::model::Generation::new(),
+                generation: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
                 block_size: db::model::BlockSize::AdvancedFormat,
 
@@ -765,8 +791,10 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(
@@ -829,7 +857,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
 
-                gen: db::model::Generation::new(),
+                generation: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
                 block_size: db::model::BlockSize::AdvancedFormat,
 
@@ -854,8 +882,10 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
                     description: String::from("stolen disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
@@ -889,8 +919,10 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -960,11 +992,15 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
-    let _base_disk: Disk = NexusRequest::new(
+    let _base_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&base_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -1047,7 +1083,7 @@ async fn test_create_snapshot_record_idempotent(
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
 
-        gen: db::model::Generation::new(),
+        generation: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
         block_size: db::model::BlockSize::Traditional,
         size: external::ByteCount::try_from(1024u32).unwrap().into(),
@@ -1098,7 +1134,7 @@ async fn test_create_snapshot_record_idempotent(
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
 
-        gen: db::model::Generation::new(),
+        generation: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
         block_size: db::model::BlockSize::Traditional,
         size: external::ByteCount::try_from(1024u32).unwrap().into(),
@@ -1125,7 +1161,7 @@ async fn test_create_snapshot_record_idempotent(
         .project_snapshot_update_state(
             &opctx,
             &authz_snapshot,
-            db_snapshot.gen,
+            db_snapshot.generation,
             db::model::SnapshotState::Ready,
         )
         .await
@@ -1199,7 +1235,7 @@ async fn test_create_snapshot_record_idempotent(
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
 
-        gen: db::model::Generation::new(),
+        generation: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
         block_size: db::model::BlockSize::Traditional,
         size: external::ByteCount::try_from(1024u32).unwrap().into(),
@@ -1253,13 +1289,15 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
 
-    let base_disk: Disk = NexusRequest::new(
+    let base_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&base_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -1480,11 +1518,14 @@ async fn test_region_allocation_for_snapshot(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
+
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk_id)
         .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -1678,8 +1719,8 @@ async fn test_snapshot_expunge(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Expunge the sled
-    let int_client = &cptestctx.internal_client;
-    int_client
+    cptestctx
+        .lockstep_client
         .make_request(
             Method::POST,
             "/sleds/expunge",

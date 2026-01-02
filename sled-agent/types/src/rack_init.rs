@@ -11,7 +11,6 @@ use std::{
 
 use anyhow::{Result, bail};
 use camino::{Utf8Path, Utf8PathBuf};
-pub use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use omicron_common::{
     address::{
         AZ_PREFIX, IpRange, Ipv6Subnet, RACK_PREFIX, SLED_PREFIX, get_64_subnet,
@@ -23,6 +22,7 @@ use omicron_common::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+pub use sled_agent_types_versions::latest::rack_init::*;
 use sled_hardware_types::Baseboard;
 
 /// Structures and routines used to maintain backwards compatibility.  The
@@ -95,6 +95,7 @@ pub mod back_compat {
             })
         }
     }
+
     impl From<RackInitializeRequestV1> for RackInitializeRequest {
         fn from(v1: RackInitializeRequestV1) -> Self {
             RackInitializeRequest {
@@ -298,19 +299,18 @@ impl RackInitializeRequest {
     pub fn from_toml_with_fallback(
         data: &str,
     ) -> Result<RackInitializeRequest> {
-        let v2_err = match toml::from_str::<RackInitializeRequest>(&data) {
-            Ok(req) => return Ok(req),
-            Err(e) => e,
-        };
-        if let Ok(v1) =
-            toml::from_str::<back_compat::RackInitializeRequestV1>(&data)
-        {
-            return Ok(v1.into());
-        }
-
-        // If we fail to parse the request as any known version, we return the
-        // error corresponding to the parse failure of the newest schema.
-        Err(v2_err.into())
+        // Note that if we fail to parse the request as any known
+        // version, we return the error corresponding to the parse
+        // failure for the newest schema.
+        toml::from_str::<RackInitializeRequest>(&data).or_else(
+            |latest_version_err| match toml::from_str::<
+                back_compat::RackInitializeRequestV1,
+            >(&data)
+            {
+                Ok(v1) => Ok(v1.into()),
+                Err(_v1_err) => Err(latest_version_err.into()),
+            },
+        )
     }
 
     /// Return a configuration suitable for testing.
@@ -375,7 +375,7 @@ impl std::fmt::Debug for RackInitializeRequest {
         // If you find a compiler error here, and you just added a field to this
         // struct, be sure to add it to the Debug impl below!
         let RackInitializeRequest {
-            trust_quorum_peers: trust_qurorum_peers,
+            trust_quorum_peers,
             bootstrap_discovery,
             ntp_servers,
             dns_servers,
@@ -389,7 +389,7 @@ impl std::fmt::Debug for RackInitializeRequest {
         } = &self;
 
         f.debug_struct("RackInitializeRequest")
-            .field("trust_quorum_peers", trust_qurorum_peers)
+            .field("trust_quorum_peers", trust_quorum_peers)
             .field("bootstrap_discovery", bootstrap_discovery)
             .field("ntp_servers", ntp_servers)
             .field("dns_servers", dns_servers)
@@ -404,6 +404,21 @@ impl std::fmt::Debug for RackInitializeRequest {
             .field("rack_network_config", rack_network_config)
             .field("allowed_source_ips", allowed_source_ips)
             .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RackInitializeRequestParams {
+    pub rack_initialize_request: RackInitializeRequest,
+    pub skip_timesync: bool,
+}
+
+impl RackInitializeRequestParams {
+    pub fn new(
+        rack_initialize_request: RackInitializeRequest,
+        skip_timesync: bool,
+    ) -> RackInitializeRequestParams {
+        RackInitializeRequestParams { rack_initialize_request, skip_timesync }
     }
 }
 

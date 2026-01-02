@@ -17,6 +17,7 @@ mod alert_delivery_state;
 mod alert_delivery_trigger;
 mod alert_subscription;
 mod allow_list;
+mod audit_log;
 mod bfd;
 mod bgp;
 mod block_size;
@@ -34,27 +35,38 @@ mod device_auth;
 mod digest;
 mod disk;
 mod disk_state;
+mod disk_type_crucible;
+mod disk_type_local_storage;
 mod dns;
 mod downstairs;
+pub mod ereport;
+mod ereporter_type;
 mod external_ip;
+pub mod fm;
 mod generation;
 mod identity_provider;
 mod image;
 mod instance;
 mod instance_auto_restart_policy;
 mod instance_cpu_count;
+mod instance_cpu_platform;
 mod instance_intended_state;
 mod instance_state;
 mod internet_gateway;
 mod inventory;
 mod ip_pool;
+mod ipnet;
+pub mod ipv4;
 mod ipv4net;
 pub mod ipv6;
 mod ipv6net;
 mod l4_port_range;
+mod local_storage;
+mod local_storage_dataset_allocation;
 mod macaddr;
 mod migration;
 mod migration_state;
+mod multicast_group;
 mod name;
 mod network_interface;
 mod oximeter_info;
@@ -66,13 +78,16 @@ mod physical_disk_state;
 mod probe;
 mod producer_endpoint;
 mod project;
+mod reconfigurator_config;
 mod rendezvous_debug_dataset;
+mod scim_client_bearer_token;
 mod semver_version;
 mod serde_time_delta;
 mod silo_auth_settings;
 mod switch_interface;
 mod switch_port;
 mod target_release;
+mod trust_quorum;
 mod v2p_mapping;
 mod vmm_state;
 mod webhook_delivery;
@@ -82,7 +97,7 @@ mod webhook_rx;
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
 mod deployment;
-mod ipv4_nat_entry;
+pub mod nat_entry;
 mod omicron_zone_config;
 mod quota;
 mod rack;
@@ -93,7 +108,6 @@ mod region_snapshot;
 mod region_snapshot_replacement;
 mod region_snapshot_replacement_step;
 mod role_assignment;
-mod role_builtin;
 pub mod saga_types;
 mod schema_versions;
 mod service_kind;
@@ -102,6 +116,7 @@ mod silo_group;
 mod silo_user;
 mod silo_user_password_hash;
 mod sled;
+mod sled_cpu_family;
 mod sled_instance;
 mod sled_policy;
 mod sled_resource_vmm;
@@ -116,10 +131,12 @@ mod typed_uuid;
 mod unsigned;
 mod upstairs_repair;
 mod user_builtin;
+mod user_data_export;
 mod utilization;
 mod virtual_provisioning_collection;
 mod virtual_provisioning_resource;
 mod vmm;
+mod vmm_cpu_platform;
 mod vni;
 mod volume;
 mod volume_repair;
@@ -149,6 +166,7 @@ pub use alert_delivery_state::*;
 pub use alert_delivery_trigger::*;
 pub use alert_subscription::*;
 pub use allow_list::*;
+pub use audit_log::*;
 pub use bfd::*;
 pub use bgp::*;
 pub use block_size::*;
@@ -167,28 +185,39 @@ pub use device_auth::*;
 pub use digest::*;
 pub use disk::*;
 pub use disk_state::*;
+pub use disk_type_crucible::*;
+pub use disk_type_local_storage::*;
 pub use dns::*;
 pub use downstairs::*;
+pub use ereport::Ereport;
+pub use ereporter_type::*;
 pub use external_ip::*;
+pub use fm::{SitrepMetadata, SitrepVersion};
 pub use generation::*;
 pub use identity_provider::*;
 pub use image::*;
 pub use instance::*;
 pub use instance_auto_restart_policy::*;
 pub use instance_cpu_count::*;
+pub use instance_cpu_platform::*;
 pub use instance_intended_state::*;
 pub use instance_state::*;
 pub use internet_gateway::*;
 pub use inventory::*;
 pub use ip_pool::*;
-pub use ipv4_nat_entry::*;
+pub use ipnet::*;
+pub use ipv4::*;
 pub use ipv4net::*;
 pub use ipv6::*;
 pub use ipv6net::*;
 pub use l4_port_range::*;
+pub use local_storage::*;
+pub use local_storage_dataset_allocation::*;
 pub use migration::*;
 pub use migration_state::*;
+pub use multicast_group::*;
 pub use name::*;
+pub use nat_entry::*;
 pub use network_interface::*;
 pub use oximeter_info::*;
 pub use oximeter_read_policy::*;
@@ -201,6 +230,7 @@ pub use producer_endpoint::*;
 pub use project::*;
 pub use quota::*;
 pub use rack::*;
+pub use reconfigurator_config::*;
 pub use region::*;
 pub use region_replacement::*;
 pub use region_replacement_step::*;
@@ -209,9 +239,9 @@ pub use region_snapshot_replacement::*;
 pub use region_snapshot_replacement_step::*;
 pub use rendezvous_debug_dataset::*;
 pub use role_assignment::*;
-pub use role_builtin::*;
 pub use saga_types::*;
 pub use schema_versions::*;
+pub use scim_client_bearer_token::*;
 pub use semver_version::*;
 pub use service_kind::*;
 pub use silo::*;
@@ -220,6 +250,7 @@ pub use silo_group::*;
 pub use silo_user::*;
 pub use silo_user_password_hash::*;
 pub use sled::*;
+pub use sled_cpu_family::*;
 pub use sled_instance::*;
 pub use sled_policy::to_db_sled_policy; // Do not expose DbSledPolicy
 pub use sled_resource_vmm::*;
@@ -232,15 +263,19 @@ pub use switch::*;
 pub use switch_interface::*;
 pub use switch_port::*;
 pub use target_release::*;
+pub use trust_quorum::*;
 pub use tuf_repo::*;
+pub use typed_uuid::DbTypedUuid;
 pub use typed_uuid::to_db_typed_uuid;
 pub use upstairs_repair::*;
 pub use user_builtin::*;
+pub use user_data_export::*;
 pub use utilization::*;
 pub use v2p_mapping::*;
 pub use virtual_provisioning_collection::*;
 pub use virtual_provisioning_resource::*;
 pub use vmm::*;
+pub use vmm_cpu_platform::*;
 pub use vmm_state::*;
 pub use vni::*;
 pub use volume::*;
@@ -423,7 +458,7 @@ pub(crate) use impl_from_sql_text;
 pub trait DatabaseString: Sized {
     type Error: std::fmt::Display;
 
-    fn to_database_string(&self) -> Cow<str>;
+    fn to_database_string(&self) -> Cow<'_, str>;
     fn from_database_string(s: &str) -> Result<Self, Self::Error>;
 }
 
@@ -436,7 +471,7 @@ use std::borrow::Cow;
 impl DatabaseString for FleetRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         match self {
             FleetRole::Admin => "admin",
             FleetRole::Collaborator => "collaborator",
@@ -461,10 +496,11 @@ impl DatabaseString for FleetRole {
 impl DatabaseString for SiloRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         match self {
             SiloRole::Admin => "admin",
             SiloRole::Collaborator => "collaborator",
+            SiloRole::LimitedCollaborator => "limited-collaborator",
             SiloRole::Viewer => "viewer",
         }
         .into()
@@ -477,6 +513,7 @@ impl DatabaseString for SiloRole {
         match s {
             "admin" => Ok(SiloRole::Admin),
             "collaborator" => Ok(SiloRole::Collaborator),
+            "limited-collaborator" => Ok(SiloRole::LimitedCollaborator),
             "viewer" => Ok(SiloRole::Viewer),
             _ => Err(anyhow!("unsupported Silo role from database: {:?}", s)),
         }
@@ -486,10 +523,11 @@ impl DatabaseString for SiloRole {
 impl DatabaseString for ProjectRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         match self {
             ProjectRole::Admin => "admin",
             ProjectRole::Collaborator => "collaborator",
+            ProjectRole::LimitedCollaborator => "limited-collaborator",
             ProjectRole::Viewer => "viewer",
         }
         .into()
@@ -502,6 +540,7 @@ impl DatabaseString for ProjectRole {
         match s {
             "admin" => Ok(ProjectRole::Admin),
             "collaborator" => Ok(ProjectRole::Collaborator),
+            "limited-collaborator" => Ok(ProjectRole::LimitedCollaborator),
             "viewer" => Ok(ProjectRole::Viewer),
             _ => {
                 Err(anyhow!("unsupported Project role from database: {:?}", s))

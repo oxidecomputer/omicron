@@ -6,21 +6,26 @@
 //! blueprints.
 
 use super::AddNetworkResourceError;
+use super::Blueprint;
+use super::BlueprintZoneImageSource;
 use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
 use super::OmicronZoneNic;
+use crate::deployment::PlannerConfig;
 use crate::external_api::views::PhysicalDiskPolicy;
 use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
-use crate::inventory::BaseboardId;
 use chrono::DateTime;
+use chrono::TimeDelta;
 use chrono::Utc;
 use clap::ValueEnum;
 use daft::Diffable;
 use ipnetwork::IpNetwork;
 use omicron_common::address::IpRange;
+use omicron_common::address::Ipv4Range;
+use omicron_common::address::Ipv6Range;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
@@ -28,6 +33,7 @@ use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
+use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -35,12 +41,43 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;
 use std::error;
 use std::fmt;
+use std::net::IpAddr;
+use std::sync::Arc;
 use strum::Display;
 use strum::IntoEnumIterator;
+
+/// Amount of time we're willing to let an MGS-managed update sit in an
+/// "impossible preconditions" state waiting for it to settle.
+///
+/// A typical update flow looks something like this:
+///
+/// 1. Target device has active version A, inactive version B
+/// 2. We generate a blueprint containing an MGS-managed update with
+///    preconditions on active A + inactive B
+/// 3. We start the update process
+/// 4. If we generate an inventory collection at this point, we'll see
+///    "inactive version invalid", because we've started to overwrite it. This
+///    makes the update impossible due to the precondition on "inactive version
+///    B", so we want to replace the pending update details with a new one with
+///    precondition "inactive version invalid". But in most cases, the inactive
+///    version is only temporarily invalid, because it's actively being updated!
+///
+/// We have to be willing to reevaluate MGS updates that have become impossible
+/// eventually to handle cases like the rack losing power mid-update and leaving
+/// the inactive slot with "version invalid" indefinitely. But we don't want to
+/// churn on blueprints in the common case of "the preconditions are invalid
+/// because we're actively updating". This can also cause thrashing where
+/// competing Nexuses looking at different inventory collections believe the
+/// preconditions are impossible in different ways. See
+/// <https://github.com/oxidecomputer/omicron/issues/8483> for examples.
+const MGS_UPDATE_SETTLE_TIMEOUT: TimeDelta = TimeDelta::minutes(5);
 
 /// Policy and database inputs to the Reconfigurator planner
 ///
@@ -60,6 +97,9 @@ use strum::IntoEnumIterator;
 ///   zone.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningInput {
+    /// current target blueprint, used as the parent in the next planning run
+    parent_blueprint: Arc<Blueprint>,
+
     /// fleet-wide policy
     policy: Policy,
 
@@ -80,9 +120,39 @@ pub struct PlanningInput {
 
     /// per-zone network resources
     network_resources: OmicronZoneNetworkResources,
+
+    /// age required to reevaluate impossible MGS updates
+    ///
+    /// MGS-driven updates include preconditions that must be satisfied for the
+    /// update to proceed (and must be met to be considered "possible"). While
+    /// an update is running, the state of the target device changes in a way
+    /// that breaks these preconditions. To avoid churning and replanning /
+    /// reevaluating MGS updates, we set an age at which we'll replace
+    /// impossible updates; the planner will _ignore_ updates newer than this
+    /// mark under the assumption that they may appear to be impossible because
+    /// they're currently in progress.
+    ignore_impossible_mgs_updates_since: DateTime<Utc>,
+
+    /// IDs of the currently running Nexus zones
+    ///
+    /// This is used to determine which Nexus instances are currently in
+    /// control, which is needed for safe shutdown decisions during handoff.
+    active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+
+    /// IDs of the about-to-be-running Nexus zones
+    ///
+    /// This is used to identify when it is safe to bump the top-level Nexus
+    /// Generation number in the blueprint, which triggers active Nexuses to
+    /// quiesce.
+    not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
 }
 
 impl PlanningInput {
+    /// parent blueprint
+    pub fn parent_blueprint(&self) -> &Arc<Blueprint> {
+        &self.parent_blueprint
+    }
+
     /// current internal DNS version
     pub fn internal_dns_version(&self) -> Generation {
         self.internal_dns_version
@@ -154,16 +224,20 @@ impl PlanningInput {
             .unwrap_or(0)
     }
 
-    pub fn tuf_repo(&self) -> Option<&TufRepoDescription> {
-        self.policy.tuf_repo.as_ref()
+    pub fn tuf_repo(&self) -> &TufRepoPolicy {
+        &self.policy.tuf_repo
     }
 
-    pub fn old_repo(&self) -> Option<&TufRepoDescription> {
-        self.policy.old_repo.as_ref()
+    pub fn old_repo(&self) -> &TufRepoPolicy {
+        &self.policy.old_repo
     }
 
-    pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
-        &self.policy.service_ip_pool_ranges
+    pub fn planner_config(&self) -> &PlannerConfig {
+        &self.policy.planner_config
+    }
+
+    pub fn external_ip_policy(&self) -> &ExternalIpPolicy {
+        &self.policy.external_ips
     }
 
     pub fn clickhouse_cluster_enabled(&self) -> bool {
@@ -191,6 +265,16 @@ impl PlanningInput {
 
     pub fn oximeter_single_node_read_enabled(&self) -> bool {
         self.policy.oximeter_read_policy.mode.single_node_enabled()
+    }
+
+    /// ID of the currently running Nexus zones
+    pub fn active_nexus_zones(&self) -> &BTreeSet<OmicronZoneUuid> {
+        &self.active_nexus_zones
+    }
+
+    /// ID of the soon-to-be-running Nexus zones
+    pub fn not_yet_nexus_zones(&self) -> &BTreeSet<OmicronZoneUuid> {
+        &self.not_yet_nexus_zones
     }
 
     pub fn all_sleds(
@@ -253,18 +337,27 @@ impl PlanningInput {
         &self.network_resources
     }
 
+    pub fn ignore_impossible_mgs_updates_since(&self) -> DateTime<Utc> {
+        self.ignore_impossible_mgs_updates_since
+    }
+
     /// Convert this `PlanningInput` back into a [`PlanningInputBuilder`]
     ///
     /// This is primarily useful for tests that want to mutate an existing
     /// [`PlanningInput`].
     pub fn into_builder(self) -> PlanningInputBuilder {
         PlanningInputBuilder {
+            parent_blueprint: self.parent_blueprint,
             policy: self.policy,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
             cockroachdb_settings: self.cockroachdb_settings,
             sleds: self.sleds,
             network_resources: self.network_resources,
+            ignore_impossible_mgs_updates_since: self
+                .ignore_impossible_mgs_updates_since,
+            active_nexus_zones: self.active_nexus_zones,
+            not_yet_nexus_zones: self.not_yet_nexus_zones,
         }
     }
 }
@@ -401,6 +494,7 @@ impl CockroachDbSettings {
     JsonSchema,
     Diffable,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum CockroachDbClusterVersion {
     #[display("22.1")]
     V22_1,
@@ -443,6 +537,7 @@ impl CockroachDbClusterVersion {
     Diffable,
 )]
 #[serde(tag = "action", content = "data", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum CockroachDbPreserveDowngrade {
     /// Do not modify the setting.
     DoNotModify,
@@ -893,9 +988,9 @@ impl SledState {
 /// sled additionally has non-policy [`SledResources`] needed for planning.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
-    /// ranges specified by the IP pool for externally-visible control plane
+    /// description of IP addresses for externally-visible control plane
     /// services (e.g., external DNS, Nexus, boundary NTP)
-    pub service_ip_pool_ranges: Vec<IpRange>,
+    pub external_ips: ExternalIpPolicy,
 
     /// desired total number of deployed Boundary NTP zones
     pub target_boundary_ntp_zone_count: usize,
@@ -942,13 +1037,316 @@ pub struct Policy {
     /// New zones may use artifacts in this repo as their image sources,
     /// and at most one extant zone may be modified to use it or replaced
     /// with one that does.
-    pub tuf_repo: Option<TufRepoDescription>,
+    pub tuf_repo: TufRepoPolicy,
 
     /// Previous system software release repository.
     ///
+    /// On initial system deployment, both `tuf_repo` and `old_repo` will be set
+    /// to `TufRepoPolicy::initial()` (the special TUF repo policy for "we don't
+    /// have a TUF repo yet"). After one target release has been set, `tuf_repo`
+    /// will reflect that target release and `old_repo` will still be
+    /// `TufRepoPolicy::initial()`. Once two or more target releases have been
+    /// set, `old_repo` will contain "the previous target release" behind
+    /// whatever value is in `tuf_repo`.
+    ///
     /// New zones deployed mid-update may use artifacts in this repo as
     /// their image sources. See RFD 565 §9.
-    pub old_repo: Option<TufRepoDescription>,
+    pub old_repo: TufRepoPolicy,
+
+    /// Runtime configuration (feature flags) to control planner behavior.
+    pub planner_config: PlannerConfig,
+}
+
+/// Subset of [`Policy`] specific to external IP addresses.
+///
+/// Today, this type encompasses three logical parts of a policy:
+///
+/// * A single IPv4 service IP pool, made up of 0 or more ranges.
+/// * A single IPv6 service IP pool, made up of 0 or more ranges.
+/// * A set of external DNS IP addresses, each of which must be present in one
+///   of the two service IP pools.
+///
+/// This is slightly more general than what deployed racks actually have: they
+/// all only populate the IPv4 service pool and external DNS IP addresses. But
+/// `#[nexus_test]` uses all of the above, and this a step in the direction
+/// we're moving where we will have more than one service IP pool (see
+/// <https://github.com/oxidecomputer/omicron/issues/8945>).
+// NOTE: The fields of the struct are private and we manually implement
+// `Deserialize` to maintain invariants (e.g., that every `external_dns_ip` is
+// contained in one of the service pool ranges).
+#[derive(Debug, Clone, Serialize)]
+pub struct ExternalIpPolicy {
+    service_pool_ipv4_ranges: Vec<Ipv4Range>,
+    service_pool_ipv6_ranges: Vec<Ipv6Range>,
+    external_dns_ips: BTreeSet<IpAddr>,
+}
+
+impl<'de> Deserialize<'de> for ExternalIpPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        // The fields of `ExternalIpPolicyShadow` should exactly match the
+        // fields of `ExternalIpPolicy`. We're not really using serde's remote
+        // derive, but by adding the attribute we get compile-time checking that
+        // all the field names and types match. (It doesn't check the _order_,
+        // but that should be fine as long as we're using JSON or similar
+        // formats.)
+        #[derive(Deserialize)]
+        #[serde(remote = "ExternalIpPolicy")]
+        struct ExternalIpPolicyShadow {
+            service_pool_ipv4_ranges: Vec<Ipv4Range>,
+            service_pool_ipv6_ranges: Vec<Ipv6Range>,
+            external_dns_ips: BTreeSet<IpAddr>,
+        }
+
+        // Deserialize without validation...
+        let ExternalIpPolicy {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        } = ExternalIpPolicyShadow::deserialize(deserializer)?;
+
+        // ...then validate by going through the builder.
+        let mut builder = ExternalIpPolicy::builder();
+        for r in service_pool_ipv4_ranges {
+            builder
+                .push_service_pool_ipv4_range(r)
+                .map_err(D::Error::custom)?;
+        }
+        for r in service_pool_ipv6_ranges {
+            builder
+                .push_service_pool_ipv6_range(r)
+                .map_err(D::Error::custom)?;
+        }
+        for ip in external_dns_ips {
+            builder.add_external_dns_ip(ip).map_err(D::Error::custom)?;
+        }
+
+        Ok(builder.build())
+    }
+}
+
+impl ExternalIpPolicy {
+    pub fn empty() -> Self {
+        Self {
+            service_pool_ipv4_ranges: Vec::new(),
+            service_pool_ipv6_ranges: Vec::new(),
+            external_dns_ips: BTreeSet::new(),
+        }
+    }
+
+    /// Construct an `ExternalIpPolicy` containing a single service IP pool
+    /// range and no external DNS IPs.
+    ///
+    /// This is used primarily by tests. A single pool with no external DNS IPs
+    /// can be constructed infallibly.
+    pub fn single_pool_no_external_dns(range: IpRange) -> Self {
+        let (service_pool_ipv4_ranges, service_pool_ipv6_ranges) = match range {
+            IpRange::V4(r) => (vec![r], vec![]),
+            IpRange::V6(r) => (vec![], vec![r]),
+        };
+        Self {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips: BTreeSet::new(),
+        }
+    }
+
+    /// Construct an empty [`ExternalIpPolicyBuilder`].
+    pub fn builder() -> ExternalIpPolicyBuilder {
+        ExternalIpPolicyBuilder::new()
+    }
+
+    /// Construct an [`ExternalIpPolicyBuilder`] that contains all of this
+    /// policy's IP pools and external DNS IPs.
+    pub fn into_builder(self) -> ExternalIpPolicyBuilder {
+        let Self {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        } = self;
+        ExternalIpPolicyBuilder {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        }
+    }
+
+    /// Consume this `ExternalIpPolicy`, returning an iterator over all IPs that
+    /// should be used for services other than external DNS (i.e., Nexus and
+    /// boundary NTP).
+    pub fn into_non_external_dns_ips(self) -> impl Iterator<Item = IpAddr> {
+        let Self {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        } = self;
+
+        let v4_ips = service_pool_ipv4_ranges
+            .into_iter()
+            .flat_map(|r| r.iter().map(IpAddr::V4));
+        let v6_ips = service_pool_ipv6_ranges
+            .into_iter()
+            .flat_map(|r| r.iter().map(IpAddr::V6));
+
+        v4_ips.chain(v6_ips).filter(move |ip| !external_dns_ips.contains(ip))
+    }
+
+    /// The set of external IP addresses on which we should run external DNS
+    /// servers.
+    pub fn external_dns_ips(&self) -> &BTreeSet<IpAddr> {
+        &self.external_dns_ips
+    }
+
+    /// Consume this `ExternalIpPolicy`, returning an iterator of all of the
+    /// ranges contained in it.
+    ///
+    /// This destroys all meaningful information (e.g., v4 vs v6 pool; which IPs
+    /// are reserved for external DNS) and should only be used by tests.
+    pub fn into_raw_ranges(self) -> impl Iterator<Item = IpRange> {
+        let v4_ranges =
+            self.service_pool_ipv4_ranges.into_iter().map(IpRange::from);
+        let v6_ranges =
+            self.service_pool_ipv6_ranges.into_iter().map(IpRange::from);
+        v4_ranges.chain(v6_ranges)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ExternalIpPolicyBuilder {
+    service_pool_ipv4_ranges: Vec<Ipv4Range>,
+    service_pool_ipv6_ranges: Vec<Ipv6Range>,
+    external_dns_ips: BTreeSet<IpAddr>,
+}
+
+impl ExternalIpPolicyBuilder {
+    /// Create a new, empty `ExternalIpPolicyBuilder`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a range to either the IPv4 or the IPv6 service pool, depending on
+    /// the variant of `new_range`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `new_range` overlaps an existing range within this builder.
+    pub fn push_service_pool_range(
+        &mut self,
+        new_range: IpRange,
+    ) -> Result<(), ExternalIpPolicyError> {
+        match new_range {
+            IpRange::V4(r) => self.push_service_pool_ipv4_range(r),
+            IpRange::V6(r) => self.push_service_pool_ipv6_range(r),
+        }
+    }
+
+    /// Add a range to the IPv4 service pool.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `new_range` overlaps an existing range within this builder.
+    pub fn push_service_pool_ipv4_range(
+        &mut self,
+        new_range: Ipv4Range,
+    ) -> Result<(), ExternalIpPolicyError> {
+        // Linear scan should be good enough: we don't expect many ranges, and
+        // the check we do for each range is cheap.
+        for &existing_range in &self.service_pool_ipv4_ranges {
+            if existing_range.overlaps(&new_range) {
+                return Err(ExternalIpPolicyError::OverlappingRanges {
+                    new_range: new_range.into(),
+                    existing_range: new_range.into(),
+                });
+            }
+        }
+        self.service_pool_ipv4_ranges.push(new_range);
+        Ok(())
+    }
+
+    /// Add a range to the IPv6 service pool.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `new_range` overlaps an existing range within this builder.
+    pub fn push_service_pool_ipv6_range(
+        &mut self,
+        new_range: Ipv6Range,
+    ) -> Result<(), ExternalIpPolicyError> {
+        // Linear scan should be good enough: we don't expect many ranges, and
+        // the check we do for each range is cheap.
+        for &existing_range in &self.service_pool_ipv6_ranges {
+            if existing_range.overlaps(&new_range) {
+                return Err(ExternalIpPolicyError::OverlappingRanges {
+                    new_range: new_range.into(),
+                    existing_range: new_range.into(),
+                });
+            }
+        }
+        self.service_pool_ipv6_ranges.push(new_range);
+        Ok(())
+    }
+
+    /// Mark an IP as exclusively for the use of external DNS.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the requested IP is _not_ covered by an existing service IP
+    /// pool range.
+    // TODO-correctness The fact that external DNS IPs are not special or
+    // distinct from the general service IP pools is a little confusing, and it
+    // would be nice to clean that up eventually. We may need to do that as a
+    // part of the work to move to multiple service pools.
+    pub fn add_external_dns_ip(
+        &mut self,
+        ip: IpAddr,
+    ) -> Result<(), ExternalIpPolicyError> {
+        let contained_in_pool = match ip {
+            IpAddr::V4(ip) => {
+                self.service_pool_ipv4_ranges.iter().any(|r| r.contains(ip))
+            }
+            IpAddr::V6(ip) => {
+                self.service_pool_ipv6_ranges.iter().any(|r| r.contains(ip))
+            }
+        };
+        if contained_in_pool {
+            self.external_dns_ips.insert(ip);
+            Ok(())
+        } else {
+            Err(ExternalIpPolicyError::ExternalDnsOutsideServiceIpPools(ip))
+        }
+    }
+
+    pub fn build(self) -> ExternalIpPolicy {
+        let Self {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        } = self;
+        ExternalIpPolicy {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ExternalIpPolicyError {
+    #[error(
+        "external IP policy cannot have overlapping IP ranges: \
+         new range [{}, {}] overlaps existing range [{}, {}]",
+        new_range.first_address(),
+        new_range.last_address(),
+        existing_range.first_address(),
+        existing_range.last_address(),
+    )]
+    OverlappingRanges { new_range: IpRange, existing_range: IpRange },
+    #[error("external DNS IP {0} is not a member of any service IP pool")]
+    ExternalDnsOutsideServiceIpPools(IpAddr),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -970,11 +1368,105 @@ impl OximeterReadPolicy {
     }
 }
 
+/// TUF repo-related policy that's part of the planning input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TufRepoPolicy {
+    /// The generation of the target release for the TUF repo.
+    pub target_release_generation: Generation,
+
+    /// A description of the target release.
+    pub description: TargetReleaseDescription,
+}
+
+impl TufRepoPolicy {
+    /// Returns the initial TUF repo policy for an Oxide deployment:
+    ///
+    /// * The target release generation is 1.
+    /// * There is no target release.
+    #[inline]
+    pub fn initial() -> Self {
+        Self {
+            target_release_generation: Generation::new(),
+            description: TargetReleaseDescription::Initial,
+        }
+    }
+
+    #[inline]
+    pub fn description(&self) -> &TargetReleaseDescription {
+        &self.description
+    }
+}
+
+/// Source of artifacts for a given target release.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TargetReleaseDescription {
+    /// The initial release source for an Oxide deployment, before any TUF repo
+    /// has been provided for upgrades.
+    Initial,
+
+    /// A TUF repo: this is the target release once an Oxide deployment has
+    /// undergone operator-driven updates.
+    TufRepo(TufRepoDescription),
+}
+
+impl TargetReleaseDescription {
+    pub fn tuf_repo(&self) -> Option<&TufRepoDescription> {
+        match self {
+            Self::Initial => None,
+            Self::TufRepo(tuf_repo) => Some(tuf_repo),
+        }
+    }
+
+    pub fn zone_image_source(
+        &self,
+        zone_kind: ZoneKind,
+    ) -> Result<BlueprintZoneImageSource, TufRepoContentsError> {
+        match self {
+            Self::Initial => Ok(BlueprintZoneImageSource::InstallDataset),
+            Self::TufRepo(tuf_repo) => {
+                // We should have exactly one artifact for a given zone kind in
+                // every TUF repo; return an error if we have 0 or more than 1.
+                let mut matching_artifacts =
+                    tuf_repo.artifacts.iter().filter(|artifact| {
+                        zone_kind.is_control_plane_zone_artifact(&artifact.id)
+                    });
+                let artifact = matching_artifacts
+                    .next()
+                    .ok_or(TufRepoContentsError::MissingZoneKind(zone_kind))?;
+                if let Some(extra_artifact) = matching_artifacts.next() {
+                    return Err(
+                        TufRepoContentsError::MultipleArtifactsSameZoneKind {
+                            artifact1: artifact.id.clone(),
+                            artifact2: extra_artifact.id.clone(),
+                        },
+                    );
+                }
+                Ok(BlueprintZoneImageSource::from_available_artifact(artifact))
+            }
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum TufRepoContentsError {
+    #[error("TUF repo is missing an artifact for zone kind {0:?}")]
+    MissingZoneKind(ZoneKind),
+    #[error(
+        "TUF repo contains 2 or more artifacts for the same zone kind: \
+         {artifact1:?}, {artifact2:?}"
+    )]
+    MultipleArtifactsSameZoneKind {
+        artifact1: ArtifactId,
+        artifact2: ArtifactId,
+    },
+}
+
 /// Where oximeter should read from
 #[derive(
     Debug,
     Display,
     Clone,
+    Copy,
     Serialize,
     Deserialize,
     JsonSchema,
@@ -1096,54 +1588,38 @@ pub enum PlanningInputBuildError {
 /// Constructor for [`PlanningInput`].
 #[derive(Clone, Debug)]
 pub struct PlanningInputBuilder {
+    parent_blueprint: Arc<Blueprint>,
     policy: Policy,
     internal_dns_version: Generation,
     external_dns_version: Generation,
     cockroachdb_settings: CockroachDbSettings,
     sleds: BTreeMap<SledUuid, SledDetails>,
     network_resources: OmicronZoneNetworkResources,
+    ignore_impossible_mgs_updates_since: DateTime<Utc>,
+    active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
 }
 
 impl PlanningInputBuilder {
-    pub fn empty_input() -> PlanningInput {
-        // This empty input is known to be valid.
-        PlanningInput {
-            policy: Policy {
-                service_ip_pool_ranges: Vec::new(),
-                target_boundary_ntp_zone_count: 0,
-                target_nexus_zone_count: 0,
-                target_internal_dns_zone_count: 0,
-                target_oximeter_zone_count: 0,
-                target_cockroachdb_zone_count: 0,
-                target_cockroachdb_cluster_version:
-                    CockroachDbClusterVersion::POLICY,
-                target_crucible_pantry_zone_count: 0,
-                clickhouse_policy: None,
-                oximeter_read_policy: OximeterReadPolicy::new(1),
-                tuf_repo: None,
-                old_repo: None,
-            },
-            internal_dns_version: Generation::new(),
-            external_dns_version: Generation::new(),
-            cockroachdb_settings: CockroachDbSettings::empty(),
-            sleds: BTreeMap::new(),
-            network_resources: OmicronZoneNetworkResources::new(),
-        }
-    }
-
     pub fn new(
+        parent_blueprint: Arc<Blueprint>,
         policy: Policy,
         internal_dns_version: Generation,
         external_dns_version: Generation,
         cockroachdb_settings: CockroachDbSettings,
     ) -> Self {
         Self {
+            parent_blueprint,
             policy,
             internal_dns_version,
             external_dns_version,
             cockroachdb_settings,
             sleds: BTreeMap::new(),
             network_resources: OmicronZoneNetworkResources::new(),
+            ignore_impossible_mgs_updates_since: Utc::now()
+                - MGS_UPDATE_SETTLE_TIMEOUT,
+            active_nexus_zones: BTreeSet::new(),
+            not_yet_nexus_zones: BTreeSet::new(),
         }
     }
 
@@ -1225,6 +1701,13 @@ impl PlanningInputBuilder {
         self.external_dns_version = new_version;
     }
 
+    pub fn set_ignore_impossible_mgs_updates_since(
+        &mut self,
+        since: DateTime<Utc>,
+    ) {
+        self.ignore_impossible_mgs_updates_since = since;
+    }
+
     pub fn set_cockroachdb_settings(
         &mut self,
         cockroachdb_settings: CockroachDbSettings,
@@ -1232,14 +1715,33 @@ impl PlanningInputBuilder {
         self.cockroachdb_settings = cockroachdb_settings;
     }
 
+    pub fn set_active_nexus_zones(
+        &mut self,
+        active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    ) {
+        self.active_nexus_zones = active_nexus_zones;
+    }
+
+    pub fn set_not_yet_nexus_zones(
+        &mut self,
+        not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    ) {
+        self.not_yet_nexus_zones = not_yet_nexus_zones;
+    }
+
     pub fn build(self) -> PlanningInput {
         PlanningInput {
+            parent_blueprint: self.parent_blueprint,
             policy: self.policy,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
             cockroachdb_settings: self.cockroachdb_settings,
             sleds: self.sleds,
             network_resources: self.network_resources,
+            ignore_impossible_mgs_updates_since: self
+                .ignore_impossible_mgs_updates_since,
+            active_nexus_zones: self.active_nexus_zones,
+            not_yet_nexus_zones: self.not_yet_nexus_zones,
         }
     }
 }

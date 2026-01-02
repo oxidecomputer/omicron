@@ -1,7 +1,7 @@
 [package]
 name = "dns-service-client"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -11,7 +11,7 @@ workspace = true
 chrono.workspace = true
 expectorate.workspace = true
 http.workspace = true
-internal-dns-types.workspace = true
+internal-dns-types-versions.workspace = true
 progenitor.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
 schemars.workspace = true

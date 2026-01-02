@@ -5,6 +5,7 @@
 use camino::Utf8PathBuf;
 use dropshot::test_util::LogContext;
 use futures::future::BoxFuture;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use nexus_config::NexusConfig;
 use nexus_config::SchemaConfig;
 use nexus_db_lookup::DataStoreConnection;
@@ -19,7 +20,7 @@ use nexus_test_utils::sql::ColumnValue;
 use nexus_test_utils::sql::Row;
 use nexus_test_utils::sql::SqlEnum;
 use nexus_test_utils::sql::process_rows;
-use nexus_test_utils::{ControlPlaneTestContextBuilder, load_test_config};
+use nexus_test_utils::{ControlPlaneStarter, load_test_config};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
@@ -28,7 +29,9 @@ use similar_asserts;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::net::IpAddr;
+use std::str::FromStr;
 use std::sync::Mutex;
 use tokio::time::Duration;
 use tokio::time::timeout;
@@ -42,23 +45,24 @@ const SCHEMA_DIR: &'static str =
 async fn test_setup<'a>(
     config: &'a mut NexusConfig,
     name: &'static str,
-) -> ControlPlaneTestContextBuilder<'a, omicron_nexus::Server> {
-    let mut builder =
-        ControlPlaneTestContextBuilder::<omicron_nexus::Server>::new(
-            name, config,
-        );
+) -> ControlPlaneStarter<'a, omicron_nexus::Server> {
+    let mut starter =
+        ControlPlaneStarter::<omicron_nexus::Server>::new(name, config);
     let populate = false;
-    builder.start_crdb(populate).await;
+    starter.start_crdb(populate).await;
     let schema_dir = Utf8PathBuf::from(SCHEMA_DIR);
-    builder.config.pkg.schema = Some(SchemaConfig { schema_dir });
-    builder.start_internal_dns().await;
-    builder.start_external_dns().await;
-    builder.start_dendrite(SwitchLocation::Switch0).await;
-    builder.start_dendrite(SwitchLocation::Switch1).await;
-    builder.start_mgd(SwitchLocation::Switch0).await;
-    builder.start_mgd(SwitchLocation::Switch1).await;
-    builder.populate_internal_dns().await;
-    builder
+    starter.config.pkg.schema = Some(SchemaConfig { schema_dir });
+    starter.start_internal_dns().await;
+    starter.start_external_dns().await;
+    let sp_conf: Utf8PathBuf = DEFAULT_SP_SIM_CONFIG.into();
+    starter.start_gateway(SwitchLocation::Switch0, None, sp_conf.clone()).await;
+    starter.start_gateway(SwitchLocation::Switch1, None, sp_conf).await;
+    starter.start_dendrite(SwitchLocation::Switch0).await;
+    starter.start_dendrite(SwitchLocation::Switch1).await;
+    starter.start_mgd(SwitchLocation::Switch0).await;
+    starter.start_mgd(SwitchLocation::Switch1).await;
+    starter.populate_internal_dns().await;
+    starter
 }
 
 // Attempts to apply an update as a transaction.
@@ -918,6 +922,12 @@ const VOLUME2: Uuid = Uuid::from_u128(0x2222566f_5c3d_4647_83b0_8f3515da7be1);
 const VOLUME3: Uuid = Uuid::from_u128(0x3333566f_5c3d_4647_83b0_8f3515da7be1);
 const VOLUME4: Uuid = Uuid::from_u128(0x4444566f_5c3d_4647_83b0_8f3515da7be1);
 
+// "566C" -> "VPC". See above on "V".
+const VPC: Uuid = Uuid::from_u128(0x1111566c_5c3d_4647_83b0_8f3515da7be1);
+
+// "7213" -> Firewall "Rule"
+const FW_RULE: Uuid = Uuid::from_u128(0x11117213_5c3d_4647_83b0_8f3515da7be1);
+
 fn before_23_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Create two silos
@@ -1383,10 +1393,12 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                             params::InstanceNetworkInterfaceAttachment::Default,
                         external_ips: vec![],
                         boot_disk: None,
+                        cpu_platform: None,
                         disks: Vec::new(),
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
                     },
                 ))
                 .execute_async(&*pool_and_conn.conn)
@@ -2319,6 +2331,1456 @@ fn after_148_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn before_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Create some fake inventory data to test the zone image resolver migration.
+        // Insert a sled agent record without the new zone image resolver columns.
+        let sled_id = Uuid::new_v4();
+        let inv_collection_id = Uuid::new_v4();
+
+        ctx.client
+            .batch_execute(&format!(
+                "
+        INSERT INTO omicron.public.inv_sled_agent
+          (inv_collection_id, time_collected, source, sled_id, sled_agent_ip,
+           sled_agent_port, sled_role, usable_hardware_threads, usable_physical_ram,
+           reservoir_size, reconciler_status_kind)
+        VALUES
+          ('{inv_collection_id}', now(), 'test-source', '{sled_id}', '192.168.1.1',
+           8080, 'gimlet', 32, 68719476736, 1073741824, 'not-yet-run');
+        ",
+                inv_collection_id = inv_collection_id,
+                sled_id = sled_id
+            ))
+            .await
+            .expect("inserted pre-migration inv_sled_agent data");
+    })
+}
+
+fn after_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Verify that the zone image resolver columns have been added with
+        // correct defaults.
+        let rows = ctx
+            .client
+            .query(
+                "SELECT zone_manifest_boot_disk_path, zone_manifest_source,
+                        zone_manifest_mupdate_id, zone_manifest_boot_disk_error,
+                        mupdate_override_boot_disk_path,
+                        mupdate_override_id, mupdate_override_boot_disk_error
+                 FROM omicron.public.inv_sled_agent
+                 ORDER BY time_collected",
+                &[],
+            )
+            .await
+            .expect("queried post-migration inv_sled_agent data");
+
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        // Check that path fields have the expected default message.
+        let zone_manifest_path: String =
+            row.get("zone_manifest_boot_disk_path");
+        let mupdate_override_path: String =
+            row.get("mupdate_override_boot_disk_path");
+        assert_eq!(zone_manifest_path, "old-collection-data-missing");
+        assert_eq!(mupdate_override_path, "old-collection-data-missing");
+
+        // Check that the zone manifest and mupdate override source fields are
+        // NULL.
+        let zone_manifest_source: Option<AnySqlType> =
+            row.get("zone_manifest_source");
+        assert_eq!(zone_manifest_source, None);
+        let zone_manifest_id: Option<Uuid> =
+            row.get("zone_manifest_mupdate_id");
+        let mupdate_override_id: Option<Uuid> = row.get("mupdate_override_id");
+        assert_eq!(zone_manifest_id, None);
+        assert_eq!(mupdate_override_id, None);
+
+        // Check that error fields have the expected default message.
+        let zone_manifest_error: String =
+            row.get("zone_manifest_boot_disk_error");
+        let mupdate_override_error: String =
+            row.get("mupdate_override_boot_disk_error");
+        assert_eq!(zone_manifest_error, "old collection, data missing");
+        assert_eq!(mupdate_override_error, "old collection, data missing");
+    })
+}
+
+fn before_155_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        use nexus_db_queries::db::fixed_data::project::*;
+        use nexus_db_queries::db::fixed_data::vpc::*;
+        use omicron_common::address::SERVICE_VPC_IPV6_PREFIX;
+
+        // First, create the oxide-services vpc. The migration will only add
+        // a new rule if it detects the presence of *this* VPC entry (i.e.,
+        // RSS has run before).
+        let svc_vpc = *SERVICES_VPC_ID;
+        let svc_proj = *SERVICES_PROJECT_ID;
+        let svc_router = *SERVICES_VPC_ROUTER_ID;
+        let svc_vpc_name = &SERVICES_DB_NAME;
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO vpc (
+                    id, name, description, time_created, time_modified,
+                    project_id, system_router_id, dns_name,
+                    vni, ipv6_prefix, firewall_gen, subnet_gen
+                )
+                VALUES (
+                    '{svc_vpc}', '{svc_vpc_name}', '', now(), now(),
+                    '{svc_proj}', '{svc_router}', '{svc_vpc_name}',
+                    100, '{}', 0, 0
+                );",
+                *SERVICE_VPC_IPV6_PREFIX
+            ))
+            .await
+            .expect("failed to create services vpc record");
+
+        // Second, create a firewall rule in a dummied-out VPC to validate
+        // that we correctly convert from ENUM[] to STRING[].
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO vpc_firewall_rule (
+                    id,
+                    name, description,
+                    time_created, time_modified, vpc_id, status, direction,
+                    targets, filter_protocols,
+                    action, priority
+                )
+                VALUES (
+                    '{FW_RULE}',
+                    'test-fw', '',
+                    now(), now(), '{VPC}', 'enabled', 'outbound',
+                    ARRAY['vpc:fiction'], ARRAY['ICMP', 'TCP', 'UDP'],
+                    'allow', 1234
+                );"
+            ))
+            .await
+            .expect("failed to create firewall rule");
+    })
+}
+
+fn after_155_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        use nexus_db_queries::db::fixed_data::vpc::*;
+        // Firstly -- has the new firewall rule been added?
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT id, description
+                    FROM vpc_firewall_rule
+                    WHERE name = 'nexus-icmp' and vpc_id = '{}'",
+                    *SERVICES_VPC_ID
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to load instance auto-restart policies");
+        let records = process_rows(&rows);
+
+        assert_eq!(records.len(), 1);
+
+        // Secondly, have FW_RULE's filter_protocols been correctly stringified?
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT filter_protocols
+                    FROM vpc_firewall_rule
+                    WHERE id = '{FW_RULE}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to load instance auto-restart policies");
+        let records = process_rows(&rows);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new(
+                "filter_protocols",
+                AnySqlType::TextArray(vec![
+                    "icmp".into(),
+                    "tcp".into(),
+                    "udp".into(),
+                ])
+            )],
+        );
+    })
+}
+
+mod migration_156 {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use std::collections::BTreeSet;
+
+    const INV_COLLECTION_ID_1: &str = "5cb42909-d94a-4903-be72-330eea0325d9";
+    const INV_COLLECTION_ID_2: &str = "142b62c2-9348-4530-9eed-7077351fb94b";
+    const SLED_ID_1: &str = "3b5b7861-03aa-420a-a057-0a14347dc4c0";
+    const SLED_ID_2: &str = "de7ab4c0-30d4-4e9e-b620-3a959a9d59dd";
+    const SLED_CONFIG_ID_1: &str = "a1637607-c49e-4658-b637-96473a72bb32";
+    const SLED_CONFIG_ID_2: &str = "695de2f0-9c09-42b0-a22a-1e5b783a38c0";
+    const SLED_CONFIG_ID_3: &str = "50a8d074-879b-4c59-a2ef-700156e49a97";
+
+    pub(super) fn before<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            // Insert these tuples:
+            //
+            // (collection 1, sled 1, sled config ID 1)
+            // (collection 1, sled 2, NULL)
+            // (collection 2, sled 1, sled config ID 2)
+            // (collection 2, sled 2, sled config ID 3)
+            ctx.client
+                .batch_execute(&format!(
+                    "
+                    INSERT INTO omicron.public.inv_sled_agent (
+                        inv_collection_id, time_collected, source, sled_id,
+                        sled_agent_ip, sled_agent_port, sled_role,
+                        usable_hardware_threads, usable_physical_ram,
+                        reservoir_size, last_reconciliation_sled_config,
+                        reconciler_status_kind, zone_manifest_boot_disk_path,
+                        zone_manifest_source, mupdate_override_boot_disk_path
+                    )
+                    VALUES (
+                        '{INV_COLLECTION_ID_1}', now(), 'test-source',
+                        '{SLED_ID_1}', '192.168.1.1', 0, 'gimlet',
+                        32, 68719476736, 1073741824, '{SLED_CONFIG_ID_1}',
+                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                    ), (
+                        '{INV_COLLECTION_ID_1}', now(), 'test-source',
+                        '{SLED_ID_2}', '192.168.1.1', 0, 'gimlet',
+                        32, 68719476736, 1073741824, NULL,
+                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                    ), (
+                        '{INV_COLLECTION_ID_2}', now(), 'test-source',
+                        '{SLED_ID_1}', '192.168.1.1', 0, 'gimlet',
+                        32, 68719476736, 1073741824, '{SLED_CONFIG_ID_2}',
+                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                    ), (
+                        '{INV_COLLECTION_ID_2}', now(), 'test-source',
+                        '{SLED_ID_2}', '192.168.1.1', 0, 'gimlet',
+                        32, 68719476736, 1073741824, '{SLED_CONFIG_ID_3}',
+                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                    );
+                    "
+                ))
+                .await
+                .expect("inserted pre-migration data");
+        })
+    }
+
+    pub(super) fn after<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            // Verify that the new inv_sled_config_reconciler table has 3 rows
+            // corresponding to the three inv_sled_agent rows that had a
+            // non-NULL last_reconciliation_sled_config inserted in `before()`.
+            let expected = {
+                let mut expected = BTreeSet::<(Uuid, Uuid, Uuid)>::new();
+                expected.insert((
+                    INV_COLLECTION_ID_1.parse().unwrap(),
+                    SLED_ID_1.parse().unwrap(),
+                    SLED_CONFIG_ID_1.parse().unwrap(),
+                ));
+                expected.insert((
+                    INV_COLLECTION_ID_2.parse().unwrap(),
+                    SLED_ID_1.parse().unwrap(),
+                    SLED_CONFIG_ID_2.parse().unwrap(),
+                ));
+                expected.insert((
+                    INV_COLLECTION_ID_2.parse().unwrap(),
+                    SLED_ID_2.parse().unwrap(),
+                    SLED_CONFIG_ID_3.parse().unwrap(),
+                ));
+                expected
+            };
+
+            let rows = ctx
+                .client
+                .query(
+                    "
+                    SELECT
+                    inv_collection_id, sled_id, last_reconciled_config,
+                    boot_disk_slot, boot_disk_error, boot_partition_a_error,
+                    boot_partition_b_error
+                    FROM omicron.public.inv_sled_config_reconciler
+                    ",
+                    &[],
+                )
+                .await
+                .expect("queried post-migration data");
+
+            let mut seen = BTreeSet::new();
+            for row in rows {
+                let inv_collection_id: Uuid = row.get("inv_collection_id");
+                let sled_id: Uuid = row.get("sled_id");
+                let last_reconciled_config: Uuid =
+                    row.get("last_reconciled_config");
+                let boot_disk_slot: Option<i16> = row.get("boot_disk_slot");
+                let boot_disk_error: Option<String> =
+                    row.get("boot_disk_error");
+                let boot_partition_a_error: Option<String> =
+                    row.get("boot_partition_a_error");
+                let boot_partition_b_error: Option<String> =
+                    row.get("boot_partition_b_error");
+
+                seen.insert((
+                    inv_collection_id,
+                    sled_id,
+                    last_reconciled_config,
+                ));
+
+                // Migration should have populated all the error fields.
+                assert_eq!(boot_disk_slot, None);
+                assert_eq!(
+                    boot_disk_error.as_deref(),
+                    Some("old collection, data missing")
+                );
+                assert_eq!(
+                    boot_partition_a_error.as_deref(),
+                    Some("old collection, data missing")
+                );
+                assert_eq!(
+                    boot_partition_b_error.as_deref(),
+                    Some("old collection, data missing")
+                );
+            }
+
+            assert_eq!(seen, expected);
+        })
+    }
+}
+
+const BP_OXIMETER_READ_POLICY_ID_0: &str =
+    "5cb42909-d94a-4903-be72-330eea0325d9";
+const BP_OXIMETER_READ_POLICY_ID_1: &str =
+    "142b62c2-9348-4530-9eed-7077351fb94b";
+const BP_OXIMETER_READ_POLICY_ID_2: &str =
+    "3b5b7861-03aa-420a-a057-0a14347dc4c0";
+const BP_OXIMETER_READ_POLICY_ID_3: &str =
+    "de7ab4c0-30d4-4e9e-b620-3a959a9d59dd";
+
+// Insert two blueprints and 4 oximeter read policies, two of which do not have
+// a corresponding blueprint
+fn before_164_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        ctx.client
+            .batch_execute(
+                &format!("
+        INSERT INTO omicron.public.blueprint
+          (id, parent_blueprint_id, time_created, creator, comment, internal_dns_version, external_dns_version, cockroachdb_fingerprint, cockroachdb_setting_preserve_downgrade, target_release_minimum_generation)
+        VALUES
+          (
+            '{BP_OXIMETER_READ_POLICY_ID_0}', NULL, now(), 'bob', 'hi', 1, 1, 'fingerprint', NULL, 1
+          ),
+          (
+            '{BP_OXIMETER_READ_POLICY_ID_1}', NULL, now(), 'bab', 'hi', 1, 1, 'fingerprint', NULL, 1
+          );
+
+        INSERT INTO omicron.public.bp_oximeter_read_policy
+          (blueprint_id, version, oximeter_read_mode)
+        VALUES
+          ('{BP_OXIMETER_READ_POLICY_ID_0}', 1, 'cluster'),
+          ('{BP_OXIMETER_READ_POLICY_ID_1}', 2, 'cluster'),
+          ('{BP_OXIMETER_READ_POLICY_ID_2}', 3, 'cluster'),
+          ('{BP_OXIMETER_READ_POLICY_ID_3}', 4, 'cluster')
+        "),
+            )
+            .await
+            .expect("failed to insert pre-migration rows for 163");
+    })
+}
+
+// Validate that rows that do not have a corresponding blueprint are gone
+fn after_164_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        let rows = ctx
+            .client
+            .query(
+                "SELECT blueprint_id FROM omicron.public.bp_oximeter_read_policy ORDER BY blueprint_id;",
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration bp_oximeter_read_policy table");
+        assert_eq!(rows.len(), 2);
+
+        let id_1: Uuid = (&rows[0]).get::<&str, Uuid>("blueprint_id");
+        assert_eq!(id_1.to_string(), BP_OXIMETER_READ_POLICY_ID_1);
+
+        let id_2: Uuid = (&rows[1]).get::<&str, Uuid>("blueprint_id");
+        assert_eq!(id_2.to_string(), BP_OXIMETER_READ_POLICY_ID_0);
+    })
+}
+
+const PORT_SETTINGS_ID_165_0: &str = "1e700b64-79e0-4515-9771-bcc2391b6d4d";
+const PORT_SETTINGS_ID_165_1: &str = "c6b015ff-1c98-474f-b9e9-dfc30546094f";
+const PORT_SETTINGS_ID_165_2: &str = "8b777d9b-62a3-4c4d-b0b7-314315c2a7fc";
+const PORT_SETTINGS_ID_165_3: &str = "7c675e89-74b1-45da-9577-cf75f028107a";
+const PORT_SETTINGS_ID_165_4: &str = "e2413d63-9307-4918-b9c4-bce959c63042";
+const PORT_SETTINGS_ID_165_5: &str = "05df929f-1596-42f4-b78f-aebb5d7028c4";
+
+// Insert records using the `local_pref` column before it's renamed and its
+// database type is changed from INT8 to INT2. The receiving Rust type is u8
+// so 2 records are outside the u8 range, 2 records are at the edge of the u8
+// range, and 1 record is within the u8 range.
+fn before_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        ctx.client
+            .batch_execute(&format!("
+                INSERT INTO omicron.public.switch_port_settings_route_config
+                  (port_settings_id, interface_name, dst, gw, vid, local_pref)
+                VALUES
+                  (
+                    '{PORT_SETTINGS_ID_165_0}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, -1
+                  ),
+                  (
+                    '{PORT_SETTINGS_ID_165_1}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 0
+                  ),
+                  (
+                    '{PORT_SETTINGS_ID_165_2}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 128
+                  ),
+                  (
+                    '{PORT_SETTINGS_ID_165_3}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 255
+                  ),
+                  (
+                    '{PORT_SETTINGS_ID_165_4}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 256
+                  ),
+                  (
+                    '{PORT_SETTINGS_ID_165_5}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, NULL
+                  );
+              "),
+            )
+            .await
+            .expect("failed to insert pre-migration rows for 165");
+    })
+}
+
+// Query the records using the new `rib_priority` column and assert that the
+// values were correctly clamped within the u8 range.
+fn after_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        let rows = ctx
+            .client
+            .query(
+                "SELECT * FROM omicron.public.switch_port_settings_route_config;",
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration switch_port_settings_route_config table");
+        assert_eq!(rows.len(), 6);
+
+        let records: HashMap<Uuid, Option<i16>> = HashMap::from([
+            (Uuid::from_str(PORT_SETTINGS_ID_165_0).unwrap(), Some(0)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_1).unwrap(), Some(0)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_2).unwrap(), Some(128)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_3).unwrap(), Some(255)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_4).unwrap(), Some(255)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_5).unwrap(), None),
+        ]);
+
+        for row in rows {
+            let port_settings_id = row.get::<&str, Uuid>("port_settings_id");
+            let rib_priority_got = row.get::<&str, Option<i16>>("rib_priority");
+
+            let rib_priority_want = records
+                .get(&port_settings_id)
+                .expect("unexpected port_settings_id value when querying switch_port_settings_route_config");
+            assert_eq!(rib_priority_got, *rib_priority_want);
+        }
+    })
+}
+
+fn before_171_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Create test data in inv_sled_config_reconciler table before the new columns are added.
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.inv_sled_config_reconciler
+                 (inv_collection_id, sled_id, last_reconciled_config, boot_disk_slot)
+                 VALUES
+                 ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
+                  '33333333-3333-3333-3333-333333333333', 0);",
+                &[],
+            )
+            .await
+            .expect("inserted pre-migration rows for 171");
+    })
+}
+
+fn after_171_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // After the migration, the new columns should exist and be NULL for existing rows.
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   clear_mupdate_override_boot_success,
+                   clear_mupdate_override_boot_error,
+                   clear_mupdate_override_non_boot_message
+                 FROM omicron.public.inv_sled_config_reconciler
+                 WHERE sled_id = '22222222-2222-2222-2222-222222222222';",
+                &[],
+            )
+            .await
+            .expect("queried post-migration inv_sled_config_reconciler");
+        assert_eq!(rows.len(), 1);
+
+        // All new columns should be NULL for existing rows.
+        let boot_success: Option<AnySqlType> =
+            (&rows[0]).get("clear_mupdate_override_boot_success");
+        assert!(boot_success.is_none());
+
+        let boot_error: Option<String> =
+            (&rows[0]).get("clear_mupdate_override_boot_error");
+        assert!(boot_error.is_none());
+
+        let non_boot_message: Option<String> =
+            (&rows[0]).get("clear_mupdate_override_non_boot_message");
+        assert!(non_boot_message.is_none());
+
+        // Test that the constraint allows valid combinations.
+        // Case 1: All NULL (should work).
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.inv_sled_config_reconciler
+                 (inv_collection_id, sled_id, last_reconciled_config, boot_disk_slot,
+                  clear_mupdate_override_boot_success, clear_mupdate_override_boot_error,
+                  clear_mupdate_override_non_boot_message)
+                 VALUES
+                 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '33333333-3333-3333-3333-333333333333',
+                  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 1, NULL, NULL, NULL);",
+                &[],
+            )
+            .await
+            .expect("inserted row with all NULL clear_mupdate_override columns");
+
+        // Case 2: Success case (boot_success NOT NULL, boot_error NULL, non_boot_message NOT NULL).
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.inv_sled_config_reconciler
+                 (inv_collection_id, sled_id, last_reconciled_config, boot_disk_slot,
+                  clear_mupdate_override_boot_success, clear_mupdate_override_boot_error,
+                  clear_mupdate_override_non_boot_message)
+                 VALUES
+                 ('cccccccc-cccc-cccc-cccc-cccccccccccc', '44444444-4444-4444-4444-444444444444',
+                  'dddddddd-dddd-dddd-dddd-dddddddddddd', 0,
+                  'cleared', NULL, 'Non-boot disk cleared successfully');",
+                &[],
+            )
+            .await
+            .expect("inserted row with success case clear_mupdate_override columns");
+
+        // Case 3: Error case (boot_success NULL, boot_error NOT NULL, non_boot_message NOT NULL).
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.inv_sled_config_reconciler
+                 (inv_collection_id, sled_id, last_reconciled_config, boot_disk_slot,
+                  clear_mupdate_override_boot_success, clear_mupdate_override_boot_error,
+                  clear_mupdate_override_non_boot_message)
+                 VALUES
+                 ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', '55555555-5555-5555-5555-555555555555',
+                  'ffffffff-ffff-ffff-ffff-ffffffffffff', 1,
+                  NULL, 'Failed to clear mupdate override', 'Non-boot disk operation failed');",
+                &[],
+            )
+            .await
+            .expect("inserted row with error case clear_mupdate_override columns");
+    })
+}
+
+const NEXUS_ID_185_0: &str = "387433f9-1473-4ca2-b156-9670452985e0";
+const EXPUNGED_NEXUS_ID_185_0: &str = "287433f9-1473-4ca2-b156-9670452985e0";
+const OLD_NEXUS_ID_185_0: &str = "187433f9-1473-4ca2-b156-9670452985e0";
+
+const BP_ID_185_0: &str = "5a5ff941-3b5a-403b-9fda-db2049f4c736";
+const OLD_BP_ID_185_0: &str = "4a5ff941-3b5a-403b-9fda-db2049f4c736";
+
+fn before_185_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Create a blueprint which contains a Nexus - we'll use this for the migration.
+        //
+        // It also contains an exupnged Nexus, which should be ignored.
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.bp_target
+                     (version, blueprint_id, enabled, time_made_target)
+                     VALUES
+                     (1, '{BP_ID_185_0}', true, now());",
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted bp_target rows for 182");
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.bp_omicron_zone (
+                         blueprint_id, sled_id, id, zone_type,
+                         primary_service_ip, primary_service_port,
+                         second_service_ip, second_service_port,
+                         dataset_zpool_name, bp_nic_id,
+                         dns_gz_address, dns_gz_address_index,
+                         ntp_ntp_servers, ntp_dns_servers, ntp_domain,
+                         nexus_external_tls, nexus_external_dns_servers,
+                         snat_ip, snat_first_port, snat_last_port,
+                         external_ip_id, filesystem_pool, disposition,
+                         disposition_expunged_as_of_generation,
+                         disposition_expunged_ready_for_cleanup,
+                         image_source, image_artifact_sha256
+                     )
+                     VALUES (
+                         '{BP_ID_185_0}', gen_random_uuid(), '{NEXUS_ID_185_0}',
+                         'nexus', '192.168.1.10', 8080, NULL, NULL, NULL, NULL,
+                         NULL, NULL, NULL, NULL, NULL, false, ARRAY[]::INET[],
+                         NULL, NULL, NULL, NULL, gen_random_uuid(),
+                         'in_service', NULL, false, 'install_dataset', NULL
+                     ),
+                     (
+                         '{BP_ID_185_0}', gen_random_uuid(),
+                         '{EXPUNGED_NEXUS_ID_185_0}', 'nexus', '192.168.1.11',
+                         8080, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                         NULL, false, ARRAY[]::INET[], NULL, NULL, NULL, NULL,
+                         gen_random_uuid(), 'expunged', 1, false,
+                         'install_dataset', NULL
+                     );"
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted bp_omicron_zone rows for 182");
+
+        // ALSO create an old blueprint, which isn't the latest target.
+        //
+        // We should ignore this one! No rows should be inserted for old data.
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.bp_target
+                     (version, blueprint_id, enabled, time_made_target)
+                     VALUES
+                     (0, '{OLD_BP_ID_185_0}', true, now());",
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted bp_target rows for 182");
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.bp_omicron_zone (
+                         blueprint_id, sled_id, id, zone_type,
+                         primary_service_ip, primary_service_port,
+                         second_service_ip, second_service_port,
+                         dataset_zpool_name, bp_nic_id,
+                         dns_gz_address, dns_gz_address_index,
+                         ntp_ntp_servers, ntp_dns_servers, ntp_domain,
+                         nexus_external_tls, nexus_external_dns_servers,
+                         snat_ip, snat_first_port, snat_last_port,
+                         external_ip_id, filesystem_pool, disposition,
+                         disposition_expunged_as_of_generation,
+                         disposition_expunged_ready_for_cleanup,
+                         image_source, image_artifact_sha256
+                     )
+                     VALUES (
+                         '{OLD_BP_ID_185_0}', gen_random_uuid(),
+                         '{OLD_NEXUS_ID_185_0}', 'nexus', '192.168.1.10', 8080,
+                         NULL, NULL, NULL, NULL,
+                         NULL, NULL, NULL, NULL, NULL,
+                         false, ARRAY[]::INET[], NULL, NULL, NULL,
+                         NULL, gen_random_uuid(), 'in_service',
+                         NULL, false, 'install_dataset', NULL
+                     );"
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted bp_omicron_zone rows for 182");
+    })
+}
+
+fn after_185_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // After the migration, the new row should be created - only for Nexuses
+        // in the latest blueprint.
+        //
+        // Note that "OLD_NEXUS_ID_185_0" doesn't get a row - it's in an old
+        // blueprint.
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   nexus_id,
+                   last_drained_blueprint_id,
+                   state
+                 FROM omicron.public.db_metadata_nexus;",
+                &[],
+            )
+            .await
+            .expect("queried post-migration inv_sled_config_reconciler");
+
+        let rows = process_rows(&rows);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        // Create a new row for the Nexuses in the target blueprint
+        assert_eq!(
+            row.values[0].expect("nexus_id").unwrap(),
+            &AnySqlType::Uuid(NEXUS_ID_185_0.parse().unwrap())
+        );
+        assert_eq!(row.values[1].expect("last_drained_blueprint_id"), None);
+        assert_eq!(
+            row.values[2].expect("state").unwrap(),
+            &AnySqlType::Enum(SqlEnum::from((
+                "db_metadata_nexus_state",
+                "active"
+            )))
+        );
+    })
+}
+
+const NEGATIVE_QUOTA: Uuid =
+    Uuid::from_u128(0x00006001_5c3d_4647_83b0_8f351dda7ce1);
+const POSITIVE_QUOTA: Uuid =
+    Uuid::from_u128(0x00006001_5c3d_4647_83b0_8f351dda7ce2);
+const MIXED_QUOTA: Uuid =
+    Uuid::from_u128(0x00006001_5c3d_4647_83b0_8f351dda7ce3);
+
+fn before_188_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.silo_quotas (
+                        silo_id,
+                        time_created,
+                        time_modified,
+                        cpus,
+                        memory_bytes,
+                        storage_bytes
+                    )
+                     VALUES
+                     ('{NEGATIVE_QUOTA}', now(), now(), -1, -2, -3),
+                     ('{POSITIVE_QUOTA}', now(), now(), 1, 2, 3),
+                     ('{MIXED_QUOTA}', now(), now(), -1, 0, 3);",
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted silo_quotas");
+    })
+}
+
+fn after_188_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   silo_id,
+                   cpus,
+                   memory_bytes,
+                   storage_bytes
+                 FROM omicron.public.silo_quotas ORDER BY silo_id ASC;",
+                &[],
+            )
+            .await
+            .expect("queried post-migration positive-quotas");
+
+        fn check_quota(
+            row: &Row,
+            id: Uuid,
+            cpus: i64,
+            memory: i64,
+            storage: i64,
+        ) {
+            assert_eq!(
+                row.values[0].expect("silo_id").unwrap(),
+                &AnySqlType::Uuid(id)
+            );
+            assert_eq!(
+                row.values[1].expect("cpus").unwrap(),
+                &AnySqlType::Int8(cpus)
+            );
+            assert_eq!(
+                row.values[2].expect("memory_bytes").unwrap(),
+                &AnySqlType::Int8(memory)
+            );
+            assert_eq!(
+                row.values[3].expect("storage_bytes").unwrap(),
+                &AnySqlType::Int8(storage)
+            );
+        }
+
+        let rows = process_rows(&rows);
+        assert_eq!(rows.len(), 3);
+
+        check_quota(&rows[0], NEGATIVE_QUOTA, 0, 0, 0);
+        check_quota(&rows[1], POSITIVE_QUOTA, 1, 2, 3);
+        check_quota(&rows[2], MIXED_QUOTA, 0, 0, 3);
+    })
+}
+
+fn before_207_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.disk (
+                    id,
+                    name,
+                    description,
+                    time_created,
+                    time_modified,
+                    time_deleted,
+
+                    rcgen,
+                    project_id,
+
+                    volume_id,
+
+                    disk_state,
+                    attach_instance_id,
+                    state_generation,
+                    slot,
+                    time_state_updated,
+
+                    size_bytes,
+                    block_size,
+                    origin_snapshot,
+                    origin_image,
+
+                    pantry_address
+                  )
+                  VALUES
+                  (
+                    'd8b7ba02-4bd5-417d-84d3-67b4e65bec70',
+                    'regular',
+                    'just a disk',
+                    '2025-10-21T20:26:25+0000',
+                    '2025-10-21T20:26:25+0000',
+                    NULL,
+
+                    0,
+                    'd904d22e-cc45-4b2e-b37f-5864d8eba323',
+
+                    '1e17286f-107d-494c-8b2d-904b70d5b706',
+
+                    'attached',
+                    '9c1f6ee5-478f-4e6a-b481-be8b69f1daab',
+                    75,
+                    0,
+                    '2025-10-21T20:27:11+0000',
+
+                    1073741824,
+                    '512',
+                    'b017fe60-9a4a-4fe6-a7d3-4a7c3ab23a98',
+                    NULL,
+
+                    '[fd00:1122:3344:101::7]:4567'
+                  ),
+                  (
+                    '336ed8ca-9bbf-4db9-9f2d-627f8d156f91',
+                    'deleted',
+                    'should migrate deleted disks too, even if they are old',
+                    '2024-10-21T20:26:25+0000',
+                    '2024-10-21T20:26:25+0000',
+                    '2025-10-15T21:38:05+0000',
+
+                    2,
+                    'c9cfb288-a39e-4ebb-ac27-b26c9248a46a',
+
+                    '0a1d0a38-f927-4260-ad23-7f9c04277a23',
+
+                    'detached',
+                    NULL,
+                    75786,
+                    1,
+                    '2025-10-14T20:27:11+0000',
+
+                    1073741824,
+                    '4096',
+                    NULL,
+                    '971395a7-4206-4dc4-ba58-e2402724270a',
+
+                    NULL
+                  );",
+                &[],
+            )
+            .await
+            .expect("inserted disks");
+    })
+}
+
+fn after_207_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // first disk
+
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   id,
+                   name,
+                   description,
+                   time_created,
+                   time_modified,
+                   time_deleted,
+
+                   rcgen,
+                   project_id,
+
+                   disk_state,
+                   attach_instance_id,
+                   state_generation,
+                   slot,
+                   time_state_updated,
+
+                   size_bytes,
+                   block_size
+                 FROM
+                   omicron.public.disk
+                 WHERE
+                   id = 'd8b7ba02-4bd5-417d-84d3-67b4e65bec70'
+                 ;",
+                &[],
+            )
+            .await
+            .expect("queried disk");
+
+        let rows = process_rows(&rows);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        assert!(row.values[5].expect("time_deleted").is_none());
+
+        assert_eq!(
+            vec![
+                row.values[0].expect("id").unwrap(),
+                row.values[1].expect("name").unwrap(),
+                row.values[2].expect("description").unwrap(),
+                row.values[3].expect("time_created").unwrap(),
+                row.values[4].expect("time_modified").unwrap(),
+                row.values[6].expect("rcgen").unwrap(),
+                row.values[7].expect("project_id").unwrap(),
+                row.values[8].expect("disk_state").unwrap(),
+                row.values[9].expect("attach_instance_id").unwrap(),
+                row.values[10].expect("state_generation").unwrap(),
+                row.values[11].expect("slot").unwrap(),
+                row.values[12].expect("time_state_updated").unwrap(),
+                row.values[13].expect("size_bytes").unwrap(),
+                row.values[14].expect("block_size").unwrap(),
+            ],
+            vec![
+                &AnySqlType::Uuid(
+                    "d8b7ba02-4bd5-417d-84d3-67b4e65bec70".parse().unwrap()
+                ),
+                &AnySqlType::String("regular".to_string()),
+                &AnySqlType::String("just a disk".to_string()),
+                &AnySqlType::DateTime,
+                &AnySqlType::DateTime,
+                &AnySqlType::Int8(0),
+                &AnySqlType::Uuid(
+                    "d904d22e-cc45-4b2e-b37f-5864d8eba323".parse().unwrap()
+                ),
+                &AnySqlType::String("attached".to_string()),
+                &AnySqlType::Uuid(
+                    "9c1f6ee5-478f-4e6a-b481-be8b69f1daab".parse().unwrap()
+                ),
+                &AnySqlType::Int8(75),
+                &AnySqlType::Int2(0),
+                &AnySqlType::DateTime,
+                &AnySqlType::Int8(1073741824),
+                &AnySqlType::Enum(SqlEnum::from(("block_size", "512"))),
+            ],
+        );
+
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   disk_id,
+                   volume_id,
+                   origin_snapshot,
+                   origin_image,
+                   pantry_address
+                 FROM
+                   omicron.public.disk_type_crucible
+                 WHERE
+                   disk_id = 'd8b7ba02-4bd5-417d-84d3-67b4e65bec70'
+                 ;",
+                &[],
+            )
+            .await
+            .expect("queried disk_type_crucible");
+
+        let rows = process_rows(&rows);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        assert!(row.values[3].expect("origin_image").is_none());
+
+        assert_eq!(
+            vec![
+                row.values[0].expect("disk_id").unwrap(),
+                row.values[1].expect("volume_id").unwrap(),
+                row.values[2].expect("origin_snapshot").unwrap(),
+                row.values[4].expect("pantry_address").unwrap(),
+            ],
+            vec![
+                &AnySqlType::Uuid(
+                    "d8b7ba02-4bd5-417d-84d3-67b4e65bec70".parse().unwrap()
+                ),
+                &AnySqlType::Uuid(
+                    "1e17286f-107d-494c-8b2d-904b70d5b706".parse().unwrap()
+                ),
+                &AnySqlType::Uuid(
+                    "b017fe60-9a4a-4fe6-a7d3-4a7c3ab23a98".parse().unwrap()
+                ),
+                &AnySqlType::String("[fd00:1122:3344:101::7]:4567".to_string()),
+            ]
+        );
+
+        // second disk
+
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   id,
+                   name,
+                   description,
+                   time_created,
+                   time_modified,
+                   time_deleted,
+
+                   rcgen,
+                   project_id,
+
+                   disk_state,
+                   attach_instance_id,
+                   state_generation,
+                   slot,
+                   time_state_updated,
+
+                   size_bytes,
+                   block_size
+                 FROM
+                   omicron.public.disk
+                 WHERE
+                   id = '336ed8ca-9bbf-4db9-9f2d-627f8d156f91'
+                 ;",
+                &[],
+            )
+            .await
+            .expect("queried disk");
+
+        let rows = process_rows(&rows);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        assert!(row.values[9].expect("attach_instance_id").is_none());
+
+        assert_eq!(
+            vec![
+                row.values[0].expect("id").unwrap(),
+                row.values[1].expect("name").unwrap(),
+                row.values[2].expect("description").unwrap(),
+                row.values[3].expect("time_created").unwrap(),
+                row.values[4].expect("time_modified").unwrap(),
+                row.values[5].expect("time_deleted").unwrap(),
+                row.values[6].expect("rcgen").unwrap(),
+                row.values[7].expect("project_id").unwrap(),
+                row.values[8].expect("disk_state").unwrap(),
+                row.values[10].expect("state_generation").unwrap(),
+                row.values[11].expect("slot").unwrap(),
+                row.values[12].expect("time_state_updated").unwrap(),
+                row.values[13].expect("size_bytes").unwrap(),
+                row.values[14].expect("block_size").unwrap(),
+            ],
+            vec![
+                &AnySqlType::Uuid(
+                    "336ed8ca-9bbf-4db9-9f2d-627f8d156f91".parse().unwrap()
+                ),
+                &AnySqlType::String("deleted".to_string()),
+                &AnySqlType::String(
+                    "should migrate deleted disks too, even if they are old"
+                        .to_string()
+                ),
+                &AnySqlType::DateTime,
+                &AnySqlType::DateTime,
+                &AnySqlType::DateTime,
+                &AnySqlType::Int8(2),
+                &AnySqlType::Uuid(
+                    "c9cfb288-a39e-4ebb-ac27-b26c9248a46a".parse().unwrap()
+                ),
+                &AnySqlType::String("detached".to_string()),
+                &AnySqlType::Int8(75786),
+                &AnySqlType::Int2(1),
+                &AnySqlType::DateTime,
+                &AnySqlType::Int8(1073741824),
+                &AnySqlType::Enum(SqlEnum::from(("block_size", "4096"))),
+            ],
+        );
+
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   disk_id,
+                   volume_id,
+                   origin_snapshot,
+                   origin_image,
+                   pantry_address
+                 FROM
+                   omicron.public.disk_type_crucible
+                 WHERE
+                   disk_id = '336ed8ca-9bbf-4db9-9f2d-627f8d156f91'
+                 ;",
+                &[],
+            )
+            .await
+            .expect("queried disk_type_crucible");
+
+        let rows = process_rows(&rows);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        assert!(row.values[2].expect("origin_snapshot").is_none());
+        assert!(row.values[4].expect("pantry_address").is_none());
+
+        assert_eq!(
+            vec![
+                row.values[0].expect("disk_id").unwrap(),
+                row.values[1].expect("volume_id").unwrap(),
+                row.values[3].expect("origin_image").unwrap(),
+            ],
+            vec![
+                &AnySqlType::Uuid(
+                    "336ed8ca-9bbf-4db9-9f2d-627f8d156f91".parse().unwrap()
+                ),
+                &AnySqlType::Uuid(
+                    "0a1d0a38-f927-4260-ad23-7f9c04277a23".parse().unwrap()
+                ),
+                &AnySqlType::Uuid(
+                    "971395a7-4206-4dc4-ba58-e2402724270a".parse().unwrap()
+                ),
+            ]
+        );
+    })
+}
+
+const SP_RESTART_ID: Uuid =
+    Uuid::from_u128(0x0358a488_3dd1_4da2_a783_570f3a149058);
+const HOST_RESTART_ID: Uuid =
+    Uuid::from_u128(0x786d5a82_da41_4d28_9901_650bf168e0f3);
+const HOST_EREPORT_SLED_ID: Uuid =
+    Uuid::from_u128(0xdf221406_85db_414b_bb3f_5b1323592bbe);
+const EREPORT_SLED_SERIAL: &str = "BRM6900420";
+const GIMLET_PART_NUMBER: &str = "913-0000019";
+
+fn before_210_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.sp_ereport (
+                        restart_id,
+                        ena,
+                        time_deleted,
+                        time_collected,
+                        collector_id,
+                        sp_type,
+                        sp_slot,
+                        serial_number,
+                        part_number,
+                        class,
+                        report
+                    )
+                     VALUES (
+                         '{SP_RESTART_ID}',
+                         1,
+                         NULL,
+                         now(),
+                         gen_random_uuid(),
+                         'sled',
+                         19,
+                         '{EREPORT_SLED_SERIAL}',
+                         '{GIMLET_PART_NUMBER}',
+                         'my.cool.sp.ereport',
+                         '{{}}'
+                     );"
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted sp_ereport");
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.host_ereport (
+                        restart_id,
+                        ena,
+                        time_deleted,
+                        time_collected,
+                        collector_id,
+                        sled_id,
+                        sled_serial,
+                        class,
+                        report,
+                        part_number
+                    )
+                     VALUES (
+                         '{HOST_RESTART_ID}',
+                         1,
+                         NULL,
+                         now(),
+                         gen_random_uuid(),
+                         '{HOST_EREPORT_SLED_ID}',
+                         '{EREPORT_SLED_SERIAL}',
+                         'my.cool.host.ereport',
+                         '{{}}',
+                         '{GIMLET_PART_NUMBER}'
+                     );"
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted host_ereport");
+    })
+}
+
+fn after_210_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        let host_rows = ctx
+            .client
+            .query(
+                "SELECT
+                   restart_id,
+                   ena,
+                   reporter,
+                   sled_id,
+                   sp_type,
+                   sp_slot,
+                   serial_number,
+                   part_number
+                 FROM omicron.public.ereport
+                 WHERE
+                    reporter = 'host';",
+                &[],
+            )
+            .await
+            .expect("queried post-migration host ereports");
+        let rows = process_rows(&host_rows);
+        assert_eq!(rows.len(), 1);
+        check_row(
+            &rows[0],
+            HOST_RESTART_ID,
+            1,
+            "host",
+            Some(HOST_EREPORT_SLED_ID),
+            None,
+            None,
+        );
+
+        let sp_rows = ctx
+            .client
+            .query(
+                "SELECT
+                   restart_id,
+                   ena,
+                   reporter,
+                   sled_id,
+                   sp_type,
+                   sp_slot,
+                   serial_number,
+                   part_number
+                 FROM omicron.public.ereport
+                 WHERE
+                    reporter = 'sp';",
+                &[],
+            )
+            .await
+            .expect("queried post-migration sp ereports");
+        let rows = process_rows(&sp_rows);
+        assert_eq!(rows.len(), 1);
+        check_row(
+            &rows[0],
+            SP_RESTART_ID,
+            1,
+            "sp",
+            None,
+            Some("sled"),
+            Some(19),
+        );
+
+        fn check_row(
+            row: &Row,
+            restart_id: Uuid,
+            ena: i64,
+            reporter: &str,
+            sled_id: Option<Uuid>,
+            sp_type: Option<&str>,
+            sp_slot: Option<i32>,
+        ) {
+            assert_eq!(
+                row.values[0].expect("restart_id").unwrap(),
+                &AnySqlType::Uuid(restart_id)
+            );
+            assert_eq!(
+                row.values[1].expect("ena").unwrap(),
+                &AnySqlType::Int8(ena)
+            );
+            assert_eq!(
+                row.values[2].expect("reporter").unwrap(),
+                &AnySqlType::Enum(SqlEnum::from(("ereporter_type", reporter))),
+            );
+            assert_eq!(
+                row.values[3].expect("sled_id"),
+                sled_id.map(AnySqlType::Uuid).as_ref(),
+            );
+            assert_eq!(
+                row.values[4].expect("sp_type"),
+                sp_type
+                    .map(|t| AnySqlType::Enum(SqlEnum::from(("sp_type", t))))
+                    .as_ref(),
+            );
+            assert_eq!(
+                row.values[5].expect("sp_slot"),
+                sp_slot.map(AnySqlType::Int4).as_ref(),
+            );
+            assert_eq!(
+                row.values[6].expect("serial_number").unwrap(),
+                &AnySqlType::String(EREPORT_SLED_SERIAL.to_string()),
+            );
+            assert_eq!(
+                row.values[7].expect("part_number").unwrap(),
+                &AnySqlType::String(GIMLET_PART_NUMBER.to_string()),
+            );
+        }
+    })
+}
+
+mod migration_211 {
+    use super::*;
+    use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::SLED_PREFIX;
+    use pretty_assertions::assert_eq;
+    use std::collections::BTreeSet;
+
+    // randomly-generated IDs
+    const SLED_ID_1: &str = "48e1d10b-3ec8-4abd-95e2-5f37f79da546";
+    const SLED_ID_2: &str = "2144219e-d989-4929-b0b3-db895f51b7b5";
+    const SLED_ID_3: &str = "d2de378b-c788-4940-9a11-60ac4e633f0c";
+
+    // randomly-generated IPs
+    const SLED_IP_1: &str = "445c:212f:f2bc:f202:2b90:5b0e:2d6c:585e";
+    const SLED_IP_2: &str = "05fb:7e45:22b1:8dfb:9a06:0dbf:22ab:3eb4";
+    const SLED_IP_3: &str = "92a6:42c8:0cf2:7556:5ace:5bab:26e4:4dd1";
+
+    async fn before_impl(ctx: &MigrationContext<'_>) {
+        ctx.client
+            .batch_execute(&format!(
+                "
+        INSERT INTO omicron.public.sled (
+            id, time_created, time_modified, rcgen, rack_id, is_scrimlet,
+            serial_number, part_number, revision, usable_hardware_threads,
+            usable_physical_ram, reservoir_size, ip, port, last_used_address,
+            sled_policy, sled_state, repo_depot_port, cpu_family
+        )
+        VALUES
+        ('{SLED_ID_1}', now(), now(), 1, gen_random_uuid(), false,
+         'migration-210-serial1', 'part1', 1, 64, 12345678, 123456,
+         '{SLED_IP_1}', 12345, '{SLED_IP_1}', 'in_service', 'active',
+         12346, 'unknown'),
+        ('{SLED_ID_2}', now(), now(), 1, gen_random_uuid(), false,
+         'migration-210-serial2', 'part1', 1, 64, 12345678, 123456,
+         '{SLED_IP_2}', 12345, '{SLED_IP_2}', 'no_provision', 'active',
+         12346, 'unknown'),
+        ('{SLED_ID_3}', now(), now(), 1, gen_random_uuid(), false,
+         'migration-210-serial3', 'part1', 1, 64, 12345678, 123456,
+         '{SLED_IP_3}', 12345, '{SLED_IP_3}', 'expunged', 'decommissioned',
+         12346, 'unknown');
+
+        INSERT INTO omicron.public.bp_sled_metadata (
+            blueprint_id, sled_id, sled_state, sled_agent_generation,
+            remove_mupdate_override, host_phase_2_desired_slot_a,
+            host_phase_2_desired_slot_b
+        )
+        VALUES
+        (gen_random_uuid(), '{SLED_ID_1}', 'active', 1, NULL, NULL, NULL),
+        (gen_random_uuid(), '{SLED_ID_2}', 'active', 1, NULL, NULL, NULL),
+        (gen_random_uuid(), '{SLED_ID_3}', 'decommissioned', 1,
+         NULL, NULL, NULL);
+                "
+            ))
+            .await
+            .expect("inserted pre-migration data");
+    }
+
+    async fn after_impl(ctx: &MigrationContext<'_>) {
+        let sled_id_1: Uuid = SLED_ID_1.parse().unwrap();
+        let sled_id_2: Uuid = SLED_ID_2.parse().unwrap();
+        let sled_id_3: Uuid = SLED_ID_3.parse().unwrap();
+
+        let expected = [
+            (
+                sled_id_1,
+                Ipv6Subnet::<SLED_PREFIX>::new(SLED_IP_1.parse().unwrap())
+                    .to_string(),
+            ),
+            (
+                sled_id_2,
+                Ipv6Subnet::<SLED_PREFIX>::new(SLED_IP_2.parse().unwrap())
+                    .to_string(),
+            ),
+            (
+                sled_id_3,
+                Ipv6Subnet::<SLED_PREFIX>::new(SLED_IP_3.parse().unwrap())
+                    .to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+
+        let rows = ctx
+            .client
+            .query(
+                "
+                SELECT sled_id, subnet::text
+                FROM omicron.public.bp_sled_metadata
+                WHERE sled_id IN ($1, $2, $3)
+                ",
+                &[&sled_id_1, &sled_id_2, &sled_id_3],
+            )
+            .await
+            .expect("queried post-migration data");
+        let got = rows
+            .into_iter()
+            .map(|row| {
+                (row.get::<_, Uuid>("sled_id"), row.get::<_, String>("subnet"))
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(expected, got);
+    }
+
+    pub(super) fn before<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(before_impl(ctx))
+    }
+
+    pub(super) fn after<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(after_impl(ctx))
+    }
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -2391,7 +3853,54 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         Version::new(148, 0, 0),
         DataMigrationFns::new().before(before_148_0_0).after(after_148_0_0),
     );
-
+    map.insert(
+        Version::new(151, 0, 0),
+        DataMigrationFns::new().before(before_151_0_0).after(after_151_0_0),
+    );
+    map.insert(
+        Version::new(155, 0, 0),
+        DataMigrationFns::new().before(before_155_0_0).after(after_155_0_0),
+    );
+    map.insert(
+        Version::new(156, 0, 0),
+        DataMigrationFns::new()
+            .before(migration_156::before)
+            .after(migration_156::after),
+    );
+    map.insert(
+        Version::new(164, 0, 0),
+        DataMigrationFns::new().before(before_164_0_0).after(after_164_0_0),
+    );
+    map.insert(
+        Version::new(165, 0, 0),
+        DataMigrationFns::new().before(before_165_0_0).after(after_165_0_0),
+    );
+    map.insert(
+        Version::new(171, 0, 0),
+        DataMigrationFns::new().before(before_171_0_0).after(after_171_0_0),
+    );
+    map.insert(
+        Version::new(185, 0, 0),
+        DataMigrationFns::new().before(before_185_0_0).after(after_185_0_0),
+    );
+    map.insert(
+        Version::new(188, 0, 0),
+        DataMigrationFns::new().before(before_188_0_0).after(after_188_0_0),
+    );
+    map.insert(
+        Version::new(207, 0, 0),
+        DataMigrationFns::new().before(before_207_0_0).after(after_207_0_0),
+    );
+    map.insert(
+        Version::new(210, 0, 0),
+        DataMigrationFns::new().before(before_210_0_0).after(after_210_0_0),
+    );
+    map.insert(
+        Version::new(211, 0, 0),
+        DataMigrationFns::new()
+            .before(migration_211::before)
+            .after(migration_211::after),
+    );
     map
 }
 

@@ -18,6 +18,7 @@ use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
 use tokio::io::AsyncReadExt;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::Key;
@@ -27,6 +28,9 @@ use tufaceous_lib::assemble::DeserializedArtifactSource;
 use tufaceous_lib::assemble::DeserializedControlPlaneZoneSource;
 use tufaceous_lib::assemble::DeserializedManifest;
 use tufaceous_lib::assemble::OmicronRepoAssembler;
+use update_common::artifacts::{
+    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
+};
 
 pub(crate) async fn build_tuf_repo(
     logger: Logger,
@@ -72,6 +76,47 @@ pub(crate) async fn build_tuf_repo(
         }
     }
 
+    let mut measurement_corpus = vec![];
+
+    let mut read_dir = fs::read_dir(
+        output_dir.join("hubris-staging").join("measurement_corpus"),
+    )
+    .await
+    .context("failed to read `hubris-staging/measurement_corpus`")?;
+
+    while let Some(entry) = read_dir.next_entry().await? {
+        let corim = rats_corim::Corim::from_file(entry.path())?;
+
+        measurement_corpus.push(DeserializedArtifactData {
+            name: format!("staging-{}", corim.id),
+            version: ArtifactVersion::new(corim.get_version()?.clone())?,
+            source: DeserializedArtifactSource::File {
+                path: Utf8PathBuf::from_path_buf(entry.path()).unwrap(),
+            },
+        });
+    }
+
+    let mut read_dir = fs::read_dir(
+        output_dir.join("hubris-production").join("measurement_corpus"),
+    )
+    .await
+    .context("failed to read `hubris-production/measurement_corpus`")?;
+
+    while let Some(entry) = read_dir.next_entry().await? {
+        let corim = rats_corim::Corim::from_file(entry.path())?;
+        measurement_corpus.push(DeserializedArtifactData {
+            name: format!("production-{}", corim.id),
+            version: ArtifactVersion::new(corim.get_version()?.clone())?,
+            source: DeserializedArtifactSource::File {
+                path: Utf8PathBuf::from_path_buf(entry.path()).unwrap(),
+            },
+        });
+    }
+
+    manifest
+        .artifacts
+        .insert(KnownArtifactKind::MeasurementCorpus, measurement_corpus);
+
     // Add the OS images.
     manifest.artifacts.insert(
         KnownArtifactKind::Host,
@@ -111,6 +156,7 @@ pub(crate) async fn build_tuf_repo(
                 .join(format!("{}.tar.gz", package)),
         });
     }
+
     manifest.artifacts.insert(
         KnownArtifactKind::ControlPlane,
         vec![DeserializedArtifactData {
@@ -139,6 +185,7 @@ pub(crate) async fn build_tuf_repo(
         manifest,
         keys,
         expiry,
+        true,
         output_dir.join("repo.zip"),
     )
     .build()
@@ -159,6 +206,39 @@ pub(crate) async fn build_tuf_repo(
         format!("{}\n", hex::encode(&hasher.finalize())),
     )
     .await?;
+
+    // Check that we haven't stepped on any rakes by attempting to generate a
+    // plan from the zip
+    let zip_bytes = std::fs::File::open(&output_dir.join("repo.zip"))
+        .context("error opening archive.zip")?;
+    let repo_hash = ArtifactHash([0u8; 32]);
+    let _ = ArtifactsWithPlan::from_zip(
+        zip_bytes,
+        None,
+        repo_hash,
+        ControlPlaneZonesMode::Split,
+        VerificationMode::BlindlyTrustAnything,
+        &logger,
+    )
+    .await
+    .with_context(|| {
+        "error reading generated TUF repo (split control plane)".to_string()
+    })?;
+
+    let zip_bytes = std::fs::File::open(&output_dir.join("repo.zip"))
+        .context("error opening archive.zip")?;
+    let _ = ArtifactsWithPlan::from_zip(
+        zip_bytes,
+        None,
+        repo_hash,
+        ControlPlaneZonesMode::Composite,
+        VerificationMode::BlindlyTrustAnything,
+        &logger,
+    )
+    .await
+    .with_context(|| {
+        "error reading generated TUF repo (composite control plane)".to_string()
+    })?;
 
     Ok(())
 }

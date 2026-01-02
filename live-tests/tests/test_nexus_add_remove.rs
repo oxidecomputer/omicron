@@ -2,28 +2,35 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod common;
+pub mod common;
 
+use crate::common::reconfigurator::blueprint_wait_sled_configs_propagated;
 use anyhow::Context;
 use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target;
 use futures::TryStreamExt;
 use live_tests_macros::live_test;
-use nexus_client::types::BackgroundTasksActivateRequest;
-use nexus_client::types::BlueprintTargetSet;
-use nexus_client::types::Saga;
-use nexus_client::types::SagaState;
-use nexus_inventory::CollectionBuilder;
+use nexus_lockstep_client::types::BlueprintTargetSet;
+use nexus_lockstep_client::types::QuiesceState;
+use nexus_lockstep_client::types::Saga;
+use nexus_lockstep_client::types::SagaState;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_planning::planner::Planner;
+use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
-use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::SledFilter;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
+use nexus_types::deployment::blueprint_zone_type;
+use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
+use sled_agent_types::inventory::ZoneKind;
 use slog::{debug, info};
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use std::time::Duration;
 
 // TODO-coverage This test could check other stuff:
@@ -42,31 +49,90 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let log = lc.log();
     let opctx = lc.opctx();
     let datastore = lc.datastore();
-    let planning_input = PlanningInputFromDb::assemble(&opctx, &datastore)
+
+    let (_, parent_blueprint) = datastore
+        .blueprint_target_get_current_full(opctx)
         .await
-        .expect("planning input");
-    let collection = datastore
-        .inventory_get_latest_collection(opctx)
+        .expect("obtained current target blueprint");
+    let planner_config = datastore
+        .reconfigurator_config_get_latest(opctx)
         .await
-        .expect("latest inventory collection")
-        .unwrap_or_else(|| CollectionBuilder::new("test").build());
+        .expect("obtained latest reconfigurator config")
+        .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
+    let planning_input = PlanningInputFromDb::assemble(
+        &opctx,
+        &datastore,
+        planner_config,
+        Arc::new(parent_blueprint),
+    )
+    .await
+    .expect("planning input");
     let initial_nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
     let nexus = initial_nexus_clients.first().expect("internal Nexus client");
 
     // First, deploy a new Nexus zone to an arbitrary sled.
-    let sled_id = planning_input
+    let commissioned_sled_ids = planning_input
         .all_sled_ids(SledFilter::Commissioned)
-        .next()
-        .expect("any sled id");
+        .collect::<Vec<_>>();
+    let sled_id = *commissioned_sled_ids.first().expect("any sled id");
     let (blueprint1, blueprint2) = blueprint_edit_current_target(
         log,
-        &planning_input,
-        &collection,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
+            // We have to tell the builder what image source to use for the new
+            // Nexus zone. If we were the planner, we'd check whether we have a
+            // TUF repo (or two) then decide whether to use the image from one
+            // of those or the install dataset. Instead of duplicating all of
+            // that logic, we'll just find an existing Nexus zone and copy its
+            // image source. This should always be right in this context; it
+            // would only be wrong if there are existing Nexus zones with
+            // different image sources, which would only be true in the middle
+            // of an update.
+            let (image_source, nexus_generation) = commissioned_sled_ids
+                .iter()
+                .find_map(|&sled_id| {
+                    builder
+                        .current_sled_zones(
+                            sled_id,
+                            BlueprintZoneDisposition::is_in_service,
+                        )
+                        .find_map(|zone| {
+                            if let BlueprintZoneType::Nexus(
+                                blueprint_zone_type::Nexus {
+                                    nexus_generation,
+                                    ..
+                                },
+                            ) = &zone.zone_type
+                            {
+                                Some((
+                                    zone.image_source.clone(),
+                                    nexus_generation,
+                                ))
+                            } else {
+                                None
+                            }
+                        })
+                })
+                .context(
+                    "could not find in-service Nexus in parent blueprint",
+                )?;
+
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                builder,
+                planning_input.external_ip_policy(),
+            )
+            .context("failed to construct external networking allocator")?
+            .for_new_nexus()
+            .context("failed to pick an external IP for Nexus")?;
             builder
-                .sled_add_zone_nexus(sled_id)
+                .sled_add_zone_nexus(
+                    sled_id,
+                    image_source,
+                    external_ip,
+                    *nexus_generation,
+                )
                 .context("adding Nexus zone")?;
+
             Ok(())
         },
     )
@@ -81,21 +147,33 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     assert_eq!(new_zone.kind(), ZoneKind::Nexus);
     let new_zone_addr = new_zone.underlay_ip();
     let new_zone_sockaddr =
-        SocketAddrV6::new(new_zone_addr, NEXUS_INTERNAL_PORT, 0, 0);
+        SocketAddrV6::new(new_zone_addr, NEXUS_LOCKSTEP_PORT, 0, 0);
     let new_zone_client = lc.specific_internal_nexus_client(new_zone_sockaddr);
 
     // Wait for the new Nexus zone to show up and be usable.
     let initial_sagas_list = wait_for_condition(
         || async {
-            list_sagas(&new_zone_client).await.map_err(|e| {
+            let list = list_sagas(&new_zone_client).await.map_err(|e| {
                 debug!(log,
                     "waiting for new Nexus to be available: listing sagas: {e:#}"
                 );
                 CondCheckError::<()>::NotYet
-            })
+            })?;
+            debug!(log, "new Nexus: listing sagas: ok");
+
+            let qq = new_zone_client
+                .quiesce_get()
+                .await
+                .expect("fetching quiesce state from new zone");
+            debug!(log, "new Nexus: quiesce state"; "state" => ?qq);
+            if let QuiesceState::Undetermined = qq.state {
+                Err(CondCheckError::<()>::NotYet)
+            } else {
+                Ok(list)
+            }
         },
         &Duration::from_millis(50),
-        &Duration::from_secs(60),
+        &Duration::from_secs(90),
     )
     .await
     .expect("new Nexus to be usable");
@@ -116,10 +194,8 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     info!(log, "created demo saga"; "demo_saga" => ?demo_saga);
 
     // Now expunge the zone we just created.
-    let _ = blueprint_edit_current_target(
+    let (_blueprint2, blueprint3) = blueprint_edit_current_target(
         log,
-        &planning_input,
-        &collection,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             builder
@@ -130,12 +206,23 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     )
     .await
     .expect("editing blueprint to expunge zone");
+    let (_, expunged_zone_config) = blueprint3
+        .all_omicron_zones(|_| true)
+        .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
+        .expect("expunged zone in new blueprint");
+    let BlueprintZoneDisposition::Expunged {
+        as_of_generation: expunged_generation,
+        ..
+    } = expunged_zone_config.disposition
+    else {
+        panic!("expected expunged zone to have disposition Expunged");
+    };
 
     // At some point, we should be unable to reach this Nexus any more.
     wait_for_condition(
         || async {
             match new_zone_client.saga_list(None, None, None).await {
-                Err(nexus_client::Error::CommunicationError(error)) => {
+                Err(nexus_lockstep_client::Error::CommunicationError(error)) => {
                     info!(log, "expunged Nexus no longer reachable";
                         "error" => slog_error_chain::InlineErrorChain::new(&error),
                     );
@@ -164,67 +251,53 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // For that to happen, inventory must first reflect that the Nexus we
     // expunged is really gone.  Then we must run through another planning
     // round.
-    //
-    // First, kick one Nexus instance's inventory collector.  Otherwise, it
-    // might take a while for the system to notice this zone is gone.  Having
-    // activated the task, it shouldn't take too long to get an inventory
-    info!(log, "activating inventory collector");
-    nexus
-        .bgtask_activate(&BackgroundTasksActivateRequest {
-            bgtask_names: vec![String::from("inventory_collection")],
-        })
-        .await
-        .expect("activating inventory background task");
-    let latest_collection = wait_for_condition(
-        || async {
-            let latest_collection = datastore
-                .inventory_get_latest_collection(opctx)
-                .await
-                .expect("latest inventory collection")
-                .expect("have a latest inventory collection");
-            debug!(log, "got inventory"; "id" => %latest_collection.id);
-            let agent = latest_collection.sled_agents.get(&sled_id).expect(
-                "collection information for the sled we added a Nexus to",
-            );
-            if let Some(config) = &agent.ledgered_sled_config {
-                if config.zones.iter().any(|z| z.id == new_zone.id) {
-                    debug!(log, "zone still present in ledger");
-                    return Err(CondCheckError::<()>::NotYet);
-                }
-            }
-            if let Some(config) = agent
-                .last_reconciliation
-                .as_ref()
-                .map(|lr| &lr.last_reconciled_config)
-            {
-                if config.zones.iter().any(|z| z.id == new_zone.id) {
-                    debug!(log, "zone still present in inventory");
-                    return Err(CondCheckError::<()>::NotYet);
-                }
-            }
-            return Ok(latest_collection);
-        },
-        &Duration::from_millis(3000),
-        &Duration::from_secs(90),
+    let latest_collection = blueprint_wait_sled_configs_propagated(
+        opctx,
+        datastore,
+        &blueprint3,
+        nexus,
+        Duration::from_secs(90),
     )
     .await
-    .expect("waiting for zone to be gone from inventory");
+    .expect("waiting for blueprint3 sled configs");
+    // These checks are not necessary, but document our assumptions.
+    let agent = latest_collection
+        .sled_agents
+        .get(&sled_id)
+        .expect("collection information for the sled we added a Nexus to");
+    let ledgered_config = agent
+        .ledgered_sled_config
+        .as_ref()
+        .expect("sled should have ledgered config");
+    assert!(!ledgered_config.zones.iter().any(|z| z.id == new_zone.id));
+    let reconciled_config = &agent
+        .last_reconciliation
+        .as_ref()
+        .expect("sled should have reconciled config")
+        .last_reconciled_config;
+    assert!(!reconciled_config.zones.iter().any(|z| z.id == new_zone.id));
+    assert!(reconciled_config.generation >= expunged_generation);
 
     // Now run through the planner.
     info!(log, "running through planner");
-    let planning_input = PlanningInputFromDb::assemble(&opctx, &datastore)
-        .await
-        .expect("planning input");
     let (_, parent_blueprint) = datastore
         .blueprint_target_get_current_full(opctx)
         .await
         .expect("getting latest target blueprint");
+    let planning_input = PlanningInputFromDb::assemble(
+        &opctx,
+        &datastore,
+        planner_config,
+        Arc::new(parent_blueprint),
+    )
+    .await
+    .expect("planning input");
     let planner = Planner::new_based_on(
         log.clone(),
-        &parent_blueprint,
         &planning_input,
         "live test suite",
         &latest_collection,
+        PlannerRng::from_entropy(),
     )
     .expect("constructing planner");
     let new_blueprint = planner.plan().expect("creating blueprint");
@@ -316,7 +389,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
 }
 
 async fn list_sagas(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<Vec<Saga>, anyhow::Error> {
     client
         .saga_list_stream(None, None)

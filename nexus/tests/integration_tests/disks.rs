@@ -5,9 +5,6 @@
 //! Tests basic disk support in the API
 
 use super::instances::instance_wait_for_state;
-use super::metrics_querier::MetricsNotYet;
-use super::metrics_querier::MetricsQuerier;
-use chrono::Utc;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
@@ -16,27 +13,25 @@ use nexus_config::RegionAllocationStrategy;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::http_testing::AuthnMode;
-use nexus_test_utils::http_testing::Collection;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
-use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
-use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::wait_for_producer;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::identity::Asset;
 use nexus_types::silo::DEFAULT_SILO_ID;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -44,14 +39,13 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::{ByteCount, SimpleIdentityOrName as _};
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::VolumeUuid;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
-use oximeter::types::Datum;
-use oximeter::types::Measurement;
+use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::TestInterfaces as _;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -120,6 +114,25 @@ async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
     create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
+}
+
+async fn get_crucible_disk(
+    datastore: &Arc<datastore::DataStore>,
+    opctx: &OpContext,
+    disk_id: Uuid,
+) -> datastore::CrucibleDisk {
+    let disk = datastore
+        .disk_get(opctx, disk_id)
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    match disk {
+        datastore::Disk::Crucible(disk) => disk,
+
+        datastore::Disk::LocalStorage(_) => {
+            unreachable!();
+        }
+    }
 }
 
 #[nexus_test]
@@ -347,8 +360,10 @@ async fn test_disk_create_disk_that_already_exists_fails(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -751,8 +766,10 @@ async fn test_disk_region_creation_failure(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -802,8 +819,10 @@ async fn test_disk_invalid_block_size_rejected(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize(1024),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize(1024),
+            },
         },
         size: disk_size,
     };
@@ -845,8 +864,10 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -879,8 +900,10 @@ async fn test_disk_reject_total_size_less_than_min_disk_size_bytes(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -922,8 +945,10 @@ async fn test_disk_reject_total_size_greater_than_max_disk_size_bytes(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -966,8 +991,10 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1016,8 +1043,10 @@ async fn test_disk_backed_by_multiple_region_sets(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1052,8 +1081,10 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1139,8 +1170,10 @@ async fn test_disk_virtual_provisioning_collection(
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1198,8 +1231,10 @@ async fn test_disk_virtual_provisioning_collection(
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1300,8 +1335,10 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1434,8 +1471,10 @@ async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1574,8 +1613,10 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1609,8 +1650,10 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1661,8 +1704,10 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
             name: "disk-three".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1712,8 +1757,10 @@ async fn test_multiple_disks_multiple_zpools(
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1735,8 +1782,10 @@ async fn test_multiple_disks_multiple_zpools(
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1752,193 +1801,6 @@ async fn test_multiple_disks_multiple_zpools(
     .unwrap();
 }
 
-async fn create_instance_with_disk(client: &ClientTestContext) {
-    create_instance_with(
-        &client,
-        PROJECT_NAME,
-        INSTANCE_NAME,
-        &params::InstanceNetworkInterfaceAttachment::Default,
-        vec![params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
-        )],
-        Vec::<params::ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-    )
-    .await;
-}
-
-const ALL_METRICS: [&'static str; 6] =
-    ["activated", "read", "write", "read_bytes", "write_bytes", "flush"];
-
-#[nexus_test]
-async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
-    let metrics_querier = MetricsQuerier::new(cptestctx);
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-    let project_id = create_project_and_pool(client).await;
-    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
-
-    // When grabbing a metric, we look for data points going back to the
-    // start of this test all the way up to the current time.
-    let metric_url = |metric: &str| {
-        format!(
-            "/v1/disks/{}/metrics/{}?start_time={:?}&end_time={:?}&project={}",
-            DISK_NAME,
-            metric,
-            cptestctx.start_time,
-            Utc::now(),
-            PROJECT_NAME,
-        )
-    };
-
-    // Try accessing metrics before we attach the disk to an instance.
-    //
-    // Observe that no metrics exist yet; no "upstairs" should have been
-    // instantiated on a sled.
-    let measurements =
-        objects_list_page_authz::<Measurement>(client, &metric_url("read"))
-            .await;
-    assert!(measurements.items.is_empty());
-
-    metrics_querier
-        .wait_for_latest_silo_metric(
-            "virtual_disk_space_provisioned",
-            Some(project_id),
-            |measurement| {
-                if measurement == i64::from(disk.size) {
-                    Ok(())
-                } else {
-                    Err(MetricsNotYet::new(format!(
-                        "waiting for virtual_disk_space_provisioned={} \
-                         (currently {measurement})",
-                        disk.size,
-                    )))
-                }
-            },
-        )
-        .await;
-
-    // Create an instance, attach the disk to it.
-    create_instance_with_disk(client).await;
-    wait_for_producer(&cptestctx.oximeter, disk.id()).await;
-
-    for metric in &ALL_METRICS {
-        metrics_querier
-            .wait_for_disk_metric(PROJECT_NAME, DISK_NAME, metric, |items| {
-                if items.is_empty() {
-                    return Err(MetricsNotYet::new(format!(
-                        "waiting for at least one item for metric={metric}"
-                    )));
-                }
-                for item in &items {
-                    let cumulative = match item.datum() {
-                        Datum::CumulativeI64(c) => c,
-                        _ => panic!("Unexpected datum type {:?}", item.datum()),
-                    };
-                    assert!(cumulative.start_time() <= item.timestamp());
-                }
-                Ok(())
-            })
-            .await;
-    }
-
-    // Check the utilization info for the whole project too.
-    metrics_querier
-        .wait_for_latest_silo_metric(
-            "virtual_disk_space_provisioned",
-            Some(project_id),
-            |measurement| {
-                if measurement == i64::from(disk.size) {
-                    Ok(())
-                } else {
-                    Err(MetricsNotYet::new(format!(
-                        "waiting for virtual_disk_space_provisioned={} \
-                         (currently {measurement})",
-                        disk.size,
-                    )))
-                }
-            },
-        )
-        .await;
-}
-
-#[nexus_test]
-async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(client).await;
-    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
-    create_instance_with_disk(client).await;
-    wait_for_producer(&cptestctx.oximeter, disk.id()).await;
-
-    let metrics_querier = MetricsQuerier::new(cptestctx);
-    for metric in &ALL_METRICS {
-        // Wait until we have at least two measurements.
-        metrics_querier
-            .wait_for_disk_metric(
-                PROJECT_NAME,
-                DISK_NAME,
-                metric,
-                |measurements| {
-                    let num_measurements = measurements.len();
-                    if num_measurements >= 2 {
-                        Ok(())
-                    } else {
-                        Err(MetricsNotYet::new(format!(
-                            "waiting for at least 2 measurements \
-                             (currently {num_measurements})"
-                        )))
-                    }
-                },
-            )
-            .await;
-
-        let collection_url = format!(
-            "/v1/disks/{}/metrics/{}?project={}",
-            DISK_NAME, metric, PROJECT_NAME
-        );
-        let initial_params = format!(
-            "start_time={:?}&end_time={:?}",
-            cptestctx.start_time,
-            Utc::now(),
-        );
-
-        let measurements_paginated: Collection<Measurement> =
-            NexusRequest::iter_collection_authn(
-                client,
-                &collection_url,
-                &initial_params,
-                Some(10),
-            )
-            .await
-            .expect("failed to iterate over metrics");
-        assert!(!measurements_paginated.all_items.is_empty());
-
-        let mut last_timestamp = None;
-        let mut last_value = None;
-        for item in &measurements_paginated.all_items {
-            let cumulative = match item.datum() {
-                Datum::CumulativeI64(c) => c,
-                _ => panic!("Unexpected datum type {:?}", item.datum()),
-            };
-            assert!(cumulative.start_time() <= item.timestamp());
-
-            // Validate that the timestamps are non-decreasing.
-            if let Some(last_ts) = last_timestamp {
-                assert!(last_ts <= item.timestamp());
-            }
-            // Validate that the values increase.
-            if let Some(last_value) = last_value {
-                assert!(last_value < cumulative.value());
-            }
-
-            last_timestamp = Some(item.timestamp());
-            last_value = Some(cumulative.value());
-        }
-    }
-}
-
 #[nexus_test]
 async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -1951,8 +1813,10 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::ImportingBlocks {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::ImportingBlocks {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -1996,8 +1860,10 @@ async fn test_project_delete_disk_no_auth_idempotent(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -2149,11 +2015,8 @@ async fn test_region_allocation_strategy_random_is_idempotent(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2279,11 +2142,8 @@ async fn test_single_region_allocate_for_replace(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2333,9 +2193,9 @@ async fn test_single_region_allocate_for_replace(
     assert_eq!(allocated_regions.len(), one_more);
 
     // Each region should be on a different pool
-    let pools_used: HashSet<Uuid> = datasets_and_regions
+    let pools_used: HashSet<ZpoolUuid> = datasets_and_regions
         .iter()
-        .map(|(dataset, _)| dataset.pool_id)
+        .map(|(dataset, _)| dataset.pool_id())
         .collect();
 
     assert_eq!(pools_used.len(), REGION_REDUNDANCY_THRESHOLD + 1);
@@ -2363,11 +2223,7 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2451,11 +2307,8 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
     // Grab the db record now, before the delete
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
-        .await
-        .unwrap();
+    let disk_id = disk.identity.id;
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     // Choose one of the datasets, and drop the simulated Crucible agent
     let zpool = disk_test.zpools().next().expect("Expected at least one zpool");
@@ -2487,7 +2340,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
 
     // Expunge the physical disk
     let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-        .zpool_id(zpool.id.into_untyped_uuid())
+        .zpool_id(zpool.id)
         .fetch()
         .await
         .unwrap();
@@ -2495,7 +2348,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id.into(),
+            db_zpool.physical_disk_id(),
             PhysicalDiskPolicy::Expunged,
         )
         .await
@@ -2531,19 +2384,15 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 
     // Expunge the sled
-    let int_client = &cptestctx.internal_client;
-    int_client
+    cptestctx
+        .lockstep_client
         .make_request(
             Method::POST,
             "/sleds/expunge",
@@ -2594,11 +2443,7 @@ async fn test_do_not_provision_on_dataset(cptestctx: &ControlPlaneTestContext) {
 
     // Assert no region was allocated to the marked dataset
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2645,8 +2490,10 @@ async fn test_do_not_provision_on_dataset_not_enough(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -2710,8 +2557,10 @@ async fn test_zpool_control_plane_storage_buffer(
             name: "disk1".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(8),
     };
@@ -2733,8 +2582,10 @@ async fn test_zpool_control_plane_storage_buffer(
             name: "disk2".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(4),
     };
@@ -2800,6 +2651,81 @@ async fn test_zpool_control_plane_storage_buffer(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&new_disk))
             .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+#[nexus_test]
+async fn test_list_all_types_of_disk(cptestctx: &ControlPlaneTestContext) {
+    // Create three zpools, each with one dataset
+    DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(3)
+        .build()
+        .await;
+
+    // Assert default is still 16 GiB
+    assert_eq!(16, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    let disks_url = get_disks_url();
+
+    // Distributed disk
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk1".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
+        },
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Local disk
+
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk2".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_backend: params::DiskBackend::Local {},
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // List them all
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

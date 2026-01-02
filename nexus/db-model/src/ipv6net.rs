@@ -58,7 +58,7 @@ impl Ipv6Net {
         let mut rng = if cfg!(test) {
             StdRng::seed_from_u64(0)
         } else {
-            StdRng::from_entropy()
+            StdRng::from_os_rng()
         };
         let random =
             (u128::from(rng.next_u64()) << 64) | u128::from(rng.next_u64());

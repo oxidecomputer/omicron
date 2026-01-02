@@ -246,6 +246,13 @@ impl RegionSnapshotReplacementDetector {
                 continue;
             }
 
+            // Do not check if the volume is deleted here: if the read-only
+            // target is _not_ deleted (checked above), then even if the
+            // snapshot volume is hard deleted there are still other references
+            // in other volumes to those read-only targets that need replacing.
+            // The start saga can handle if the snapshot volume is hard deleted,
+            // so proceed with invoking it here.
+
             let result = self
                 .send_start_request(
                     authn::saga::Serialized::for_opctx(opctx),
@@ -326,7 +333,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external;
     use omicron_uuid_kinds::DatasetUuid;
-    use omicron_uuid_kinds::GenericUuid;
+
     use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::CrucibleOpts;
     use sled_agent_client::VolumeConstructionRequest;
@@ -512,7 +519,7 @@ mod test {
                     volume_id: volume_id.into(),
                     destination_volume_id: VolumeUuid::new_v4().into(),
 
-                    gen: Generation::new(),
+                    generation: Generation::new(),
                     state: SnapshotState::Creating,
                     block_size: BlockSize::AdvancedFormat,
 
@@ -530,7 +537,7 @@ mod test {
             disk_test.zpools().next().expect("Expected at least one zpool");
 
         let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-            .zpool_id(first_zpool.id.into_untyped_uuid())
+            .zpool_id(first_zpool.id)
             .fetch()
             .await
             .unwrap();
@@ -538,7 +545,7 @@ mod test {
         datastore
             .physical_disk_update_policy(
                 &opctx,
-                db_zpool.physical_disk_id.into(),
+                db_zpool.physical_disk_id(),
                 PhysicalDiskPolicy::Expunged,
             )
             .await
@@ -672,7 +679,7 @@ mod test {
                             block_size: 512,
                             blocks_per_extent: 1,
                             extent_count: 1,
-                            gen: 1,
+                            generation: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec!["[::1]:12345".parse().unwrap()],

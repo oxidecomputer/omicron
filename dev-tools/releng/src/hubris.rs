@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use camino::Utf8PathBuf;
 use fs_err::tokio as fs;
 use futures::future::TryFutureExt;
@@ -29,6 +30,7 @@ pub(crate) async fn fetch_hubris_artifacts(
     client: reqwest::Client,
     manifest_list: Utf8PathBuf,
     output_dir: Utf8PathBuf,
+    name_check: &'static str,
 ) -> Result<()> {
     macro_rules! zip {
         ($expr:expr) => {
@@ -37,6 +39,21 @@ pub(crate) async fn fetch_hubris_artifacts(
     }
 
     fs::create_dir_all(&output_dir).await?;
+
+    // We need to remove our old downloaded corpus to make sure nothing else
+    // gets added to the repo unexpectedly. This should only really be a
+    // issue with local builds
+    if let Err(e) =
+        fs::remove_dir_all(&output_dir.join("measurement_corpus")).await
+    {
+        match e.kind() {
+            std::io::ErrorKind::NotFound => {}
+            _ => bail!(e),
+        }
+    }
+    fs::create_dir_all(&output_dir.join("measurement_corpus"))
+        .await
+        .context("Failed to create `measurement_corpus`")?;
 
     // This could be parallelized with FuturesUnordered but in practice this
     // takes less time than OS builds.
@@ -106,14 +123,91 @@ pub(crate) async fn fetch_hubris_artifacts(
                     }
                 }
             }
+            if let Some(corpus) = hash_manifest.corpus {
+                let hash = match corpus {
+                    Source::File(file) => file.hash,
+                    Source::CompositeRot { .. } => bail!(
+                        "Unexpected file type: should be a single file, not an RoT"
+                    ),
+                };
+                let data =
+                    fetch_hash(&logger, base_url, &client, &hash).await?;
+                fs::write(
+                    output_dir.join("measurement_corpus").join(hash),
+                    data,
+                )
+                .await
+                .context("failed to write file {hash}")?;
+            }
         }
     }
 
+    workaround_check(&manifest, name_check)?;
     fs::write(
         output_dir.join("manifest.toml"),
         toml::to_string_pretty(&manifest)?.into_bytes(),
     )
     .await?;
+    Ok(())
+}
+
+// omicron#9437 fixed an issue where an incorrect RoT image could be chosen.
+// Because the RoT is upgraded before any omicron components, the risk is
+// the incorrect RoT gets chosen and blocks the update with the fix in it.
+// For the purposes of working around the bug and making sure we can deploy
+// the fix, ensure our images are in the "correct" order
+fn workaround_check(
+    manifest: &DeserializedManifest,
+    name_check: &'static str,
+) -> Result<()> {
+    // This bug only affects `gimlet_rot` and `gimlet_rot_bootloader`
+    // We search for these by name. This is ugly but temporary.
+    let gimlet_artifacts =
+        manifest.artifacts.get(&KnownArtifactKind::GimletRot).unwrap();
+
+    let gimlet = gimlet_artifacts
+        .iter()
+        .position(|x| x.name == format!("oxide-rot-1-{}-gimlet", name_check))
+        .expect("failed to find gimlet");
+
+    let cosmo = gimlet_artifacts
+        .iter()
+        .position(|x| x.name == format!("oxide-rot-1-{}-cosmo", name_check))
+        .expect("failed to find cosmo");
+
+    // We need the indicies to be relative for each key set
+    if gimlet > cosmo {
+        anyhow::bail!(
+            "The gimlet entry for `GimletRot` comes after cosmo. This may cause problems."
+        );
+    }
+
+    let gimlet_artifacts = manifest
+        .artifacts
+        .get(&KnownArtifactKind::GimletRotBootloader)
+        .unwrap();
+
+    let gimlet = gimlet_artifacts
+        .iter()
+        .position(|x| {
+            x.name == format!("gimlet_rot_bootloader-{}-gimlet", name_check)
+        })
+        .expect("failed to find gimlet");
+
+    let cosmo = gimlet_artifacts
+        .iter()
+        .position(|x| {
+            x.name == format!("gimlet_rot_bootloader-{}-cosmo", name_check)
+        })
+        .expect("failed to find cosmo");
+
+    // We need the indicies to be relative for each key set
+    if gimlet > cosmo {
+        anyhow::bail!(
+            "The gimlet entry for `GimletRotBootloader` comes after cosmo. This may cause problems."
+        );
+    }
+
     Ok(())
 }
 
@@ -160,6 +254,9 @@ async fn fetch_hash(
 struct Manifest {
     #[serde(rename = "artifact")]
     artifacts: HashMap<KnownArtifactKind, Vec<Artifact>>,
+    // Add a default for backwards compatibility
+    #[serde(rename = "measurement_corpus")]
+    corpus: Option<Source>,
 }
 
 #[derive(Deserialize)]

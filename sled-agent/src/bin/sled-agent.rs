@@ -12,7 +12,9 @@ use omicron_common::cmd::fatal;
 use omicron_sled_agent::bootstrap::RssAccessError;
 use omicron_sled_agent::bootstrap::server as bootstrap_server;
 use omicron_sled_agent::config::Config as SledConfig;
-use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_init::{
+    RackInitializeRequest, RackInitializeRequestParams,
+};
 
 #[derive(Debug, Parser)]
 #[clap(
@@ -28,9 +30,8 @@ enum Args {
     },
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(message) = do_run().await {
+fn main() {
+    if let Err(message) = oxide_tokio_rt::run(do_run()) {
         fatal(message);
     }
 }
@@ -62,10 +63,14 @@ async fn do_run() -> Result<(), CmdError> {
                 rss_config_path
             };
             let rss_config = if rss_config_path.exists() {
-                Some(
+                let rss_config =
                     RackInitializeRequest::from_file(rss_config_path)
-                        .map_err(|e| CmdError::Failure(anyhow!(e)))?,
-                )
+                        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
+                let skip_timesync = config.skip_timesync.unwrap_or(false);
+                Some(RackInitializeRequestParams::new(
+                    rss_config,
+                    skip_timesync,
+                ))
             } else {
                 None
             };
@@ -93,7 +98,6 @@ async fn do_run() -> Result<(), CmdError> {
                 .wait_for_finish()
                 .await
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
-
             Ok(())
         }
     }

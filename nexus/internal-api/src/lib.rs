@@ -2,53 +2,44 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use dropshot::{
-    Body, Header, HttpError, HttpResponseCreated, HttpResponseDeleted,
-    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
-    ResultsPage, TypedBody,
+    HttpError, HttpResponseCreated, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, ResultsPage,
+    TypedBody,
 };
-use http::Response;
+use dropshot_api_manager_types::api_versions;
 use nexus_types::{
-    deployment::{
-        Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
-        ClickhousePolicy, OximeterReadPolicy,
-    },
     external_api::{
-        headers::RangeRequest,
-        params::{self, PhysicalDiskPath, SledSelector, UninitializedSledId},
-        shared::{self, ProbeInfo, UninitializedSled},
-        views::{Ping, PingStatus, SledPolicy},
+        shared::ProbeInfo,
+        views::{Ping, PingStatus},
     },
     internal_api::{
         params::{
-            InstanceMigrateRequest, OximeterInfo, RackInitializationRequest,
-            SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
+            OximeterInfo, SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
         },
-        views::{
-            BackgroundTask, DemoSaga, Ipv4NatEntryView, MgsUpdateDriverStatus,
-            Saga, UpdateStatus,
-        },
+        views::NatEntryView,
     },
 };
 use omicron_common::api::{
-    external::{Instance, http_pagination::PaginatedById},
+    external::http_pagination::PaginatedById,
     internal::nexus::{
         DiskRuntimeState, DownstairsClientStopRequest, DownstairsClientStopped,
         ProducerEndpoint, ProducerRegistrationResponse, RepairFinishInfo,
         RepairProgress, RepairStartInfo, SledVmmState,
     },
 };
-use omicron_uuid_kinds::{
-    DemoSagaUuid, DownstairsKind, PropolisUuid, SledUuid, TypedUuid,
-    UpstairsKind, UpstairsRepairKind, VolumeUuid,
-};
+use omicron_uuid_kinds::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const RACK_INITIALIZATION_REQUEST_MAX_BYTES: usize = 10 * 1024 * 1024;
+api_versions!([
+    // Do not create new versions of this client-side versioned API.
+    // https://github.com/oxidecomputer/omicron/issues/9290
+    (1, INITIAL),
+]);
 
 #[dropshot::api_description]
 pub trait NexusInternalApi {
@@ -88,34 +79,6 @@ pub trait NexusInternalApi {
         sled_info: TypedBody<SledAgentInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Request a new set of firewall rules for a sled.
-    ///
-    /// This causes Nexus to read the latest set of rules for the sled,
-    /// and call a Sled endpoint which applies the rules to all OPTE ports
-    /// that happen to exist.
-    #[endpoint {
-        method = POST,
-        path = "/sled-agents/{sled_id}/firewall-rules-update",
-    }]
-    async fn sled_firewall_rules_request(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<SledAgentPathParam>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Report that the Rack Setup Service initialization is complete
-    ///
-    /// See RFD 278 for more details.
-    #[endpoint {
-        method = PUT,
-        path = "/racks/{rack_id}/initialization-complete",
-        request_body_max_bytes = RACK_INITIALIZATION_REQUEST_MAX_BYTES,
-    }]
-    async fn rack_initialization_complete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<RackPathParam>,
-        info: TypedBody<RackInitializationRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
     #[endpoint {
         method = PUT,
         path = "/switch/{switch_id}",
@@ -136,16 +99,6 @@ pub trait NexusInternalApi {
         path_params: Path<VmmPathParam>,
         new_runtime_state: TypedBody<SledVmmState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    #[endpoint {
-        method = POST,
-        path = "/instances/{instance_id}/migrate",
-    }]
-    async fn instance_migrate(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
-        migrate_params: TypedBody<InstanceMigrateRequest>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError>;
 
     /// Report updated state for a disk.
     #[endpoint {
@@ -279,101 +232,6 @@ pub trait NexusInternalApi {
         downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    // Debug interfaces for sagas
-
-    /// List sagas
-    #[endpoint {
-        method = GET,
-        path = "/sagas",
-    }]
-    async fn saga_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError>;
-
-    /// Fetch a saga
-    #[endpoint {
-        method = GET,
-        path = "/sagas/{saga_id}",
-    }]
-    async fn saga_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<SagaPathParam>,
-    ) -> Result<HttpResponseOk<Saga>, HttpError>;
-
-    /// Kick off an instance of the "demo" saga
-    ///
-    /// This saga is used for demo and testing.  The saga just waits until you
-    /// complete using the `saga_demo_complete` API.
-    #[endpoint {
-        method = POST,
-        path = "/demo-saga",
-    }]
-    async fn saga_demo_create(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DemoSaga>, HttpError>;
-
-    /// Complete a waiting demo saga
-    ///
-    /// Note that the id used here is not the same as the id of the saga.  It's
-    /// the one returned by the `saga_demo_create` API.
-    #[endpoint {
-        method = POST,
-        path = "/demo-saga/{demo_saga_id}/complete",
-    }]
-    async fn saga_demo_complete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<DemoSagaPathParam>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    // Debug interfaces for background Tasks
-
-    /// List background tasks
-    ///
-    /// This is a list of discrete background activities that Nexus carries out.
-    /// This is exposed for support and debugging.
-    #[endpoint {
-        method = GET,
-        path = "/bgtasks",
-    }]
-    async fn bgtask_list(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BTreeMap<String, BackgroundTask>>, HttpError>;
-
-    /// Fetch status of one background task
-    ///
-    /// This is exposed for support and debugging.
-    #[endpoint {
-        method = GET,
-        path = "/bgtasks/view/{bgtask_name}",
-    }]
-    async fn bgtask_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<BackgroundTaskPathParam>,
-    ) -> Result<HttpResponseOk<BackgroundTask>, HttpError>;
-
-    /// Activates one or more background tasks, causing them to be run immediately
-    /// if idle, or scheduled to run again as soon as possible if already running.
-    #[endpoint {
-        method = POST,
-        path = "/bgtasks/activate",
-    }]
-    async fn bgtask_activate(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<BackgroundTasksActivateRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    // Debug interfaces for ongoing MGS updates
-
-    /// Fetch information about ongoing MGS updates
-    #[endpoint {
-        method = GET,
-        path = "/mgs-updates",
-    }]
-    async fn mgs_updates(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<MgsUpdateDriverStatus>, HttpError>;
-
     // NAT RPW internal APIs
 
     /// Fetch NAT ChangeSet
@@ -391,263 +249,13 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<RpwNatPathParam>,
         query_params: Query<RpwNatQueryParam>,
-    ) -> Result<HttpResponseOk<Vec<Ipv4NatEntryView>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<NatEntryView>>, HttpError>;
 
-    // APIs for managing blueprints
+    /// This endpoint has been abandoned and will permanently return a 410 Gone
+    /// error.
     //
-    // These are not (yet) intended for use by any other programs.  Eventually, we
-    // will want this functionality part of the public API.  But we don't want to
-    // commit to any of this yet.  These properly belong in an RFD 399-style
-    // "Service and Support API".  Absent that, we stick them here.
-
-    /// Lists blueprints
-    #[endpoint {
-        method = GET,
-        path = "/deployment/blueprints/all",
-    }]
-    async fn blueprint_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<BlueprintMetadata>>, HttpError>;
-
-    /// Fetches one blueprint
-    #[endpoint {
-        method = GET,
-        path = "/deployment/blueprints/all/{blueprint_id}",
-    }]
-    async fn blueprint_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<nexus_types::external_api::params::BlueprintPath>,
-    ) -> Result<HttpResponseOk<Blueprint>, HttpError>;
-
-    /// Deletes one blueprint
-    #[endpoint {
-        method = DELETE,
-        path = "/deployment/blueprints/all/{blueprint_id}",
-    }]
-    async fn blueprint_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<nexus_types::external_api::params::BlueprintPath>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
-
-    // Managing the current target blueprint
-
-    /// Fetches the current target blueprint, if any
-    #[endpoint {
-        method = GET,
-        path = "/deployment/blueprints/target",
-    }]
-    async fn blueprint_target_view(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError>;
-
-    /// Make the specified blueprint the new target
-    #[endpoint {
-        method = POST,
-        path = "/deployment/blueprints/target",
-    }]
-    async fn blueprint_target_set(
-        rqctx: RequestContext<Self::Context>,
-        target: TypedBody<BlueprintTargetSet>,
-    ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError>;
-
-    /// Set the `enabled` field of the current target blueprint
-    #[endpoint {
-        method = PUT,
-        path = "/deployment/blueprints/target/enabled",
-    }]
-    async fn blueprint_target_set_enabled(
-        rqctx: RequestContext<Self::Context>,
-        target: TypedBody<BlueprintTargetSet>,
-    ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError>;
-
-    // Generating blueprints
-
-    /// Generates a new blueprint for the current system, re-evaluating anything
-    /// that's changed since the last one was generated
-    #[endpoint {
-        method = POST,
-        path = "/deployment/blueprints/regenerate",
-    }]
-    async fn blueprint_regenerate(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Blueprint>, HttpError>;
-
-    /// Imports a client-provided blueprint
-    ///
-    /// This is intended for development and support, not end users or operators.
-    #[endpoint {
-        method = POST,
-        path = "/deployment/blueprints/import",
-    }]
-    async fn blueprint_import(
-        rqctx: RequestContext<Self::Context>,
-        blueprint: TypedBody<Blueprint>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Show deployed versions of artifacts
-    #[endpoint {
-        method = GET,
-        path = "/deployment/update-status"
-    }]
-    async fn update_status(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<UpdateStatus>, HttpError>;
-
-    /// List uninitialized sleds
-    #[endpoint {
-        method = GET,
-        path = "/sleds/uninitialized",
-    }]
-    async fn sled_list_uninitialized(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError>;
-
-    /// Add sled to initialized rack
-    //
-    // TODO: In the future this should really be a PUT request, once we resolve
-    // https://github.com/oxidecomputer/omicron/issues/4494. It should also
-    // explicitly be tied to a rack via a `rack_id` path param. For now we assume
-    // we are only operating on single rack systems.
-    #[endpoint {
-        method = POST,
-        path = "/sleds/add",
-    }]
-    async fn sled_add(
-        rqctx: RequestContext<Self::Context>,
-        sled: TypedBody<UninitializedSledId>,
-    ) -> Result<HttpResponseCreated<SledId>, HttpError>;
-
-    /// Mark a sled as expunged
-    ///
-    /// This is an irreversible process! It should only be called after
-    /// sufficient warning to the operator.
-    ///
-    /// This is idempotent, and it returns the old policy of the sled.
-    #[endpoint {
-        method = POST,
-        path = "/sleds/expunge",
-    }]
-    async fn sled_expunge(
-        rqctx: RequestContext<Self::Context>,
-        sled: TypedBody<SledSelector>,
-    ) -> Result<HttpResponseOk<SledPolicy>, HttpError>;
-
-    /// Mark a physical disk as expunged
-    ///
-    /// This is an irreversible process! It should only be called after
-    /// sufficient warning to the operator.
-    ///
-    /// This is idempotent.
-    #[endpoint {
-        method = POST,
-        path = "/physical-disk/expunge",
-    }]
-    async fn physical_disk_expunge(
-        rqctx: RequestContext<Self::Context>,
-        disk: TypedBody<PhysicalDiskPath>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    // Support bundles (experimental)
-
-    /// List all support bundles
-    #[endpoint {
-        method = GET,
-        path = "/experimental/v1/system/support-bundles",
-    }]
-    async fn support_bundle_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
-
-    /// View a support bundle
-    #[endpoint {
-        method = GET,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}",
-    }]
-    async fn support_bundle_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::SupportBundlePath>,
-    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
-
-    /// Download the index of a support bundle
-    #[endpoint {
-        method = GET,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}/index",
-    }]
-    async fn support_bundle_index(
-        rqctx: RequestContext<Self::Context>,
-        headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundlePath>,
-    ) -> Result<Response<Body>, HttpError>;
-
-    /// Download the contents of a support bundle
-    #[endpoint {
-        method = GET,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
-    }]
-    async fn support_bundle_download(
-        rqctx: RequestContext<Self::Context>,
-        headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundlePath>,
-    ) -> Result<Response<Body>, HttpError>;
-
-    /// Download a file within a support bundle
-    #[endpoint {
-        method = GET,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
-    }]
-    async fn support_bundle_download_file(
-        rqctx: RequestContext<Self::Context>,
-        headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundleFilePath>,
-    ) -> Result<Response<Body>, HttpError>;
-
-    /// Download the metadata of a support bundle
-    #[endpoint {
-        method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
-    }]
-    async fn support_bundle_head(
-        rqctx: RequestContext<Self::Context>,
-        headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundlePath>,
-    ) -> Result<Response<Body>, HttpError>;
-
-    /// Download the metadata of a file within the support bundle
-    #[endpoint {
-        method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
-    }]
-    async fn support_bundle_head_file(
-        rqctx: RequestContext<Self::Context>,
-        headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundleFilePath>,
-    ) -> Result<Response<Body>, HttpError>;
-
-    /// Create a new support bundle
-    #[endpoint {
-        method = POST,
-        path = "/experimental/v1/system/support-bundles",
-    }]
-    async fn support_bundle_create(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError>;
-
-    /// Delete an existing support bundle
-    ///
-    /// May also be used to cancel a support bundle which is currently being
-    /// collected, or to remove metadata for a support bundle that has failed.
-    #[endpoint {
-        method = DELETE,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}",
-    }]
-    async fn support_bundle_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::SupportBundlePath>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// Get all the probes associated with a given sled.
+    // Remove this once we can appropriately handle client-side versioned APIs.
+    // See https://github.com/oxidecomputer/omicron/issues/9290 for details.
     #[endpoint {
         method = GET,
         path = "/probes/{sled}"
@@ -658,42 +266,17 @@ pub trait NexusInternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError>;
 
-    /// Get the current clickhouse policy
-    #[endpoint {
-     method = GET,
-     path = "/clickhouse/policy"
-     }]
-    async fn clickhouse_policy_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ClickhousePolicy>, HttpError>;
-
-    /// Set the new clickhouse policy
+    /// This endpoint has been abandoned and will permanently return a 410 Gone
+    /// error.
+    //
+    // Remove this once we can appropriately handle client-side versioned APIs.
+    // See https://github.com/oxidecomputer/omicron/issues/9290 for details.
     #[endpoint {
         method = POST,
-        path = "/clickhouse/policy"
+        path = "/refresh-vpc-routes"
     }]
-    async fn clickhouse_policy_set(
+    async fn refresh_vpc_routes(
         rqctx: RequestContext<Self::Context>,
-        policy: TypedBody<ClickhousePolicy>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Get the current oximeter read policy
-    #[endpoint {
-            method = GET,
-            path = "/oximeter/read-policy"
-            }]
-    async fn oximeter_read_policy_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OximeterReadPolicy>, HttpError>;
-
-    /// Set the new oximeter read policy
-    #[endpoint {
-               method = POST,
-               path = "/oximeter/read-policy"
-           }]
-    async fn oximeter_read_policy_set(
-        rqctx: RequestContext<Self::Context>,
-        policy: TypedBody<OximeterReadPolicy>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
@@ -715,22 +298,10 @@ pub struct VolumePathParam {
     pub volume_id: VolumeUuid,
 }
 
-/// Path parameters for Rack requests.
-#[derive(Deserialize, JsonSchema)]
-pub struct RackPathParam {
-    pub rack_id: Uuid,
-}
-
 /// Path parameters for Switch requests.
 #[derive(Deserialize, JsonSchema)]
 pub struct SwitchPathParam {
     pub switch_id: Uuid,
-}
-
-/// Path parameters for Instance requests (internal API)
-#[derive(Deserialize, JsonSchema)]
-pub struct InstancePathParam {
-    pub instance_id: Uuid,
 }
 
 /// Path parameters for VMM requests (internal API)
@@ -765,25 +336,6 @@ pub struct UpstairsDownstairsPathParam {
     pub downstairs_id: TypedUuid<DownstairsKind>,
 }
 
-/// Path parameters for Saga requests
-#[derive(Deserialize, JsonSchema)]
-pub struct SagaPathParam {
-    #[serde(rename = "saga_id")]
-    pub saga_id: Uuid,
-}
-
-/// Path parameters for DemoSaga requests
-#[derive(Deserialize, JsonSchema)]
-pub struct DemoSagaPathParam {
-    pub demo_saga_id: DemoSagaUuid,
-}
-
-/// Path parameters for Background Task requests
-#[derive(Deserialize, JsonSchema)]
-pub struct BackgroundTaskPathParam {
-    pub bgtask_name: String,
-}
-
 /// Query parameters for Background Task activation requests.
 #[derive(Deserialize, JsonSchema)]
 pub struct BackgroundTasksActivateRequest {
@@ -812,5 +364,6 @@ pub struct SledId {
 /// Path parameters for probes
 #[derive(Deserialize, JsonSchema)]
 pub struct ProbePathParam {
-    pub sled: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
 }

@@ -53,6 +53,7 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
 use schemars::JsonSchema;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -163,6 +164,54 @@ pub fn marker_for_name_or_id<T: SimpleIdentityOrName, Selector>(
     }
 }
 
+// Pagination by semantic version in ascending or descending order
+
+/// Scan parameters for resources that support scanning by semantic version
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct ScanByVersion<Selector = ()> {
+    #[serde(default = "default_version_sort_mode")]
+    sort_by: VersionSortMode,
+    #[serde(flatten)]
+    pub selector: Selector,
+}
+
+/// Supported sort modes when scanning by semantic version
+#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VersionSortMode {
+    /// Sort in increasing semantic version order (oldest first)
+    VersionAscending,
+    /// Sort in decreasing semantic version order (newest first)
+    VersionDescending,
+}
+
+fn default_version_sort_mode() -> VersionSortMode {
+    VersionSortMode::VersionDescending
+}
+
+impl<T> ScanParams for ScanByVersion<T>
+where
+    T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
+{
+    type MarkerValue = Version;
+
+    fn direction(&self) -> PaginationOrder {
+        match self.sort_by {
+            VersionSortMode::VersionAscending => PaginationOrder::Ascending,
+            VersionSortMode::VersionDescending => PaginationOrder::Descending,
+        }
+    }
+
+    fn from_query(
+        p: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
+    ) -> Result<&Self, HttpError> {
+        Ok(match p.page {
+            WhichPage::First(ref scan_params) => scan_params,
+            WhichPage::Next(PageSelector { ref scan, .. }) => scan,
+        })
+    }
+}
+
 /// See `dropshot::ResultsPage::new`
 fn page_selector_for<F, T, S, M>(
     item: &T,
@@ -200,7 +249,7 @@ where
 fn data_page_params_with_limit<S>(
     limit: NonZeroU32,
     pag_params: &PaginationParams<S, PageSelector<S, S::MarkerValue>>,
-) -> Result<DataPageParams<S::MarkerValue>, HttpError>
+) -> Result<DataPageParams<'_, S::MarkerValue>, HttpError>
 where
     S: ScanParams,
 {
@@ -260,7 +309,7 @@ impl ScanParams for ScanByName {
 /// Query parameters for pagination by id only
 pub type PaginatedById<Selector = ()> =
     PaginationParams<ScanById<Selector>, PageSelectorById<Selector>>;
-/// Page selector for pagination by name only
+/// Page selector for pagination by id only
 pub type PageSelectorById<Selector = ()> =
     PageSelector<ScanById<Selector>, Uuid>;
 /// Scan parameters for resources that support scanning by id only
@@ -312,6 +361,13 @@ pub type PaginatedByNameOrId<Selector = ()> = PaginationParams<
 /// Page selector for pagination by name or id
 pub type PageSelectorByNameOrId<Selector = ()> =
     PageSelector<ScanByNameOrId<Selector>, NameOrId>;
+
+/// Query parameters for pagination by semantic version
+pub type PaginatedByVersion<Selector = ()> =
+    PaginationParams<ScanByVersion<Selector>, PageSelectorByVersion<Selector>>;
+/// Page selector for pagination by semantic version
+pub type PageSelectorByVersion<Selector = ()> =
+    PageSelector<ScanByVersion<Selector>, Version>;
 
 pub fn id_pagination<'a, Selector>(
     pag_params: &'a DataPageParams<Uuid>,
@@ -447,13 +503,13 @@ pub struct ScanByTimeAndId<Selector = ()> {
 #[serde(rename_all = "snake_case")]
 pub enum TimeAndIdSortMode {
     /// sort in increasing order of timestamp and ID, i.e., earliest first
-    Ascending,
+    TimeAndIdAscending,
     /// sort in increasing order of timestamp and ID, i.e., most recent first
-    Descending,
+    TimeAndIdDescending,
 }
 
 fn default_ts_id_sort_mode() -> TimeAndIdSortMode {
-    TimeAndIdSortMode::Ascending
+    TimeAndIdSortMode::TimeAndIdAscending
 }
 
 impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
@@ -462,8 +518,10 @@ impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
     type MarkerValue = (DateTime<Utc>, Uuid);
     fn direction(&self) -> PaginationOrder {
         match self.sort_by {
-            TimeAndIdSortMode::Ascending => PaginationOrder::Ascending,
-            TimeAndIdSortMode::Descending => PaginationOrder::Descending,
+            TimeAndIdSortMode::TimeAndIdAscending => PaginationOrder::Ascending,
+            TimeAndIdSortMode::TimeAndIdDescending => {
+                PaginationOrder::Descending
+            }
         }
     }
     fn from_query(p: &PaginatedByTimeAndId<T>) -> Result<&Self, HttpError> {
@@ -579,7 +637,7 @@ mod test {
             selector: (),
         };
         let scan_by_time_and_id = ScanByTimeAndId::<()> {
-            sort_by: TimeAndIdSortMode::Ascending,
+            sort_by: TimeAndIdSortMode::TimeAndIdAscending,
             selector: (),
         };
         let id: Uuid = "61a78113-d3c6-4b35-a410-23e9eae64328".parse().unwrap();
@@ -961,7 +1019,7 @@ mod test {
     #[test]
     fn test_scan_by_time_and_id() {
         let scan = ScanByTimeAndId {
-            sort_by: TimeAndIdSortMode::Ascending,
+            sort_by: TimeAndIdSortMode::TimeAndIdAscending,
             selector: (),
         };
 
@@ -982,7 +1040,7 @@ mod test {
         let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
-            "sort_by=ascending",
+            "sort_by=time_and_id_ascending",
             &item0_marker,
             &item_last_marker,
             &scan,
@@ -1005,13 +1063,13 @@ mod test {
 
         // test descending too, why not (it caught a mistake!)
         let scan_desc = ScanByTimeAndId {
-            sort_by: TimeAndIdSortMode::Descending,
+            sort_by: TimeAndIdSortMode::TimeAndIdDescending,
             selector: (),
         };
         let (p0, p1) = test_scan_param_common(
             &list,
             &scan_desc,
-            "sort_by=descending",
+            "sort_by=time_and_id_descending",
             &item0_marker,
             &item_last_marker,
             &scan,
@@ -1039,7 +1097,7 @@ mod test {
 
         assert_eq!(
             error.to_string(),
-            "unknown variant `nothing`, expected `ascending` or `descending`"
+            "unknown variant `nothing`, expected `time_and_id_ascending` or `time_and_id_descending`"
         );
     }
 }

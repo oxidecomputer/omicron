@@ -19,8 +19,11 @@ use oximeter_test_utils::{wait_for_keepers, wait_for_ping};
 use scopeguard::ScopeGuard;
 use std::time::Duration;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<()> {
     let request_timeout = Duration::from_secs(15);
     let (logctx, path) = default_clickhouse_log_ctx_and_path();
 

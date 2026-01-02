@@ -13,7 +13,6 @@ use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
@@ -30,7 +29,9 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::Client as SledAgentClient;
+use sled_agent_types::inventory::SledRole;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -40,7 +41,7 @@ impl super::Nexus {
     pub fn sled_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        sled_id: &Uuid,
+        sled_id: &SledUuid,
     ) -> LookupResult<lookup::Sled<'a>> {
         nexus_networking::sled_lookup(&self.db_datastore, opctx, *sled_id)
     }
@@ -53,7 +54,7 @@ impl super::Nexus {
     pub(crate) async fn upsert_sled(
         &self,
         _opctx: &OpContext,
-        id: Uuid,
+        id: SledUuid,
         info: SledAgentInfo,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
@@ -77,6 +78,7 @@ impl super::Nexus {
                 usable_hardware_threads: info.usable_hardware_threads,
                 usable_physical_ram: info.usable_physical_ram.into(),
                 reservoir_size: info.reservoir_size.into(),
+                cpu_family: info.cpu_family.into(),
             },
             self.rack_id,
             info.generation.into(),
@@ -90,6 +92,14 @@ impl super::Nexus {
         // the control plane.
         if was_modified {
             self.activate_inventory_collection();
+
+            // Signal multicast cache invalidation since sled topology changed.
+            // The reconciler will be activated via its inventory watchers.
+            if let Some(flag) =
+                &self.background_tasks_internal.multicast_invalidate_cache
+            {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
         }
 
         Ok(())
@@ -104,7 +114,7 @@ impl super::Nexus {
     pub(crate) async fn sled_expunge(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
     ) -> Result<SledPolicy, Error> {
         let sled_lookup = self.sled_lookup(opctx, &sled_id)?;
         let (authz_sled,) =
@@ -121,17 +131,16 @@ impl super::Nexus {
         // for the next periodic activation before they can be cleaned up.
         self.background_tasks.task_instance_watcher.activate();
 
-        Ok(prev_policy)
-    }
+        // Signal multicast cache invalidation since sled topology changed.
+        // Inventory collection will be triggered automatically, which will
+        // activate the reconciler via its inventory watchers.
+        if let Some(flag) =
+            &self.background_tasks_internal.multicast_invalidate_cache
+        {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
 
-    pub(crate) async fn sled_request_firewall_rules(
-        &self,
-        opctx: &OpContext,
-        id: Uuid,
-    ) -> Result<(), Error> {
-        info!(self.log, "requesting firewall rules"; "sled_uuid" => id.to_string());
-        self.plumb_service_firewall_rules(opctx, &[id]).await?;
-        Ok(())
+        Ok(prev_policy)
     }
 
     pub(crate) async fn sled_list(
@@ -140,7 +149,7 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
         self.db_datastore
-            .sled_list(&opctx, pagparams, SledFilter::InService)
+            .sled_list(&opctx, &pagparams, SledFilter::InService)
             .await
     }
 
@@ -168,7 +177,7 @@ impl super::Nexus {
         let client = nexus_networking::sled_client_ext(
             &self.db_datastore,
             &self.opctx_alloc,
-            id.into_untyped_uuid(),
+            *id,
             &self.log,
             client,
         )
@@ -230,10 +239,11 @@ impl super::Nexus {
         ))
     }
 
+    /// Return a page of physical disks for a given sled id
     pub(crate) async fn sled_list_physical_disks(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::PhysicalDisk> {
         self.db_datastore
@@ -357,7 +367,7 @@ impl super::Nexus {
     pub(crate) async fn upsert_crucible_dataset(
         &self,
         id: DatasetUuid,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         address: SocketAddrV6,
     ) -> Result<(), Error> {
         info!(
@@ -375,7 +385,7 @@ impl super::Nexus {
     pub(crate) async fn plumb_service_firewall_rules(
         &self,
         opctx: &OpContext,
-        sleds_filter: &[Uuid],
+        sleds_filter: &[SledUuid],
     ) -> Result<(), Error> {
         nexus_networking::plumb_service_firewall_rules(
             &self.db_datastore,

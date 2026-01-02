@@ -2,7 +2,7 @@
 name = "gfss"
 version = "0.1.0"
 description = "Shamir secret sharing over GF(2^8)"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -10,7 +10,8 @@ workspace = true
 
 [dependencies]
 digest.workspace = true
-rand09.workspace = true
+rand.workspace = true
+schemars.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 subtle.workspace = true
@@ -21,3 +22,14 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 test-strategy.workspace = true
+
+[features]
+
+
+# Impl `PartialEq` and `Eq` for types implementing `subtle::ConstantTimeEq` when
+# this feature is enabled.
+# 
+# This is of unknown risk. The rust compiler may obviate the security of using
+# subtle when we do this. On the other hand its very useful for testing and
+# debugging outside of production.
+danger_partial_eq_ct_wrapper = []

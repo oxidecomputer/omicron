@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::ControlPlaneTestContext;
+use crate::TEST_SUITE_PASSWORD;
 use crate::http_testing::RequestBuilder;
 
 use super::http_testing::AuthnMode;
@@ -12,13 +13,13 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
+use http::header;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::Baseboard;
-use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::AffinityGroup;
@@ -45,6 +46,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::InstanceCpuPlatform;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
@@ -62,8 +64,9 @@ use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv4Net;
@@ -146,6 +149,24 @@ where
         .unwrap()
 }
 
+pub async fn object_create_no_body<OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+) -> OutputType
+where
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::objects_post_no_body(client, path)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"POST\" request to {path}: {e}")
+        })
+        .parsed_body()
+        .unwrap()
+}
+
 /// Make a POST, assert status code, return error response body
 pub async fn object_create_error<InputType>(
     client: &ClientTestContext,
@@ -164,7 +185,7 @@ where
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .unwrap()
+    .unwrap_or_else(|err| panic!("Error creating object with {path}: {err}"))
     .parsed_body::<HttpErrorResponseBody>()
     .unwrap()
 }
@@ -248,23 +269,61 @@ pub async fn create_ip_pool(
     pool_name: &str,
     ip_range: Option<IpRange>,
 ) -> (IpPool, IpPoolRange) {
-    let pool = object_create(
-        client,
-        "/v1/system/ip-pools",
-        &params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
-                name: pool_name.parse().unwrap(),
-                description: String::from("an ip pool"),
-            },
+    let pool_params = params::IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: pool_name.parse().unwrap(),
+            description: String::from("an ip pool"),
         },
-    )
-    .await;
+        ip_range
+            .as_ref()
+            .map(|r| r.version())
+            .unwrap_or_else(views::IpVersion::v4),
+    );
+    let pool = object_create(client, "/v1/system/ip-pools", &pool_params).await;
 
     let ip_range = ip_range.unwrap_or_else(|| {
         use std::net::Ipv4Addr;
         IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 0),
             Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap()
+    });
+    let url = format!("/v1/system/ip-pools/{}/ranges/add", pool_name);
+    let range = object_create(client, &url, &ip_range).await;
+    (pool, range)
+}
+
+/// Create a multicast IP pool with a multicast range for testing.
+///
+/// The multicast IP range may be specified if it's important for testing specific
+/// multicast addresses, or a default multicast range (224.1.0.0 - 224.1.255.255)
+/// will be provided if the `ip_range` argument is `None`.
+pub async fn create_multicast_ip_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_range: Option<IpRange>,
+) -> (IpPool, IpPoolRange) {
+    let pool = object_create(
+        client,
+        "/v1/system/ip-pools",
+        &params::IpPoolCreate::new_multicast(
+            IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: String::from("a multicast ip pool"),
+            },
+            ip_range
+                .map(|r| r.version())
+                .unwrap_or_else(|| views::IpVersion::V4),
+        ),
+    )
+    .await;
+
+    let ip_range = ip_range.unwrap_or_else(|| {
+        use std::net::Ipv4Addr;
+        IpRange::try_from((
+            Ipv4Addr::new(224, 1, 0, 0),
+            Ipv4Addr::new(224, 1, 255, 255),
         ))
         .unwrap()
     });
@@ -314,6 +373,7 @@ pub async fn create_floating_ip(
             },
             ip,
             pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
+            ip_version: None,
         },
     )
     .await
@@ -375,6 +435,23 @@ pub async fn create_silo(
     discoverable: bool,
     identity_mode: shared::SiloIdentityMode,
 ) -> Silo {
+    create_silo_with_admin_group_name(
+        client,
+        silo_name,
+        discoverable,
+        identity_mode,
+        None,
+    )
+    .await
+}
+
+pub async fn create_silo_with_admin_group_name(
+    client: &ClientTestContext,
+    silo_name: &str,
+    discoverable: bool,
+    identity_mode: shared::SiloIdentityMode,
+    admin_group_name: Option<String>,
+) -> Silo {
     object_create(
         client,
         "/v1/system/silos",
@@ -386,7 +463,7 @@ pub async fn create_silo(
             quotas: params::SiloQuotasCreate::arbitrarily_high_default(),
             discoverable,
             identity_mode,
-            admin_group_name: None,
+            admin_group_name,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
         },
@@ -462,6 +539,7 @@ pub async fn create_project(
     .await
 }
 
+/// Create a regular Crucible disk
 pub async fn create_disk(
     client: &ClientTestContext,
     project_name: &str,
@@ -476,8 +554,10 @@ pub async fn create_disk(
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(1),
         },
@@ -500,7 +580,9 @@ pub async fn create_disk_from_snapshot(
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::Snapshot { snapshot_id },
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Snapshot { snapshot_id },
+            },
             size: ByteCount::from_gibibytes_u32(1),
         },
     )
@@ -623,6 +705,9 @@ pub async fn create_instance(
         Vec::<params::ExternalIpCreate>::new(),
         true,
         Default::default(),
+        None,
+        // Multicast groups=
+        Vec::<NameOrId>::new(),
     )
     .await
 }
@@ -639,6 +724,8 @@ pub async fn create_instance_with(
     external_ips: Vec<params::ExternalIpCreate>,
     start: bool,
     auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+    cpu_platform: Option<InstanceCpuPlatform>,
+    multicast_groups: Vec<NameOrId>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
 
@@ -661,9 +748,11 @@ pub async fn create_instance_with(
             external_ips,
             disks,
             boot_disk: None,
+            cpu_platform,
             start,
             auto_restart_policy,
             anti_affinity_groups: Vec::new(),
+            multicast_groups,
         },
     )
     .await
@@ -1055,35 +1144,29 @@ pub async fn detach_ip_address_from_igw(
         .unwrap();
 }
 
+/// Assert that the utilization of the provided pool matches expectations.
+///
+/// Note that the third argument is the number of _allocated_ addresses as an
+/// integer. This is compared against the count of remaining addresses
+/// internally, which is what the API returns.
 pub async fn assert_ip_pool_utilization(
     client: &ClientTestContext,
     pool_name: &str,
-    ipv4_allocated: u32,
-    ipv4_capacity: u32,
-    ipv6_allocated: u128,
-    ipv6_capacity: u128,
+    allocated: u32,
+    capacity: f64,
 ) {
     let url = format!("/v1/system/ip-pools/{}/utilization", pool_name);
     let utilization: views::IpPoolUtilization = object_get(client, &url).await;
+    let remaining = capacity - f64::from(allocated);
     assert_eq!(
-        utilization.ipv4.allocated, ipv4_allocated,
-        "IP pool '{}': expected {} IPv4 allocated, got {:?}",
-        pool_name, ipv4_allocated, utilization.ipv4.allocated
+        remaining, utilization.remaining,
+        "IP pool '{}': expected {} remaining, got {}",
+        pool_name, remaining, utilization.remaining,
     );
     assert_eq!(
-        utilization.ipv4.capacity, ipv4_capacity,
-        "IP pool '{}': expected {} IPv4 capacity, got {:?}",
-        pool_name, ipv4_capacity, utilization.ipv4.capacity
-    );
-    assert_eq!(
-        utilization.ipv6.allocated, ipv6_allocated,
-        "IP pool '{}': expected {} IPv6 allocated, got {:?}",
-        pool_name, ipv6_allocated, utilization.ipv6.allocated
-    );
-    assert_eq!(
-        utilization.ipv6.capacity, ipv6_capacity,
-        "IP pool '{}': expected {} IPv6 capacity, got {:?}",
-        pool_name, ipv6_capacity, utilization.ipv6.capacity
+        capacity, utilization.capacity,
+        "IP pool '{}': expected {} capacity, got {:?}",
+        pool_name, capacity, utilization.capacity,
     );
 }
 
@@ -1097,7 +1180,7 @@ pub async fn grant_iam<T>(
     client: &ClientTestContext,
     grant_resource_url: &str,
     grant_role: T,
-    grant_user: Uuid,
+    grant_user: SiloUserUuid,
     run_as: AuthnMode,
 ) where
     T: serde::Serialize + serde::de::DeserializeOwned,
@@ -1111,11 +1194,50 @@ pub async fn grant_iam<T>(
             .expect("failed to fetch policy")
             .parsed_body()
             .expect("failed to parse policy");
-    let new_role_assignment = shared::RoleAssignment {
-        identity_type: IdentityType::SiloUser,
-        identity_id: grant_user,
-        role_name: grant_role,
-    };
+    let new_role_assignment =
+        shared::RoleAssignment::for_silo_user(grant_user, grant_role);
+    let new_role_assignments = existing_policy
+        .role_assignments
+        .into_iter()
+        .chain(std::iter::once(new_role_assignment))
+        .collect();
+
+    let new_policy = shared::Policy { role_assignments: new_role_assignments };
+
+    // TODO-correctness use etag when we have it
+    NexusRequest::object_put(client, &policy_url, Some(&new_policy))
+        .authn_as(run_as)
+        .execute()
+        .await
+        .expect("failed to update policy");
+}
+
+/// Grant a role on a resource to a group
+///
+/// * `grant_resource_url`: URL of the resource we're granting the role on
+/// * `grant_role`: the role we're granting
+/// * `grant_group`: the uuid of the group we're granting the role to
+/// * `run_as`: the user _doing_ the granting
+pub async fn grant_iam_for_group<T>(
+    client: &ClientTestContext,
+    grant_resource_url: &str,
+    grant_role: T,
+    grant_group: SiloGroupUuid,
+    run_as: AuthnMode,
+) where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    let policy_url = format!("{}/policy", grant_resource_url);
+    let existing_policy: shared::Policy<T> =
+        NexusRequest::object_get(client, &policy_url)
+            .authn_as(run_as.clone())
+            .execute()
+            .await
+            .expect("failed to fetch policy")
+            .parsed_body()
+            .expect("failed to parse policy");
+    let new_role_assignment =
+        shared::RoleAssignment::for_silo_group(grant_group, grant_role);
     let new_role_assignments = existing_policy
         .role_assignments
         .into_iter()
@@ -1162,6 +1284,55 @@ pub async fn projects_list(
     .all_items
     .into_iter()
     .collect()
+}
+
+/// Log in and return session token
+pub async fn create_session_for_user(
+    testctx: &ClientTestContext,
+    silo_name: &str,
+    username: &str,
+    password: &str,
+) -> String {
+    let url = format!("/v1/login/{silo_name}/local");
+    let credentials = test_params::UsernamePasswordCredentials {
+        username: username.parse().unwrap(),
+        password: password.to_string(),
+    };
+    let login_response = RequestBuilder::new(&testctx, Method::POST, &url)
+        .body(Some(&credentials))
+        .expect_status(Some(StatusCode::NO_CONTENT))
+        .execute()
+        .await
+        .expect("failed to log in");
+
+    let cookie_header = login_response
+        .headers
+        .get(header::SET_COOKIE)
+        .expect("missing session cookie")
+        .to_str()
+        .expect("session cookie not a string");
+
+    cookie_header
+        .split_once("session=")
+        .expect("malformed cookie")
+        .1
+        .split_once(';')
+        .expect("malformed cookie")
+        .0
+        .to_string()
+}
+
+/// Log in with test suite password. Returns session token.
+pub async fn create_console_session<N: NexusServer>(
+    cptestctx: &ControlPlaneTestContext<N>,
+) -> String {
+    create_session_for_user(
+        &cptestctx.external_client,
+        cptestctx.silo_name.as_str(),
+        cptestctx.user_name.as_ref(),
+        TEST_SUITE_PASSWORD,
+    )
+    .await
 }
 
 #[derive(Debug)]
@@ -1403,9 +1574,27 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     ///
     /// Does not inform sled agents to use these pools.
     ///
-    /// See: [Self::propagate_datasets_to_sleds] if you want to send
-    /// this configuration to a simulated sled agent.
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// configuration to a simulated sled agent.
     pub async fn add_zpool_with_datasets(&mut self, sled_id: SledUuid) {
+        self.add_sized_zpool_with_datasets(
+            sled_id,
+            Self::DEFAULT_ZPOOL_SIZE_GIB,
+        )
+        .await
+    }
+
+    /// Adds the zpool (of arbitrary size) and datasets into the database.
+    ///
+    /// Does not inform sled agents to use these pools.
+    ///
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// configuration to a simulated sled agent.
+    pub async fn add_sized_zpool_with_datasets(
+        &mut self,
+        sled_id: SledUuid,
+        gibibytes: u32,
+    ) {
         self.add_zpool_with_datasets_ext(
             sled_id,
             PhysicalDiskUuid::new_v4(),
@@ -1420,7 +1609,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                     kind: DatasetKind::Debug,
                 },
             ],
-            Self::DEFAULT_ZPOOL_SIZE_GIB,
+            gibibytes,
         )
         .await
     }
@@ -1492,7 +1681,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             .expect("Cannot find sled")
     }
 
-    pub fn zpools(&self) -> ZpoolIterator {
+    pub fn zpools(&self) -> ZpoolIterator<'_> {
         ZpoolIterator {
             sleds: &self.sleds,
             sled: self.sleds.keys().next().copied(),
@@ -1539,14 +1728,14 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 model: disk_identity.model.clone(),
                 variant:
                     nexus_types::external_api::params::PhysicalDiskKind::U2,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
             };
 
         let zpool_request =
             nexus_types::internal_api::params::ZpoolPutRequest {
-                id: zpool.id.into_untyped_uuid(),
+                id: zpool.id,
                 physical_disk_id,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
             };
 
         // Find the sled on which we're adding a zpool
@@ -1641,7 +1830,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                     Ok(Some(c)) => {
                         let all_zpools = c
                             .sled_agents
-                            .values()
+                            .iter()
                             .flat_map(|sled_agent| {
                                 sled_agent.zpools.iter().map(|z| z.id)
                             })
@@ -1660,7 +1849,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 }
             },
             &Duration::from_millis(50),
-            &Duration::from_secs(30),
+            &Duration::from_secs(120),
         )
         .await
         .expect("expected to find inventory collection");
@@ -1747,9 +1936,9 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     /// _not_ clean up crucible resources on an expunged disk (due to the "gone"
     /// check that it performs), but it's useful for tests to be able to assert
     /// all crucible resources are cleaned up.
-    pub async fn remove_zpool(&mut self, zpool_id: Uuid) {
+    pub async fn remove_zpool(&mut self, zpool_id: ZpoolUuid) {
         for sled in self.sleds.values_mut() {
-            sled.zpools.retain(|zpool| *zpool.id.as_untyped_uuid() != zpool_id);
+            sled.zpools.retain(|zpool| zpool.id != zpool_id);
         }
     }
 }

@@ -1,3 +1,4 @@
 variant Admin: serialized form = admin
 variant Collaborator: serialized form = collaborator
+variant LimitedCollaborator: serialized form = limited-collaborator
 variant Viewer: serialized form = viewer

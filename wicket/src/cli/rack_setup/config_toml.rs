@@ -197,7 +197,7 @@ fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
                 format!(" # UNKNOWN SLED ({ip}){end}")
             }
             Baseboard::Pc { identifier, model } => {
-                format!(" # NON-GIMLET {identifier} (model {model}, {ip}){end}")
+                format!(" # NON-OXIDE {identifier} (model {model}, {ip}){end}")
             }
         }
     }

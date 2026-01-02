@@ -1,0 +1,18 @@
+# Load example system
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Show the sleds, blueprints, and inventory collections we have.
+sled-list
+blueprint-list
+inventory-list
+
+# Add a new sled with no disks.
+sled-add --ndisks 0
+
+# Generate a new inventory collection that includes that sled.
+inventory-generate
+
+# Try to plan a new blueprint; this should be okay even though the sled
+# we added has no disks.
+blueprint-plan dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+blueprint-show 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1

@@ -12,7 +12,6 @@ use clap::Parser;
 use clap::Subcommand;
 use futures::StreamExt;
 use gateway_client::types::SpIgnition;
-use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 use internal_dns_types::names::ServiceName;
 use nexus_mgs_updates::ArtifactCache;
@@ -21,27 +20,34 @@ use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
-use nexus_types::inventory::BaseboardId;
+use nexus_types::inventory::SpType;
+use omicron_common::disk::M2Slot;
 use omicron_repl_utils::run_repl_on_stdin;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
+use sled_hardware_types::BaseboardId;
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
-use std::fmt::Write;
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::time::Duration;
+use swrite::SWrite;
+use swrite::swriteln;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+fn main() -> Result<(), anyhow::Error> {
     let args = ReconfiguratorSpUpdater::parse();
 
-    if let Err(error) = args.exec().await {
+    if let Err(error) = oxide_tokio_rt::run(args.exec()) {
         eprintln!("error: {:#}", error);
         std::process::exit(1);
     }
@@ -189,7 +195,7 @@ impl Inventory {
 struct SpInfo {
     baseboard_id: Arc<BaseboardId>,
     sp_type: SpType,
-    sp_slot_id: u32,
+    sp_slot_id: u16,
 }
 
 impl Inventory {
@@ -214,16 +220,18 @@ impl Inventory {
             }),
         )
         .then(async move |sp_id| {
-            c.sp_get(sp_id.type_, sp_id.slot)
+            c.sp_get(&sp_id.type_, sp_id.slot)
                 .await
                 .with_context(|| format!("fetching info about SP {:?}", sp_id))
-                .map(|s| (sp_id, s))
+                .map(|s| (sp_id.type_, sp_id.slot, s))
         })
         .collect::<Vec<Result<_, _>>>()
         .await
         .into_iter()
         .filter_map(|r| match r {
-            Ok((sp_id, v)) => Some((sp_id, v.into_inner())),
+            Ok((sp_type, sp_slot, v)) => {
+                Some((sp_type, sp_slot, v.into_inner()))
+            }
             Err(error) => {
                 warn!(
                     log,
@@ -237,17 +245,14 @@ impl Inventory {
 
         let sps_by_serial = sp_infos
             .into_iter()
-            .map(|(sp_id, sp_state)| {
+            .map(|(sp_type, sp_slot, sp_state)| {
                 let baseboard_id = Arc::new(BaseboardId {
                     serial_number: sp_state.serial_number,
                     part_number: sp_state.model,
                 });
                 let serial_number = baseboard_id.serial_number.clone();
-                let sp_info = SpInfo {
-                    baseboard_id,
-                    sp_type: sp_id.type_,
-                    sp_slot_id: sp_id.slot,
-                };
+                let sp_info =
+                    SpInfo { baseboard_id, sp_type, sp_slot_id: sp_slot };
                 (serial_number, sp_info)
             })
             .collect();
@@ -279,6 +284,9 @@ struct TopLevelArgs {
     command: Commands,
 }
 
+// Clippy wants us to box `SetArgs`, but that makes matches slightly more
+// awkward. This is just a dev/test tool; big variants are fine.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Show configured updates
@@ -297,43 +305,44 @@ fn cmd_config(
     let configured = updater_state.requests_tx.borrow();
 
     let mut s = String::new();
-    writeln!(&mut s, "configured updates ({}):", configured.len())?;
+    swriteln!(s, "configured updates ({}):", configured.len());
     for update in &*configured {
         let baseboard_id = &update.baseboard_id;
-        writeln!(
-            &mut s,
+        swriteln!(
+            s,
             "    part {} serial {} (type {:?} slot {}):",
             baseboard_id.part_number,
             baseboard_id.serial_number,
             update.sp_type,
             update.slot_id,
-        )?;
-        writeln!(&mut s, "        artifact hash: {}", update.artifact_hash)?;
-        writeln!(
-            &mut s,
+        );
+        swriteln!(s, "        artifact hash: {}", update.artifact_hash);
+        swriteln!(
+            s,
             "        user-provided artifact version: {}",
             update.artifact_version,
-        )?;
+        );
         match &update.details {
-            PendingMgsUpdateDetails::Sp {
+            PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version,
                 expected_inactive_version,
-            } => {
-                writeln!(
-                    &mut s,
+            }) => {
+                swriteln!(
+                    s,
                     "        preconditions: active slot {:?}, inactive slot {:?}",
-                    expected_active_version, expected_inactive_version,
-                )?;
+                    expected_active_version,
+                    expected_inactive_version,
+                );
             }
-            PendingMgsUpdateDetails::Rot {
+            PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
                 expected_active_slot,
                 expected_inactive_version,
                 expected_persistent_boot_preference,
                 expected_pending_persistent_boot_preference,
                 expected_transient_boot_preference,
-            } => {
-                writeln!(
-                    &mut s,
+            }) => {
+                swriteln!(
+                    s,
                     "        preconditions: expected active slot {:?}
                                             expected active version {:?}
                                             expected inactive version {:?}
@@ -344,21 +353,44 @@ fn cmd_config(
                     expected_inactive_version, expected_persistent_boot_preference,
                     expected_pending_persistent_boot_preference,
                     expected_transient_boot_preference,
-                )?;
+                );
             }
-            PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version,
-                expected_stage0_next_version,
-            } => {
-                writeln!(
-                    &mut s,
+            PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version,
+                    expected_stage0_next_version,
+                },
+            ) => {
+                swriteln!(
+                    s,
                     "        preconditions: stage 0 {:?}, stage 0 next {:?}",
-                    expected_stage0_version, expected_stage0_next_version,
-                )?;
+                    expected_stage0_version,
+                    expected_stage0_next_version,
+                );
+            }
+            PendingMgsUpdateDetails::HostPhase1(
+                PendingMgsUpdateHostPhase1Details {
+                    expected_active_phase_1_slot,
+                    expected_boot_disk,
+                    expected_active_phase_1_hash,
+                    expected_active_phase_2_hash,
+                    expected_inactive_phase_1_hash,
+                    expected_inactive_phase_2_hash,
+                    sled_agent_address,
+                },
+            ) => {
+                swriteln!(s,"        preconditions: expected active phase 1 slot {expected_active_phase_1_slot:?}
+                                                    expected boot disk {expected_boot_disk:?}
+                                                    expected active phase 1 artifact {expected_active_phase_1_hash}
+                                                    expected active phase 2 artifact {expected_active_phase_2_hash}
+                                                    expected inactive phase 1 artifact {expected_inactive_phase_1_hash}
+                                                    expected inactive phase 2 artifact {expected_inactive_phase_2_hash}
+                                                    sled_agent_address {sled_agent_address}",
+                );
             }
         }
 
-        writeln!(&mut s)?;
+        swriteln!(s);
     }
 
     Ok(Some(s))
@@ -429,6 +461,22 @@ enum Component {
         #[arg(long, short = 'i')]
         expected_stage0_next_version: ExpectedVersion,
     },
+    HostPhase1 {
+        #[arg(long)]
+        expected_active_phase_1_slot: M2Slot,
+        #[arg(long)]
+        expected_boot_disk: M2Slot,
+        #[arg(long)]
+        expected_slot_a_phase_1_hash: ArtifactHash,
+        #[arg(long)]
+        expected_slot_a_phase_2_hash: ArtifactHash,
+        #[arg(long)]
+        expected_slot_b_phase_1_hash: ArtifactHash,
+        #[arg(long)]
+        expected_slot_b_phase_2_hash: ArtifactHash,
+        #[arg(long)]
+        sled_agent_address: SocketAddrV6,
+    },
 }
 
 fn cmd_set(
@@ -445,10 +493,10 @@ fn cmd_set(
             Component::Sp {
                 expected_active_version,
                 expected_inactive_version,
-            } => PendingMgsUpdateDetails::Sp {
+            } => PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version,
                 expected_inactive_version,
-            },
+            }),
             Component::Rot {
                 expected_active_slot,
                 expected_slot_a_version,
@@ -476,7 +524,7 @@ fn cmd_set(
                     }
                 };
 
-                PendingMgsUpdateDetails::Rot {
+                PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
                     expected_active_slot: ExpectedActiveRotSlot {
                         slot: expected_active_slot,
                         version: expected_active_version,
@@ -487,15 +535,63 @@ fn cmd_set(
                             .unwrap_or(expected_active_slot),
                     expected_pending_persistent_boot_preference,
                     expected_transient_boot_preference,
-                }
+                })
             }
             Component::RotBootloader {
                 expected_stage0_version,
                 expected_stage0_next_version,
-            } => PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version,
-                expected_stage0_next_version,
-            },
+            } => PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version,
+                    expected_stage0_next_version,
+                },
+            ),
+            Component::HostPhase1 {
+                expected_active_phase_1_slot,
+                expected_boot_disk,
+                expected_slot_a_phase_1_hash,
+                expected_slot_a_phase_2_hash,
+                expected_slot_b_phase_1_hash,
+                expected_slot_b_phase_2_hash,
+                sled_agent_address,
+            } => {
+                let (
+                    expected_active_phase_1_hash,
+                    expected_inactive_phase_1_hash,
+                ) = match expected_active_phase_1_slot {
+                    M2Slot::A => (
+                        expected_slot_a_phase_1_hash,
+                        expected_slot_b_phase_1_hash,
+                    ),
+                    M2Slot::B => (
+                        expected_slot_b_phase_1_hash,
+                        expected_slot_a_phase_1_hash,
+                    ),
+                };
+                let (
+                    expected_active_phase_2_hash,
+                    expected_inactive_phase_2_hash,
+                ) = match expected_active_phase_1_slot {
+                    M2Slot::A => (
+                        expected_slot_a_phase_2_hash,
+                        expected_slot_b_phase_2_hash,
+                    ),
+                    M2Slot::B => (
+                        expected_slot_b_phase_2_hash,
+                        expected_slot_a_phase_2_hash,
+                    ),
+                };
+                let details = PendingMgsUpdateHostPhase1Details {
+                    expected_active_phase_1_slot,
+                    expected_boot_disk,
+                    expected_active_phase_1_hash,
+                    expected_active_phase_2_hash,
+                    expected_inactive_phase_1_hash,
+                    expected_inactive_phase_2_hash,
+                    sled_agent_address,
+                };
+                PendingMgsUpdateDetails::HostPhase1(details)
+            }
         },
         artifact_hash: args.artifact_hash,
         artifact_version: ArtifactVersion::new(args.version)

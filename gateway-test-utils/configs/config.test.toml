@@ -33,11 +33,32 @@ max_attempts_reset = 10
 # sleep time between UDP RPC resends (up to `max_attempts_*`)
 per_attempt_timeout_millis = 1000
 
-[switch.location]
-# possible locations where MGS could be running; these names appear in logs and
-# are used in the remainder of the `[switch.*]` configuration to define port
-# mappings
-names = ["switch0", "switch1"]
+# Possible locations where MGS could be running.
+#
+# The `name` of each location description will appear in logs and in the
+# remainder of the `[switch.*]` configuration to define port mappings.
+#
+# The `local_sled` of each location description specifies the `slot` of the
+# `SpIdentifier` for the sled on which this MGS is running. (The
+# `SpIdentifier::typ` value is implicitly `SpType::Sled`.)
+#
+# `allow_local_sled_sp_reset` determines whether MGS will accept a request to
+# perform an SP reset on its own local sled. This is dangerous during SP
+# updates, because the "reset" operation involves a watchdog that requires MGS
+# to send a "disarm the watchdog" message _after_ the reset, which it can't do
+# if it just powered itself off. In production, we set this to `false` for both
+# sleds; this means a scrimlet's SP can only be reset via MGS on the _other_
+# scrimlet. (We allow this to be `true` in tests and other dev environments
+# where rejecting reset attempts is too restrictive.)
+[[switch.location.description]]
+name = "switch0"
+local_sled = 0
+allow_local_sled_sp_reset = true
+
+[[switch.location.description]]
+name = "switch1"
+local_sled = 1
+allow_local_sled_sp_reset = true
 
 # `[[switch.location.determination]]` is a list of switch ports we should
 # contact in order to determine our location; each port defines a subset of
@@ -57,7 +78,7 @@ sp_port_2 = ["switch1"]
 # `[[switch.port.*]]` defines the local data link address (in RFD 250 terms, the
 # interface configured to use VLAN tag  assigned to the given port) and the
 # logical ID of the remote SP ("sled 7", "switch 1", etc.), which must have an
-# entry for each member of `[switch.location]` above.
+# entry for each member of `[[switch.location.description]]` above.
 #
 # TODO This section has some concessions to local testing: ultimately we will
 # use a single multicast address, target port, and source port, but for now all

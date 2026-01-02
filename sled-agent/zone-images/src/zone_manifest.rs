@@ -5,7 +5,8 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use iddqd::IdOrdMap;
 use omicron_common::update::{
-    OmicronZoneFileMetadata, OmicronZoneManifest, OmicronZoneManifestSource,
+    OmicronInstallManifest, OmicronInstallManifestSource,
+    OmicronInstallMetadata,
 };
 use omicron_uuid_kinds::InternalZpoolUuid;
 use rayon::iter::{ParallelBridge, ParallelIterator};
@@ -13,9 +14,10 @@ use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use sled_agent_types::zone_images::{
     ArcIoError, ArtifactReadResult, InstallMetadataReadError,
-    ZoneManifestArtifactResult, ZoneManifestArtifactsResult,
-    ZoneManifestNonBootInfo, ZoneManifestNonBootMismatch,
-    ZoneManifestNonBootResult, ZoneManifestReadError, ZoneManifestStatus,
+    MeasurementManifestStatus, ZoneManifestArtifactResult,
+    ZoneManifestArtifactsResult, ZoneManifestNonBootInfo,
+    ZoneManifestNonBootMismatch, ZoneManifestNonBootResult,
+    ZoneManifestReadError, ZoneManifestStatus,
 };
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
@@ -40,15 +42,110 @@ pub(crate) struct AllZoneManifests {
 }
 
 impl AllZoneManifests {
+    /// Attempt to find measurement manifests.
+    pub(crate) fn read_all_measurements(
+        log: &slog::Logger,
+        file_name: &str,
+        internal_disks: &InternalDisksWithBootDisk,
+    ) -> Self {
+        // First read all the files.
+        let files = AllInstallMetadataFiles::read_all_subdir(
+            log,
+            file_name,
+            internal_disks,
+            "measurements",
+            |dataset_dir| synthesize_manifest(log, dataset_dir),
+        );
+
+        // Validate files on the boot disk.
+        let boot_disk_result = match files.boot_disk_metadata {
+            Ok(Some(manifest)) => {
+                Ok(make_artifacts_result(&files.boot_dataset_dir, manifest))
+            }
+            Ok(None) => {
+                unreachable!("we always synthesize a manifest")
+            }
+            Err(error) => Err(ZoneManifestReadError::InstallMetadata(error)),
+        };
+
+        // Validate files on non-boot disks (non-fatal, will produce warnings if
+        // errors or mismatches are encountered).
+        let non_boot_disk_metadata = files
+            .non_boot_disk_metadata
+            .into_iter()
+            .map(make_non_boot_info)
+            .collect::<IdOrdMap<_>>();
+
+        let ret = Self {
+            boot_zpool: files.boot_zpool,
+            boot_disk_path: files.boot_disk_path,
+            boot_disk_result,
+            non_boot_disk_metadata,
+        };
+
+        ret.log_measurement_results(&log);
+        ret
+    }
+
+    fn log_measurement_results(&self, log: &slog::Logger) {
+        let log = log.new(o!(
+            "component" => "measurement_manifest",
+            "boot_zpool" => self.boot_zpool.to_string(),
+            "boot_disk_path" => self.boot_disk_path.to_string(),
+        ));
+
+        match &self.boot_disk_result {
+            Ok(result) => {
+                if result.is_valid() {
+                    info!(
+                        log,
+                        "found measurement manifest for boot disk";
+                        "boot_disk_result" => %result.display(),
+                    );
+                } else {
+                    error!(
+                        log,
+                        "measurement manifest for boot disk is invalid, \
+                         may have problems completing Trust Quorum unlock";
+                        "boot_disk_result" => %result.display(),
+                    );
+                }
+            }
+            Err(error) => {
+                // This error most likely requires operator intervention -- if
+                // it happens, we'll continue to bring sled-agent up but reject
+                // all Omicron zone image lookups.
+                error!(
+                    log,
+                    "error reading measurement manifest for boot disk, \
+                     will not be able to perform Trust Quorum unlock";
+                    "error" => InlineErrorChain::new(error),
+                );
+            }
+        }
+        if self.non_boot_disk_metadata.is_empty() {
+            warn!(
+                log,
+                "no non-boot zpools found, unable to verify consistency -- \
+                 this may be a hardware issue with the non-boot M.2"
+            );
+        }
+
+        for info in &self.non_boot_disk_metadata {
+            info.log_to(&log);
+        }
+    }
+
     /// Attempt to find zone manifests.
     pub(crate) fn read_all(
         log: &slog::Logger,
+        file_name: &str,
         internal_disks: &InternalDisksWithBootDisk,
     ) -> Self {
         // First read all the files.
         let files = AllInstallMetadataFiles::read_all(
             log,
-            OmicronZoneManifest::FILE_NAME,
+            file_name,
             internal_disks,
             |dataset_dir| synthesize_manifest(log, dataset_dir),
         );
@@ -83,18 +180,20 @@ impl AllZoneManifests {
         ret
     }
 
-    pub(crate) fn status(&self) -> ZoneManifestStatus {
-        ZoneManifestStatus {
+    pub(crate) fn measurement_status(&self) -> MeasurementManifestStatus {
+        MeasurementManifestStatus {
             boot_disk_path: self.boot_disk_path.clone(),
             boot_disk_result: self.boot_disk_result.clone(),
             non_boot_disk_metadata: self.non_boot_disk_metadata.clone(),
         }
     }
 
-    pub(crate) fn boot_disk_result(
-        &self,
-    ) -> &Result<ZoneManifestArtifactsResult, ZoneManifestReadError> {
-        &self.boot_disk_result
+    pub(crate) fn status(&self) -> ZoneManifestStatus {
+        ZoneManifestStatus {
+            boot_disk_path: self.boot_disk_path.clone(),
+            boot_disk_result: self.boot_disk_result.clone(),
+            non_boot_disk_metadata: self.non_boot_disk_metadata.clone(),
+        }
     }
 
     fn log_results(&self, log: &slog::Logger) {
@@ -149,7 +248,7 @@ impl AllZoneManifests {
 }
 
 fn make_non_boot_info(
-    info: InstallMetadataNonBootInfo<OmicronZoneManifest>,
+    info: InstallMetadataNonBootInfo<OmicronInstallManifest>,
 ) -> ZoneManifestNonBootInfo {
     let result = make_non_boot_result(&info.dataset_dir, info.result);
     ZoneManifestNonBootInfo {
@@ -162,7 +261,7 @@ fn make_non_boot_info(
 
 fn make_non_boot_result(
     dataset_dir: &Utf8Path,
-    result: InstallMetadataNonBootResult<OmicronZoneManifest>,
+    result: InstallMetadataNonBootResult<OmicronInstallManifest>,
 ) -> ZoneManifestNonBootResult {
     match result {
         InstallMetadataNonBootResult::MatchesPresent(
@@ -227,11 +326,11 @@ fn make_non_boot_result(
 
 fn make_artifacts_result(
     dir: &Utf8Path,
-    manifest: InstallMetadata<OmicronZoneManifest>,
+    manifest: InstallMetadata<OmicronInstallManifest>,
 ) -> ZoneManifestArtifactsResult {
     let artifacts: Vec<_> = manifest
         .value
-        .zones
+        .files
         .iter()
         // Parallelize artifact reading to speed it up.
         .par_bridge()
@@ -264,8 +363,8 @@ fn make_artifacts_result(
 fn synthesize_manifest(
     log: &slog::Logger,
     dataset_dir: &Utf8Path,
-) -> Result<Option<OmicronZoneManifest>, InstallMetadataReadError> {
-    let mut zones = IdOrdMap::new();
+) -> Result<Option<OmicronInstallManifest>, InstallMetadataReadError> {
+    let mut files = IdOrdMap::new();
 
     // Read all the files in the directory.
     let entries = dataset_dir.read_dir_utf8().map_err(|error| {
@@ -316,7 +415,7 @@ fn synthesize_manifest(
 
         match compute_size_and_hash(&mut f) {
             Ok((size, hash)) => {
-                zones.insert_overwrite(OmicronZoneFileMetadata {
+                files.insert_overwrite(OmicronInstallMetadata {
                     file_name: entry.file_name().to_string(),
                     file_size: size,
                     hash,
@@ -331,15 +430,15 @@ fn synthesize_manifest(
         }
     }
 
-    Ok(Some(OmicronZoneManifest {
-        source: OmicronZoneManifestSource::SledAgent,
-        zones,
+    Ok(Some(OmicronInstallManifest {
+        source: OmicronInstallManifestSource::SledAgent,
+        files,
     }))
 }
 
 fn validate_one(
     artifact_path: &Utf8Path,
-    zone: &OmicronZoneFileMetadata,
+    zone: &OmicronInstallMetadata,
 ) -> ArtifactReadResult {
     let mut f = match File::open(artifact_path) {
         Ok(f) => f,
@@ -368,7 +467,13 @@ fn compute_size_and_hash(
     let mut buffer = [0u8; 8192];
     let mut total_bytes_read = 0;
     loop {
-        let bytes_read = f.read(&mut buffer)?;
+        let bytes_read = match f.read(&mut buffer) {
+            Ok(n) => n,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         if bytes_read == 0 {
             break;
         }
@@ -417,8 +522,11 @@ mod tests {
         let internal_disks =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
-        let manifests =
-            AllZoneManifests::read_all(&logctx.log, &internal_disks);
+        let manifests = AllZoneManifests::read_all(
+            &logctx.log,
+            OmicronInstallManifest::ZONES_FILE_NAME,
+            &internal_disks,
+        );
 
         // Boot disk should be valid.
         assert_eq!(
@@ -469,8 +577,11 @@ mod tests {
         let internal_disks =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
-        let manifests =
-            AllZoneManifests::read_all(&logctx.log, &internal_disks);
+        let manifests = AllZoneManifests::read_all(
+            &logctx.log,
+            OmicronInstallManifest::ZONES_FILE_NAME,
+            &internal_disks,
+        );
         // For the boot disk, we should synthesize a manifest.
         assert_eq!(
             manifests.boot_disk_result.as_ref().unwrap(),
@@ -518,8 +629,11 @@ mod tests {
         let internal_disks =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
-        let manifests =
-            AllZoneManifests::read_all(&logctx.log, &internal_disks);
+        let manifests = AllZoneManifests::read_all(
+            &logctx.log,
+            OmicronInstallManifest::ZONES_FILE_NAME,
+            &internal_disks,
+        );
         assert_eq!(
             manifests.boot_disk_result.as_ref().unwrap_err(),
             &deserialize_error(dir.path(), &BOOT_PATHS.zones_json, "").into(),
@@ -566,8 +680,11 @@ mod tests {
         let internal_disks =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
-        let manifests =
-            AllZoneManifests::read_all(&logctx.log, &internal_disks);
+        let manifests = AllZoneManifests::read_all(
+            &logctx.log,
+            OmicronInstallManifest::ZONES_FILE_NAME,
+            &internal_disks,
+        );
         assert_eq!(
             manifests.boot_disk_result.as_ref().unwrap(),
             &invalid_cx
@@ -634,8 +751,11 @@ mod tests {
             &[NON_BOOT_UUID, NON_BOOT_2_UUID, NON_BOOT_3_UUID],
         )
         .current_with_boot_disk();
-        let manifests =
-            AllZoneManifests::read_all(&logctx.log, &internal_disks);
+        let manifests = AllZoneManifests::read_all(
+            &logctx.log,
+            OmicronInstallManifest::ZONES_FILE_NAME,
+            &internal_disks,
+        );
         // The boot disk is valid.
         let boot_disk_result = manifests.boot_disk_result.as_ref().unwrap();
         assert_eq!(

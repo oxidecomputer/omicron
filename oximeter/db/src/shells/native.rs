@@ -60,7 +60,7 @@ pub async fn shell(addr: IpAddr, port: u16) -> anyhow::Result<()> {
                 if query.is_empty() {
                     continue;
                 }
-                match conn.query(query).await {
+                match conn.query(uuid::Uuid::new_v4(), query).await {
                     Ok(result) => print_query_result(result),
                     Err(e) => {
                         eprintln!(

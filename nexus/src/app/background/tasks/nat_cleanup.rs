@@ -2,13 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task for garbage collecting ipv4_nat_entry table.
+//! Background task for garbage collecting nat_entry table.
 //! Responsible for cleaning up soft deleted entries once they
 //! have been propagated to running dpd instances.
 
-use crate::app::switch_zone_address_mappings;
+use crate::app::dpd_clients;
 
-use super::networking::build_dpd_clients;
 use crate::app::background::BackgroundTask;
 use chrono::{Duration, Utc};
 use futures::FutureExt;
@@ -16,11 +15,12 @@ use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use omicron_common::api::internal::shared::SwitchLocation;
 use serde_json::json;
 use std::sync::Arc;
 
 /// Background task that periodically prunes soft-deleted entries
-/// from ipv4_nat_entry table
+/// from nat_entry table
 pub struct Ipv4NatGarbageCollector {
     datastore: Arc<DataStore>,
     resolver: Resolver,
@@ -43,10 +43,10 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
         async {
             let log = &opctx.log;
 
-            let result = self.datastore.ipv4_nat_current_version(opctx).await;
+            let result = self.datastore.nat_current_version(opctx).await;
 
             let mut min_gen = match result {
-                Ok(gen) => gen,
+                Ok(r#gen) => r#gen,
                 Err(error) => {
                     warn!(
                         &log,
@@ -64,8 +64,8 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
                 }
             };
 
-            let mappings = match
-                switch_zone_address_mappings(&self.resolver, log).await
+            let dpd_clients = match
+                dpd_clients(&self.resolver, log).await
             {
                 Ok(mappings) => mappings,
                 Err(e) => {
@@ -83,12 +83,18 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
                 }
             };
 
-            let dpd_clients = build_dpd_clients(&mappings, log);
+            for location in [SwitchLocation::Switch0, SwitchLocation::Switch1] {
+                if !dpd_clients.contains_key(&location) {
+                    let message = format!("dendrite for {location} is unavailable, cannot perform nat cleanup");
+                    error!(log, "{message}");
+                    return json!({"error": message});
+                }
+            }
 
-            for (_location, client) in dpd_clients {
+            for client in dpd_clients.values() {
                 let response = client.ipv4_nat_generation().await;
                 match response {
-                    Ok(gen) => min_gen = std::cmp::min(min_gen, *gen),
+                    Ok(r#gen) => min_gen = std::cmp::min(min_gen, *r#gen),
                     Err(error) => {
                         warn!(
                             &log,
@@ -111,7 +117,7 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
 
             let result = match self
                 .datastore
-                .ipv4_nat_cleanup(opctx, min_gen, retention_threshold)
+                .nat_cleanup(opctx, min_gen, retention_threshold)
                 .await {
                     Ok(v) => v,
                     Err(e) => {

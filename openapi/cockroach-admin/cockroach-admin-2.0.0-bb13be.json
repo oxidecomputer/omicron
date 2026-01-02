@@ -1,0 +1,469 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "CockroachDB Cluster Admin API",
+    "description": "API for interacting with the Oxide control plane's CockroachDB cluster",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/cluster/init": {
+      "post": {
+        "summary": "Initialize the CockroachDB cluster.",
+        "description": "This performs both the base-level `cockroach init` and installs the Omicron schema. It should be idempotent, but we haven't heavily tested that. We test that this endpoint can safely be called multiple times, but haven't tested calling it concurrently (either multiple simultaneous requests to the same cockroach node, or sending simultaneous requests to different cockroach nodes, both of which would rely on `cockroach init` itself being safe to call concurrently). In practice, only RSS calls this endpoint and it does so serially; as long as we don't change that, the existing testing should be sufficient.",
+        "operationId": "cluster_init",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/node/decommission": {
+      "post": {
+        "summary": "Decommission a node from the CRDB cluster.",
+        "operationId": "node_decommission",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeDecommission"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/node/id": {
+      "get": {
+        "summary": "Get the CockroachDB node ID of the local cockroach instance.",
+        "operationId": "local_node_id",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalNodeId"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/node/status": {
+      "get": {
+        "summary": "Get the status of all nodes in the CRDB cluster.",
+        "operationId": "node_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterNodeStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/proxy/status/nodes": {
+      "get": {
+        "summary": "Proxy to CockroachDB's /_status/nodes endpoint",
+        "operationId": "status_nodes",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "String",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/proxy/status/vars": {
+      "get": {
+        "summary": "Proxy to CockroachDB's /_status/vars endpoint",
+        "operationId": "status_vars",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "String",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ClusterNodeStatus": {
+        "type": "object",
+        "properties": {
+          "all_nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeStatus"
+            }
+          }
+        },
+        "required": [
+          "all_nodes"
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "LocalNodeId": {
+        "description": "CockroachDB Node ID",
+        "type": "object",
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "zone_id": {
+            "description": "The ID of this Omicron zone.\n\nThis is included to ensure correctness even if a socket address on a sled is reused for a different zone; if our caller is trying to determine the node ID for a particular Omicron CockroachDB zone, they'll contact us by socket address. We include our zone ID in the response for their confirmation that we are the zone they intended to contact.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronZoneUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "node_id",
+          "zone_id"
+        ]
+      },
+      "NodeDecommission": {
+        "type": "object",
+        "properties": {
+          "is_decommissioning": {
+            "type": "boolean"
+          },
+          "is_draining": {
+            "type": "boolean"
+          },
+          "is_live": {
+            "type": "boolean"
+          },
+          "membership": {
+            "$ref": "#/components/schemas/NodeMembership"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "replicas": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "is_decommissioning",
+          "is_draining",
+          "is_live",
+          "membership",
+          "node_id",
+          "notes",
+          "replicas"
+        ]
+      },
+      "NodeId": {
+        "type": "object",
+        "properties": {
+          "node_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id"
+        ]
+      },
+      "NodeMembership": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "active"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "decommissioning"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "decommissioned"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "value"
+            ]
+          }
+        ]
+      },
+      "NodeStatus": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "build": {
+            "type": "string"
+          },
+          "gossiped_replicas": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "intent_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "is_available": {
+            "type": "boolean"
+          },
+          "is_decommissioning": {
+            "type": "boolean"
+          },
+          "is_draining": {
+            "type": "boolean"
+          },
+          "is_live": {
+            "type": "boolean"
+          },
+          "key_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "live_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "locality": {
+            "type": "string"
+          },
+          "membership": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "ranges": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ranges_unavailable": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ranges_underreplicated": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "replicas_leaders": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "replicas_leaseholders": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sql_address": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "system_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value_bytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "address",
+          "build",
+          "gossiped_replicas",
+          "intent_bytes",
+          "is_available",
+          "is_decommissioning",
+          "is_draining",
+          "is_live",
+          "key_bytes",
+          "live_bytes",
+          "locality",
+          "membership",
+          "node_id",
+          "ranges",
+          "ranges_unavailable",
+          "ranges_underreplicated",
+          "replicas_leaders",
+          "replicas_leaseholders",
+          "sql_address",
+          "started_at",
+          "system_bytes",
+          "updated_at",
+          "value_bytes"
+        ]
+      },
+      "OmicronZoneUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::OmicronZoneUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -8,7 +8,7 @@
 
 use super::prepare_columns;
 use crate::sql::{QueryResult, Table, function_allow_list};
-use crate::{Client, QuerySummary, make_client};
+use crate::{Client, make_client};
 use clap::Args;
 use dropshot::EmptyScanParams;
 use dropshot::WhichPage;
@@ -255,7 +255,7 @@ fn print_sql_query(query: &str) {
     println!();
 }
 
-fn print_query_summary(table: &Table, summary: &QuerySummary) {
+fn print_query_summary(table: &Table, summary: &oxql_types::QuerySummary) {
     println!("Summary");
     println!(" Query ID:    {}", summary.id);
     println!(" Result rows: {}", table.rows.len());

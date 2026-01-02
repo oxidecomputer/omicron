@@ -5,7 +5,7 @@
 //! Interface for making API requests to a Bootstrap Agent
 
 progenitor::generate_api!(
-    spec = "../../openapi/bootstrap-agent.json",
+    spec = "../../openapi/bootstrap-agent/bootstrap-agent-1.0.0-127591.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
@@ -20,13 +20,12 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
     crates = {
+        "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
     replace = {
         AllowedSourceIps = omicron_common::api::external::AllowedSourceIps,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
-        TypedUuidForRackInitKind = omicron_uuid_kinds::RackInitUuid,
-        TypedUuidForRackResetKind = omicron_uuid_kinds::RackResetUuid,
     },
 );
 

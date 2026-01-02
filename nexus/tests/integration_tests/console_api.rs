@@ -6,7 +6,6 @@ use anyhow::Context;
 use camino::Utf8PathBuf;
 use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
-use http::header::HeaderName;
 use http::{StatusCode, header, method::Method};
 use nexus_auth::context::OpContext;
 use std::env::current_dir;
@@ -17,22 +16,18 @@ use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
-use nexus_test_utils::http_testing::{
-    AuthnMode, NexusRequest, RequestBuilder, TestResponse,
-};
-use nexus_test_utils::resource_helpers::test_params;
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::create_console_session;
 use nexus_test_utils::resource_helpers::{
     create_silo, grant_iam, object_create,
 };
-use nexus_test_utils::{
-    TEST_SUITE_PASSWORD, load_test_config, test_setup_with_config,
-};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{self, ProjectCreate};
-use nexus_types::external_api::shared::{SiloIdentityMode, SiloRole};
+use nexus_types::external_api::shared::{
+    FleetRole, SiloIdentityMode, SiloRole,
+};
 use nexus_types::external_api::{shared, views};
 use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
-use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 
 type ControlPlaneTestContext =
@@ -54,7 +49,8 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to clear cookie and 204 on logout");
 
     // log in and pull the token out of the header so we can use it for authed requests
-    let session_token = log_in_and_extract_token(cptestctx).await;
+    let session_cookie =
+        format!("session={}", create_console_session(cptestctx).await);
 
     let project_params = ProjectCreate {
         identity: IdentityMetadataCreateParams {
@@ -103,7 +99,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     // now make same requests with cookie
     RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
-        .header(header::COOKIE, &session_token)
+        .header(header::COOKIE, &session_cookie)
         .body(Some(&project_params))
         // TODO: explicit expect_status not needed. decide whether to keep it anyway
         .expect_status(Some(StatusCode::CREATED))
@@ -112,7 +108,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to create org with session cookie");
 
     RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
-        .header(header::COOKIE, &session_token)
+        .header(header::COOKIE, &session_cookie)
         .expect_console_asset()
         .execute()
         .await
@@ -126,7 +122,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     // logout with an actual session should delete the session in the db
     RequestBuilder::new(&testctx, Method::POST, "/v1/logout")
-        .header(header::COOKIE, &session_token)
+        .header(header::COOKIE, &session_cookie)
         .expect_status(Some(StatusCode::NO_CONTENT))
         // logout also clears the cookie client-side
         .expect_response_header(
@@ -153,7 +149,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
     RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
-        .header(header::COOKIE, &session_token)
+        .header(header::COOKIE, &session_cookie)
         .body(Some(&project_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
@@ -161,7 +157,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to get 401 for unauthed API request");
 
     RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
-        .header(header::COOKIE, &session_token)
+        .header(header::COOKIE, &session_cookie)
         .expect_status(Some(StatusCode::FOUND))
         .execute()
         .await
@@ -175,8 +171,9 @@ async fn expect_console_page(
 ) {
     let mut builder = RequestBuilder::new(testctx, Method::GET, path);
 
-    if let Some(session_token) = session_token {
-        builder = builder.header(http::header::COOKIE, &session_token)
+    if let Some(token) = session_token {
+        builder =
+            builder.header(http::header::COOKIE, &format!("session={token}"))
     }
 
     let console_page = builder
@@ -208,7 +205,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let session_token = log_in_and_extract_token(cptestctx).await;
+    let session_token = create_console_session(cptestctx).await;
 
     // hit console pages with session, should get back HTML response
     let console_paths = &[
@@ -387,19 +384,16 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 
 #[tokio::test]
 async fn test_absolute_static_dir() {
-    let mut config = load_test_config();
-    config.pkg.console.static_dir =
-        Utf8PathBuf::try_from(current_dir().unwrap())
-            .unwrap()
-            .join("tests/static");
-    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
-        "test_absolute_static_dir",
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
-        0,
-    )
-    .await;
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_absolute_static_dir")
+            .customize_nexus_config(&|config| {
+                config.pkg.console.static_dir =
+                    Utf8PathBuf::try_from(current_dir().unwrap())
+                        .unwrap()
+                        .join("tests/static");
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
     let testctx = &cptestctx.external_client;
 
     // existing file is returned
@@ -439,10 +433,12 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         views::CurrentUser {
             user: views::User {
                 id: USER_TEST_PRIVILEGED.id(),
-                display_name: USER_TEST_PRIVILEGED.external_id.clone(),
+                display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
                 silo_id: DEFAULT_SILO.id(),
             },
-            silo_name: DEFAULT_SILO.name().clone()
+            silo_name: DEFAULT_SILO.name().clone(),
+            fleet_viewer: true,
+            silo_admin: true,
         }
     );
 
@@ -456,12 +452,51 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         views::CurrentUser {
             user: views::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
-                display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
+                display_name: USER_TEST_UNPRIVILEGED
+                    .external_id
+                    .clone()
+                    .unwrap(),
                 silo_id: DEFAULT_SILO.id(),
             },
-            silo_name: DEFAULT_SILO.name().clone()
+            silo_name: DEFAULT_SILO.name().clone(),
+            fleet_viewer: false,
+            silo_admin: false,
         }
     );
+
+    // now make unpriv user silo admin and see it change
+    grant_iam(
+        testctx,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name),
+        SiloRole::Admin,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .await;
+    assert!(!unpriv_user.fleet_viewer);
+    assert!(unpriv_user.silo_admin);
+
+    // now grant fleet viewer and see that one change
+    grant_iam(
+        testctx,
+        "/v1/system",
+        FleetRole::Admin,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .await;
+    assert!(unpriv_user.fleet_viewer);
+    assert!(unpriv_user.silo_admin);
 }
 
 #[nexus_test]
@@ -882,35 +917,6 @@ async fn test_login_redirect_multiple_silos(
     )
 }
 
-fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
-    resp.headers.get(header_name).unwrap().to_str().unwrap().to_string()
-}
-
-async fn log_in_and_extract_token(
-    cptestctx: &ControlPlaneTestContext,
-) -> String {
-    let testctx = &cptestctx.external_client;
-    let url = format!("/v1/login/{}/local", cptestctx.silo_name);
-    let credentials = test_params::UsernamePasswordCredentials {
-        username: cptestctx.user_name.as_ref().parse().unwrap(),
-        password: TEST_SUITE_PASSWORD.to_string(),
-    };
-    let login = RequestBuilder::new(&testctx, Method::POST, &url)
-        .body(Some(&credentials))
-        .expect_status(Some(StatusCode::NO_CONTENT))
-        .execute()
-        .await
-        .expect("failed to log in");
-
-    let session_cookie = get_header_value(login, header::SET_COOKIE);
-    let (session_token, rest) = session_cookie.split_once("; ").unwrap();
-
-    assert!(session_token.starts_with("session="));
-    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=86400");
-
-    session_token.to_string()
-}
-
 async fn expect_redirect(testctx: &ClientTestContext, from: &str, to: &str) {
     let _ = RequestBuilder::new(&testctx, Method::GET, from)
         .expect_status(Some(StatusCode::FOUND))
@@ -928,27 +934,25 @@ async fn expect_redirect(testctx: &ClientTestContext, from: &str, to: &str) {
 /// the session was found but is expired. vs not found at all
 #[tokio::test]
 async fn test_session_idle_timeout_deletes_session() {
-    // set idle timeout to 1 second so we can test expiration
-    let mut config = load_test_config();
-    config.pkg.console.session_idle_timeout_minutes = 0;
-    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
         "test_session_idle_timeout_deletes_session",
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
-        0,
     )
+    .customize_nexus_config(&|config| {
+        // set idle timeout to 0 so we can test expiration
+        config.pkg.console.session_idle_timeout_minutes = 0;
+    })
+    .start::<omicron_nexus::Server>()
     .await;
     let testctx = &cptestctx.external_client;
 
     // Start session
-    let session_cookie = log_in_and_extract_token(&cptestctx).await;
+    let session_token = create_console_session(&cptestctx).await;
 
     // sleep here not necessary given TTL of 0
 
     // Make a request with the expired session cookie
     let me_response = RequestBuilder::new(testctx, Method::GET, "/v1/me")
-        .header(header::COOKIE, &session_cookie)
+        .header(header::COOKIE, &format!("session={}", session_token))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
@@ -965,10 +969,9 @@ async fn test_session_idle_timeout_deletes_session() {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let token = session_cookie.strip_prefix("session=").unwrap();
     let db_token_error = nexus
         .datastore()
-        .session_lookup_by_token(&opctx, token.to_string())
+        .session_lookup_by_token(&opctx, session_token)
         .await
         .expect_err("session should be deleted");
     assert_matches::assert_matches!(

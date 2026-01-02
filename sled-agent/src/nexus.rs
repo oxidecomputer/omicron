@@ -54,9 +54,11 @@ pub(crate) trait ConvertInto<T>: Sized {
     fn convert(self) -> T;
 }
 
-impl ConvertInto<nexus_client::types::PhysicalDiskKind> for DiskVariant {
-    fn convert(self) -> nexus_client::types::PhysicalDiskKind {
-        use nexus_client::types::PhysicalDiskKind;
+impl ConvertInto<nexus_lockstep_client::types::PhysicalDiskKind>
+    for DiskVariant
+{
+    fn convert(self) -> nexus_lockstep_client::types::PhysicalDiskKind {
+        use nexus_lockstep_client::types::PhysicalDiskKind;
 
         match self {
             DiskVariant::U2 => PhysicalDiskKind::U2,
@@ -73,6 +75,28 @@ impl ConvertInto<nexus_client::types::Baseboard>
             serial: self.identifier().to_string(),
             part: self.model().to_string(),
             revision: self.revision(),
+        }
+    }
+}
+
+impl ConvertInto<nexus_client::types::SledCpuFamily>
+    for sled_hardware_types::SledCpuFamily
+{
+    fn convert(self) -> nexus_client::types::SledCpuFamily {
+        use sled_hardware_types::SledCpuFamily as SharedSledCpuFamily;
+        match self {
+            SharedSledCpuFamily::Unknown => {
+                nexus_client::types::SledCpuFamily::Unknown
+            }
+            SharedSledCpuFamily::AmdMilan => {
+                nexus_client::types::SledCpuFamily::AmdMilan
+            }
+            SharedSledCpuFamily::AmdTurin => {
+                nexus_client::types::SledCpuFamily::AmdTurin
+            }
+            SharedSledCpuFamily::AmdTurinDense => {
+                nexus_client::types::SledCpuFamily::AmdTurinDense
+            }
         }
     }
 }
@@ -275,6 +299,7 @@ impl NexusNotifierTask {
                     .usable_physical_ram_bytes()
                     .into(),
                 reservoir_size: vmm_reservoir_manager.reservoir_size().into(),
+                cpu_family: hardware.cpu_family().convert(),
                 generation,
                 decommissioned: false,
             }
@@ -654,6 +679,7 @@ mod test {
                 usable_physical_ram: ByteCount::from(1024 * 1024 * 1024u32)
                     .into(),
                 reservoir_size: ByteCount::from(0u32).into(),
+                cpu_family: nexus_client::types::SledCpuFamily::Unknown,
                 generation: Generation::new(),
                 decommissioned: false,
             }));

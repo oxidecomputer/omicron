@@ -81,6 +81,21 @@ NOTE: This section assumes you're already familiar with the prerequisites and en
 * Use `cargo check` when you just want to know if your code compiles.  It's _much_ faster than `cargo build` or `cargo nextest run`.
 * When using Cargo's check/build/test/clippy commands, you can use the `-p PACKAGE` flag to only operate on a specific package.  This often saves a lot of time for incremental builds.
 * When using Cargo's check/build/clippy commands, use `--all-targets` to make sure you're checking or building the test code, too.
+* Use https://rust-analyzer.github.io/book/configuration#cargo.targetDir[`cargo.targetDir`] to give rust-analyzer a target directory other than `./target` so it doesn't block you from running commands in the terminal. This uses extra disk space.
+
+.How to set `cargo.targetDir` in various editors
+[%collapsible]
+====
+
+[source, toml]
+.Helix
+----
+[language-server.rust-analyzer.config]
+cargo.targetDir = true
+----
+
+====
+
 
 These are explained a bit more below, along with some common pitfalls.
 

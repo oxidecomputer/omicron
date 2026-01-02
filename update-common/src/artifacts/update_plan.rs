@@ -39,6 +39,7 @@ use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::ControlPlaneZoneImages;
+use tufaceous_lib::HostPhaseImageSource;
 use tufaceous_lib::HostPhaseImages;
 use tufaceous_lib::RotArchives;
 
@@ -68,17 +69,24 @@ pub struct UpdatePlan {
     // The same would apply to the host phase1/phase2, but we don't actually
     // need the `host_phase_2` data as part of this plan (we serve it from the
     // artifact server instead).
-    pub host_phase_1: ArtifactIdData,
-    pub trampoline_phase_1: ArtifactIdData,
+    pub cosmo_host_phase_1: ArtifactIdData,
+    pub gimlet_host_phase_1: ArtifactIdData,
+    pub cosmo_trampoline_phase_1: ArtifactIdData,
+    pub gimlet_trampoline_phase_1: ArtifactIdData,
     pub trampoline_phase_2: ArtifactIdData,
 
-    // We need to send installinator the hash of the host_phase_2 data it should
-    // fetch from us; we compute it while generating the plan.
+    // We need to send installinator either the hash of the installinator
+    // document (for newer TUF repos), or the host phase 2 and control plane
+    // hashes (for older TUF repos).
+    //
+    // TODO-cleanup: After r16, installinator_doc_hash will always be present.
+    pub installinator_doc_hash: Option<ArtifactHash>,
+
+    // We compute this while generating the plan.
     pub host_phase_2_hash: ArtifactHash,
 
-    // We also need to send installinator the hash of the control_plane image it
-    // should fetch from us. This is already present in the TUF repository, but
-    // we record it here for use by the update process.
+    // This is already present in the TUF repository, but we record it here
+    // for use by the update process.
     //
     // When built with `ControlPlaneZonesMode::Split`, this hash does not
     // reference any artifacts in our corresponding `ArtifactsWithPlan`.
@@ -101,6 +109,19 @@ struct RotSignData {
 struct RotSignTarget {
     id: ArtifactId,
     bord: String,
+}
+
+struct HostArtifactSource<'a> {
+    gimlet_host_phase_1: &'a mut HashingNamedUtf8TempFile,
+    cosmo_host_phase_1: &'a mut HashingNamedUtf8TempFile,
+    phase_2: &'a mut HashingNamedUtf8TempFile,
+}
+
+// Results from extraction
+struct HostArtifactResult {
+    gimlet_host_phase_1: ExtractedArtifactDataHandle,
+    cosmo_host_phase_1: ExtractedArtifactDataHandle,
+    phase_2: ExtractedArtifactDataHandle,
 }
 
 /// `UpdatePlanBuilder` mirrors all the fields of `UpdatePlan`, but they're all
@@ -126,8 +147,10 @@ pub struct UpdatePlanBuilder<'a> {
 
     // We always send phase 1 images (regardless of host or trampoline) to the
     // SP via MGS, so we retain their data.
-    host_phase_1: Option<ArtifactIdData>,
-    trampoline_phase_1: Option<ArtifactIdData>,
+    cosmo_host_phase_1: Option<ArtifactIdData>,
+    gimlet_host_phase_1: Option<ArtifactIdData>,
+    cosmo_trampoline_phase_1: Option<ArtifactIdData>,
+    gimlet_trampoline_phase_1: Option<ArtifactIdData>,
 
     // Trampoline phase 2 images must be sent to MGS so that the SP is able to
     // fetch it on demand while the trampoline OS is booting, so we need the
@@ -136,9 +159,15 @@ pub struct UpdatePlanBuilder<'a> {
 
     // In contrast to the trampoline phase 2 image, the host phase 2 image and
     // the control plane are fetched by installinator from us over the bootstrap
-    // network. The only information we have to send to the SP via MGS is the
-    // hash of these two artifacts; we still hold the data in our `by_hash` map
-    // we build below, but we don't need the data when driving an update.
+    // network.
+    //
+    // For newer TUF repos, this information is contained within the
+    // installinator document. We have to send this data to the SP via MGS.
+    installinator_doc_hash: Option<ArtifactHash>,
+
+    // For older TUF repos, the information we have to send to the SP via MGS is
+    // the hash of these two artifacts; we still hold the data in our `by_hash`
+    // map we build below, but we don't need the data when driving an update.
     host_phase_2_hash: Option<ArtifactHash>,
     control_plane_hash: Option<ArtifactHash>,
 
@@ -178,12 +207,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             sidecar_rot_a: Vec::new(),
             sidecar_rot_b: Vec::new(),
             sidecar_rot_bootloader: Vec::new(),
-            host_phase_1: None,
-            trampoline_phase_1: None,
+            cosmo_host_phase_1: None,
+            gimlet_host_phase_1: None,
+            gimlet_trampoline_phase_1: None,
+            cosmo_trampoline_phase_1: None,
             trampoline_phase_2: None,
+            installinator_doc_hash: None,
             host_phase_2_hash: None,
             control_plane_hash: None,
-
             by_id: BTreeMap::new(),
             by_hash: HashMap::new(),
             rot_by_sign: HashMap::new(),
@@ -248,6 +279,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::Trampoline => {
                 self.add_trampoline_artifact(artifact_id, stream)
             }
+            KnownArtifactKind::InstallinatorDocument => {
+                self.add_installinator_document_artifact(
+                    artifact_id,
+                    artifact_hash,
+                    stream,
+                )
+                .await
+            }
             KnownArtifactKind::ControlPlane => {
                 self.add_control_plane_artifact(
                     artifact_id,
@@ -259,6 +298,11 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::Zone => {
                 // We don't currently support repos with already split-out
                 // zones.
+                self.add_unknown_artifact(artifact_id, artifact_hash, stream)
+                    .await
+            }
+            KnownArtifactKind::MeasurementCorpus => {
+                // This is handled via the installinator document
                 self.add_unknown_artifact(artifact_id, artifact_hash, stream)
                     .await
             }
@@ -280,8 +324,10 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::GimletRot
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
+            | KnownArtifactKind::MeasurementCorpus
             | KnownArtifactKind::PscRot
             | KnownArtifactKind::SwitchRot
             | KnownArtifactKind::GimletRotBootloader
@@ -316,7 +362,7 @@ impl<'a> UpdatePlanBuilder<'a> {
 
         let board = Board(caboose.board);
 
-        let slot = match sp_map.entry(board) {
+        let slot = match sp_map.entry(board.clone()) {
             btree_map::Entry::Vacant(slot) => slot,
             btree_map::Entry::Occupied(slot) => {
                 return Err(RepositoryError::DuplicateBoardEntry {
@@ -344,6 +390,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             artifact_kind.into(),
+            Some(board),
+            None,
             self.log,
         )?;
 
@@ -373,8 +421,10 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::GimletRot
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
+            | KnownArtifactKind::MeasurementCorpus
             | KnownArtifactKind::PscRot
             | KnownArtifactKind::SwitchRot
             | KnownArtifactKind::GimletSp
@@ -398,11 +448,20 @@ impl<'a> UpdatePlanBuilder<'a> {
         let (artifact_id, bootloader_caboose) =
             read_hubris_caboose_from_archive(artifact_id, data.clone())?;
 
+        let sign = match bootloader_caboose.sign {
+            Some(sign) => sign,
+            None => {
+                return Err(RepositoryError::MissingHubrisCabooseSign(
+                    artifact_id,
+                ));
+            }
+        };
+
         // We restrict the bootloader to exactly one entry per (kind, signature)
-        match self.rot_by_sign.entry(RotSignData {
-            kind: artifact_kind,
-            sign: bootloader_caboose.sign.expect("required SIGN in caboose"),
-        }) {
+        match self
+            .rot_by_sign
+            .entry(RotSignData { kind: artifact_kind, sign: sign.clone() })
+        {
             hash_map::Entry::Occupied(_) => {
                 return Err(RepositoryError::DuplicateBoardEntry {
                     board: bootloader_caboose.board,
@@ -411,7 +470,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             }
             hash_map::Entry::Vacant(slot) => slot.insert(vec![RotSignTarget {
                 id: artifact_id.clone(),
-                bord: bootloader_caboose.board,
+                bord: bootloader_caboose.board.clone(),
             }]),
         };
 
@@ -433,6 +492,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             bootloader_kind,
+            Some(Board(bootloader_caboose.board)),
+            Some(sign),
             self.log,
         )?;
 
@@ -468,8 +529,10 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::GimletSp
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
+            | KnownArtifactKind::MeasurementCorpus
             | KnownArtifactKind::PscSp
             | KnownArtifactKind::SwitchSp
             | KnownArtifactKind::GimletRotBootloader
@@ -533,14 +596,20 @@ impl<'a> UpdatePlanBuilder<'a> {
             });
         }
 
-        let entry_a = RotSignData {
-            kind: artifact_kind,
-            sign: image_a_caboose.sign.expect("required SIGN in caboose"),
+        let sign_a = match image_a_caboose.sign {
+            Some(sign) => sign,
+            None => {
+                return Err(RepositoryError::MissingHubrisCabooseSign(
+                    artifact_id,
+                ));
+            }
         };
+
+        let entry_a = RotSignData { kind: artifact_kind, sign: sign_a.clone() };
 
         let target_a = RotSignTarget {
             id: artifact_id.clone(),
-            bord: image_a_caboose.board,
+            bord: image_a_caboose.board.clone(),
         };
 
         match self.rot_by_sign.entry(entry_a) {
@@ -561,14 +630,20 @@ impl<'a> UpdatePlanBuilder<'a> {
             }
         };
 
-        let entry_b = RotSignData {
-            kind: artifact_kind,
-            sign: image_b_caboose.sign.expect("required SIGN in caboose"),
+        let sign_b = match image_b_caboose.sign {
+            Some(sign) => sign,
+            None => {
+                return Err(RepositoryError::MissingHubrisCabooseSign(
+                    artifact_id,
+                ));
+            }
         };
+
+        let entry_b = RotSignData { kind: artifact_kind, sign: sign_b.clone() };
 
         let target_b = RotSignTarget {
             id: artifact_id.clone(),
-            bord: image_b_caboose.board,
+            bord: image_b_caboose.board.clone(),
         };
 
         // We already checked for duplicate boards, no need to check again
@@ -598,12 +673,16 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id.clone(),
             rot_a_data,
             rot_a_kind,
+            Some(Board(image_a_caboose.board)),
+            Some(sign_a),
             self.log,
         )?;
         self.record_extracted_artifact(
             artifact_id,
             rot_b_data,
             rot_b_kind,
+            Some(Board(image_b_caboose.board)),
+            Some(sign_b),
             self.log,
         )?;
 
@@ -615,43 +694,83 @@ impl<'a> UpdatePlanBuilder<'a> {
         artifact_id: ArtifactId,
         stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
     ) -> Result<(), RepositoryError> {
-        if self.host_phase_1.is_some() || self.host_phase_2_hash.is_some() {
+        if self.cosmo_host_phase_1.is_some()
+            || self.gimlet_host_phase_1.is_some()
+            || self.host_phase_2_hash.is_some()
+        {
             return Err(RepositoryError::DuplicateArtifactKind(
                 KnownArtifactKind::Host,
             ));
         }
 
-        let (phase_1_data, phase_2_data) = Self::extract_nested_artifact_pair(
+        let result = Self::extract_nested_host_artifacts(
             stream,
             &mut self.extracted_artifacts,
             KnownArtifactKind::Host,
-            |reader, out_1, out_2| {
-                HostPhaseImages::extract_into(reader, out_1, out_2)
+            |reader, source| {
+                HostPhaseImages::extract_into(
+                    reader,
+                    HostPhaseImageSource {
+                        gimlet_phase_1: source.gimlet_host_phase_1,
+                        cosmo_phase_1: source.cosmo_host_phase_1,
+                        phase_2: source.phase_2,
+                    },
+                )
             },
         )?;
 
+        let gimlet_phase_1_data = result.gimlet_host_phase_1;
+        let cosmo_phase_1_data = result.cosmo_host_phase_1;
+        let phase_2_data = result.phase_2;
+
         // Similarly to the RoT, we need to create new, non-conflicting artifact
         // IDs for each image.
-        let phase_1_id = ArtifactId {
-            name: artifact_id.name.clone(),
+        let gimlet_phase_1_id = ArtifactId {
+            name: format!("{}-gimlet", artifact_id.name),
             version: artifact_id.version.clone(),
-            kind: ArtifactKind::HOST_PHASE_1,
+            kind: ArtifactKind::GIMLET_HOST_PHASE_1,
         };
 
-        self.host_phase_1 =
-            Some(ArtifactIdData { id: phase_1_id, data: phase_1_data.clone() });
+        let cosmo_phase_1_id = ArtifactId {
+            name: format!("{}-cosmo", artifact_id.name),
+            version: artifact_id.version.clone(),
+            kind: ArtifactKind::COSMO_HOST_PHASE_1,
+        };
+
+        self.gimlet_host_phase_1 = Some(ArtifactIdData {
+            id: gimlet_phase_1_id.clone(),
+            data: gimlet_phase_1_data.clone(),
+        });
+        self.cosmo_host_phase_1 = Some(ArtifactIdData {
+            id: cosmo_phase_1_id.clone(),
+            data: cosmo_phase_1_data.clone(),
+        });
+
         self.host_phase_2_hash = Some(phase_2_data.hash());
 
         self.record_extracted_artifact(
             artifact_id.clone(),
-            phase_1_data,
-            ArtifactKind::HOST_PHASE_1,
+            gimlet_phase_1_data,
+            ArtifactKind::GIMLET_HOST_PHASE_1,
+            None,
+            None,
             self.log,
         )?;
+        self.record_extracted_artifact(
+            artifact_id.clone(),
+            cosmo_phase_1_data,
+            ArtifactKind::COSMO_HOST_PHASE_1,
+            None,
+            None,
+            self.log,
+        )?;
+
         self.record_extracted_artifact(
             artifact_id,
             phase_2_data,
             ArtifactKind::HOST_PHASE_2,
+            None,
+            None,
             self.log,
         )?;
 
@@ -663,7 +782,8 @@ impl<'a> UpdatePlanBuilder<'a> {
         artifact_id: ArtifactId,
         stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
     ) -> Result<(), RepositoryError> {
-        if self.trampoline_phase_1.is_some()
+        if self.gimlet_trampoline_phase_1.is_some()
+            || self.cosmo_trampoline_phase_1.is_some()
             || self.trampoline_phase_2.is_some()
         {
             return Err(RepositoryError::DuplicateArtifactKind(
@@ -671,22 +791,38 @@ impl<'a> UpdatePlanBuilder<'a> {
             ));
         }
 
-        let (phase_1_data, phase_2_data) = Self::extract_nested_artifact_pair(
+        let result = Self::extract_nested_host_artifacts(
             stream,
             &mut self.extracted_artifacts,
             KnownArtifactKind::Trampoline,
-            |reader, out_1, out_2| {
-                HostPhaseImages::extract_into(reader, out_1, out_2)
+            |reader, source| {
+                HostPhaseImages::extract_into(
+                    reader,
+                    HostPhaseImageSource {
+                        gimlet_phase_1: source.gimlet_host_phase_1,
+                        cosmo_phase_1: source.cosmo_host_phase_1,
+                        phase_2: source.phase_2,
+                    },
+                )
             },
         )?;
+
+        let gimlet_phase_1_data = result.gimlet_host_phase_1;
+        let cosmo_phase_1_data = result.cosmo_host_phase_1;
+        let phase_2_data = result.phase_2;
 
         // Similarly to the RoT, we need to create new, non-conflicting artifact
         // IDs for each image. We'll append a suffix to the name; keep the
         // version and kind the same.
-        let phase_1_id = ArtifactId {
-            name: artifact_id.name.clone(),
+        let gimlet_phase_1_id = ArtifactId {
+            name: format!("{}-gimlet", artifact_id.name),
             version: artifact_id.version.clone(),
-            kind: ArtifactKind::TRAMPOLINE_PHASE_1,
+            kind: ArtifactKind::GIMLET_TRAMPOLINE_PHASE_1,
+        };
+        let cosmo_phase_1_id = ArtifactId {
+            name: format!("{}-cosmo", artifact_id.name),
+            version: artifact_id.version.clone(),
+            kind: ArtifactKind::COSMO_TRAMPOLINE_PHASE_1,
         };
         let phase_2_id = ArtifactId {
             name: artifact_id.name.clone(),
@@ -694,23 +830,75 @@ impl<'a> UpdatePlanBuilder<'a> {
             kind: ArtifactKind::TRAMPOLINE_PHASE_2,
         };
 
-        self.trampoline_phase_1 =
-            Some(ArtifactIdData { id: phase_1_id, data: phase_1_data.clone() });
+        self.cosmo_trampoline_phase_1 = Some(ArtifactIdData {
+            id: cosmo_phase_1_id.clone(),
+            data: cosmo_phase_1_data.clone(),
+        });
+        self.gimlet_trampoline_phase_1 = Some(ArtifactIdData {
+            id: gimlet_phase_1_id.clone(),
+            data: gimlet_phase_1_data.clone(),
+        });
         self.trampoline_phase_2 =
             Some(ArtifactIdData { id: phase_2_id, data: phase_2_data.clone() });
 
         self.record_extracted_artifact(
             artifact_id.clone(),
-            phase_1_data,
-            ArtifactKind::TRAMPOLINE_PHASE_1,
+            gimlet_phase_1_data,
+            ArtifactKind::GIMLET_TRAMPOLINE_PHASE_1,
+            None,
+            None,
+            self.log,
+        )?;
+        self.record_extracted_artifact(
+            artifact_id.clone(),
+            cosmo_phase_1_data,
+            ArtifactKind::COSMO_TRAMPOLINE_PHASE_1,
+            None,
+            None,
             self.log,
         )?;
         self.record_extracted_artifact(
             artifact_id,
             phase_2_data,
             ArtifactKind::TRAMPOLINE_PHASE_2,
+            None,
+            None,
             self.log,
         )?;
+
+        Ok(())
+    }
+
+    async fn add_installinator_document_artifact(
+        &mut self,
+        artifact_id: ArtifactId,
+        artifact_hash: ArtifactHash,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
+    ) -> Result<(), RepositoryError> {
+        // The installinator document is treated as an opaque single-unit
+        // artifact by update-common, so that older versions of update-common
+        // can handle newer versions of this artifact.
+        if self.installinator_doc_hash.is_some() {
+            return Err(RepositoryError::DuplicateInstallinatorDocument);
+        }
+
+        let artifact_kind = artifact_id.kind.clone();
+        let artifact_hash_id =
+            ArtifactHashId { kind: artifact_kind.clone(), hash: artifact_hash };
+
+        let data =
+            self.extracted_artifacts.store(artifact_hash_id, stream).await?;
+
+        self.record_extracted_artifact(
+            artifact_id,
+            data,
+            artifact_kind,
+            None,
+            None,
+            self.log,
+        )?;
+
+        self.installinator_doc_hash = Some(artifact_hash);
 
         Ok(())
     }
@@ -742,6 +930,8 @@ impl<'a> UpdatePlanBuilder<'a> {
                     artifact_id,
                     data,
                     KnownArtifactKind::ControlPlane.into(),
+                    None,
+                    None,
                     self.log,
                 )?;
             }
@@ -776,10 +966,61 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             artifact_kind,
+            None,
+            None,
             self.log,
         )?;
 
         Ok(())
+    }
+
+    fn extract_nested_host_artifacts<F>(
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
+        extracted_artifacts: &mut ExtractedArtifacts,
+        kind: KnownArtifactKind,
+        extract: F,
+    ) -> Result<HostArtifactResult, RepositoryError>
+    where
+        F: FnOnce(
+                &mut dyn io::BufRead,
+                HostArtifactSource,
+            ) -> anyhow::Result<()>
+            + Send,
+    {
+        // Since stream isn't guaranteed to be 'static, we have to use
+        // block_in_place here, not spawn_blocking. This does mean that the
+        // current task is taken over, and that this function can only be used
+        // from a multithreaded Tokio runtime.
+        //
+        // An alternative would be to use the `async-scoped` crate. However:
+        //
+        // - We would only spawn one task there.
+        // - The only safe use of async-scoped is with the `scope_and_block`
+        //   call, which uses `tokio::task::block_in_place` anyway.
+        // - async-scoped also requires a multithreaded Tokio runtime.
+        //
+        // If we ever want to parallelize extraction across all the different
+        // artifacts, `async-scoped` would be a good fit.
+        tokio::task::block_in_place(|| {
+            let stream = std::pin::pin!(stream);
+            let reader =
+                tokio_util::io::StreamReader::new(stream.map_err(|error| {
+                    // StreamReader requires a conversion from tough's errors to
+                    // std::io::Error.
+                    std::io::Error::new(io::ErrorKind::Other, error)
+                }));
+
+            // RotArchives::extract_into takes a synchronous reader, so we need
+            // to use this bridge. The bridge can only be used from a blocking
+            // context.
+            let mut reader = tokio_util::io::SyncIoBridge::new(reader);
+
+            Self::extract_nested_host_artifact_impl(
+                extracted_artifacts,
+                kind,
+                |source| extract(&mut reader, source),
+            )
+        })
     }
 
     /// A helper that converts a single artifact `stream` into a pair of
@@ -852,6 +1093,44 @@ impl<'a> UpdatePlanBuilder<'a> {
                 kind,
                 |out_a, out_b| extract(&mut reader, out_a, out_b),
             )
+        })
+    }
+
+    fn extract_nested_host_artifact_impl<F>(
+        extracted_artifacts: &mut ExtractedArtifacts,
+        kind: KnownArtifactKind,
+        extract: F,
+    ) -> Result<HostArtifactResult, RepositoryError>
+    where
+        F: FnOnce(HostArtifactSource) -> anyhow::Result<()>,
+    {
+        // Create three temp files for the pair of images we want to
+        // extract from `reader`.
+        let mut gimlet_phase_1_out = extracted_artifacts.new_tempfile()?;
+        let mut cosmo_phase_1_out = extracted_artifacts.new_tempfile()?;
+        let mut phase_2_out = extracted_artifacts.new_tempfile()?;
+
+        let source = HostArtifactSource {
+            gimlet_host_phase_1: &mut gimlet_phase_1_out,
+            cosmo_host_phase_1: &mut cosmo_phase_1_out,
+            phase_2: &mut phase_2_out,
+        };
+        // Extract the two images from `reader`.
+        extract(source)
+            .map_err(|error| RepositoryError::TarballExtract { kind, error })?;
+
+        // Persist the two images we just extracted.
+        let gimlet_host_phase_1 = extracted_artifacts
+            .store_tempfile(kind.into(), gimlet_phase_1_out)?;
+        let cosmo_host_phase_1 = extracted_artifacts
+            .store_tempfile(kind.into(), cosmo_phase_1_out)?;
+        let phase_2 =
+            extracted_artifacts.store_tempfile(kind.into(), phase_2_out)?;
+
+        Ok(HostArtifactResult {
+            gimlet_host_phase_1,
+            cosmo_host_phase_1,
+            phase_2,
         })
     }
 
@@ -940,6 +1219,8 @@ impl<'a> UpdatePlanBuilder<'a> {
                 artifact_id,
                 data,
                 KnownArtifactKind::Zone.into(),
+                None,
+                None,
                 self.log,
             )?;
             Ok(())
@@ -963,6 +1244,8 @@ impl<'a> UpdatePlanBuilder<'a> {
         tuf_repo_artifact_id: ArtifactId,
         data: ExtractedArtifactDataHandle,
         data_kind: ArtifactKind,
+        board: Option<Board>,
+        sign: Option<Vec<u8>>,
         log: &Logger,
     ) -> Result<(), RepositoryError> {
         use std::collections::hash_map::Entry;
@@ -1005,6 +1288,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             id: artifacts_meta_id,
             hash: data.hash(),
             size: data.file_size() as u64,
+            board: board.map(|b| b.0),
+            sign,
         });
         by_hash_slot.insert(data);
 
@@ -1111,10 +1396,18 @@ impl<'a> UpdatePlanBuilder<'a> {
             sidecar_rot_a: self.sidecar_rot_a, // checked above
             sidecar_rot_b: self.sidecar_rot_b, // checked above
             sidecar_rot_bootloader: self.sidecar_rot_bootloader, // checked above
-            host_phase_1: self.host_phase_1.ok_or(
+            gimlet_host_phase_1: self.gimlet_host_phase_1.ok_or(
                 RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
             )?,
-            trampoline_phase_1: self.trampoline_phase_1.ok_or(
+            cosmo_host_phase_1: self.cosmo_host_phase_1.ok_or(
+                RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
+            )?,
+            gimlet_trampoline_phase_1: self.gimlet_trampoline_phase_1.ok_or(
+                RepositoryError::MissingArtifactKind(
+                    KnownArtifactKind::Trampoline,
+                ),
+            )?,
+            cosmo_trampoline_phase_1: self.cosmo_trampoline_phase_1.ok_or(
                 RepositoryError::MissingArtifactKind(
                     KnownArtifactKind::Trampoline,
                 ),
@@ -1124,6 +1417,9 @@ impl<'a> UpdatePlanBuilder<'a> {
                     KnownArtifactKind::Trampoline,
                 ),
             )?,
+            // For backwards compatibility, installinator_doc_hash is currently
+            // optional.
+            installinator_doc_hash: self.installinator_doc_hash,
             host_phase_2_hash: self.host_phase_2_hash.ok_or(
                 RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
             )?,
@@ -1281,7 +1577,7 @@ mod tests {
     use flate2::{Compression, write::GzEncoder};
     use futures::StreamExt;
     use omicron_test_utils::dev::test_setup_log;
-    use rand::{Rng, distributions::Standard, thread_rng};
+    use rand::{Rng, distr::StandardUniform};
     use sha2::{Digest, Sha256};
     use tufaceous_brand_metadata::{ArchiveType, LayerInfo, Metadata};
     use tufaceous_lib::{
@@ -1289,11 +1585,12 @@ mod tests {
     };
 
     fn make_random_bytes() -> Vec<u8> {
-        thread_rng().sample_iter(Standard).take(128).collect()
+        rand::rng().sample_iter(StandardUniform).take(128).collect()
     }
 
     struct RandomHostOsImage {
-        phase1: Bytes,
+        gimlet_phase1: Bytes,
+        cosmo_phase1: Bytes,
         phase2: Bytes,
         tarball: Bytes,
     }
@@ -1301,15 +1598,22 @@ mod tests {
     fn make_random_host_os_image() -> RandomHostOsImage {
         use tufaceous_lib::CompositeHostArchiveBuilder;
 
-        let phase1 = make_random_bytes();
+        let gimlet_phase1 = make_random_bytes();
+        let cosmo_phase1 = make_random_bytes();
         let phase2 = make_random_bytes();
 
         let mut builder =
             CompositeHostArchiveBuilder::new(Vec::new(), MtimeSource::Zero)
                 .unwrap();
         builder
-            .append_phase_1(CompositeEntry {
-                data: &phase1,
+            .append_gimlet_phase_1(CompositeEntry {
+                data: &gimlet_phase1,
+                mtime_source: MtimeSource::Zero,
+            })
+            .unwrap();
+        builder
+            .append_cosmo_phase_1(CompositeEntry {
+                data: &cosmo_phase1,
                 mtime_source: MtimeSource::Zero,
             })
             .unwrap();
@@ -1323,7 +1627,8 @@ mod tests {
         let tarball = builder.finish().unwrap();
 
         RandomHostOsImage {
-            phase1: Bytes::from(phase1),
+            gimlet_phase1: Bytes::from(gimlet_phase1),
+            cosmo_phase1: Bytes::from(cosmo_phase1),
             phase2: Bytes::from(phase2),
             tarball: Bytes::from(tarball),
         }
@@ -1887,6 +2192,30 @@ mod tests {
                 .unwrap();
         }
 
+        // The measurement corpus can be random bytes
+        // If we do further testing we should use a fake CoRIM
+        let measurement_corpus_data = make_random_bytes();
+        let measurement_corpus_hash =
+            ArtifactHash(Sha256::digest(&measurement_corpus_data).into());
+        {
+            let kind = KnownArtifactKind::MeasurementCorpus;
+            let id = ArtifactId {
+                name: format!("{kind:?}"),
+                version: ARTIFACT_VERSION_0,
+                kind: kind.into(),
+            };
+            plan_builder
+                .add_artifact(
+                    id,
+                    measurement_corpus_hash,
+                    futures::stream::iter([Ok(Bytes::from(
+                        measurement_corpus_data,
+                    ))]),
+                )
+                .await
+                .unwrap();
+        }
+
         // For each SP image, we'll insert two artifacts: these should end up in
         // the update plan's SP image maps keyed by their "board". Normally the
         // board is read from the archive itself via hubtools; we'll inject a
@@ -2036,6 +2365,13 @@ mod tests {
                     assert_eq!(hash_ids.len(), 1);
                     assert_eq!(plan.control_plane_hash, hash_ids[0].hash);
                 }
+                KnownArtifactKind::InstallinatorDocument => {
+                    assert_eq!(hash_ids.len(), 1);
+                    assert_eq!(
+                        plan.installinator_doc_hash,
+                        Some(hash_ids[0].hash)
+                    );
+                }
                 KnownArtifactKind::Zone => {
                     unreachable!(
                         "tufaceous does not yet generate repos \
@@ -2066,6 +2402,10 @@ mod tests {
                         hash_ids[0].hash
                     );
                 }
+                KnownArtifactKind::MeasurementCorpus => {
+                    assert_eq!(hash_ids.len(), 1);
+                    assert_eq!(measurement_corpus_hash, hash_ids[0].hash);
+                }
                 // These are special (we import their inner parts) and we'll
                 // check them below.
                 KnownArtifactKind::Host
@@ -2080,10 +2420,21 @@ mod tests {
         }
 
         // Check extracted host and trampoline data
-        assert_eq!(read_to_vec(&plan.host_phase_1.data).await, host.phase1);
         assert_eq!(
-            read_to_vec(&plan.trampoline_phase_1.data).await,
-            trampoline.phase1
+            read_to_vec(&plan.gimlet_host_phase_1.data).await,
+            host.gimlet_phase1
+        );
+        assert_eq!(
+            read_to_vec(&plan.cosmo_host_phase_1.data).await,
+            host.cosmo_phase1
+        );
+        assert_eq!(
+            read_to_vec(&plan.gimlet_trampoline_phase_1.data).await,
+            trampoline.gimlet_phase1
+        );
+        assert_eq!(
+            read_to_vec(&plan.cosmo_trampoline_phase_1.data).await,
+            trampoline.cosmo_phase1
         );
         assert_eq!(
             read_to_vec(&plan.trampoline_phase_2.data).await,

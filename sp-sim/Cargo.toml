@@ -1,7 +1,7 @@
 [package]
 name = "sp-sim"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -18,9 +18,12 @@ gateway-messages.workspace = true
 gateway-types.workspace = true
 hex = { workspace = true, features = [ "serde" ] }
 hubtools.workspace = true
+nexus-types.workspace = true
 omicron-common.workspace = true
+oxide-tokio-rt.workspace = true
 serde.workspace = true
 serde_cbor.workspace = true
+sha2.workspace = true
 sha3.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true

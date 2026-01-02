@@ -22,6 +22,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
+use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use slog::Logger;
 use slog::debug;
@@ -30,7 +32,6 @@ use slog::info;
 use slog::warn;
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
-use uuid::Uuid;
 
 pub async fn vpc_list_firewall_rules(
     datastore: &DataStore,
@@ -48,7 +49,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
     vpc: &db::model::Vpc,
     rules: &[db::model::VpcFirewallRule],
     log: &Logger,
-) -> Result<Vec<sled_agent_client::types::ResolvedVpcFirewallRule>, Error> {
+) -> Result<Vec<ResolvedVpcFirewallRule>, Error> {
     // Collect the names of instances, subnets, and VPCs that are either
     // targets or host filters. We have to find the sleds for all the
     // targets, and we'll need information about the IP addresses or
@@ -133,6 +134,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
     }
 
     let mut vpc_interfaces: NicMap = HashMap::new();
+    let mut vpc_vni_map = HashMap::new();
     for vpc_name in &vpcs {
         if let Ok((.., authz_vpc)) = LookupPath::new(opctx, datastore)
             .project_id(vpc.project_id)
@@ -144,6 +146,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                 .derive_vpc_network_interface_info(opctx, &authz_vpc)
                 .await?
             {
+                vpc_vni_map.insert(&vpc_name.0, iface.vni);
                 vpc_interfaces
                     .entry(vpc_name.0.clone())
                     .or_insert_with(Vec::new)
@@ -281,7 +284,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                         .get(vpc.name())
                         .unwrap_or(&no_interfaces)
                         .iter()
-                        .filter(|nic| nic.ip == *addr)
+                        .filter(|nic| nic.ip_config.has_addr(addr))
                         .for_each(&mut push_target_nic);
                 }
                 external::VpcFirewallRuleTarget::IpNet(net) => {
@@ -289,14 +292,17 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                         .get(vpc.name())
                         .unwrap_or(&no_interfaces)
                         .iter()
-                        .filter(|nic| match (net, nic.ip) {
-                            (IpNet::V4(net), IpAddr::V4(ip)) => {
-                                net.contains(ip)
-                            }
-                            (IpNet::V6(net), IpAddr::V6(ip)) => {
-                                net.contains(ip)
-                            }
-                            (_, _) => false,
+                        .filter(|nic| match net {
+                            IpNet::V4(net) => nic
+                                .ip_config
+                                .ipv4_addr()
+                                .map(|ip| net.contains(*ip))
+                                .unwrap_or(false),
+                            IpNet::V6(net) => nic
+                                .ip_config
+                                .ipv6_addr()
+                                .map(|ip| net.contains(*ip))
+                                .unwrap_or(false),
                         })
                         .for_each(&mut push_target_nic);
                 }
@@ -316,6 +322,11 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             // `nexus_db_queries::fixed_data::vpc_firewall_rule` for those
             // rules.) If those rules change to include any filter hosts, this
             // logic needs to change as well.
+            //
+            // Note that inbound ICMP is not currently governed by this filter,
+            // as error-type ICMP messages can arrive from any host which a
+            // Nexus/DNS zone reaches out to *or* a gateway/router on the path to
+            // that destination.
             (None, Some(allowed_ips)) => {
                 if allowlist_applies_to_firewall_rule(rule) {
                     match allowed_ips {
@@ -323,7 +334,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                         AllowedSourceIps::List(list) => Some(
                             list.iter()
                                 .copied()
-                                .map(|ip| HostIdentifier::Ip(ip).into())
+                                .map(HostIdentifier::Ip)
                                 .collect(),
                         ),
                     }
@@ -350,7 +361,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             // There are host filters, but we don't need to apply the allowlist
             // to this VPC either, so insert the rules as-is.
             (Some(hosts), None) => {
-                let mut host_addrs = Vec::with_capacity(hosts.len());
+                let mut host_addrs = HashSet::with_capacity(hosts.len());
                 for host in hosts {
                     match &host.0 {
                         external::VpcFirewallRuleHostFilter::Instance(name) => {
@@ -358,12 +369,21 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                                 .get(&name)
                                 .unwrap_or(&no_interfaces)
                             {
-                                host_addrs.push(
-                                    HostIdentifier::Ip(IpNet::host_net(
-                                        interface.ip,
-                                    ))
-                                    .into(),
-                                )
+                                // Insert both IPv4 and / or IPv6 addresses.
+                                if let Some(ipv4) =
+                                    interface.ip_config.ipv4_addr()
+                                {
+                                    host_addrs.insert(HostIdentifier::Ip(
+                                        IpNet::host_net(IpAddr::V4(*ipv4)),
+                                    ));
+                                }
+                                if let Some(ipv6) =
+                                    interface.ip_config.ipv6_addr()
+                                {
+                                    host_addrs.insert(HostIdentifier::Ip(
+                                        IpNet::host_net(IpAddr::V6(*ipv6)),
+                                    ));
+                                }
                             }
                         }
                         external::VpcFirewallRuleHostFilter::Subnet(name) => {
@@ -371,29 +391,22 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                                 .get(name)
                                 .unwrap_or(&no_networks)
                             {
-                                host_addrs.push(
-                                    HostIdentifier::Ip(IpNet::from(*subnet))
-                                        .into(),
-                                );
+                                host_addrs.insert(HostIdentifier::Ip(
+                                    IpNet::from(*subnet),
+                                ));
                             }
                         }
                         external::VpcFirewallRuleHostFilter::Ip(addr) => {
-                            host_addrs.push(
-                                HostIdentifier::Ip(IpNet::host_net(*addr))
-                                    .into(),
-                            )
+                            host_addrs.insert(HostIdentifier::Ip(
+                                IpNet::host_net(*addr),
+                            ));
                         }
                         external::VpcFirewallRuleHostFilter::IpNet(net) => {
-                            host_addrs.push(HostIdentifier::Ip(*net).into())
+                            host_addrs.insert(HostIdentifier::Ip(*net));
                         }
                         external::VpcFirewallRuleHostFilter::Vpc(name) => {
-                            for interface in vpc_interfaces
-                                .get(name)
-                                .unwrap_or(&no_interfaces)
-                            {
-                                host_addrs.push(
-                                    HostIdentifier::Vpc(interface.vni).into(),
-                                )
+                            if let Some(vni) = vpc_vni_map.get(name) {
+                                host_addrs.insert(HostIdentifier::Vpc(*vni));
                             }
                         }
                     }
@@ -409,25 +422,23 @@ pub async fn resolve_firewall_rules_for_sled_agent(
         let filter_ports = rule
             .filter_ports
             .as_ref()
-            .map(|ports| ports.iter().map(|v| v.0.into()).collect());
+            .map(|ports| ports.iter().map(|v| v.0).collect());
 
         let filter_protocols = rule
             .filter_protocols
             .as_ref()
-            .map(|protocols| protocols.iter().map(|v| v.0.into()).collect());
+            .map(|protocols| protocols.iter().map(|v| v.0).collect());
 
-        sled_agent_rules.push(
-            sled_agent_client::types::ResolvedVpcFirewallRule {
-                status: rule.status.0.into(),
-                direction: rule.direction.0.into(),
-                targets,
-                filter_hosts,
-                filter_ports,
-                filter_protocols,
-                action: rule.action.0.into(),
-                priority: rule.priority.0.0,
-            },
-        );
+        sled_agent_rules.push(ResolvedVpcFirewallRule {
+            status: rule.status.0,
+            direction: rule.direction.0,
+            targets,
+            filter_hosts,
+            filter_ports,
+            filter_protocols,
+            action: rule.action.0,
+            priority: rule.priority.0,
+        });
     }
     debug!(
         log,
@@ -443,7 +454,7 @@ pub async fn send_sled_agents_firewall_rules(
     opctx: &OpContext,
     vpc: &db::model::Vpc,
     rules: &[db::model::VpcFirewallRule],
-    sleds_filter: &[Uuid],
+    sleds_filter: &[SledUuid],
     sled_lookup_opctx: &OpContext,
     log: &Logger,
 ) -> Result<(), Error> {
@@ -502,7 +513,7 @@ pub async fn send_sled_agents_firewall_rules(
 pub async fn plumb_service_firewall_rules(
     datastore: &DataStore,
     opctx: &OpContext,
-    sleds_filter: &[Uuid],
+    sleds_filter: &[SledUuid],
     sled_lookup_opctx: &OpContext,
     log: &Logger,
 ) -> Result<(), Error> {

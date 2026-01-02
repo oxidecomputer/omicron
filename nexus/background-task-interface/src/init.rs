@@ -17,6 +17,7 @@ pub struct BackgroundTasks {
     pub task_nat_cleanup: Activator,
     pub task_bfd_manager: Activator,
     pub task_inventory_collection: Activator,
+    pub task_inventory_loader: Activator,
     pub task_support_bundle_collector: Activator,
     pub task_physical_disk_adoption: Activator,
     pub task_decommissioned_disk_cleaner: Activator,
@@ -44,9 +45,16 @@ pub struct BackgroundTasks {
     pub task_region_snapshot_replacement_step: Activator,
     pub task_region_snapshot_replacement_finish: Activator,
     pub task_tuf_artifact_replication: Activator,
+    pub task_tuf_repo_pruner: Activator,
     pub task_read_only_region_replacement_start: Activator,
     pub task_alert_dispatcher: Activator,
     pub task_webhook_deliverator: Activator,
+    pub task_sp_ereport_ingester: Activator,
+    pub task_reconfigurator_config_loader: Activator,
+    pub task_fm_sitrep_loader: Activator,
+    pub task_fm_sitrep_gc: Activator,
+    pub task_probe_distributor: Activator,
+    pub task_multicast_reconciler: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as

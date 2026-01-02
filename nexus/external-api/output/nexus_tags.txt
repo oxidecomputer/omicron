@@ -35,7 +35,6 @@ disk_create                              POST     /v1/disks
 disk_delete                              DELETE   /v1/disks/{disk}
 disk_finalize_import                     POST     /v1/disks/{disk}/finalize
 disk_list                                GET      /v1/disks
-disk_metrics_list                        GET      /v1/disks/{disk}/metrics/{metric}
 disk_view                                GET      /v1/disks/{disk}
 
 API operations found with tag "experimental"
@@ -50,6 +49,18 @@ affinity_group_member_list               GET      /v1/affinity-groups/{affinity_
 affinity_group_update                    PUT      /v1/affinity-groups/{affinity_group}
 affinity_group_view                      GET      /v1/affinity-groups/{affinity_group}
 instance_affinity_group_list             GET      /v1/instances/{instance}/affinity-groups
+instance_multicast_group_join            PUT      /v1/instances/{instance}/multicast-groups/{multicast_group}
+instance_multicast_group_leave           DELETE   /v1/instances/{instance}/multicast-groups/{multicast_group}
+instance_multicast_group_list            GET      /v1/instances/{instance}/multicast-groups
+lookup_multicast_group_by_ip             GET      /v1/system/multicast-groups/by-ip/{address}
+multicast_group_create                   POST     /v1/multicast-groups
+multicast_group_delete                   DELETE   /v1/multicast-groups/{multicast_group}
+multicast_group_list                     GET      /v1/multicast-groups
+multicast_group_member_add               POST     /v1/multicast-groups/{multicast_group}/members
+multicast_group_member_list              GET      /v1/multicast-groups/{multicast_group}/members
+multicast_group_member_remove            DELETE   /v1/multicast-groups/{multicast_group}/members/{instance}
+multicast_group_update                   PUT      /v1/multicast-groups/{multicast_group}
+multicast_group_view                     GET      /v1/multicast-groups/{multicast_group}
 probe_create                             POST     /experimental/v1/probes
 probe_delete                             DELETE   /experimental/v1/probes/{probe}
 probe_list                               GET      /experimental/v1/probes
@@ -62,11 +73,8 @@ support_bundle_head                      HEAD     /experimental/v1/system/suppor
 support_bundle_head_file                 HEAD     /experimental/v1/system/support-bundles/{bundle_id}/download/{file}
 support_bundle_index                     GET      /experimental/v1/system/support-bundles/{bundle_id}/index
 support_bundle_list                      GET      /experimental/v1/system/support-bundles
+support_bundle_update                    PUT      /experimental/v1/system/support-bundles/{bundle_id}
 support_bundle_view                      GET      /experimental/v1/system/support-bundles/{bundle_id}
-system_update_get_repository             GET      /v1/system/update/repository/{system_version}
-system_update_put_repository             PUT      /v1/system/update/repository
-target_release_update                    PUT      /v1/system/update/target-release
-target_release_view                      GET      /v1/system/update/target-release
 timeseries_query                         POST     /v1/timeseries/query
 
 API operations found with tag "floating-ips"
@@ -140,11 +148,6 @@ project_policy_view                      GET      /v1/projects/{project}/policy
 project_update                           PUT      /v1/projects/{project}
 project_view                             GET      /v1/projects/{project}
 
-API operations found with tag "roles"
-OPERATION ID                             METHOD   URL PATH
-role_list                                GET      /v1/system/roles
-role_view                                GET      /v1/system/roles/{role_name}
-
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH
 auth_settings_update                     PUT      /v1/auth-settings
@@ -158,6 +161,10 @@ group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
 user_list                                GET      /v1/users
+user_logout                              POST     /v1/users/{user_id}/logout
+user_session_list                        GET      /v1/users/{user_id}/sessions
+user_token_list                          GET      /v1/users/{user_id}/access-tokens
+user_view                                GET      /v1/users/{user_id}
 utilization_view                         GET      /v1/utilization
 
 API operations found with tag "snapshots"
@@ -183,6 +190,10 @@ webhook_receiver_update                  PUT      /v1/webhook-receivers/{receive
 webhook_secrets_add                      POST     /v1/webhook-secrets
 webhook_secrets_delete                   DELETE   /v1/webhook-secrets/{secret_id}
 webhook_secrets_list                     GET      /v1/webhook-secrets
+
+API operations found with tag "system/audit-log"
+OPERATION ID                             METHOD   URL PATH
+audit_log_list                           GET      /v1/system/audit-log
 
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
@@ -236,6 +247,7 @@ networking_address_lot_block_list        GET      /v1/system/networking/address-
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
 networking_address_lot_list              GET      /v1/system/networking/address-lot
+networking_address_lot_view              GET      /v1/system/networking/address-lot/{address_lot}
 networking_allow_list_update             PUT      /v1/system/networking/allow-list
 networking_allow_list_view               GET      /v1/system/networking/allow-list
 networking_bfd_disable                   POST     /v1/system/networking/bfd-disable
@@ -252,6 +264,8 @@ networking_bgp_exported                  GET      /v1/system/networking/bgp-expo
 networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
 networking_bgp_message_history           GET      /v1/system/networking/bgp-message-history
 networking_bgp_status                    GET      /v1/system/networking/bgp-status
+networking_inbound_icmp_update           PUT      /v1/system/networking/inbound-icmp
+networking_inbound_icmp_view             GET      /v1/system/networking/inbound-icmp
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
 networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}
 networking_loopback_address_list         GET      /v1/system/networking/loopback-address
@@ -270,6 +284,10 @@ local_idp_user_delete                    DELETE   /v1/system/identity-providers/
 local_idp_user_set_password              POST     /v1/system/identity-providers/local/users/{user_id}/set-password
 saml_identity_provider_create            POST     /v1/system/identity-providers/saml
 saml_identity_provider_view              GET      /v1/system/identity-providers/saml/{provider}
+scim_token_create                        POST     /v1/system/scim/tokens
+scim_token_delete                        DELETE   /v1/system/scim/tokens/{token_id}
+scim_token_list                          GET      /v1/system/scim/tokens
+scim_token_view                          GET      /v1/system/scim/tokens/{token_id}
 silo_create                              POST     /v1/system/silos
 silo_delete                              DELETE   /v1/system/silos/{silo}
 silo_identity_provider_list              GET      /v1/system/identity-providers
@@ -291,6 +309,18 @@ user_builtin_view                        GET      /v1/system/users-builtin/{user
 API operations found with tag "system/status"
 OPERATION ID                             METHOD   URL PATH
 ping                                     GET      /v1/ping
+
+API operations found with tag "system/update"
+OPERATION ID                             METHOD   URL PATH
+system_update_repository_list            GET      /v1/system/update/repositories
+system_update_repository_upload          PUT      /v1/system/update/repositories
+system_update_repository_view            GET      /v1/system/update/repositories/{system_version}
+system_update_status                     GET      /v1/system/update/status
+system_update_trust_root_create          POST     /v1/system/update/trust-roots
+system_update_trust_root_delete          DELETE   /v1/system/update/trust-roots/{trust_root_id}
+system_update_trust_root_list            GET      /v1/system/update/trust-roots
+system_update_trust_root_view            GET      /v1/system/update/trust-roots/{trust_root_id}
+target_release_update                    PUT      /v1/system/update/target-release
 
 API operations found with tag "tokens"
 OPERATION ID                             METHOD   URL PATH

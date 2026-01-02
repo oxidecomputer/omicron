@@ -1,11 +1,14 @@
 [package]
 name = "nexus-test-utils"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
 workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
@@ -15,46 +18,52 @@ camino-tempfile.workspace = true
 chrono.workspace = true
 crucible-agent-client.workspace = true
 dns-server.workspace = true
+dpd-client.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 headers.workspace = true
+hickory-resolver.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
-id-map.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-db-queries = { workspace = true, features = [ "testing" ] }
-nexus-sled-agent-shared.workspace = true
+nexus-lockstep-client.workspace = true
 nexus-test-interface.workspace = true
 nexus-types.workspace = true
+omicron-cockroach-admin.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 oximeter.workspace = true
 oximeter-collector.workspace = true
 oximeter-producer.workspace = true
 oxnet.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 pretty_assertions.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
 sled-agent-client.workspace = true
+sled-agent-types.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 tokio.workspace = true
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util.workspace = true
-hickory-resolver.workspace = true
 uuid.workspace = true
-omicron-workspace-hack.workspace = true
 
 [features]
 omicron-dev = ["omicron-test-utils/seed-gen"]

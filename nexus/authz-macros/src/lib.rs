@@ -263,8 +263,28 @@ enum PolarSnippet {
     InSilo,
 
     /// Generate it as a resource nested within a Project (either directly or
-    /// indirectly)
-    InProject,
+    /// indirectly). Grants modify/create permissions to `limited-collaborator`
+    /// and above.
+    ///
+    /// Use this for resources that users with limited permissions should be
+    /// able to manage: instances, disks, snapshots, images, floating IPs, etc.
+    /// These are "regular" project resources that don't involve reconfiguring
+    /// network infrastructure.
+    InProjectLimited,
+
+    /// Generate it as a resource nested within a Project.
+    /// Requires the full `collaborator` role (not `limited-collaborator`)
+    /// to modify or create these resources.
+    ///
+    /// Use this for networking infrastructure resources: VPCs, subnets,
+    /// routers, internet gateways, and their children. Users with the
+    /// `limited-collaborator` role can still *read* these resources (via
+    /// viewer inheritance) but cannot create or modify them.
+    ///
+    /// This distinction allows organizations to restrict who can reconfigure
+    /// the network while still allowing those users to work with compute
+    /// resources.
+    InProjectFull,
 }
 
 /// Implementation of [`authz_resource!`]
@@ -320,8 +340,8 @@ fn do_authz_resource(
     let polar_snippet = match (input.polar_snippet, input.parent.as_str()) {
         (PolarSnippet::Custom, _) => String::new(),
 
-        // The FleetChild case is similar to the InProject case, but we require
-        // a different role (and, of course, the parent is the Fleet)
+        // The FleetChild case is similar to the InProject* cases, but we require
+        // a different role (admin) and the parent is the Fleet instead of Project
         (PolarSnippet::FleetChild, _) => format!(
             r#"
                 resource {} {{
@@ -371,7 +391,72 @@ fn do_authz_resource(
 
         // If this resource is directly inside a Project, we only need to define
         // permissions that are contingent on having roles on that Project.
-        (PolarSnippet::InProject, "Project") => format!(
+        (PolarSnippet::InProjectLimited, "Project") => format!(
+            r#"
+                resource {} {{
+                    permissions = [
+                        "list_children",
+                        "modify",
+                        "read",
+                        "create_child",
+                    ];
+
+                    relations = {{ containing_project: Project }};
+                    "list_children" if "viewer" on "containing_project";
+                    "read" if "viewer" on "containing_project";
+                    "modify" if "limited-collaborator" on "containing_project";
+                    "create_child" if "limited-collaborator" on "containing_project";
+                }}
+
+                has_relation(parent: Project, "containing_project", child: {})
+                        if child.project = parent;
+            "#,
+            resource_name, resource_name,
+        ),
+
+        // If this resource is nested under something else within the Project,
+        // we need to define both the "parent" relationship and the (indirect)
+        // relationship to the containing Project.  Permissions are still
+        // contingent on having roles on the Project, but to get to the Project,
+        // we have to go through the parent resource.
+        (PolarSnippet::InProjectLimited, _) => format!(
+            r#"
+                resource {} {{
+                    permissions = [
+                        "list_children",
+                        "modify",
+                        "read",
+                        "create_child",
+                    ];
+
+                    relations = {{
+                        containing_project: Project,
+                        parent: {}
+                    }};
+                    "list_children" if "viewer" on "containing_project";
+                    "read" if "viewer" on "containing_project";
+                    "modify" if "limited-collaborator" on "containing_project";
+                    "create_child" if "limited-collaborator" on "containing_project";
+                }}
+
+                has_relation(project: Project, "containing_project", child: {})
+                    if has_relation(project, "containing_project", child.{});
+
+                has_relation(parent: {}, "parent", child: {})
+                    if child.{} = parent;
+            "#,
+            resource_name,
+            parent_resource_name,
+            resource_name,
+            parent_as_snake,
+            parent_resource_name,
+            resource_name,
+            parent_as_snake,
+        ),
+
+        // InProjectFull: Like InProjectLimited, but modifying these things
+        // requires "collaborator".
+        (PolarSnippet::InProjectFull, "Project") => format!(
             r#"
                 resource {} {{
                     permissions = [
@@ -393,13 +478,7 @@ fn do_authz_resource(
             "#,
             resource_name, resource_name,
         ),
-
-        // If this resource is nested under something else within the Project,
-        // we need to define both the "parent" relationship and the (indirect)
-        // relationship to the containing Project.  Permissions are still
-        // contingent on having roles on the Project, but to get to the Project,
-        // we have to go through the parent resource.
-        (PolarSnippet::InProject, _) => format!(
+        (PolarSnippet::InProjectFull, _) => format!(
             r#"
                 resource {} {{
                     permissions = [
@@ -413,6 +492,7 @@ fn do_authz_resource(
                         containing_project: Project,
                         parent: {}
                     }};
+
                     "list_children" if "viewer" on "containing_project";
                     "read" if "viewer" on "containing_project";
                     "modify" if "collaborator" on "containing_project";
@@ -578,7 +658,7 @@ mod tests {
             // this code is never compiled, just printed out.
             input_key = SomeCompositeId,
             roles_allowed = false,
-            polar_snippet = InProject,
+            polar_snippet = InProjectLimited,
         })
         .unwrap();
         assert_contents("outputs/instance.txt", &pretty_format(output));

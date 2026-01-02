@@ -217,18 +217,18 @@ impl FieldValue {
 impl fmt::Display for FieldValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            FieldValue::String(ref inner) => write!(f, "{}", inner),
-            FieldValue::I8(ref inner) => write!(f, "{}", inner),
-            FieldValue::U8(ref inner) => write!(f, "{}", inner),
-            FieldValue::I16(ref inner) => write!(f, "{}", inner),
-            FieldValue::U16(ref inner) => write!(f, "{}", inner),
-            FieldValue::I32(ref inner) => write!(f, "{}", inner),
-            FieldValue::U32(ref inner) => write!(f, "{}", inner),
-            FieldValue::I64(ref inner) => write!(f, "{}", inner),
-            FieldValue::U64(ref inner) => write!(f, "{}", inner),
-            FieldValue::IpAddr(ref inner) => write!(f, "{}", inner),
-            FieldValue::Uuid(ref inner) => write!(f, "{}", inner),
-            FieldValue::Bool(ref inner) => write!(f, "{}", inner),
+            FieldValue::String(inner) => write!(f, "{}", inner),
+            FieldValue::I8(inner) => write!(f, "{}", inner),
+            FieldValue::U8(inner) => write!(f, "{}", inner),
+            FieldValue::I16(inner) => write!(f, "{}", inner),
+            FieldValue::U16(inner) => write!(f, "{}", inner),
+            FieldValue::I32(inner) => write!(f, "{}", inner),
+            FieldValue::U32(inner) => write!(f, "{}", inner),
+            FieldValue::I64(inner) => write!(f, "{}", inner),
+            FieldValue::U64(inner) => write!(f, "{}", inner),
+            FieldValue::IpAddr(inner) => write!(f, "{}", inner),
+            FieldValue::Uuid(inner) => write!(f, "{}", inner),
+            FieldValue::Bool(inner) => write!(f, "{}", inner),
         }
     }
 }
@@ -456,7 +456,7 @@ impl Datum {
             Datum::HistogramU64(_) => DatumType::HistogramU64,
             Datum::HistogramF32(_) => DatumType::HistogramF32,
             Datum::HistogramF64(_) => DatumType::HistogramF64,
-            Datum::Missing(ref inner) => inner.datum_type(),
+            Datum::Missing(inner) => inner.datum_type(),
         }
     }
 
@@ -481,21 +481,21 @@ impl Datum {
             | Datum::F64(_)
             | Datum::String(_)
             | Datum::Bytes(_) => None,
-            Datum::CumulativeI64(ref inner) => Some(inner.start_time()),
-            Datum::CumulativeU64(ref inner) => Some(inner.start_time()),
-            Datum::CumulativeF32(ref inner) => Some(inner.start_time()),
-            Datum::CumulativeF64(ref inner) => Some(inner.start_time()),
-            Datum::HistogramI8(ref inner) => Some(inner.start_time()),
-            Datum::HistogramU8(ref inner) => Some(inner.start_time()),
-            Datum::HistogramI16(ref inner) => Some(inner.start_time()),
-            Datum::HistogramU16(ref inner) => Some(inner.start_time()),
-            Datum::HistogramI32(ref inner) => Some(inner.start_time()),
-            Datum::HistogramU32(ref inner) => Some(inner.start_time()),
-            Datum::HistogramI64(ref inner) => Some(inner.start_time()),
-            Datum::HistogramU64(ref inner) => Some(inner.start_time()),
-            Datum::HistogramF32(ref inner) => Some(inner.start_time()),
-            Datum::HistogramF64(ref inner) => Some(inner.start_time()),
-            Datum::Missing(ref inner) => inner.start_time(),
+            Datum::CumulativeI64(inner) => Some(inner.start_time()),
+            Datum::CumulativeU64(inner) => Some(inner.start_time()),
+            Datum::CumulativeF32(inner) => Some(inner.start_time()),
+            Datum::CumulativeF64(inner) => Some(inner.start_time()),
+            Datum::HistogramI8(inner) => Some(inner.start_time()),
+            Datum::HistogramU8(inner) => Some(inner.start_time()),
+            Datum::HistogramI16(inner) => Some(inner.start_time()),
+            Datum::HistogramU16(inner) => Some(inner.start_time()),
+            Datum::HistogramI32(inner) => Some(inner.start_time()),
+            Datum::HistogramU32(inner) => Some(inner.start_time()),
+            Datum::HistogramI64(inner) => Some(inner.start_time()),
+            Datum::HistogramU64(inner) => Some(inner.start_time()),
+            Datum::HistogramF32(inner) => Some(inner.start_time()),
+            Datum::HistogramF64(inner) => Some(inner.start_time()),
+            Datum::Missing(inner) => inner.start_time(),
         }
     }
 

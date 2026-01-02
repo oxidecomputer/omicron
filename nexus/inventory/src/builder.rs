@@ -8,34 +8,45 @@
 //! from sources like MGS) from assembling a representation of what was
 //! collected.
 
+use anyhow::Context;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use cockroach_admin_types::node::InternalNodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
-use gateway_client::types::SpType;
-use nexus_sled_agent_shared::inventory::Baseboard;
-use nexus_sled_agent_shared::inventory::Inventory;
-use nexus_types::inventory::BaseboardId;
+use iddqd::IdOrdMap;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::HostPhase1ActiveSlot;
+use nexus_types::inventory::HostPhase1FlashHash;
+use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::SpType;
+use nexus_types::inventory::TimeSync;
 use nexus_types::inventory::Zpool;
+use omicron_cockroach_metrics::CockroachMetric;
+use omicron_cockroach_metrics::PrometheusMetrics;
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
-use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::Baseboard;
+use sled_agent_types::inventory::Inventory;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::sync::Arc;
 use thiserror::Error;
+use tufaceous_artifact::ArtifactHash;
 use typed_rng::TypedUuidRng;
 
 /// Describes an operational error encountered during the collection process
@@ -106,14 +117,20 @@ pub struct CollectionBuilder {
     cabooses: BTreeSet<Arc<Caboose>>,
     rot_pages: BTreeSet<Arc<RotPage>>,
     sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    host_phase_1_active_slots: BTreeMap<Arc<BaseboardId>, HostPhase1ActiveSlot>,
+    host_phase_1_flash_hashes:
+        BTreeMap<M2Slot, BTreeMap<Arc<BaseboardId>, HostPhase1FlashHash>>,
     rots: BTreeMap<Arc<BaseboardId>, RotState>,
     cabooses_found:
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
-    sleds: BTreeMap<SledUuid, SledAgent>,
+    sleds: IdOrdMap<SledAgent>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
+    cockroach_status: BTreeMap<InternalNodeId, CockroachStatus>,
+    ntp_timesync: IdOrdMap<TimeSync>,
+    internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
     // mutable ref, to encourage a tree-like structure where each RNG is
     // generally independent.
@@ -138,11 +155,16 @@ impl CollectionBuilder {
             cabooses: BTreeSet::new(),
             rot_pages: BTreeSet::new(),
             sps: BTreeMap::new(),
+            host_phase_1_active_slots: BTreeMap::new(),
+            host_phase_1_flash_hashes: BTreeMap::new(),
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
             rot_pages_found: BTreeMap::new(),
-            sleds: BTreeMap::new(),
+            sleds: IdOrdMap::new(),
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
+            cockroach_status: BTreeMap::new(),
+            ntp_timesync: IdOrdMap::new(),
+            internal_dns_generation_status: IdOrdMap::new(),
             rng: CollectionBuilderRng::from_entropy(),
         }
     }
@@ -159,12 +181,17 @@ impl CollectionBuilder {
             cabooses: self.cabooses,
             rot_pages: self.rot_pages,
             sps: self.sps,
+            host_phase_1_active_slots: self.host_phase_1_active_slots,
+            host_phase_1_flash_hashes: self.host_phase_1_flash_hashes,
             rots: self.rots,
             cabooses_found: self.cabooses_found,
             rot_pages_found: self.rot_pages_found,
             sled_agents: self.sleds,
             clickhouse_keeper_cluster_membership: self
                 .clickhouse_keeper_cluster_membership,
+            cockroach_status: self.cockroach_status,
+            ntp_timesync: self.ntp_timesync,
+            internal_dns_generation_status: self.internal_dns_generation_status,
         }
     }
 
@@ -187,26 +214,9 @@ impl CollectionBuilder {
         &mut self,
         source: &str,
         sp_type: SpType,
-        slot: u32,
+        sp_slot: u16,
         sp_state: SpState,
     ) -> Option<Arc<BaseboardId>> {
-        // Much ado about very little: MGS reports that "slot" is a u32, though
-        // in practice this seems very unlikely to be bigger than a u8.  (How
-        // many slots can there be within one rack?)  The database only supports
-        // signed integers, so if we assumed this really could span the range of
-        // a u32, we'd need to store it in an i64.  Instead, assume here that we
-        // can stick it into a u16 (which still seems generous).  This will
-        // allow us to store it into an Int32 in the database.
-        let Ok(sp_slot) = u16::try_from(slot) else {
-            self.found_error(InventoryError::from(anyhow!(
-                "MGS {:?}: SP {:?} slot {}: slot number did not fit into u16",
-                source,
-                sp_type,
-                slot
-            )));
-            return None;
-        };
-
         // Normalize the baseboard id: i.e., if we've seen this baseboard
         // before, use the same baseboard id record.  Otherwise, make a new one.
         let baseboard = Self::normalize_item(
@@ -310,6 +320,130 @@ impl CollectionBuilder {
         }
 
         Some(baseboard)
+    }
+
+    /// Returns true if we already found the active host phase 1 flash slot for
+    /// baseboard `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_host_phase_1_active_slot_already(
+        &self,
+        baseboard: &BaseboardId,
+    ) -> bool {
+        self.host_phase_1_active_slots.contains_key(baseboard)
+    }
+
+    /// Record the given host phase 1 active slot found for the given baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    pub fn found_host_phase_1_active_slot(
+        &mut self,
+        baseboard: &BaseboardId,
+        source: &str,
+        slot: M2Slot,
+    ) -> Result<(), CollectorBug> {
+        let (baseboard, _) =
+            self.sps.get_key_value(baseboard).ok_or_else(|| {
+                anyhow!(
+                    "reporting host phase 1 active slot for unknown baseboard: \
+                    {baseboard:?} ({slot:?})",
+                )
+            })?;
+        if let Some(previous) = self.host_phase_1_active_slots.insert(
+            baseboard.clone(),
+            HostPhase1ActiveSlot {
+                time_collected: now_db_precision(),
+                source: source.to_owned(),
+                slot,
+            },
+        ) {
+            let error = if previous.slot == slot {
+                anyhow!("reported multiple times (same value)")
+            } else {
+                anyhow!(
+                    "reported host phase 1 flash hash \
+                     (previously {}, now {slot})",
+                    previous.slot,
+                )
+            };
+            Err(CollectorBug::from(
+                error.context(format!("baseboard {baseboard:?}")),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Returns true if we already found the host phase 1 flash hash for `slot`
+    /// for baseboard `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_host_phase_1_flash_hash_already(
+        &self,
+        baseboard: &BaseboardId,
+        slot: M2Slot,
+    ) -> bool {
+        self.host_phase_1_flash_hashes
+            .get(&slot)
+            .map(|map| map.contains_key(baseboard))
+            .unwrap_or(false)
+    }
+
+    /// Record the given host phase 1 flash hash found for the given baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    pub fn found_host_phase_1_flash_hash(
+        &mut self,
+        baseboard: &BaseboardId,
+        slot: M2Slot,
+        source: &str,
+        hash: ArtifactHash,
+    ) -> Result<(), CollectorBug> {
+        let (baseboard, _) =
+            self.sps.get_key_value(baseboard).ok_or_else(|| {
+                anyhow!(
+                    "reporting host phase 1 flash hash for unknown baseboard: \
+                    {baseboard:?} ({slot:?}: {hash})",
+                )
+            })?;
+        let by_id = self
+            .host_phase_1_flash_hashes
+            .entry(slot)
+            .or_insert_with(BTreeMap::new);
+        if let Some(previous) = by_id.insert(
+            baseboard.clone(),
+            HostPhase1FlashHash {
+                time_collected: now_db_precision(),
+                source: source.to_owned(),
+                slot,
+                hash,
+            },
+        ) {
+            let error = if previous.hash == hash {
+                anyhow!("reported multiple times (same value)")
+            } else {
+                anyhow!(
+                    "reported host phase 1 flash hash \
+                     (previously {}, now {hash})",
+                    previous.hash,
+                )
+            };
+            Err(CollectorBug::from(
+                error.context(format!("baseboard {baseboard:?} slot {slot:?}")),
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     /// Returns true if we already found the caboose for `which` for baseboard
@@ -493,7 +627,7 @@ impl CollectionBuilder {
 
         let baseboard_id = match inventory.baseboard {
             Baseboard::Pc { .. } => None,
-            Baseboard::Gimlet { identifier, model, revision: _ } => {
+            Baseboard::Gimlet { identifier, model, .. } => {
                 Some(Self::normalize_item(
                     &mut self.baseboards,
                     BaseboardId {
@@ -522,6 +656,7 @@ impl CollectionBuilder {
             baseboard_id,
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: inventory.usable_physical_ram,
+            cpu_family: inventory.cpu_family,
             reservoir_size: inventory.reservoir_size,
             time_collected,
             sled_id,
@@ -539,17 +674,16 @@ impl CollectionBuilder {
             ledgered_sled_config: inventory.ledgered_sled_config,
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
+            zone_image_resolver: inventory.zone_image_resolver,
+            health_monitor: inventory.health_monitor,
         };
 
-        if let Some(previous) = self.sleds.get(&sled_id) {
-            Err(anyhow!(
-                "sled {sled_id}: reported sled multiple times \
-                (previously {previous:?}, now {sled:?})",
-            ))
-        } else {
-            self.sleds.insert(sled_id, sled);
-            Ok(())
-        }
+        self.sleds
+            .insert_unique(sled)
+            .map_err(|error| error.into_owned())
+            .with_context(|| {
+                anyhow!("sled {sled_id}: reported sled multiple times")
+            })
     }
 
     /// Record information about Keeper cluster membership learned from the
@@ -559,6 +693,81 @@ impl CollectionBuilder {
         membership: ClickhouseKeeperClusterMembership,
     ) {
         self.clickhouse_keeper_cluster_membership.insert(membership);
+    }
+
+    /// Record information about timesync
+    pub fn found_ntp_timesync(
+        &mut self,
+        timesync: TimeSync,
+    ) -> Result<(), anyhow::Error> {
+        self.ntp_timesync
+            .insert_unique(timesync)
+            .map_err(|err| err.into_owned())
+            .context("NTP service reported time multiple times")
+    }
+
+    /// Record metrics from a CockroachDB node
+    pub fn found_cockroach_metrics(
+        &mut self,
+        node_id: InternalNodeId,
+        metrics: PrometheusMetrics,
+    ) {
+        let mut status = CockroachStatus::default();
+        status.ranges_underreplicated =
+            metrics.get_metric_unsigned(CockroachMetric::RangesUnderreplicated);
+        status.liveness_live_nodes =
+            metrics.get_metric_unsigned(CockroachMetric::LivenessLiveNodes);
+        self.cockroach_status.insert(node_id, status);
+    }
+
+    /// Record information about internal DNS generation status
+    pub fn found_internal_dns_generation_status(
+        &mut self,
+        status: InternalDnsGenerationStatus,
+    ) -> Result<(), anyhow::Error> {
+        self.internal_dns_generation_status
+            .insert_unique(status)
+            .map_err(|err| err.into_owned())
+            .context(
+                "Internal DNS server reported generation status multiple times",
+            )
+    }
+
+    /// Returns all zones of a kind from the ledgers of observed sleds
+    pub fn ledgered_zones_of_kind(
+        &self,
+        kind: sled_agent_types::inventory::ZoneKind,
+    ) -> impl Iterator<Item = &sled_agent_types::inventory::OmicronZoneConfig> + '_
+    {
+        self.sleds.iter().flat_map(move |sled| {
+            sled.ledgered_sled_config.as_ref().into_iter().flat_map(
+                move |sled_config| {
+                    sled_config.zones.iter().filter(move |zone_config| {
+                        zone_config.zone_type.kind() == kind
+                    })
+                },
+            )
+        })
+    }
+
+    /// Returns zones from the last reconciled ledger of observed sleds
+    ///
+    /// Does not actually consider whether or not the zone was successfully
+    /// created by the sled reconciliation process
+    pub fn last_reconciled_zones_of_kind(
+        &self,
+        kind: sled_agent_types::inventory::ZoneKind,
+    ) -> impl Iterator<Item = &sled_agent_types::inventory::OmicronZoneConfig> + '_
+    {
+        self.sleds.iter().flat_map(move |sled| {
+            sled.last_reconciliation.as_ref().into_iter().flat_map(
+                move |sled_config| {
+                    sled_config.last_reconciled_config.zones.iter().filter(
+                        move |zone_config| zone_config.zone_type.kind() == kind,
+                    )
+                },
+            )
+        })
     }
 }
 
@@ -581,22 +790,21 @@ mod test {
     use super::now_db_precision;
     use crate::examples::Representative;
     use crate::examples::representative;
-    use crate::examples::sp_state;
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use gateway_client::types::PowerState;
     use gateway_client::types::RotState;
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
-    use gateway_client::types::SpType;
     use gateway_types::rot::RotSlot;
-    use nexus_sled_agent_shared::inventory::SledRole;
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;
     use nexus_types::inventory::RotPageWhich;
+    use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
+    use sled_agent_types::inventory::SledRole;
+    use sled_hardware_types::BaseboardId;
 
     // Verify the contents of an empty collection.
     #[test]
@@ -619,6 +827,9 @@ mod test {
         assert!(collection.cabooses_found.is_empty());
         assert!(collection.rot_pages_found.is_empty());
         assert!(collection.clickhouse_keeper_cluster_membership.is_empty());
+        assert!(collection.cockroach_status.is_empty());
+        assert!(collection.ntp_timesync.is_empty());
+        assert!(collection.internal_dns_generation_status.is_empty());
     }
 
     // Simple test of a single, fairly typical collection that contains just
@@ -956,9 +1167,8 @@ mod test {
 
         // Verify that we found the sled agents.
         assert_eq!(collection.sled_agents.len(), 4);
-        for (sled_id, sled_agent) in &collection.sled_agents {
-            assert_eq!(*sled_id, sled_agent.sled_id);
-            if *sled_id == sled_agent_id_extra {
+        for sled_agent in &collection.sled_agents {
+            if sled_agent.sled_id == sled_agent_id_extra {
                 assert_eq!(sled_agent.sled_role, SledRole::Scrimlet);
             } else {
                 assert_eq!(sled_agent.sled_role, SledRole::Gimlet);
@@ -976,7 +1186,8 @@ mod test {
             assert_eq!(sled_agent.reservoir_size, ByteCount::from(1024));
         }
 
-        let sled1_agent = &collection.sled_agents[&sled_agent_id_basic];
+        let sled1_agent =
+            collection.sled_agents.get(&sled_agent_id_basic).unwrap();
         let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled1_bb.part_number, "model1");
         assert_eq!(sled1_bb.serial_number, "s1");
@@ -985,14 +1196,23 @@ mod test {
         assert_eq!(sled1_agent.disks[0].identity.model, "box");
         assert_eq!(sled1_agent.disks[0].identity.serial, "XXIV");
 
-        let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
+        let sled4_agent =
+            collection.sled_agents.get(&sled_agent_id_extra).unwrap();
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");
         assert!(
-            collection.sled_agents[&sled_agent_id_pc].baseboard_id.is_none()
+            collection
+                .sled_agents
+                .get(&sled_agent_id_pc)
+                .unwrap()
+                .baseboard_id
+                .is_none()
         );
         assert!(
-            collection.sled_agents[&sled_agent_id_unknown]
+            collection
+                .sled_agents
+                .get(&sled_agent_id_unknown)
+                .unwrap()
                 .baseboard_id
                 .is_none()
         );
@@ -1080,15 +1300,6 @@ mod test {
             )
             .unwrap();
         assert_eq!(sled1_bb, sled1_bb_dup);
-
-        // report an SP with an impossible slot number
-        let sled2_sp = builder.found_sp_state(
-            "fake MGS 1",
-            SpType::Sled,
-            u32::from(u16::MAX) + 1,
-            sp_state("1"),
-        );
-        assert_eq!(sled2_sp, None);
 
         // report SP caboose for an unknown baseboard
         let bogus_baseboard = BaseboardId {
@@ -1301,17 +1512,7 @@ mod test {
                 .is_none()
         );
 
-        // We should see an error.
-        assert_eq!(
-            collection
-                .errors
-                .iter()
-                .map(|e| format!("{:#}", e))
-                .collect::<Vec<_>>(),
-            vec![
-                "MGS \"fake MGS 1\": SP Sled slot 65536: \
-                slot number did not fit into u16"
-            ]
-        );
+        // We should see no errors.
+        assert!(collection.errors.is_empty());
     }
 }

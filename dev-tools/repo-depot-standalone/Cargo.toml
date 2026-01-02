@@ -1,7 +1,7 @@
 [package]
 name = "omicron-repo-depot-standalone"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -15,15 +15,19 @@ camino.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+libc.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+oxide-tokio-rt.workspace = true
 repo-depot-api.workspace = true
 serde_json.workspace = true
+signal-hook-tokio.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
-tough.workspace = true
+tokio-util.workspace = true
 tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
-omicron-workspace-hack.workspace = true
+update-common.workspace = true
 
 [[bin]]
 name = "repo-depot-standalone"

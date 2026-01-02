@@ -1,7 +1,7 @@
 [package]
 name = "omicron-gateway"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -20,12 +20,15 @@ gateway-api.workspace = true
 gateway-messages.workspace = true
 gateway-sp-comms.workspace = true
 gateway-types.workspace = true
+gateway-types-versions.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 ipcc.workspace = true
 omicron-common.workspace = true
+oxide-tokio-rt.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -50,6 +53,7 @@ zip.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+gateway-client.workspace = true
 gateway-test-utils.workspace = true
 omicron-test-utils.workspace = true
 serde_json.workspace = true

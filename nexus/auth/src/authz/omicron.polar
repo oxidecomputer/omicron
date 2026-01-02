@@ -63,13 +63,15 @@ has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 # - fleet.collaborator    (can manage Silos)
 # - fleet.viewer          (can read most non-siloed resources in the system)
 # - silo.admin            (superuser for the silo)
-# - silo.collaborator     (can create and own Organizations)
-# - silo.viewer           (can read most resources within the Silo)
+# - silo.collaborator     (can create and own Organizations; grants project.admin on all projects)
+# - silo.limited-collaborator (grants project.limited-collaborator on all projects)
+# - silo.viewer           (can read most resources within the Silo; grants project.viewer)
 # - organization.admin    (complete control over an organization)
 # - organization.collaborator (can manage Projects)
 # - organization.viewer   (can read most resources within the Organization)
 # - project.admin         (complete control over a Project)
-# - project.collaborator  (can manage all resources within the Project)
+# - project.collaborator  (can manage all resources within the Project, including networking)
+# - project.limited-collaborator (can manage compute resources, but not networking resources)
 # - project.viewer        (can read most resources within the Project)
 #
 # Outside the Silo/Organization/Project hierarchy, we (currently) treat most
@@ -112,6 +114,8 @@ resource Fleet {
 }
 
 # For fleets specifically, roles can be conferred by roles on the user's Silo.
+# Note that certain Actors may not ever have any roles assigned to them, like
+# SCIM Actors.
 has_role(actor: AuthenticatedActor, role: String, _: Fleet) if
 	silo_role in actor.confers_fleet_role(role) and
 	has_role(actor, silo_role, actor.silo.unwrap());
@@ -123,10 +127,11 @@ resource Silo {
 	    "read",
 	    "create_child",
 	];
-	roles = [ "admin", "collaborator", "viewer" ];
+	roles = [ "admin", "collaborator", "limited-collaborator", "viewer" ];
 
 	# Roles implied by other roles on this resource
-	"viewer" if "collaborator";
+	"viewer" if "limited-collaborator";
+	"limited-collaborator" if "collaborator";
 	"collaborator" if "admin";
 
 	# Permissions granted directly by roles on this resource
@@ -173,7 +178,7 @@ has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 #
 # It's unclear what else would break if users couldn't see their own Silo.
 has_permission(actor: AuthenticatedActor, "read", silo: Silo)
-	if silo in actor.silo;
+	if actor.is_user and silo in actor.silo;
 
 resource Project {
 	permissions = [
@@ -182,21 +187,29 @@ resource Project {
 	    "read",
 	    "create_child",
 	];
-	roles = [ "admin", "collaborator", "viewer" ];
+	roles = [ "admin", "collaborator", "limited-collaborator", "viewer" ];
 
 	# Roles implied by other roles on this resource
-	"viewer" if "collaborator";
+	# Role hierarchy: admin > collaborator > limited-collaborator > viewer
+	#
+	# The "limited-collaborator" role can create/modify non-networking
+	# resources (instances, disks, etc.) but cannot create/modify networking
+	# infrastructure (VPCs, subnets, routers, internet gateways).
+	# See nexus/authz-macros for InProjectLimited vs InProjectFull.
+	"viewer" if "limited-collaborator";
+	"limited-collaborator" if "collaborator";
 	"collaborator" if "admin";
 
 	# Permissions granted directly by roles on this resource
 	"list_children" if "viewer";
 	"read" if "viewer";
-	"create_child" if "collaborator";
+	"create_child" if "limited-collaborator";
 	"modify" if "admin";
 
 	# Roles implied by roles on this resource's parent (Silo)
 	relations = { parent_silo: Silo };
 	"admin" if "collaborator" on "parent_silo";
+	"limited-collaborator" if "limited-collaborator" on "parent_silo";
 	"viewer" if "viewer" on "parent_silo";
 }
 has_relation(silo: Silo, "parent_silo", project: Project)
@@ -255,7 +268,7 @@ has_permission(actor: AuthenticatedActor, _perm: String, silo_user: SiloUser)
     if actor.equals_silo_user(silo_user);
 
 has_permission(actor: AuthenticatedActor, "read", silo_user: SiloUser)
-    if silo_user.silo in actor.silo;
+    if actor.is_user and silo_user.silo in actor.silo;
 
 resource SiloGroup {
 	permissions = [
@@ -279,8 +292,11 @@ resource SshKey {
 	relations = { silo_user: SiloUser };
 
 	"read" if "read" on "silo_user";
-	"modify" if "modify" on "silo_user";
 }
+# We want to allow the user to modify the ssh key but disallow a SCIM IdP token
+# from doing the same.
+has_permission(actor: AuthenticatedActor, "modify", ssh_key: SshKey)
+	if actor.is_user and has_permission(actor, "modify", ssh_key.silo_user);
 has_relation(user: SiloUser, "silo_user", ssh_key: SshKey)
 	if ssh_key.silo_user = user;
 
@@ -336,6 +352,27 @@ has_relation(silo: Silo, "parent_silo", saml_identity_provider: SamlIdentityProv
 has_relation(fleet: Fleet, "parent_fleet", collection: SamlIdentityProvider)
 	if collection.silo.fleet = fleet;
 
+resource ScimClientBearerToken {
+	permissions = [ "read", "modify" ];
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+    # necessary to authenticate SCIM actors
+	"read" if "external-authenticator" on "parent_fleet";
+
+	# Silo-level roles grant privileges for SCIM client tokens.
+	"read" if "admin" on "parent_silo";
+	"modify" if "admin" on "parent_silo";
+
+	# Fleet-level roles also grant privileges for SCIM client tokens.
+	"read" if "admin" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", scim_client_bearer_token: ScimClientBearerToken)
+	if scim_client_bearer_token.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", collection: ScimClientBearerToken)
+	if collection.silo.fleet = fleet;
+
+
 #
 # SYNTHETIC RESOURCES OUTSIDE THE SILO HIERARCHY
 #
@@ -346,6 +383,20 @@ has_relation(fleet: Fleet, "parent_fleet", collection: SamlIdentityProvider)
 # either statically-defined in this file or driven by role assignments on the
 # Fleet.  None of these resources defines their own roles.
 #
+
+# Describes the quiesce state of a particular Nexus instance.
+#
+# These authz checks must not require the database.  We grant this directly to
+# callers of the internal API.
+resource QuiesceState {
+	permissions = [ "read", "modify" ];
+}
+has_permission(USER_INTERNAL_API: AuthenticatedActor, "read", _q: QuiesceState);
+has_permission(
+    USER_INTERNAL_API: AuthenticatedActor,
+    "modify",
+    _q: QuiesceState
+);
 
 # Describes the policy for reading and modifying DNS configuration
 # (both internal and external)
@@ -382,6 +433,16 @@ resource BlueprintConfig {
 }
 has_relation(fleet: Fleet, "parent_fleet", list: BlueprintConfig)
 	if list.fleet = fleet;
+
+# Describes the policy for accessing "/v1/system/update/trust-roots" in the API
+resource UpdateTrustRootList {
+	permissions = [ "list_children", "create_child" ];
+	relations = { parent_fleet: Fleet };
+	"list_children" if "viewer" on "parent_fleet";
+	"create_child" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", collection: UpdateTrustRootList)
+	if collection.fleet = fleet;
 
 # Describes the policy for accessing blueprints
 resource TargetReleaseConfig {
@@ -429,7 +490,73 @@ has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
 # Any authenticated user can create a child of a provided IP Pool.
 # This is necessary to use the pools when provisioning instances.
 has_permission(actor: AuthenticatedActor, "create_child", ip_pool: IpPool)
-	if silo in actor.silo and silo.fleet = ip_pool.fleet;
+	if actor.is_user and silo in actor.silo and silo.fleet = ip_pool.fleet;
+
+# Describes the policy for accessing "/v1/multicast-groups" in the API
+resource MulticastGroupList {
+	permissions = [
+	    "list_children",
+	    "create_child",
+	];
+
+	relations = { parent_fleet: Fleet };
+	# Fleet Administrators can create multicast groups
+	"create_child" if "admin" on "parent_fleet";
+
+	# Fleet Viewers can list multicast groups
+	"list_children" if "viewer" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", multicast_group_list: MulticastGroupList)
+	if multicast_group_list.fleet = fleet;
+
+# Any authenticated user can create multicast groups in their fleet.
+# This is necessary to allow silo users to create multicast groups for
+# cross-project and cross-silo communication without requiring Fleet::Admin.
+has_permission(actor: AuthenticatedActor, "create_child", multicast_group_list: MulticastGroupList)
+	if silo in actor.silo and silo.fleet = multicast_group_list.fleet;
+
+# Any authenticated user can list multicast groups in their fleet.
+# This is necessary because multicast groups are fleet-scoped resources that
+# silo users need to discover and attach their instances to, without requiring
+# Fleet::Viewer role.
+has_permission(actor: AuthenticatedActor, "list_children", multicast_group_list: MulticastGroupList)
+	if silo in actor.silo and silo.fleet = multicast_group_list.fleet;
+
+# Any authenticated user can read and modify individual multicast groups in their fleet.
+# Users can create, modify, and consume (attach instances to) multicast groups.
+# This enables cross-project and cross-silo multicast while maintaining
+# appropriate security boundaries via API authorization and underlay group
+# membership validation.
+has_permission(actor: AuthenticatedActor, "read", multicast_group: MulticastGroup)
+	if silo in actor.silo and silo.fleet = multicast_group.fleet;
+
+has_permission(actor: AuthenticatedActor, "modify", multicast_group: MulticastGroup)
+	if silo in actor.silo and silo.fleet = multicast_group.fleet;
+
+# Describes the policy for reading and writing the audit log
+resource AuditLog {
+	permissions = [
+	    "list_children", # retrieve audit log
+	    "create_child",  # create audit log entry
+	];
+
+	relations = { parent_fleet: Fleet };
+
+	# Fleet viewers can read the audit log
+	"list_children" if "viewer" on "parent_fleet";
+}
+
+# Any actor should be able to write to the audit log because we need to be able
+# to write to the log from any request, authenticated or not. Audit log writes
+# are always a byproduct of other operations: there are no endpoints that allow
+# the user to write to the log deliberately. Note we use AuthenticatedActor
+# because we don't really mean unauthenticated -- in the case of login
+# operations, we use the external authenticator actor that creates the session
+# to authorize the audit log write.
+has_permission(_actor: AuthenticatedActor, "create_child", _audit_log: AuditLog);
+
+has_relation(fleet: Fleet, "parent_fleet", audit_log: AuditLog)
+	if audit_log.fleet = fleet;
 
 # Describes the policy for creating and managing web console sessions.
 resource ConsoleSessionList {
@@ -439,6 +566,46 @@ resource ConsoleSessionList {
 }
 has_relation(fleet: Fleet, "parent_fleet", collection: ConsoleSessionList)
 	if collection.fleet = fleet;
+
+# Allow silo admins to delete and list user sessions
+resource SiloUserSessionList {
+    permissions = [ "modify", "list_children" ];
+    relations = { parent_silo: Silo };
+
+    # A silo admin can modify (e.g., delete) a user's sessions.
+    "modify" if "admin" on "parent_silo";
+
+    # A silo admin can list a user's sessions.
+    "list_children" if "admin" on "parent_silo";
+}
+has_relation(silo: Silo, "parent_silo", authn_list: SiloUserSessionList)
+    if authn_list.silo_user.silo = silo;
+
+# give users 'modify' and 'list_children' on their own sessions
+has_permission(actor: AuthenticatedActor, "modify", authn_list: SiloUserSessionList)
+    if actor.equals_silo_user(authn_list.silo_user);
+has_permission(actor: AuthenticatedActor, "list_children", authn_list: SiloUserSessionList)
+    if actor.equals_silo_user(authn_list.silo_user);
+
+# Allow silo admins to delete and list user access tokens
+resource SiloUserTokenList {
+    permissions = [ "modify", "list_children" ];
+    relations = { parent_silo: Silo };
+
+    # A silo admin can modify (e.g., delete) a user's tokens.
+    "modify" if "admin" on "parent_silo";
+
+    # A silo admin can list a user's tokens.
+    "list_children" if "admin" on "parent_silo";
+}
+has_relation(silo: Silo, "parent_silo", authn_list: SiloUserTokenList)
+    if authn_list.silo_user.silo = silo;
+
+# give users 'modify' and 'list_children' on their own tokens
+has_permission(actor: AuthenticatedActor, "modify", authn_list: SiloUserTokenList)
+    if actor.equals_silo_user(authn_list.silo_user);
+has_permission(actor: AuthenticatedActor, "list_children", authn_list: SiloUserTokenList)
+    if actor.equals_silo_user(authn_list.silo_user);
 
 # Describes the policy for creating and managing device authorization requests.
 resource DeviceAuthRequestList {
@@ -518,6 +685,52 @@ has_relation(silo: Silo, "parent_silo", collection: SiloUserList)
 has_relation(fleet: Fleet, "parent_fleet", collection: SiloUserList)
 	if collection.silo.fleet = fleet;
 
+# Grant SCIM IdP actors the permissions they need on users.
+has_permission(actor: AuthenticatedActor, "read", silo_user: SiloUser)
+    if actor.is_scim_idp and silo_user.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "create_child", silo_user_list: SiloUserList)
+	if actor.is_scim_idp and silo_user_list.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "modify", silo_user: SiloUser)
+	if actor.is_scim_idp and silo_user.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "list_children", silo_user_list: SiloUserList)
+    if actor.is_scim_idp and silo_user_list.silo in actor.silo;
+
+# Describes the policy for creating and managing Silo groups (mostly intended
+# for API-managed groups)
+resource SiloGroupList {
+	permissions = [ "list_children", "create_child" ];
+
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+	# Everyone who can read the Silo (which includes all the groups in the
+	# Silo) can see the groups in it.
+	"list_children" if "read" on "parent_silo";
+
+	# Fleet and Silo administrators can manage the Silo's groups.  This is
+	# one of the only areas of Silo configuration that Fleet Administrators
+	# have permissions on.  This is also one of the few cases (so far) where
+	# we need to look two levels up the hierarchy to see if somebody has the
+	# right permission.  For most other things, permissions cascade down the
+	# hierarchy so we only need to look at the parent.
+	"create_child" if "admin" on "parent_silo";
+	"list_children" if "admin" on "parent_fleet";
+	"create_child" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", collection: SiloGroupList)
+	if collection.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", collection: SiloGroupList)
+	if collection.silo.fleet = fleet;
+
+# Grant SCIM IdP actors the permissions they need on groups.
+has_permission(actor: AuthenticatedActor, "read", silo_group: SiloGroup)
+    if actor.is_scim_idp and silo_group.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "create_child", silo_group_list: SiloGroupList)
+	if actor.is_scim_idp and silo_group_list.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "modify", silo_group: SiloGroup)
+	if actor.is_scim_idp and silo_group.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "list_children", silo_group_list: SiloGroupList)
+    if actor.is_scim_idp and silo_group_list.silo in actor.silo;
+
 # These rules grants the external authenticator role the permissions it needs to
 # read silo users and modify their sessions.  This is necessary for login to
 # work.
@@ -542,8 +755,10 @@ has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
 # even Silo) the device auth is associated with.  Any user can claim a device
 # auth request with the right user code (that's how it works) -- it's the user
 # code and associated logic that prevents unauthorized access here.
-has_permission(_actor: AuthenticatedActor, "read", _device_auth: DeviceAuthRequest);
-has_permission(_actor: AuthenticatedActor, "modify", _device_auth: DeviceAuthRequest);
+has_permission(actor: AuthenticatedActor, "read", _device_auth: DeviceAuthRequest)
+    if actor.is_user;
+has_permission(actor: AuthenticatedActor, "modify", _device_auth: DeviceAuthRequest)
+    if actor.is_user;
 
 has_permission(actor: AuthenticatedActor, "read", device_token: DeviceAccessToken)
 	if has_role(actor, "external-authenticator", device_token.fleet);
@@ -614,3 +829,40 @@ resource AlertClassList {
 
 has_relation(fleet: Fleet, "parent_fleet", collection: AlertClassList)
 	if collection.fleet = fleet;
+
+resource ScimClientBearerTokenList {
+	permissions = [ "create_child", "list_children" ];
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+	# Silo-level roles grant privileges for SCIM client tokens.
+    # These are all admin because being able to create these tokens would allow
+    # a user to grant themselves admin by modifying group membership through SCIM calls
+	"create_child" if "admin" on "parent_silo";
+	"list_children" if "admin" on "parent_silo";
+
+    # Fleet-level roles also grant privileges for SCIM client tokens, for
+    # configuration before silo admins are present.
+	"create_child" if "admin" on "parent_fleet";
+	"list_children" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", scim_client_bearer_token_list: ScimClientBearerTokenList)
+	if scim_client_bearer_token_list.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", collection: ScimClientBearerTokenList)
+	if collection.silo.fleet = fleet;
+
+# VpcList is a synthetic resource for controlling VPC creation.
+# Unlike other project resources, VPC creation requires the full "collaborator"
+# role rather than "limited-collaborator", enforcing the networking restriction.
+# This allows organizations to restrict who can reconfigure the network topology
+# while still allowing users with limited-collaborator to work with compute
+# resources (instances, disks, etc.) within the existing network.
+resource VpcList {
+	permissions = [ "list_children", "create_child" ];
+
+	relations = { containing_project: Project };
+
+	"list_children" if "read" on "containing_project";
+	"create_child" if "collaborator" on "containing_project";
+}
+has_relation(project: Project, "containing_project", collection: VpcList)
+	if collection.project = project;

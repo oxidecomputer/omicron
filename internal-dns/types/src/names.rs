@@ -5,6 +5,7 @@
 //! Well-known DNS names and related types for internal DNS (see RFD 248)
 
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
+use strum::{EnumIter, IntoEnumIterator};
 
 /// Name for the special boundary NTP DNS name
 ///
@@ -32,7 +33,9 @@ pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
 pub const ZONE_APEX_NAME: &str = "@";
 
 /// Names of services within the control plane
-#[derive(Clone, Copy, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Hash, Eq, Ord, PartialEq, PartialOrd, EnumIter,
+)]
 pub enum ServiceName {
     /// The HTTP interface to a single-node ClickHouse server.
     Clickhouse,
@@ -58,6 +61,7 @@ pub enum ServiceName {
     InternalDns,
     ExternalDns,
     Nexus,
+    NexusLockstep,
     Oximeter,
     /// Determines whether to read from a replicated cluster or single-node
     /// ClickHouse installation.
@@ -77,6 +81,16 @@ pub enum ServiceName {
 }
 
 impl ServiceName {
+    /// Returns an iterator over all service name variants.
+    ///
+    /// Service names with associated data, such as [`Self::SledAgent`] and
+    /// [`Self::Crucible`], will have default values associated with them. When
+    /// iterating over these service names, ensure that you provide the expected
+    /// values associated with them.
+    pub fn iter() -> impl Iterator<Item = Self> {
+        <Self as IntoEnumIterator>::iter()
+    }
+
     fn service_kind(&self) -> &'static str {
         match self {
             ServiceName::Clickhouse => "clickhouse",
@@ -93,6 +107,7 @@ impl ServiceName {
             ServiceName::ExternalDns => "external-dns",
             ServiceName::InternalDns => "nameservice",
             ServiceName::Nexus => "nexus",
+            ServiceName::NexusLockstep => "nexus-lockstep",
             ServiceName::Oximeter => "oximeter",
             ServiceName::OximeterReader => "oximeter-reader",
             ServiceName::ManagementGatewayService => "mgs",
@@ -126,6 +141,7 @@ impl ServiceName {
             | ServiceName::InternalDns
             | ServiceName::ExternalDns
             | ServiceName::Nexus
+            | ServiceName::NexusLockstep
             | ServiceName::Oximeter
             | ServiceName::OximeterReader
             | ServiceName::ManagementGatewayService

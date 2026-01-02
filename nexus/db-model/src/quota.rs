@@ -80,9 +80,9 @@ impl From<SiloQuotas> for views::SiloQuotas {
 pub struct SiloQuotasUpdate {
     pub cpus: Option<i64>,
     #[diesel(column_name = memory_bytes)]
-    pub memory: Option<i64>,
+    pub memory: Option<ByteCount>,
     #[diesel(column_name = storage_bytes)]
-    pub storage: Option<i64>,
+    pub storage: Option<ByteCount>,
     pub time_modified: DateTime<Utc>,
 }
 

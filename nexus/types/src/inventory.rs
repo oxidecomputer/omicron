@@ -10,40 +10,54 @@
 //! convenient to separate these concerns.)
 
 use crate::external_api::params::PhysicalDiskKind;
-use crate::external_api::params::UninitializedSledId;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
-pub use gateway_client::types::SpType;
+pub use gateway_types::component::SpType;
 pub use gateway_types::rot::RotSlot;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::InventoryDataset;
-use nexus_sled_agent_shared::inventory::InventoryDisk;
-use nexus_sled_agent_shared::inventory::InventoryZpool;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::SledRole;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
-pub use omicron_common::api::internal::shared::SourceNatConfig;
+pub use omicron_common::api::internal::shared::SourceNatConfigGeneric;
+use omicron_common::disk::M2Slot;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
+use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types_versions::latest::inventory::HealthMonitorInventory;
+use sled_agent_types_versions::latest::inventory::InventoryDataset;
+use sled_agent_types_versions::latest::inventory::InventoryDisk;
+use sled_agent_types_versions::latest::inventory::InventoryZpool;
+use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
+use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
+use sled_agent_types_versions::latest::inventory::SledCpuFamily;
+use sled_agent_types_versions::latest::inventory::SledRole;
+use sled_agent_types_versions::latest::inventory::ZoneImageResolverInventory;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use tufaceous_artifact::ArtifactHash;
+
+mod display;
+
+pub use display::*;
 
 /// Results of collecting hardware/software inventory from various Omicron
 /// components
@@ -94,6 +108,21 @@ pub struct Collection {
     /// table.
     #[serde_as(as = "Vec<(_, _)>")]
     pub sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    /// all host phase 1 active slots, keyed by baseboard id
+    ///
+    /// In practice, these will be inserted into the
+    /// `inv_host_phase_1_active_slot` table.
+    #[serde_as(as = "Vec<(_, _)>")]
+    pub host_phase_1_active_slots:
+        BTreeMap<Arc<BaseboardId>, HostPhase1ActiveSlot>,
+    /// all host phase 1 flash hashes, keyed first by the phase 1 slot, then the
+    /// baseboard id of the sled where they were found
+    ///
+    /// In practice, these will be inserted into the
+    /// `inv_host_phase_1_flash_hash` table.
+    #[serde_as(as = "BTreeMap<_, Vec<(_, _)>>")]
+    pub host_phase_1_flash_hashes:
+        BTreeMap<M2Slot, BTreeMap<Arc<BaseboardId>, HostPhase1FlashHash>>,
     /// all roots of trust, keyed by baseboard id
     ///
     /// In practice, these will be inserted into the `inv_root_of_trust` table.
@@ -118,7 +147,7 @@ pub struct Collection {
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 
     /// Sled Agent information, by *sled* id
-    pub sled_agents: BTreeMap<SledUuid, SledAgent>,
+    pub sled_agents: IdOrdMap<SledAgent>,
 
     /// The raft configuration (cluster membership) of the clickhouse keeper
     /// cluster as returned from each available keeper via `clickhouse-admin` in
@@ -144,9 +173,35 @@ pub struct Collection {
     /// mappings and guarantee unique pairs.
     pub clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
+
+    /// The status of our cockroachdb cluster, keyed by node identifier
+    pub cockroach_status:
+        BTreeMap<cockroach_admin_types::node::InternalNodeId, CockroachStatus>,
+
+    /// The status of time synchronization
+    pub ntp_timesync: IdOrdMap<TimeSync>,
+    /// The generation status of internal DNS servers
+    pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
 }
 
 impl Collection {
+    pub fn host_phase_1_active_slot_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&HostPhase1ActiveSlot> {
+        self.host_phase_1_active_slots.get(baseboard_id)
+    }
+
+    pub fn host_phase_1_flash_hash_for(
+        &self,
+        slot: M2Slot,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&HostPhase1FlashHash> {
+        self.host_phase_1_flash_hashes
+            .get(&slot)
+            .and_then(|by_bb| by_bb.get(baseboard_id))
+    }
+
     pub fn caboose_for(
         &self,
         which: CabooseWhich,
@@ -155,6 +210,13 @@ impl Collection {
         self.cabooses_found
             .get(&which)
             .and_then(|by_bb| by_bb.get(baseboard_id))
+    }
+
+    pub fn rot_state_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&RotState> {
+        self.rots.get(baseboard_id)
     }
 
     pub fn rot_page_for(
@@ -173,7 +235,7 @@ impl Collection {
         &self,
     ) -> impl Iterator<Item = &OmicronZoneConfig> {
         self.sled_agents
-            .values()
+            .iter()
             .filter_map(|sa| sa.ledgered_sled_config.as_ref())
             .flat_map(|config| config.zones.iter())
     }
@@ -184,17 +246,30 @@ impl Collection {
         &self,
     ) -> impl Iterator<Item = &OmicronZoneConfig> {
         self.sled_agents
-            .values()
+            .iter()
             .filter_map(|sa| sa.last_reconciliation.as_ref())
             .flat_map(|reconciliation| reconciliation.running_omicron_zones())
     }
 
-    /// Iterate over the sled ids of sleds identified as Scrimlets
-    pub fn scrimlets(&self) -> impl Iterator<Item = SledUuid> + '_ {
+    /// Iterate over all the Omicron zones along with their statuses (as
+    /// reported by each sled-agent's last reconciliation attempt)
+    pub fn all_reconciled_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = (&OmicronZoneConfig, &ConfigReconcilerInventoryResult)>
+    {
         self.sled_agents
             .iter()
-            .filter(|(_, inventory)| inventory.sled_role == SledRole::Scrimlet)
-            .map(|(sled_id, _)| *sled_id)
+            .filter_map(|sa| sa.last_reconciliation.as_ref())
+            .flat_map(|reconciliation| {
+                reconciliation.reconciled_omicron_zones()
+            })
+    }
+
+    /// Iterate over the sled ids of sleds identified as Scrimlets
+    pub fn scrimlets(&self) -> impl Iterator<Item = SledUuid> + '_ {
+        self.sled_agents.iter().filter_map(|sa| {
+            (sa.sled_role == SledRole::Scrimlet).then_some(sa.sled_id)
+        })
     }
 
     /// Return the latest clickhouse keeper configuration in this collection, if
@@ -205,62 +280,16 @@ impl Collection {
         self.clickhouse_keeper_cluster_membership
             .iter()
             .max_by_key(|membership| membership.leader_committed_log_index)
-            .map(|membership| (membership.clone()))
+            .map(|membership| membership.clone())
     }
-}
 
-/// A unique baseboard id found during a collection
-///
-/// Baseboard ids are the keys used to link up information from disparate
-/// sources (like a service processor and a sled agent).
-///
-/// These are normalized in the database.  Each distinct baseboard id is
-/// assigned a uuid and shared across the many possible collections that
-/// reference it.
-///
-/// Usually, the part number and serial number are combined with a revision
-/// number.  We do not include that here.  If we ever did find a baseboard with
-/// the same part number and serial number but a new revision number, we'd want
-/// to treat that as the same baseboard as one with a different revision number.
-#[derive(
-    Clone,
-    Debug,
-    Diffable,
-    Ord,
-    Eq,
-    PartialOrd,
-    PartialEq,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-pub struct BaseboardId {
-    /// Oxide Part Number
-    pub part_number: String,
-    /// Serial number (unique for a given part number)
-    pub serial_number: String,
-}
-
-impl From<crate::external_api::shared::Baseboard> for BaseboardId {
-    fn from(value: crate::external_api::shared::Baseboard) -> Self {
-        BaseboardId { part_number: value.part, serial_number: value.serial }
-    }
-}
-
-impl From<UninitializedSledId> for BaseboardId {
-    fn from(value: UninitializedSledId) -> Self {
-        BaseboardId { part_number: value.part, serial_number: value.serial }
-    }
-}
-
-impl slog::KV for BaseboardId {
-    fn serialize(
-        &self,
-        _record: &slog::Record,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        serializer.emit_str("part_number".into(), &self.part_number)?;
-        serializer.emit_str("serial_number".into(), &self.serial_number)
+    /// Return a type which can be used to display a collection in a
+    /// human-readable format.
+    ///
+    /// The return [`CollectionDisplay`] has several knobs that can be tweaked
+    /// to display part or all of a collection.
+    pub fn display(&self) -> CollectionDisplay<'_> {
+        CollectionDisplay::new(self)
     }
 }
 
@@ -344,6 +373,29 @@ pub struct RotState {
     pub stage0next_error: Option<RotImageError>,
 }
 
+/// Describes a host phase 1 flash active slot found from a service processor
+/// during collection
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
+pub struct HostPhase1ActiveSlot {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub slot: M2Slot,
+}
+
+/// Describes a host phase 1 flash hash found from a service processor
+/// during collection
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
+pub struct HostPhase1FlashHash {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub slot: M2Slot,
+    pub hash: ArtifactHash,
+}
+
 /// Describes which caboose this is (which component, which slot)
 #[derive(
     Clone,
@@ -356,7 +408,10 @@ pub struct RotState {
     Ord,
     Deserialize,
     Serialize,
+    JsonSchema,
 )]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum CabooseWhich {
     SpSlot0,
     SpSlot1,
@@ -364,6 +419,26 @@ pub enum CabooseWhich {
     RotSlotB,
     Stage0,
     Stage0Next,
+}
+
+impl CabooseWhich {
+    pub fn toggled_slot(&self) -> Self {
+        match self {
+            CabooseWhich::RotSlotA => CabooseWhich::RotSlotB,
+            CabooseWhich::RotSlotB => CabooseWhich::RotSlotA,
+            CabooseWhich::SpSlot0 => CabooseWhich::SpSlot1,
+            CabooseWhich::SpSlot1 => CabooseWhich::SpSlot0,
+            CabooseWhich::Stage0 => CabooseWhich::Stage0Next,
+            CabooseWhich::Stage0Next => CabooseWhich::Stage0,
+        }
+    }
+
+    pub fn from_rot_slot(slot: RotSlot) -> Self {
+        match slot {
+            RotSlot::A => CabooseWhich::RotSlotA,
+            RotSlot::B => CabooseWhich::RotSlotB,
+        }
+    }
 }
 
 /// Root of trust page contents found during a collection
@@ -558,6 +633,7 @@ pub struct SledAgent {
     pub sled_role: SledRole,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
+    pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
     pub disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
@@ -565,4 +641,58 @@ pub struct SledAgent {
     pub ledgered_sled_config: Option<OmicronSledConfig>,
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
+    pub zone_image_resolver: ZoneImageResolverInventory,
+    pub health_monitor: HealthMonitorInventory,
+}
+
+impl IdOrdItem for SledAgent {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+    id_upcast!();
+}
+
+#[derive(
+    Clone, Default, Debug, Hash, PartialEq, Eq, Deserialize, Serialize,
+)]
+pub struct CockroachStatus {
+    pub ranges_underreplicated: Option<u64>,
+    pub liveness_live_nodes: Option<u64>,
+}
+
+/// Inventory representation of whether an NTP service reports time to be synced
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct TimeSync {
+    /// Zone ID of the NTP admin server contacted
+    pub zone_id: OmicronZoneUuid,
+
+    /// Whether or not the service claims time is synchronized
+    pub synced: bool,
+}
+
+impl IdOrdItem for TimeSync {
+    type Key<'a> = OmicronZoneUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_id
+    }
+    id_upcast!();
+}
+
+#[derive(
+    Clone, Debug, Diffable, Serialize, Deserialize, JsonSchema, PartialEq, Eq,
+)]
+pub struct InternalDnsGenerationStatus {
+    /// Zone ID of the internal DNS server contacted
+    pub zone_id: OmicronZoneUuid,
+    /// Generation number of the DNS configuration
+    pub generation: omicron_common::api::external::Generation,
+}
+
+impl IdOrdItem for InternalDnsGenerationStatus {
+    type Key<'a> = OmicronZoneUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_id
+    }
+    id_upcast!();
 }

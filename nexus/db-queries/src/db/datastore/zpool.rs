@@ -11,6 +11,8 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::OpContext;
 use crate::db::identity::Asset;
+use crate::db::model::ByteCount;
+use crate::db::model::DbTypedUuid;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::PhysicalDiskState;
@@ -36,10 +38,29 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
+
+#[derive(Debug)]
+pub struct ZpoolGetForSledReservationResult {
+    pub pool: Zpool,
+
+    /// Last reported inventory size for the zpool
+    pub last_inv_total_size: i64,
+
+    /// The rendezvous local storage dataset for this zpool
+    pub rendezvous_local_storage_dataset_id: DatasetUuid,
+
+    /// Upper bound on Crucible dataset usage
+    pub crucible_dataset_usage: i64,
+
+    /// Upper bound on Local Storage dataset usage
+    pub local_storage_usage: i64,
+}
 
 impl DataStore {
     pub async fn zpool_insert(
@@ -48,8 +69,9 @@ impl DataStore {
         zpool: Zpool,
     ) -> CreateResult<Zpool> {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
-        let zpool =
-            Self::zpool_insert_on_connection(&conn, opctx, zpool).await?;
+        let zpool = Self::zpool_insert_on_connection(&conn, opctx, zpool)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
         Ok(zpool)
     }
 
@@ -63,9 +85,9 @@ impl DataStore {
 
         use nexus_db_schema::schema::zpool::dsl;
 
-        let sled_id = zpool.sled_id;
+        let sled_id = zpool.sled_id();
         let pool = Sled::insert_resource(
-            sled_id,
+            sled_id.into(),
             diesel::insert_into(dsl::zpool)
                 .values(zpool.clone())
                 .on_conflict(dsl::id)
@@ -80,7 +102,7 @@ impl DataStore {
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Sled,
-                lookup_type: LookupType::ById(sled_id),
+                lookup_type: LookupType::by_id(sled_id),
             },
             AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
                 e,
@@ -98,7 +120,7 @@ impl DataStore {
     async fn zpool_list_all_external(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, DbTypedUuid<ZpoolKind>>,
     ) -> ListResultVec<(Zpool, PhysicalDisk)> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
@@ -132,12 +154,15 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         opctx.check_complex_operations_allowed()?;
         let mut zpools = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .zpool_list_all_external(opctx, &p.current_pagparams())
                 .await?;
-            paginator = p.found_batch(&batch, &|(z, _)| z.id());
+            paginator = p.found_batch(&batch, &|(z, _)| z.id().into());
             zpools.extend(batch);
         }
 
@@ -148,7 +173,7 @@ impl DataStore {
     pub async fn zpool_on_decommissioned_disk_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, DbTypedUuid<ZpoolKind>>,
     ) -> ListResultVec<Zpool> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
@@ -170,8 +195,9 @@ impl DataStore {
                     .or(physical_disk_dsl::id.is_null())
                     .or(
                         // NOTE: We should probably get rid of this altogether
-                        // (it's kinda implied by "Decommissioned", being a terminal
-                        // state) but this is an extra cautious statement.
+                        // (it's kinda implied by "Decommissioned", being a
+                        // terminal state) but this is an extra cautious
+                        // statement.
                         physical_disk_dsl::time_deleted.is_not_null(),
                     ),
             )
@@ -225,7 +251,8 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        // Verify that there are no regions nor region snapshots using this dataset
+        // Verify that there are no regions nor region snapshots using this
+        // dataset
         use nexus_db_schema::schema::region::dsl as region_dsl;
         let region_count = region_dsl::region
             .filter(region_dsl::dataset_id.eq_any(dataset_ids.clone()))
@@ -248,11 +275,12 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if region_snapshot_count > 0 {
             return Err(Error::unavail(&format!(
-                "Cannot delete this zpool; it has {region_snapshot_count} region snapshots"
+                "Cannot delete this zpool; it has {region_snapshot_count} \
+                region snapshots"
             )));
         }
 
-        // Ensure the datasets are deleted
+        // Ensure the crucible datasets are deleted
         diesel::update(dataset_dsl::crucible_dataset)
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zpool_id))
@@ -339,5 +367,161 @@ impl DataStore {
             .await
             .map(|_| ())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// For a given sled id, return all zpools for that sled plus:
+    ///
+    /// - the total upper bound on usage as reported by their crucible and local
+    ///   storage datasets
+    /// - their most recent total_size as reported by inventory.
+    pub async fn zpool_get_for_sled_reservation(
+        &self,
+        opctx: &OpContext,
+        sled_id: SledUuid,
+    ) -> ListResultVec<ZpoolGetForSledReservationResult> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::crucible_dataset;
+        use nexus_db_schema::schema::inv_zpool;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::rendezvous_local_storage_dataset;
+        use nexus_db_schema::schema::zpool::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let tuples = dsl::zpool
+            .filter(dsl::sled_id.eq(to_db_typed_uuid(sled_id)))
+            .filter(dsl::time_deleted.is_null())
+            .inner_join(
+                physical_disk_dsl::physical_disk
+                    .on(dsl::physical_disk_id.eq(physical_disk_dsl::id)),
+            )
+            .filter(
+                physical_disk_dsl::disk_policy
+                    .eq(PhysicalDiskPolicy::InService),
+            )
+            // Only U2 disks will be considered for local storage allocations.
+            // This should be redundant when filtering on pools with local
+            // storage datasets!
+            .filter(physical_disk_dsl::variant.eq(PhysicalDiskKind::U2))
+            .select((
+                Zpool::as_select(),
+                // This and the next result are the upper bound on existing
+                // usages
+                crucible_dataset::table
+                    .select(diesel::dsl::sum(crucible_dataset::size_used))
+                    .filter(crucible_dataset::time_deleted.is_null())
+                    .filter(crucible_dataset::pool_id.eq(dsl::id))
+                    .single_value(),
+                rendezvous_local_storage_dataset::table
+                    .select(diesel::dsl::sum(
+                        rendezvous_local_storage_dataset::size_used,
+                    ))
+                    .filter(
+                        rendezvous_local_storage_dataset::time_tombstoned
+                            .is_null(),
+                    )
+                    .filter(
+                        rendezvous_local_storage_dataset::pool_id.eq(dsl::id),
+                    )
+                    .single_value(),
+                //
+                rendezvous_local_storage_dataset::table
+                    .select(rendezvous_local_storage_dataset::id)
+                    .filter(
+                        rendezvous_local_storage_dataset::time_tombstoned
+                            .is_null(),
+                    )
+                    .filter(
+                        rendezvous_local_storage_dataset::pool_id.eq(dsl::id),
+                    )
+                    .single_value(),
+                // last reported total size of this pool from inventory
+                inv_zpool::table
+                    .select(inv_zpool::total_size)
+                    .filter(inv_zpool::id.eq(dsl::id))
+                    .order_by(inv_zpool::time_collected.desc())
+                    .limit(1)
+                    .single_value(),
+            ))
+            .load_async::<(
+                Zpool,
+                Option<diesel::pg::data_types::PgNumeric>,
+                Option<diesel::pg::data_types::PgNumeric>,
+                Option<Uuid>,
+                Option<i64>,
+            )>(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Sled,
+                        LookupType::by_id(sled_id),
+                    ),
+                )
+            })?;
+
+        let mut converted = Vec::with_capacity(tuples.len());
+
+        for tuple in tuples {
+            let (
+                pool,
+                crucible_dataset_usage,
+                local_storage_usage,
+                rendezvous_local_storage_dataset_id,
+                last_inv_total_size,
+            ) = tuple;
+
+            // If this zpool doesn't have a local storage dataset yet, skip it
+            let Some(rendezvous_local_storage_dataset_id) =
+                rendezvous_local_storage_dataset_id
+            else {
+                continue;
+            };
+
+            // If the usage sum for either dataset type wasn't able to be
+            // computed, then the associated rendezvous table entry doesn't
+            // exist yet, so skip this zpool.
+            let crucible_dataset_usage: ByteCount =
+                if let Some(crucible_dataset_usage) = crucible_dataset_usage {
+                    crucible_dataset_usage.try_into().map_err(
+                        |e: anyhow::Error| {
+                            Error::internal_error(&e.to_string())
+                        },
+                    )?
+                } else {
+                    continue;
+                };
+
+            let local_storage_usage: ByteCount =
+                if let Some(local_storage_usage) = local_storage_usage {
+                    local_storage_usage.try_into().map_err(
+                        |e: anyhow::Error| {
+                            Error::internal_error(&e.to_string())
+                        },
+                    )?
+                } else {
+                    continue;
+                };
+
+            // If there isn't an inventory collection for this zpool, skip it
+            let Some(last_inv_total_size) = last_inv_total_size else {
+                continue;
+            };
+
+            converted.push(ZpoolGetForSledReservationResult {
+                pool,
+                last_inv_total_size,
+                rendezvous_local_storage_dataset_id:
+                    DatasetUuid::from_untyped_uuid(
+                        rendezvous_local_storage_dataset_id,
+                    ),
+                crucible_dataset_usage: crucible_dataset_usage.into(),
+                local_storage_usage: local_storage_usage.into(),
+            });
+        }
+
+        Ok(converted)
     }
 }

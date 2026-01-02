@@ -11,7 +11,8 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use cockroach_admin_types::node::InternalNodeId as CockroachNodeId;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
@@ -25,25 +26,27 @@ use diesel::expression::SelectableHelper;
 use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use id_map::{IdMap, IdMappable};
-use iddqd::IdOrdMap;
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
-use nexus_db_model::HwBaseboardId;
-use nexus_db_model::HwPowerState;
-use nexus_db_model::HwRotSlot;
-use nexus_db_model::InvCaboose;
+use nexus_db_model::ArtifactHash;
+use nexus_db_model::HwM2Slot;
 use nexus_db_model::InvClickhouseKeeperMembership;
+use nexus_db_model::InvCockroachStatus;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
 use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
+use nexus_db_model::InvHostPhase1ActiveSlot;
+use nexus_db_model::InvHostPhase1FlashHash;
+use nexus_db_model::InvInternalDns;
 use nexus_db_model::InvLastReconciliationDatasetResult;
 use nexus_db_model::InvLastReconciliationDiskResult;
 use nexus_db_model::InvLastReconciliationOrphanedDataset;
 use nexus_db_model::InvLastReconciliationZoneResult;
+use nexus_db_model::InvNtpTimesync;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvOmicronSledConfig;
 use nexus_db_model::InvOmicronSledConfigDataset;
@@ -55,6 +58,8 @@ use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::InvSledAgent;
+use nexus_db_model::InvSledBootPartition;
+use nexus_db_model::InvSledConfigReconciler;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
@@ -64,7 +69,13 @@ use nexus_db_model::SqlU32;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_db_model::to_db_typed_uuid;
-use nexus_db_schema::enums::HwPowerStateEnum;
+use nexus_db_model::{
+    HwBaseboardId, InvZoneImageResolver, InvZoneManifestZone,
+};
+use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
+use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
+use nexus_db_model::{InvCaboose, InvRemoveMupdateOverride};
+use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
@@ -73,20 +84,19 @@ use nexus_db_schema::enums::SpTypeEnum;
 use nexus_db_schema::enums::{
     CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
 };
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
-use nexus_types::inventory::BaseboardId;
+use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
+use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::PhysicalDiskFirmware;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::TimeSync;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -94,6 +104,18 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::BootPartitionContents;
+use sled_agent_types::inventory::BootPartitionDetails;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HealthMonitorInventory;
+use sled_agent_types::inventory::ManifestNonBootInventory;
+use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::ZoneArtifactInventory;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -164,7 +186,7 @@ impl DataStore {
 
         // Pull disk firmware out of sled agents
         let mut nvme_disk_firmware = Vec::new();
-        for (sled_id, sled_agent) in &collection.sled_agents {
+        for sled_agent in &collection.sled_agents {
             for disk in &sled_agent.disks {
                 match &disk.firmware {
                     PhysicalDiskFirmware::Unknown => (),
@@ -172,7 +194,7 @@ impl DataStore {
                         .push(
                             InvNvmeDiskFirmware::new(
                                 collection_id,
-                                *sled_id,
+                                sled_agent.sled_id,
                                 disk.slot,
                                 firmware,
                             )
@@ -188,9 +210,13 @@ impl DataStore {
         let disks: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
+            .flat_map(|sled_agent| {
                 sled_agent.disks.iter().map(|disk| {
-                    InvPhysicalDisk::new(collection_id, *sled_id, disk.clone())
+                    InvPhysicalDisk::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        disk.clone(),
+                    )
                 })
             })
             .collect();
@@ -199,11 +225,10 @@ impl DataStore {
         let zpools: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
-                sled_agent
-                    .zpools
-                    .iter()
-                    .map(|pool| InvZpool::new(collection_id, *sled_id, pool))
+            .flat_map(|sled_agent| {
+                sled_agent.zpools.iter().map(|pool| {
+                    InvZpool::new(collection_id, sled_agent.sled_id, pool)
+                })
             })
             .collect();
 
@@ -211,10 +236,73 @@ impl DataStore {
         let datasets: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
+            .flat_map(|sled_agent| {
                 sled_agent.datasets.iter().map(|dataset| {
-                    InvDataset::new(collection_id, *sled_id, dataset)
+                    InvDataset::new(collection_id, sled_agent.sled_id, dataset)
                 })
+            })
+            .collect();
+
+        // Pull zone manifest zones out of all sled agents.
+        let mut zone_manifest_zones = Vec::new();
+        for sled_agent in &collection.sled_agents {
+            if let Some(artifacts) = sled_agent
+                .zone_image_resolver
+                .zone_manifest
+                .boot_inventory
+                .as_ref()
+                .ok()
+            {
+                for artifact in artifacts.artifacts.iter() {
+                    zone_manifest_zones.push(
+                        InvZoneManifestZone::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            artifact,
+                        )
+                        .map_err(|e| Error::internal_error(&e.to_string()))?,
+                    );
+                }
+            }
+        }
+
+        // Pull zone manifest non-boot info out of all sled agents.
+        let zone_manifest_non_boot: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                sled_agent
+                    .zone_image_resolver
+                    .zone_manifest
+                    .non_boot_status
+                    .iter()
+                    .map(|non_boot| {
+                        InvZoneManifestNonBoot::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            non_boot,
+                        )
+                    })
+            })
+            .collect();
+
+        // Pull mupdate override non-boot info out of all sled agents.
+        let mupdate_override_non_boot: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                sled_agent
+                    .zone_image_resolver
+                    .mupdate_override
+                    .non_boot_status
+                    .iter()
+                    .map(|non_boot| {
+                        InvMupdateOverrideNonBoot::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            non_boot,
+                        )
+                    })
             })
             .collect();
 
@@ -238,6 +326,7 @@ impl DataStore {
         // reconciler properties for each sled. We need all of this to construct
         // `InvSledAgent` instances below.
         let ConfigReconcilerRows {
+            config_reconcilers,
             sled_configs: omicron_sled_configs,
             disks: omicron_sled_config_disks,
             datasets: omicron_sled_config_datasets,
@@ -247,6 +336,7 @@ impl DataStore {
             dataset_results: reconciler_dataset_results,
             orphaned_datasets: reconciler_orphaned_datasets,
             zone_results: reconciler_zone_results,
+            boot_partitions: reconciler_boot_partitions,
             mut config_reconciler_fields_by_sled,
         } = ConfigReconcilerRows::new(collection_id, collection)
             .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
@@ -258,7 +348,7 @@ impl DataStore {
             Vec<_>,
         ) = collection
             .sled_agents
-            .values()
+            .iter()
             .partition(|sled_agent| sled_agent.baseboard_id.is_some());
         let sled_agents_no_baseboards = sled_agents_no_baseboards
             .into_iter()
@@ -266,17 +356,18 @@ impl DataStore {
                 assert!(sled_agent.baseboard_id.is_none());
                 let ConfigReconcilerFields {
                     ledgered_sled_config,
-                    last_reconciliation_sled_config,
                     reconciler_status,
                 } = config_reconciler_fields_by_sled
                     .remove(&sled_agent.sled_id)
                     .expect("all sled IDs should exist");
+                let zone_image_resolver =
+                    InvZoneImageResolver::new(&sled_agent.zone_image_resolver);
                 InvSledAgent::new_without_baseboard(
                     collection_id,
                     sled_agent,
                     ledgered_sled_config,
-                    last_reconciliation_sled_config,
                     reconciler_status,
+                    zone_image_resolver,
                 )
                 .map_err(|e| Error::internal_error(&e.to_string()))
             })
@@ -292,6 +383,29 @@ impl DataStore {
                 .map_err(|e| Error::internal_error(&e.to_string()))?,
             );
         }
+
+        let inv_cockroach_status_records: Vec<InvCockroachStatus> = collection
+            .cockroach_status
+            .iter()
+            .map(|(node_id, status)| {
+                InvCockroachStatus::new(collection_id, node_id.clone(), status)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
+
+        let inv_ntp_timesync_records: Vec<InvNtpTimesync> = collection
+            .ntp_timesync
+            .iter()
+            .map(|timesync| InvNtpTimesync::new(collection_id, timesync))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
+
+        let inv_internal_dns_records: Vec<InvInternalDns> = collection
+            .internal_dns_generation_status
+            .iter()
+            .map(|status| InvInternalDns::new(collection_id, status))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
@@ -573,6 +687,134 @@ impl DataStore {
                         _stage0_error,
                         _stage0next_error,
                     ) = rot_dsl::inv_root_of_trust::all_columns();
+                }
+            }
+
+            // Insert rows for the host phase 1 active slots that we found.
+            // Like service processors, we do this using INSERT INTO ... SELECT.
+            {
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::inv_host_phase_1_active_slot::dsl as phase1_dsl;
+
+                for (baseboard_id, phase1) in
+                    &collection.host_phase_1_active_slots
+                {
+                    let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                        .select((
+                            db_collection_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
+                            baseboard_dsl::id,
+                            phase1.time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            phase1.source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            HwM2Slot::from(phase1.slot)
+                                .into_sql::<HwM2SlotEnum>(),
+                        ))
+                        .filter(
+                            baseboard_dsl::part_number
+                                .eq(baseboard_id.part_number.clone()),
+                        )
+                        .filter(
+                            baseboard_dsl::serial_number
+                                .eq(baseboard_id.serial_number.clone()),
+                        );
+
+                    let _ = diesel::insert_into(
+                        nexus_db_schema::schema::inv_host_phase_1_active_slot::table,
+                    )
+                    .values(selection)
+                    .into_columns((
+                        phase1_dsl::inv_collection_id,
+                        phase1_dsl::hw_baseboard_id,
+                        phase1_dsl::time_collected,
+                        phase1_dsl::source,
+                        phase1_dsl::slot,
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // See the comment in the above block (where we use
+                    // `inv_service_processor::all_columns()`).  The same
+                    // applies here.
+                    let (
+                        _inv_collection_id,
+                        _hw_baseboard_id,
+                        _time_collected,
+                        _source,
+                        _slot,
+                    ) = phase1_dsl::inv_host_phase_1_active_slot::all_columns();
+                }
+            }
+
+            // Insert rows for the host phase 1 flash hashes that we found.
+            // Like service processors, we do this using INSERT INTO ... SELECT.
+            {
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::inv_host_phase_1_flash_hash::dsl as phase1_dsl;
+
+                // Squish our map-of-maps down to a flat iterator.
+                //
+                // We can throw away the `_slot` key because the `phase1`
+                // structures also contain their own slot. (Maybe we could use
+                // `iddqd` here instead?)
+                let phase1_hashes = collection
+                    .host_phase_1_flash_hashes
+                    .iter()
+                    .flat_map(|(_slot, by_baseboard)| by_baseboard.iter());
+
+                for (baseboard_id, phase1) in phase1_hashes {
+                    let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                        .select((
+                            db_collection_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
+                            baseboard_dsl::id,
+                            phase1.time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            phase1.source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            HwM2Slot::from(phase1.slot)
+                                .into_sql::<HwM2SlotEnum>(),
+                            ArtifactHash(phase1.hash)
+                                .into_sql::<diesel::sql_types::Text>(),
+                        ))
+                        .filter(
+                            baseboard_dsl::part_number
+                                .eq(baseboard_id.part_number.clone()),
+                        )
+                        .filter(
+                            baseboard_dsl::serial_number
+                                .eq(baseboard_id.serial_number.clone()),
+                        );
+
+                    let _ = diesel::insert_into(
+                        nexus_db_schema::schema::inv_host_phase_1_flash_hash::table,
+                    )
+                    .values(selection)
+                    .into_columns((
+                        phase1_dsl::inv_collection_id,
+                        phase1_dsl::hw_baseboard_id,
+                        phase1_dsl::time_collected,
+                        phase1_dsl::source,
+                        phase1_dsl::slot,
+                        phase1_dsl::hash,
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // See the comment in the above block (where we use
+                    // `inv_service_processor::all_columns()`).  The same
+                    // applies here.
+                    let (
+                        _inv_collection_id,
+                        _hw_baseboard_id,
+                        _time_collected,
+                        _source,
+                        _slot,
+                        _hash,
+                    ) = phase1_dsl::inv_host_phase_1_flash_hash::all_columns();
                 }
             }
 
@@ -880,6 +1122,49 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the config reconcilers we found.
+            {
+                use nexus_db_schema::schema::inv_sled_config_reconciler::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut reconcilers = config_reconcilers.into_iter();
+                loop {
+                    let some_reconcilers = reconcilers
+                        .by_ref()
+                        .take(batch_size)
+                        .collect::<Vec<_>>();
+                    if some_reconcilers.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_sled_config_reconciler)
+                        .values(some_reconcilers)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the boot partition details we found.
+            {
+                use nexus_db_schema::schema::inv_sled_boot_partition::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut boot_partitions = reconciler_boot_partitions
+                    .into_iter();
+                loop {
+                    let some_boot_partitions = boot_partitions
+                        .by_ref()
+                        .take(batch_size)
+                        .collect::<Vec<_>>();
+                    if some_boot_partitions.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_sled_boot_partition)
+                        .values(some_boot_partitions)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for the all the sled configs we found.
             {
                 use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
@@ -1051,6 +1336,64 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the zones found in the zone manifest on the
+            // boot disk.
+            {
+                use nexus_db_schema::schema::inv_zone_manifest_zone::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut zones = zone_manifest_zones.into_iter();
+                loop {
+                    let some_zones =
+                        zones.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_zones.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_zone_manifest_zone)
+                        .values(some_zones)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for non-boot zone manifests.
+            {
+                use nexus_db_schema::schema::inv_zone_manifest_non_boot::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut non_boot = zone_manifest_non_boot.into_iter();
+                loop {
+                    let some_non_boot =
+                        non_boot.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_non_boot.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_zone_manifest_non_boot)
+                        .values(some_non_boot)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for non-boot mupdate overrides.
+            {
+                use nexus_db_schema::schema::inv_mupdate_override_non_boot::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut non_boot = mupdate_override_non_boot.into_iter();
+                loop {
+                    let some_non_boot =
+                        non_boot.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_non_boot.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_mupdate_override_non_boot)
+                        .values(some_non_boot)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for the sled agents that we found.  In practice, we'd
             // expect these to all have baseboards (if using Oxide hardware) or
             // none have baseboards (if not).
@@ -1067,11 +1410,11 @@ impl DataStore {
                     );
                     let ConfigReconcilerFields {
                         ledgered_sled_config,
-                        last_reconciliation_sled_config,
                         reconciler_status,
                     } = config_reconciler_fields_by_sled
                         .remove(&sled_agent.sled_id)
                         .expect("all sled IDs should exist");
+                    let zone_image_resolver = InvZoneImageResolver::new(&sled_agent.zone_image_resolver);
                     let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .select((
                             db_collection_id
@@ -1100,14 +1443,13 @@ impl DataStore {
                                 sled_agent.usable_physical_ram,
                             )
                             .into_sql::<diesel::sql_types::Int8>(),
+                            nexus_db_model::SledCpuFamily::from(sled_agent.cpu_family)
+                            .into_sql::<nexus_db_schema::enums::SledCpuFamilyEnum>(),
                             nexus_db_model::ByteCount::from(
                                 sled_agent.reservoir_size,
                             )
                             .into_sql::<diesel::sql_types::Int8>(),
                             ledgered_sled_config
-                                .map(|id| id.into_untyped_uuid())
-                                .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
-                            last_reconciliation_sled_config
                                 .map(|id| id.into_untyped_uuid())
                                 .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
                             reconciler_status.reconciler_status_kind
@@ -1119,6 +1461,20 @@ impl DataStore {
                                 .into_sql::<Nullable<diesel::sql_types::Timestamptz>>(),
                             reconciler_status.reconciler_status_duration_secs
                                 .into_sql::<Nullable<diesel::sql_types::Double>>(),
+                            zone_image_resolver.zone_manifest_boot_disk_path
+                                .into_sql::<diesel::sql_types::Text>(),
+                            zone_image_resolver.zone_manifest_source
+                                .into_sql::<Nullable<InvZoneManifestSourceEnum>>(),
+                            zone_image_resolver.zone_manifest_mupdate_id
+                                .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
+                            zone_image_resolver.zone_manifest_boot_disk_error
+                                .into_sql::<Nullable<diesel::sql_types::Text>>(),
+                            zone_image_resolver.mupdate_override_boot_disk_path
+                                .into_sql::<diesel::sql_types::Text>(),
+                            zone_image_resolver.mupdate_override_id
+                                .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
+                            zone_image_resolver.mupdate_override_boot_disk_error
+                                .into_sql::<Nullable<diesel::sql_types::Text>>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -1143,13 +1499,20 @@ impl DataStore {
                                 sa_dsl::sled_role,
                                 sa_dsl::usable_hardware_threads,
                                 sa_dsl::usable_physical_ram,
+                                sa_dsl::cpu_family,
                                 sa_dsl::reservoir_size,
                                 sa_dsl::ledgered_sled_config,
-                                sa_dsl::last_reconciliation_sled_config,
                                 sa_dsl::reconciler_status_kind,
                                 sa_dsl::reconciler_status_sled_config,
                                 sa_dsl::reconciler_status_timestamp,
                                 sa_dsl::reconciler_status_duration_secs,
+                                sa_dsl::zone_manifest_boot_disk_path,
+                                sa_dsl::zone_manifest_source,
+                                sa_dsl::zone_manifest_mupdate_id,
+                                sa_dsl::zone_manifest_boot_disk_error,
+                                sa_dsl::mupdate_override_boot_disk_path,
+                                sa_dsl::mupdate_override_id,
+                                sa_dsl::mupdate_override_boot_disk_error,
                             ))
                             .execute_async(&conn)
                             .await?;
@@ -1168,13 +1531,20 @@ impl DataStore {
                         _sled_role,
                         _usable_hardware_threads,
                         _usable_physical_ram,
+                        _cpu_family,
                         _reservoir_size,
                         _ledgered_sled_config,
-                        _last_reconciliation_sled_config,
                         _reconciler_status_kind,
                         _reconciler_status_sled_config,
                         _reconciler_status_timestamp,
                         _reconciler_status_duration_secs,
+                        _zone_manifest_boot_disk_path,
+                        _zone_manifest_source,
+                        _zone_manifest_mupdate_id,
+                        _zone_manifest_boot_disk_error,
+                        _mupdate_override_boot_disk_path,
+                        _mupdate_override_boot_disk_id,
+                        _mupdate_override_boot_disk_error,
                     ) = sa_dsl::inv_sled_agent::all_columns();
                 }
 
@@ -1195,6 +1565,33 @@ impl DataStore {
                 use nexus_db_schema::schema::inv_clickhouse_keeper_membership::dsl;
                 diesel::insert_into(dsl::inv_clickhouse_keeper_membership)
                     .values(inv_clickhouse_keeper_memberships)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the cockroach status information we've observed
+            if !inv_cockroach_status_records.is_empty() {
+                use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+                diesel::insert_into(dsl::inv_cockroachdb_status)
+                    .values(inv_cockroach_status_records)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the NTP info we've observed
+            if !inv_ntp_timesync_records.is_empty() {
+                use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+                diesel::insert_into(dsl::inv_ntp_timesync)
+                    .values(inv_ntp_timesync_records)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the internal DNS generation status we've observed
+            if !inv_internal_dns_records.is_empty() {
+                use nexus_db_schema::schema::inv_internal_dns::dsl;
+                diesel::insert_into(dsl::inv_internal_dns)
+                    .values(inv_internal_dns_records)
                     .execute_async(&conn)
                     .await?;
             }
@@ -1463,6 +1860,8 @@ impl DataStore {
         struct NumRowsDeleted {
             ncollections: usize,
             nsps: usize,
+            nhost_phase1_active_slots: usize,
+            nhost_phase1_flash_hashes: usize,
             nrots: usize,
             ncabooses: usize,
             nrot_pages: usize,
@@ -1474,6 +1873,11 @@ impl DataStore {
             nlast_reconciliation_dataset_results: usize,
             nlast_reconciliation_orphaned_datasets: usize,
             nlast_reconciliation_zone_results: usize,
+            nzone_manifest_zones: usize,
+            nzone_manifest_non_boot: usize,
+            nmupdate_override_non_boot: usize,
+            nconfig_reconcilers: usize,
+            nboot_partitions: usize,
             nomicron_sled_configs: usize,
             nomicron_sled_config_disks: usize,
             nomicron_sled_config_datasets: usize,
@@ -1482,11 +1886,16 @@ impl DataStore {
             nzpools: usize,
             nerrors: usize,
             nclickhouse_keeper_membership: usize,
+            ncockroach_status: usize,
+            nntp_timesync: usize,
+            ninternal_dns: usize,
         }
 
         let NumRowsDeleted {
             ncollections,
             nsps,
+            nhost_phase1_active_slots,
+            nhost_phase1_flash_hashes,
             nrots,
             ncabooses,
             nrot_pages,
@@ -1498,6 +1907,11 @@ impl DataStore {
             nlast_reconciliation_dataset_results,
             nlast_reconciliation_orphaned_datasets,
             nlast_reconciliation_zone_results,
+            nzone_manifest_zones,
+            nzone_manifest_non_boot,
+            nmupdate_override_non_boot,
+            nconfig_reconcilers,
+            nboot_partitions,
             nomicron_sled_configs,
             nomicron_sled_config_disks,
             nomicron_sled_config_datasets,
@@ -1506,6 +1920,9 @@ impl DataStore {
             nzpools,
             nerrors,
             nclickhouse_keeper_membership,
+            ncockroach_status,
+            nntp_timesync,
+            ninternal_dns,
         } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
@@ -1524,6 +1941,26 @@ impl DataStore {
                     let nsps = {
                         use nexus_db_schema::schema::inv_service_processor::dsl;
                         diesel::delete(dsl::inv_service_processor.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for host phase 1 active slots.
+                    let nhost_phase1_active_slots = {
+                        use nexus_db_schema::schema::inv_host_phase_1_active_slot::dsl;
+                        diesel::delete(dsl::inv_host_phase_1_active_slot.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for host phase 1 flash hashes.
+                    let nhost_phase1_flash_hashes = {
+                        use nexus_db_schema::schema::inv_host_phase_1_flash_hash::dsl;
+                        diesel::delete(dsl::inv_host_phase_1_flash_hash.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -1635,6 +2072,50 @@ impl DataStore {
                         .await?
                     };
 
+                    // Remove rows associated with zone resolver inventory.
+                    let nzone_manifest_zones = {
+                        use nexus_db_schema::schema::inv_zone_manifest_zone::dsl;
+                        diesel::delete(dsl::inv_zone_manifest_zone.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nzone_manifest_non_boot = {
+                        use nexus_db_schema::schema::inv_zone_manifest_non_boot::dsl;
+                        diesel::delete(dsl::inv_zone_manifest_non_boot.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nmupdate_override_non_boot = {
+                        use nexus_db_schema::schema::inv_mupdate_override_non_boot::dsl;
+                        diesel::delete(dsl::inv_mupdate_override_non_boot.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows associated with sled-agent config reconcilers
+                    let nconfig_reconcilers = {
+                        use nexus_db_schema::schema::inv_sled_config_reconciler::dsl;
+                        diesel::delete(dsl::inv_sled_config_reconciler.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nboot_partitions = {
+                        use nexus_db_schema::schema::inv_sled_boot_partition::dsl;
+                        diesel::delete(dsl::inv_sled_boot_partition.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     // Remove rows associated with `OmicronSledConfig`s.
                     let nomicron_sled_configs = {
                         use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
@@ -1707,10 +2188,46 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    // Remove rows for cockroach status
+                    let ncockroach_status = {
+                        use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+                        diesel::delete(
+                            dsl::inv_cockroachdb_status.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    // Remove rows for NTP timesync
+                    let nntp_timesync = {
+                        use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+                        diesel::delete(
+                            dsl::inv_ntp_timesync.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for internal DNS
+                    let ninternal_dns = {
+                        use nexus_db_schema::schema::inv_internal_dns::dsl;
+                        diesel::delete(
+                            dsl::inv_internal_dns.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
+                        nhost_phase1_active_slots,
+                        nhost_phase1_flash_hashes,
                         nrots,
                         ncabooses,
                         nrot_pages,
@@ -1722,6 +2239,11 @@ impl DataStore {
                         nlast_reconciliation_dataset_results,
                         nlast_reconciliation_orphaned_datasets,
                         nlast_reconciliation_zone_results,
+                        nzone_manifest_zones,
+                        nzone_manifest_non_boot,
+                        nmupdate_override_non_boot,
+                        nconfig_reconcilers,
+                        nboot_partitions,
                         nomicron_sled_configs,
                         nomicron_sled_config_disks,
                         nomicron_sled_config_datasets,
@@ -1730,6 +2252,9 @@ impl DataStore {
                         nzpools,
                         nerrors,
                         nclickhouse_keeper_membership,
+                        ncockroach_status,
+                        nntp_timesync,
+                        ninternal_dns,
                     })
                 })
                 .await
@@ -1741,6 +2266,8 @@ impl DataStore {
             "collection_id" => collection_id.to_string(),
             "ncollections" => ncollections,
             "nsps" => nsps,
+            "nhost_phase1_active_slots" => nhost_phase1_active_slots,
+            "nhost_phase1_flash_hashes" => nhost_phase1_flash_hashes,
             "nrots" => nrots,
             "ncabooses" => ncabooses,
             "nrot_pages" => nrot_pages,
@@ -1756,6 +2283,11 @@ impl DataStore {
                 nlast_reconciliation_orphaned_datasets,
             "nlast_reconciliation_zone_results" =>
                 nlast_reconciliation_zone_results,
+            "nzone_manifest_zones" => nzone_manifest_zones,
+            "nzone_manifest_non_boot" => nzone_manifest_non_boot,
+            "nmupdate_override_non_boot" => nmupdate_override_non_boot,
+            "nconfig_reconcilers" => nconfig_reconcilers,
+            "nboot_partitions" => nboot_partitions,
             "nomicron_sled_configs" => nomicron_sled_configs,
             "nomicron_sled_config_disks" => nomicron_sled_config_disks,
             "nomicron_sled_config_datasets" => nomicron_sled_config_datasets,
@@ -1763,7 +2295,10 @@ impl DataStore {
             "nomicron_sled_config_zone_nics" => nomicron_sled_config_zone_nics,
             "nzpools" => nzpools,
             "nerrors" => nerrors,
-            "nclickhouse_keeper_membership" => nclickhouse_keeper_membership
+            "nclickhouse_keeper_membership" => nclickhouse_keeper_membership,
+            "ncockroach_status" => ncockroach_status,
+            "nntp_timesync" => nntp_timesync,
+            "ninternal_dns" => ninternal_dns,
         );
 
         Ok(())
@@ -1793,16 +2328,18 @@ impl DataStore {
             })
     }
 
-    /// Attempt to read the latest collection.
+    /// Attempt to get the ID of the latest collection.
     ///
     /// If there aren't any collections, return `Ok(None)`.
-    pub async fn inventory_get_latest_collection(
+    pub async fn inventory_get_latest_collection_id(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<Collection>, Error> {
+    ) -> Result<Option<CollectionUuid>, Error> {
+        use nexus_db_schema::schema::inv_collection::dsl;
+
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        use nexus_db_schema::schema::inv_collection::dsl;
+
         let collection_id = dsl::inv_collection
             .select(dsl::id)
             .order_by(dsl::time_started.desc())
@@ -1811,17 +2348,23 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let Some(collection_id) = collection_id else {
+        Ok(collection_id.map(CollectionUuid::from_untyped_uuid))
+    }
+
+    /// Attempt to read the latest collection.
+    ///
+    /// If there aren't any collections, return `Ok(None)`.
+    pub async fn inventory_get_latest_collection(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<Collection>, Error> {
+        let Some(collection_id) =
+            self.inventory_get_latest_collection_id(opctx).await?
+        else {
             return Ok(None);
         };
 
-        Ok(Some(
-            self.inventory_collection_read(
-                opctx,
-                CollectionUuid::from_untyped_uuid(collection_id),
-            )
-            .await?,
-        ))
+        Ok(Some(self.inventory_collection_read(opctx, collection_id).await?))
     }
 
     /// Attempt to read the current collection
@@ -1877,7 +2420,10 @@ impl DataStore {
         let errors: Vec<String> = {
             use nexus_db_schema::schema::inv_collection_error::dsl;
             let mut errors = Vec::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_collection_error,
@@ -1904,7 +2450,10 @@ impl DataStore {
 
             let mut sps = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_service_processor,
@@ -1935,7 +2484,10 @@ impl DataStore {
 
             let mut rots = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_root_of_trust,
@@ -1966,7 +2518,10 @@ impl DataStore {
 
             let mut rows = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let mut batch = paginated(
                     dsl::inv_sled_agent,
@@ -1998,7 +2553,10 @@ impl DataStore {
                 SledUuid,
                 BTreeMap<i64, nexus_types::inventory::PhysicalDiskFirmware>,
             >::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_nvme_disk_firmware,
@@ -2040,7 +2598,10 @@ impl DataStore {
                 SledUuid,
                 Vec<nexus_types::inventory::PhysicalDisk>,
             >::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_physical_disk,
@@ -2086,7 +2647,10 @@ impl DataStore {
 
             let mut zpools =
                 BTreeMap::<Uuid, Vec<nexus_types::inventory::Zpool>>::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_zpool,
@@ -2117,7 +2681,10 @@ impl DataStore {
 
             let mut datasets =
                 BTreeMap::<Uuid, Vec<nexus_types::inventory::Dataset>>::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_dataset,
@@ -2158,7 +2725,10 @@ impl DataStore {
 
             let mut bbs = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::hw_baseboard_id,
@@ -2173,12 +2743,11 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
-                bbs.extend(batch.into_iter().map(|bb| {
-                    (
-                        bb.id,
-                        Arc::new(nexus_types::inventory::BaseboardId::from(bb)),
-                    )
-                }));
+                bbs.extend(
+                    batch
+                        .into_iter()
+                        .map(|bb| (bb.id, Arc::new(BaseboardId::from(bb)))),
+                );
             }
 
             bbs
@@ -2212,13 +2781,119 @@ impl DataStore {
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
 
+        // Fetch the host phase 1 active slots found.
+        let host_phase_1_active_slots = {
+            use nexus_db_schema::schema::inv_host_phase_1_active_slot::dsl;
+
+            let mut slots = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_host_phase_1_active_slot,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvHostPhase1ActiveSlot::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
+                for row in batch {
+                    let bb = baseboards_by_id
+                        .get(&row.hw_baseboard_id)
+                        .ok_or_else(|| {
+                            Error::internal_error(
+                                "missing baseboard that we should have fetched",
+                            )
+                        })?;
+                    slots.insert(Arc::clone(bb), row.into());
+                }
+            }
+
+            slots
+        };
+
+        // Fetch records of host phase 1 flash hashes found.
+        let inv_host_phase_1_flash_hash_rows = {
+            use nexus_db_schema::schema::inv_host_phase_1_flash_hash::dsl;
+
+            let mut phase_1s = Vec::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let mut batch = paginated_multicolumn(
+                    dsl::inv_host_phase_1_flash_hash,
+                    (dsl::hw_baseboard_id, dsl::slot),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvHostPhase1FlashHash::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.hw_baseboard_id, row.slot)
+                });
+                phase_1s.append(&mut batch);
+            }
+
+            phase_1s
+        };
+        // Assemble the lists of host phase 1 flash hashes found.
+        let mut host_phase_1_flash_hashes = BTreeMap::new();
+        for p in inv_host_phase_1_flash_hash_rows {
+            let slot = M2Slot::from(p.slot);
+            let by_baseboard = host_phase_1_flash_hashes
+                .entry(slot)
+                .or_insert_with(BTreeMap::new);
+            let Some(bb) = baseboards_by_id.get(&p.hw_baseboard_id) else {
+                let msg = format!(
+                    "unknown baseboard found in \
+                     inv_host_phase_1_flash_hash: {}",
+                    p.hw_baseboard_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+
+            let previous = by_baseboard.insert(
+                bb.clone(),
+                nexus_types::inventory::HostPhase1FlashHash {
+                    time_collected: p.time_collected,
+                    source: p.source,
+                    slot,
+                    hash: *p.hash,
+                },
+            );
+            bail_unless!(
+                previous.is_none(),
+                "duplicate host phase 1 flash hash found: {:?} baseboard {:?}",
+                p.slot,
+                p.hw_baseboard_id
+            );
+        }
+
         // Fetch records of cabooses found.
         let inv_caboose_rows = {
             use nexus_db_schema::schema::inv_caboose::dsl;
 
             let mut cabooses = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let mut batch = paginated_multicolumn(
                     dsl::inv_caboose,
@@ -2252,7 +2927,10 @@ impl DataStore {
 
             let mut cabooses = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch =
                     paginated(dsl::sw_caboose, dsl::id, &p.current_pagparams())
@@ -2320,7 +2998,10 @@ impl DataStore {
 
             let mut rot_pages = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let mut batch = paginated_multicolumn(
                     dsl::inv_root_of_trust_page,
@@ -2354,7 +3035,10 @@ impl DataStore {
 
             let mut rot_pages = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::sw_root_of_trust_page,
@@ -2436,9 +3120,12 @@ impl DataStore {
         let mut omicron_sled_configs = {
             use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
 
-            let mut configs = IdMap::new();
+            let mut configs = IdOrdMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config,
@@ -2454,18 +3141,27 @@ impl DataStore {
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 for sled_config in batch {
-                    configs.insert(OmicronSledConfigWithId {
-                        id: sled_config.id.into(),
-                        config: OmicronSledConfig {
-                            generation: sled_config.generation.into(),
-                            remove_mupdate_override: sled_config
-                                .remove_mupdate_override
-                                .map(From::from),
-                            disks: IdMap::default(),
-                            datasets: IdMap::default(),
-                            zones: IdMap::default(),
-                        },
-                    });
+                    configs
+                        .insert_unique(OmicronSledConfigWithId {
+                            id: sled_config.id.into(),
+                            config: OmicronSledConfig {
+                                generation: sled_config.generation.into(),
+                                remove_mupdate_override: sled_config
+                                    .remove_mupdate_override
+                                    .map(From::from),
+                                disks: IdOrdMap::default(),
+                                datasets: IdOrdMap::default(),
+                                zones: IdOrdMap::default(),
+                                host_phase_2: sled_config.host_phase_2.into(),
+                            },
+                        })
+                        .map_err(|e| {
+                            Error::internal_error(&format!(
+                                "duplicate omicron sled config ID found, but \
+                                 database guarantees uniqueness: {}",
+                                InlineErrorChain::new(&e),
+                            ))
+                        })?;
                 }
             }
 
@@ -2481,7 +3177,10 @@ impl DataStore {
 
             let mut nics = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config_zone_nic,
@@ -2513,7 +3212,10 @@ impl DataStore {
 
             let mut zones = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let mut batch = paginated(
                     dsl::inv_omicron_sled_config_zone,
@@ -2552,7 +3254,7 @@ impl DataStore {
                 })
                 .transpose()?;
             let mut config_with_id = omicron_sled_configs
-                .get_mut(&z.sled_config_id.into())
+                .get_mut(&z.sled_config_id)
                 .ok_or_else(|| {
                     // This error means that we found a row in
                     // inv_omicron_sled_config_zone with no associated record in
@@ -2572,7 +3274,7 @@ impl DataStore {
                 .map_err(|e| {
                     Error::internal_error(&format!("{:#}", e.to_string()))
                 })?;
-            config_with_id.config.zones.insert(zone);
+            config_with_id.config.zones.insert_overwrite(zone);
         }
 
         bail_unless!(
@@ -2585,7 +3287,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::inv_omicron_sled_config_dataset::dsl;
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config_dataset,
@@ -2603,14 +3308,14 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id.into())
+                        .get_mut(&row.sled_config_id)
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "dataset config {:?}: unknown config ID: {:?}",
                                 row.id, row.sled_config_id
                             ))
                         })?;
-                    config_with_id.config.datasets.insert(
+                    config_with_id.config.datasets.insert_overwrite(
                         row.try_into().map_err(|e| {
                             Error::internal_error(&format!("{e:#}"))
                         })?,
@@ -2623,7 +3328,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::inv_omicron_sled_config_disk::dsl;
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config_disk,
@@ -2641,17 +3349,93 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id.into())
+                        .get_mut(&row.sled_config_id)
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "disk config {:?}: unknown config ID: {:?}",
                                 row.id, row.sled_config_id
                             ))
                         })?;
-                    config_with_id.config.disks.insert(row.into());
+                    config_with_id.config.disks.insert_overwrite(row.into());
                 }
             }
         }
+
+        // Load all the config reconciler top-level rows; build a map keyed by
+        // sled ID.
+        let mut sled_config_reconcilers = {
+            use nexus_db_schema::schema::inv_sled_config_reconciler::dsl;
+
+            let mut results: BTreeMap<SledUuid, _> = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_sled_config_reconciler,
+                    dsl::sled_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvSledConfigReconciler::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.sled_id);
+
+                for row in batch {
+                    results.insert(row.sled_id.into(), row);
+                }
+            }
+
+            results
+        };
+
+        // Load all the sled boot partition details; build a map of maps keyed
+        // by sled ID -> M2Slot.
+        let mut sled_boot_partition_details = {
+            use nexus_db_schema::schema::inv_sled_boot_partition::dsl;
+
+            let mut results: BTreeMap<SledUuid, BTreeMap<M2Slot, _>> =
+                BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_sled_boot_partition,
+                    (dsl::sled_id, dsl::boot_disk_slot),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvSledBootPartition::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.boot_disk_slot)
+                });
+
+                for row in batch {
+                    let sled_map =
+                        results.entry(row.sled_id.into()).or_default();
+                    let slot = row.slot().map_err(|err| {
+                        Error::internal_error(&format!("{err:#}"))
+                    })?;
+                    sled_map.insert(slot, row);
+                }
+            }
+
+            results
+        };
 
         // Load all the config reconciler disk results; build a map of maps
         // keyed by sled ID.
@@ -2663,7 +3447,10 @@ impl DataStore {
                 BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_last_reconciliation_disk_result,
@@ -2699,7 +3486,10 @@ impl DataStore {
                 BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_last_reconciliation_dataset_result,
@@ -2778,7 +3568,10 @@ impl DataStore {
                 BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_last_reconciliation_zone_result,
@@ -2804,11 +3597,143 @@ impl DataStore {
             results
         };
 
+        // Load zone_manifest_zone rows.
+        let mut zone_manifest_artifacts_by_sled_id = {
+            use nexus_db_schema::schema::inv_zone_manifest_zone::dsl;
+
+            let mut by_sled_id: BTreeMap<
+                SledUuid,
+                IdOrdMap<ZoneArtifactInventory>,
+            > = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_zone_manifest_zone,
+                    (dsl::sled_id, dsl::zone_file_name),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvZoneManifestZone::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.zone_file_name.clone())
+                });
+
+                for row in batch {
+                    by_sled_id
+                        .entry(row.sled_id.into())
+                        .or_default()
+                        .insert_unique(row.try_into().map_err(
+                            |e: anyhow::Error| {
+                                Error::internal_error(&e.to_string())
+                            },
+                        )?)
+                        .expect("database ensures the row is unique");
+                }
+            }
+
+            by_sled_id
+        };
+
+        // Load zone-manifest non-boot rows.
+        let mut zone_manifest_non_boot_by_sled_id = {
+            use nexus_db_schema::schema::inv_zone_manifest_non_boot::dsl;
+
+            let mut by_sled_id: BTreeMap<
+                SledUuid,
+                IdOrdMap<ManifestNonBootInventory>,
+            > = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_zone_manifest_non_boot,
+                    (dsl::sled_id, dsl::non_boot_zpool_id),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvZoneManifestNonBoot::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.non_boot_zpool_id)
+                });
+
+                for row in batch {
+                    by_sled_id
+                        .entry(row.sled_id.into())
+                        .or_default()
+                        .insert_unique(row.into())
+                        .expect("database ensures the row is unique");
+                }
+            }
+
+            by_sled_id
+        };
+
+        // Load mupdate-override non-boot rows.
+        let mut mupdate_override_non_boot_by_sled_id = {
+            use nexus_db_schema::schema::inv_mupdate_override_non_boot::dsl;
+
+            let mut by_sled_id: BTreeMap<
+                SledUuid,
+                IdOrdMap<MupdateOverrideNonBootInventory>,
+            > = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_mupdate_override_non_boot,
+                    (dsl::sled_id, dsl::non_boot_zpool_id),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvMupdateOverrideNonBoot::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.non_boot_zpool_id)
+                });
+                for row in batch {
+                    by_sled_id
+                        .entry(row.sled_id.into())
+                        .or_default()
+                        .insert_unique(row.into())
+                        .expect("database ensures the row is unique");
+                }
+            }
+
+            by_sled_id
+        };
+
         // Now load the clickhouse keeper cluster memberships
         let clickhouse_keeper_cluster_membership = {
             use nexus_db_schema::schema::inv_clickhouse_keeper_membership::dsl;
             let mut memberships = BTreeSet::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_clickhouse_keeper_membership,
@@ -2835,10 +3760,77 @@ impl DataStore {
             memberships
         };
 
+        // Load the cockroach status records for all nodes.
+        let cockroach_status: BTreeMap<CockroachNodeId, CockroachStatus> = {
+            use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+
+            let status_records: Vec<InvCockroachStatus> =
+                dsl::inv_cockroachdb_status
+                    .filter(dsl::inv_collection_id.eq(db_id))
+                    .select(InvCockroachStatus::as_select())
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            status_records
+                .into_iter()
+                .map(|record| {
+                    let node_id = CockroachNodeId::new(record.node_id.clone());
+                    let status: nexus_types::inventory::CockroachStatus =
+                        record.try_into().map_err(|e| {
+                            Error::internal_error(&format!("{e:#}"))
+                        })?;
+                    Ok((node_id, status))
+                })
+                .collect::<Result<BTreeMap<_, _>, Error>>()?
+        };
+
+        // Load TimeSync statuses
+        let ntp_timesync = {
+            use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+
+            let records: Vec<InvNtpTimesync> = dsl::inv_ntp_timesync
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvNtpTimesync::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            records
+                .into_iter()
+                .map(|record| TimeSync::from(record))
+                .collect::<IdOrdMap<_>>()
+        };
+
+        // Load internal DNS generation status
+        let internal_dns_generation_status: IdOrdMap<
+            InternalDnsGenerationStatus,
+        > = {
+            use nexus_db_schema::schema::inv_internal_dns::dsl;
+
+            let records: Vec<InvInternalDns> = dsl::inv_internal_dns
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvInternalDns::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            records
+                .into_iter()
+                .map(|record| InternalDnsGenerationStatus::from(record))
+                .collect::<IdOrdMap<_>>()
+        };
+
         // Finally, build up the sled-agent map using the sled agent and
         // omicron zone rows. A for loop is easier to understand than into_iter
         // + filter_map + return Result + collect.
-        let mut sled_agents = BTreeMap::new();
+        let mut sled_agents = IdOrdMap::new();
         for s in sled_agent_rows {
             let sled_id = SledUuid::from(s.sled_id);
             let baseboard_id = s
@@ -2859,7 +3851,7 @@ impl DataStore {
             let ledgered_sled_config = s
                 .ledgered_sled_config
                 .map(|id| {
-                    omicron_sled_configs.get(&id.into()).as_ref()
+                    omicron_sled_configs.get(&id).as_ref()
                     .map(|c| c.config.clone())
                         .ok_or_else(|| {
                         Error::internal_error(
@@ -2877,11 +3869,11 @@ impl DataStore {
                         .map(|c| c.config.clone())
                 })
                 .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
-            let last_reconciliation = s
-                .last_reconciliation_sled_config
-                .map(|id| {
+            let last_reconciliation = sled_config_reconcilers
+                .remove(&sled_id)
+                .map(|reconciler| {
                     let last_reconciled_config = omicron_sled_configs
-                        .get(&id.into())
+                        .get(&reconciler.last_reconciled_config)
                         .as_ref()
                         .ok_or_else(|| {
                             Error::internal_error(
@@ -2891,6 +3883,53 @@ impl DataStore {
                         })?
                         .config
                         .clone();
+
+                    let boot_partitions = {
+                        let boot_disk =
+                            reconciler.boot_disk().map_err(|err| {
+                                Error::internal_error(&format!("{err:#}"))
+                            })?;
+
+                        // Helper to convert our nullable error column into
+                        // either the error message (if present) or, if NULL,
+                        // looking up the `BootPartitionDetails` from the rows
+                        // we loaded above. We have to do this for both slots.
+                        let mut slot_details = |maybe_err, slot| match maybe_err
+                        {
+                            Some(err) => Ok(Err(err)),
+                            None => sled_boot_partition_details
+                                .get_mut(&sled_id)
+                                .and_then(|by_slot| by_slot.remove(&slot))
+                                .map(|details| {
+                                    Ok(BootPartitionDetails::from(details))
+                                })
+                                .ok_or_else(|| {
+                                    Error::internal_error(
+                                        "missing boot partition details that \
+                                         we should have fetched",
+                                    )
+                                }),
+                        };
+
+                        let slot_a = slot_details(
+                            reconciler.boot_partition_a_error,
+                            M2Slot::A,
+                        )?;
+                        let slot_b = slot_details(
+                            reconciler.boot_partition_b_error,
+                            M2Slot::B,
+                        )?;
+
+                        BootPartitionContents { boot_disk, slot_a, slot_b }
+                    };
+
+                    let remove_mupdate_override = reconciler
+                        .remove_mupdate_override
+                        .into_inventory()
+                        .map_err(|err| {
+                            Error::internal_error(&format!("{err:#}"))
+                        })?;
+
                     Ok::<_, Error>(ConfigReconcilerInventory {
                         last_reconciled_config,
                         external_disks: last_reconciliation_disk_results
@@ -2906,9 +3945,26 @@ impl DataStore {
                         zones: last_reconciliation_zone_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
+                        boot_partitions,
+                        remove_mupdate_override,
                     })
                 })
                 .transpose()?;
+
+            let zone_image_resolver = s
+                .zone_image_resolver
+                .into_inventory(
+                    zone_manifest_artifacts_by_sled_id.remove(&sled_id),
+                    zone_manifest_non_boot_by_sled_id.remove(&sled_id),
+                    mupdate_override_non_boot_by_sled_id.remove(&sled_id),
+                )
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to create zone image resolver inventory \
+                         for sled {sled_id}: {}",
+                        InlineErrorChain::new(e.as_ref()),
+                    ))
+                })?;
 
             let sled_agent = nexus_types::inventory::SledAgent {
                 time_collected: s.time_collected,
@@ -2924,6 +3980,7 @@ impl DataStore {
                 sled_role: s.sled_role.into(),
                 usable_hardware_threads: u32::from(s.usable_hardware_threads),
                 usable_physical_ram: s.usable_physical_ram.into(),
+                cpu_family: s.cpu_family.into(),
                 reservoir_size: s.reservoir_size.into(),
                 // For disks, zpools, and datasets, the map for a sled ID is
                 // only populated if there is at least one disk/zpool/dataset
@@ -2944,12 +4001,43 @@ impl DataStore {
                 ledgered_sled_config,
                 reconciler_status,
                 last_reconciliation,
+                zone_image_resolver,
+                // TODO-K[omicron#9516]: Actually query the DB when there is
+                // something there
+                health_monitor: HealthMonitorInventory::new(),
             };
-            sled_agents.insert(sled_id, sled_agent);
+            sled_agents
+                .insert_unique(sled_agent)
+                .expect("database ensures sled_agent_rows has unique sled_id");
         }
 
         // Check that we consumed all the reconciliation results we found in
         // this collection.
+        bail_unless!(
+            sled_config_reconcilers.is_empty(),
+            "found extra sled config reconcilers: {:?}",
+            sled_config_reconcilers.keys(),
+        );
+        {
+            // `sled_boot_partition_details` is a map of maps; we don't prune
+            // the outermost map, but they should all be empty.
+            let sleds_with_leftover_boot_partitions =
+                sled_boot_partition_details
+                    .iter()
+                    .filter_map(|(sled_id, boot_partitions)| {
+                        if boot_partitions.is_empty() {
+                            None
+                        } else {
+                            Some(sled_id)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+            bail_unless!(
+                sleds_with_leftover_boot_partitions.is_empty(),
+                "found extra sled boot partition details: {:?}",
+                sleds_with_leftover_boot_partitions,
+            );
+        }
         bail_unless!(
             last_reconciliation_disk_results.is_empty(),
             "found extra config reconciliation disk results: {:?}",
@@ -2965,6 +4053,21 @@ impl DataStore {
             "found extra config reconciliation zone results: {:?}",
             last_reconciliation_zone_results.keys()
         );
+        bail_unless!(
+            zone_manifest_artifacts_by_sled_id.is_empty(),
+            "found extra zone manifest artifacts: {:?}",
+            zone_manifest_artifacts_by_sled_id.keys()
+        );
+        bail_unless!(
+            zone_manifest_non_boot_by_sled_id.is_empty(),
+            "found extra zone manifest non-boot entries: {:?}",
+            zone_manifest_non_boot_by_sled_id.keys()
+        );
+        bail_unless!(
+            mupdate_override_non_boot_by_sled_id.is_empty(),
+            "found extra mupdate override non-boot entries: {:?}",
+            mupdate_override_non_boot_by_sled_id.keys()
+        );
 
         Ok(Collection {
             id,
@@ -2976,12 +4079,40 @@ impl DataStore {
             cabooses: cabooses_by_id.values().cloned().collect(),
             rot_pages: rot_pages_by_id.values().cloned().collect(),
             sps,
+            host_phase_1_active_slots,
+            host_phase_1_flash_hashes,
             rots,
             cabooses_found,
             rot_pages_found,
             sled_agents,
             clickhouse_keeper_cluster_membership,
+            cockroach_status,
+            ntp_timesync,
+            internal_dns_generation_status,
         })
+    }
+
+    pub async fn inventory_collections_latest(
+        &self,
+        opctx: &OpContext,
+        count: u8,
+    ) -> anyhow::Result<Vec<InvCollection>> {
+        let limit: i64 = i64::from(count);
+        let conn = self
+            .pool_connection_authorized(opctx)
+            .await
+            .context("getting connection")?;
+
+        use nexus_db_schema::schema::inv_collection::dsl;
+        let collections = dsl::inv_collection
+            .select(InvCollection::as_select())
+            .order_by(dsl::time_started.desc())
+            .limit(limit)
+            .load_async(&*conn)
+            .await
+            .context("failed to list collections")?;
+
+        Ok(collections)
     }
 }
 
@@ -2991,18 +4122,17 @@ struct OmicronSledConfigWithId {
     config: OmicronSledConfig,
 }
 
-impl IdMappable for OmicronSledConfigWithId {
-    type Id = OmicronSledConfigUuid;
-
-    fn id(&self) -> Self::Id {
+impl IdOrdItem for OmicronSledConfigWithId {
+    type Key<'a> = OmicronSledConfigUuid;
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+    id_upcast!();
 }
 
 #[derive(Debug)]
 struct ConfigReconcilerFields {
     ledgered_sled_config: Option<OmicronSledConfigUuid>,
-    last_reconciliation_sled_config: Option<OmicronSledConfigUuid>,
     reconciler_status: InvConfigReconcilerStatus,
 }
 
@@ -3010,6 +4140,7 @@ struct ConfigReconcilerFields {
 // per-sled config reconciler status rows for an inventory collection.
 #[derive(Debug, Default)]
 struct ConfigReconcilerRows {
+    config_reconcilers: Vec<InvSledConfigReconciler>,
     sled_configs: Vec<InvOmicronSledConfig>,
     disks: Vec<InvOmicronSledConfigDisk>,
     datasets: Vec<InvOmicronSledConfigDataset>,
@@ -3019,6 +4150,7 @@ struct ConfigReconcilerRows {
     dataset_results: Vec<InvLastReconciliationDatasetResult>,
     orphaned_datasets: Vec<InvLastReconciliationOrphanedDataset>,
     zone_results: Vec<InvLastReconciliationZoneResult>,
+    boot_partitions: Vec<InvSledBootPartition>,
     config_reconciler_fields_by_sled:
         BTreeMap<SledUuid, ConfigReconcilerFields>,
 }
@@ -3029,8 +4161,8 @@ impl ConfigReconcilerRows {
         collection: &Collection,
     ) -> anyhow::Result<Self> {
         let mut this = Self::default();
-        for (sled_id, sled_agent) in &collection.sled_agents {
-            this.accumulate(collection_id, *sled_id, sled_agent)?;
+        for sled_agent in &collection.sled_agents {
+            this.accumulate(collection_id, sled_agent)?;
         }
         Ok(this)
     }
@@ -3038,29 +4170,86 @@ impl ConfigReconcilerRows {
     fn accumulate(
         &mut self,
         collection_id: CollectionUuid,
-        sled_id: SledUuid,
         sled_agent: &SledAgent,
     ) -> anyhow::Result<()> {
+        let sled_id = sled_agent.sled_id;
         let mut ledgered_sled_config = None;
         if let Some(config) = &sled_agent.ledgered_sled_config {
             ledgered_sled_config =
                 Some(self.accumulate_config(collection_id, config)?);
         }
 
-        let mut last_reconciliation_sled_config = None;
+        let mut last_reconciliation_config_id = None;
         if let Some(last_reconciliation) = &sled_agent.last_reconciliation {
             // If this config exactly matches the ledgered sled config, we can
             // reuse the foreign key; otherwise, accumulate the new one.
-            if Some(&last_reconciliation.last_reconciled_config)
-                == sled_agent.ledgered_sled_config.as_ref()
-            {
-                last_reconciliation_sled_config = ledgered_sled_config;
-            } else {
-                last_reconciliation_sled_config =
-                    Some(self.accumulate_config(
+            let last_reconciled_config =
+                if Some(&last_reconciliation.last_reconciled_config)
+                    == sled_agent.ledgered_sled_config.as_ref()
+                {
+                    // We always set this to `Some(_)` above if we have a
+                    // ledgered sled config, which we must to pass this check.
+                    ledgered_sled_config
+                        .expect("always Some(_) if we have a ledgered config")
+                } else {
+                    self.accumulate_config(
                         collection_id,
                         &last_reconciliation.last_reconciled_config,
-                    )?);
+                    )?
+                };
+            last_reconciliation_config_id = Some(last_reconciled_config);
+            let remove_mupdate_override = InvRemoveMupdateOverride::new(
+                last_reconciliation.remove_mupdate_override.as_ref(),
+            );
+
+            self.config_reconcilers.push(InvSledConfigReconciler::new(
+                collection_id,
+                sled_id,
+                last_reconciled_config,
+                last_reconciliation.boot_partitions.boot_disk.clone(),
+                last_reconciliation
+                    .boot_partitions
+                    .slot_a
+                    .as_ref()
+                    .err()
+                    .cloned(),
+                last_reconciliation
+                    .boot_partitions
+                    .slot_b
+                    .as_ref()
+                    .err()
+                    .cloned(),
+                remove_mupdate_override,
+            ));
+
+            // Boot partition _errors_ are kept in `InvSledConfigReconciler`
+            // above, but non-errors get their own rows; handle those here.
+            //
+            // `.into_iter().flatten()` strips out `None`s (i.e., slots that had
+            // an error, after the conversions we do here).
+            for (slot, details) in [
+                last_reconciliation
+                    .boot_partitions
+                    .slot_a
+                    .as_ref()
+                    .ok()
+                    .map(|details| (M2Slot::A, details.clone())),
+                last_reconciliation
+                    .boot_partitions
+                    .slot_b
+                    .as_ref()
+                    .ok()
+                    .map(|details| (M2Slot::B, details.clone())),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                self.boot_partitions.push(InvSledBootPartition::new(
+                    collection_id,
+                    sled_id,
+                    slot,
+                    details,
+                ));
             }
 
             self.disk_results.extend(
@@ -3126,17 +4315,17 @@ impl ConfigReconcilerRows {
                 // If this config exactly matches the ledgered or
                 // most-recently-reconciled configs, we can reuse those IDs.
                 // Otherwise, accumulate a new one.
-                let reconciler_status_sled_config = if Some(config)
+                let reconciler_status_sled_config = if Some(&**config)
                     == sled_agent.ledgered_sled_config.as_ref()
                 {
                     ledgered_sled_config
-                } else if Some(config)
+                } else if Some(&**config)
                     == sled_agent
                         .last_reconciliation
                         .as_ref()
                         .map(|lr| &lr.last_reconciled_config)
                 {
-                    last_reconciliation_sled_config
+                    last_reconciliation_config_id
                 } else {
                     Some(self.accumulate_config(collection_id, config)?)
                 };
@@ -3165,11 +4354,7 @@ impl ConfigReconcilerRows {
 
         self.config_reconciler_fields_by_sled.insert(
             sled_id,
-            ConfigReconcilerFields {
-                ledgered_sled_config,
-                last_reconciliation_sled_config,
-                reconciler_status,
-            },
+            ConfigReconcilerFields { ledgered_sled_config, reconciler_status },
         );
 
         Ok(())
@@ -3187,6 +4372,7 @@ impl ConfigReconcilerRows {
             sled_config_id,
             config.generation,
             config.remove_mupdate_override,
+            config.host_phase_2.clone(),
         ));
         self.disks.extend(config.disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(
@@ -3229,13 +4415,13 @@ pub trait DataStoreInventoryTest: Send + Sync {
     /// This does not paginate.
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>>;
+    ) -> BoxFuture<'_, anyhow::Result<Vec<InvCollection>>>;
 }
 
 impl DataStoreInventoryTest for DataStore {
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>> {
+    ) -> BoxFuture<'_, anyhow::Result<Vec<InvCollection>>> {
         async {
             let conn = self
                 .pool_connection_for_tests()
@@ -3277,23 +4463,18 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::QueryDsl;
-    use gateway_client::types::SpType;
     use nexus_db_schema::schema;
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
     use nexus_inventory::now_db_precision;
-    use nexus_sled_agent_shared::inventory::OrphanedDataset;
-    use nexus_sled_agent_shared::inventory::{
-        ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-        ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
-    };
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPageWhich;
+    use nexus_types::inventory::SpType;
     use omicron_common::api::external::Error;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
+    use omicron_common::disk::M2Slot;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
@@ -3301,6 +4482,18 @@ mod test {
         ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
+    use sled_agent_types::inventory::BootPartitionContents;
+    use sled_agent_types::inventory::BootPartitionDetails;
+    use sled_agent_types::inventory::OrphanedDataset;
+    use sled_agent_types::inventory::{
+        BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
+        RemoveMupdateOverrideInventory,
+    };
+    use sled_agent_types::inventory::{
+        ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+        ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
+    };
+    use sled_hardware_types::BaseboardId;
     use std::num::NonZeroU32;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;
@@ -4066,71 +5259,100 @@ mod test {
         //
         // * try all three `ConfigReconcilerInventoryStatus` variants
         // * add a `last_reconciliation` with a mix of success/error results
-        let mut sled_agents = collection.sled_agents.values_mut();
-        let sa1 = sled_agents.next().expect("at least 1 sled agent");
-        let sa2 = sled_agents.next().expect("at least 2 sled agents");
-        let sa3 = sled_agents.next().expect("at least 3 sled agents");
+        {
+            let mut sled_agents = collection.sled_agents.iter_mut();
+            let mut sa1 = sled_agents.next().expect("at least 1 sled agent");
+            let mut sa2 = sled_agents.next().expect("at least 2 sled agents");
+            let mut sa3 = sled_agents.next().expect("at least 3 sled agents");
 
-        sa1.reconciler_status = ConfigReconcilerInventoryStatus::NotYetRun;
-        sa1.last_reconciliation = None;
+            sa1.reconciler_status = ConfigReconcilerInventoryStatus::NotYetRun;
+            sa1.last_reconciliation = None;
 
-        sa2.reconciler_status = ConfigReconcilerInventoryStatus::Running {
-            config: sa2.ledgered_sled_config.clone().unwrap(),
-            started_at: now_db_precision(),
-            running_for: Duration::from_secs(1),
-        };
-        sa2.last_reconciliation = Some({
-            let make_result = |kind, i| {
-                if i % 2 == 0 {
-                    ConfigReconcilerInventoryResult::Ok
-                } else {
-                    ConfigReconcilerInventoryResult::Err {
-                        message: format!("fake {kind} error {i}"),
-                    }
-                }
+            sa2.reconciler_status = ConfigReconcilerInventoryStatus::Running {
+                config: Box::new(sa2.ledgered_sled_config.clone().unwrap()),
+                started_at: now_db_precision(),
+                running_for: Duration::from_secs(1),
             };
-            ConfigReconcilerInventory {
-                last_reconciled_config: sa2
-                    .ledgered_sled_config
-                    .clone()
-                    .unwrap(),
-                external_disks: (0..10)
-                    .map(|i| {
-                        (PhysicalDiskUuid::new_v4(), make_result("disk", i))
-                    })
-                    .collect(),
-                datasets: (0..10)
-                    .map(|i| (DatasetUuid::new_v4(), make_result("dataset", i)))
-                    .collect(),
-                orphaned_datasets: (0..5)
-                    .map(|i| OrphanedDataset {
-                        name: DatasetName::new(
-                            ZpoolName::new_external(ZpoolUuid::new_v4()),
-                            DatasetKind::Cockroach,
-                        ),
-                        reason: format!("test orphan {i}"),
-                        id: if i % 2 == 0 {
-                            Some(DatasetUuid::new_v4())
-                        } else {
-                            None
+            sa2.last_reconciliation = Some({
+                let make_result = |kind, i| {
+                    if i % 2 == 0 {
+                        ConfigReconcilerInventoryResult::Ok
+                    } else {
+                        ConfigReconcilerInventoryResult::Err {
+                            message: format!("fake {kind} error {i}"),
+                        }
+                    }
+                };
+                ConfigReconcilerInventory {
+                    last_reconciled_config: sa2
+                        .ledgered_sled_config
+                        .clone()
+                        .unwrap(),
+                    external_disks: (0..10)
+                        .map(|i| {
+                            (PhysicalDiskUuid::new_v4(), make_result("disk", i))
+                        })
+                        .collect(),
+                    datasets: (0..10)
+                        .map(|i| {
+                            (DatasetUuid::new_v4(), make_result("dataset", i))
+                        })
+                        .collect(),
+                    orphaned_datasets: (0..5)
+                        .map(|i| OrphanedDataset {
+                            name: DatasetName::new(
+                                ZpoolName::new_external(ZpoolUuid::new_v4()),
+                                DatasetKind::Cockroach,
+                            ),
+                            reason: format!("test orphan {i}"),
+                            id: if i % 2 == 0 {
+                                Some(DatasetUuid::new_v4())
+                            } else {
+                                None
+                            },
+                            mounted: i % 2 == 1,
+                            available: (10 * i).into(),
+                            used: i.into(),
+                        })
+                        .collect(),
+                    zones: (0..10)
+                        .map(|i| {
+                            (OmicronZoneUuid::new_v4(), make_result("zone", i))
+                        })
+                        .collect(),
+                    boot_partitions: BootPartitionContents {
+                        boot_disk: Ok(M2Slot::B),
+                        slot_a: Err("some error".to_string()),
+                        slot_b: Ok(BootPartitionDetails {
+                            header: BootImageHeader {
+                                flags: u64::MAX,
+                                data_size: 123456,
+                                image_size: 234567,
+                                target_size: 345678,
+                                sha256: [1; 32],
+                                image_name: "test image".to_string(),
+                            },
+                            artifact_hash: ArtifactHash([2; 32]),
+                            artifact_size: 456789,
+                        }),
+                    },
+                    remove_mupdate_override: Some(
+                        RemoveMupdateOverrideInventory {
+                            boot_disk_result: Ok(
+                                RemoveMupdateOverrideBootSuccessInventory::Removed,
+                            ),
+                            non_boot_message: "simulated non-boot message"
+                                .to_owned(),
                         },
-                        mounted: i % 2 == 1,
-                        available: (10 * i).into(),
-                        used: i.into(),
-                    })
-                    .collect(),
-                zones: (0..10)
-                    .map(|i| {
-                        (OmicronZoneUuid::new_v4(), make_result("zone", i))
-                    })
-                    .collect(),
-            }
-        });
+                    ),
+                }
+            });
 
-        sa3.reconciler_status = ConfigReconcilerInventoryStatus::Idle {
-            completed_at: now_db_precision(),
-            ran_for: Duration::from_secs(5),
-        };
+            sa3.reconciler_status = ConfigReconcilerInventoryStatus::Idle {
+                completed_at: now_db_precision(),
+                ran_for: Duration::from_secs(5),
+            };
+        }
 
         // Write it to the db; read it back and check it survived.
         datastore
@@ -4173,9 +5395,9 @@ mod test {
         // Mutate some zones on one of the sleds to have various image sources.
         {
             // Find a sled that has a few zones in one of its sled configs.
-            let sa = collection
+            let mut sa = collection
                 .sled_agents
-                .values_mut()
+                .iter_mut()
                 .find(|sa| {
                     sa.ledgered_sled_config
                         .as_ref()

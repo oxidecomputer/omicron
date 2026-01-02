@@ -24,6 +24,7 @@
 //! whether a zone without a known node ID ever existed.
 
 use crate::app::background::BackgroundTask;
+use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
 use anyhow::Context;
 use anyhow::ensure;
 use futures::FutureExt;
@@ -33,7 +34,6 @@ use futures::stream;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
@@ -46,15 +46,13 @@ use tokio::sync::watch;
 
 pub struct CockroachNodeIdCollector {
     datastore: Arc<DataStore>,
-    rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
 }
 
 impl CockroachNodeIdCollector {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
-        >,
+        rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
     ) -> Self {
         Self { datastore, rx_blueprint }
     }
@@ -74,7 +72,8 @@ impl CockroachNodeIdCollector {
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
 
-        let Some((_bp_target, blueprint)) = update.as_deref() else {
+        let Some(LoadedTargetBlueprint { blueprint, target: _ }) = update
+        else {
             warn!(
                 &opctx.log, "Blueprint execution: skipped";
                 "reason" => "no blueprint",
@@ -84,19 +83,18 @@ impl CockroachNodeIdCollector {
 
         // With a bit of concurrency, confirm we know the node IDs for all the
         // CRDB zones in the blueprint.
-        let mut results =
-            stream::iter(addrs_from_blueprint.cockroach_admin_addrs(blueprint))
-                .map(|(zone_id, admin_addr)| {
-                    let datastore = &self.datastore;
-                    async move {
-                        ensure_node_id_known(
-                            opctx, datastore, zone_id, admin_addr,
-                        )
-                        .await
-                        .map_err(|err| (zone_id, err))
-                    }
-                })
-                .buffer_unordered(8);
+        let mut results = stream::iter(
+            addrs_from_blueprint.cockroach_admin_addrs(&blueprint),
+        )
+        .map(|(zone_id, admin_addr)| {
+            let datastore = &self.datastore;
+            async move {
+                ensure_node_id_known(opctx, datastore, zone_id, admin_addr)
+                    .await
+                    .map_err(|err| (zone_id, err))
+            }
+        })
+        .buffer_unordered(8);
 
         let mut nsuccess = 0;
         let mut errors = vec![];
@@ -128,6 +126,9 @@ impl CockroachNodeIdCollector {
 // This trait exists so we can inject addresses in our unit tests below that
 // aren't required to have admin servers listening on the fixed
 // `COCKROACH_ADMIN_PORT`.
+//
+// TODO(https://github.com/oxidecomputer/omicron/issues/8496): Add the admin
+// service to DNS, remove this?
 trait CockroachAdminFromBlueprint {
     fn cockroach_admin_addrs<'a>(
         &'a self,
@@ -238,17 +239,16 @@ mod tests {
     use httptest::responders::status_code;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
+    use nexus_types::deployment::BlueprintSource;
+    use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use omicron_common::api::external::Generation;
-    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::SledUuid;
-    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
-    use std::iter;
+    use std::collections::BTreeSet;
     use std::net::SocketAddr;
 
     // The `CockroachAdminFromBlueprintViaFixedPort` type above is the standard
@@ -257,97 +257,81 @@ mod tests {
     // can _write_ that test), so test it in isolation here.
     #[test]
     fn test_default_cockroach_admin_addrs_from_blueprint() {
-        // Construct an empty blueprint with one sled.
-        let sled_id = SledUuid::new_v4();
-        let mut blueprint = BlueprintBuilder::build_empty_with_sleds(
-            iter::once(sled_id),
-            "test",
-        );
-        let bp_sled = &mut blueprint
-            .sleds
-            .get_mut(&sled_id)
-            .expect("found entry for test sled");
+        const TEST_NAME: &str =
+            "test_default_cockroach_admin_addrs_from_blueprint";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let log = &logctx.log;
 
-        let zpool_id = ZpoolUuid::new_v4();
-        let make_crdb_zone_config =
-            |disposition, id, addr: SocketAddrV6| BlueprintZoneConfig {
-                disposition,
-                id,
-                filesystem_pool: ZpoolName::new_external(zpool_id),
-                zone_type: BlueprintZoneType::CockroachDb(
-                    blueprint_zone_type::CockroachDb {
-                        address: addr,
-                        dataset: OmicronZoneDataset {
-                            pool_name: format!("oxp_{}", zpool_id)
-                                .parse()
-                                .unwrap(),
-                        },
-                    },
-                ),
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            };
+        // Build an example system with one sled.
+        let (_, bp0) =
+            ExampleSystemBuilder::new(log, TEST_NAME).nsleds(1).build();
 
-        // Add three CRDB zones with known addresses; the first and third are
-        // in service, and the second is expunged. Only the first and third
-        // should show up when we ask for addresses below.
-        let crdb_id1 = OmicronZoneUuid::new_v4();
-        let crdb_id2 = OmicronZoneUuid::new_v4();
-        let crdb_id3 = OmicronZoneUuid::new_v4();
-        let crdb_addr1: SocketAddrV6 = "[2001:db8::1]:1111".parse().unwrap();
-        let crdb_addr2: SocketAddrV6 = "[2001:db8::2]:1234".parse().unwrap();
-        let crdb_addr3: SocketAddrV6 = "[2001:db8::3]:1234".parse().unwrap();
-        bp_sled.zones.insert(make_crdb_zone_config(
-            BlueprintZoneDisposition::InService,
-            crdb_id1,
-            crdb_addr1,
-        ));
-        bp_sled.zones.insert(make_crdb_zone_config(
-            BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
-            },
-            crdb_id2,
-            crdb_addr2,
-        ));
-        bp_sled.zones.insert(make_crdb_zone_config(
-            BlueprintZoneDisposition::InService,
-            crdb_id3,
-            crdb_addr3,
-        ));
+        // `ExampleSystemBuilder` doesn't place any cockroach nodes; assert so
+        // we bail out early if that changes.
+        let ncockroach = bp0
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .filter(|(_, z)| z.zone_type.is_cockroach())
+            .count();
+        assert_eq!(ncockroach, 0);
 
-        // Also add a non-CRDB zone to ensure it's filtered out.
-        bp_sled.zones.insert(BlueprintZoneConfig {
-            disposition: BlueprintZoneDisposition::InService,
-            id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
-            zone_type: BlueprintZoneType::CruciblePantry(
-                blueprint_zone_type::CruciblePantry {
-                    address: "[::1]:0".parse().unwrap(),
-                },
-            ),
-            image_source: BlueprintZoneImageSource::InstallDataset,
-        });
-
-        // We expect to see CRDB zones 1 and 3 with their IPs but the ports
-        // changed to `COCKROACH_ADMIN_PORT`.
-        let mut expected = vec![
-            (
-                crdb_id1,
-                SocketAddrV6::new(*crdb_addr1.ip(), COCKROACH_ADMIN_PORT, 0, 0),
-            ),
-            (
-                crdb_id3,
-                SocketAddrV6::new(*crdb_addr3.ip(), COCKROACH_ADMIN_PORT, 0, 0),
-            ),
-        ];
-        // We sort starting with zone id, since the original zones are sorted
-        // that way in a map.
-        expected.sort_unstable();
-
+        // This blueprint has no cockroach zones, so should have no admin addrs
+        // either.
         let admin_addrs = CockroachAdminFromBlueprintViaFixedPort
-            .cockroach_admin_addrs(&blueprint)
+            .cockroach_admin_addrs(&bp0)
             .collect::<Vec<_>>();
+        assert_eq!(admin_addrs, Vec::new());
+
+        // Add 5 cockroach zones to our sled.
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &bp0,
+            TEST_NAME,
+            PlannerRng::from_entropy(),
+        )
+        .expect("constructed builder");
+        let sled_id = bp0.sleds().next().expect("1 sled");
+        for _ in 0..5 {
+            builder
+                .sled_add_zone_cockroachdb(
+                    sled_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
+                .expect("added cockroach");
+        }
+        let mut bp1 = builder.build(BlueprintSource::Test);
+
+        // Mutate this blueprint: expunge 2 of the 5 zones. Record the expected
+        // admin addrs from the other three.
+        let mut expected = BTreeSet::new();
+        let sled_config = bp1.sleds.get_mut(&sled_id).unwrap();
+        let mut seen = 0;
+        for mut zone in sled_config.zones.iter_mut() {
+            if !zone.zone_type.is_cockroach() {
+                continue;
+            }
+            // Keep even; expunge odd.
+            if seen % 2 == 0 {
+                let ip = zone.underlay_ip();
+                let addr = SocketAddrV6::new(ip, COCKROACH_ADMIN_PORT, 0, 0);
+                expected.insert((zone.id, addr));
+            } else {
+                zone.disposition = BlueprintZoneDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    ready_for_cleanup: false,
+                };
+            }
+            seen += 1;
+        }
+        assert_eq!(seen, 5);
+        assert_eq!(expected.len(), 3);
+
+        // Confirm we only see the three expected addrs.
+        let admin_addrs = CockroachAdminFromBlueprintViaFixedPort
+            .cockroach_admin_addrs(&bp1)
+            .collect::<BTreeSet<_>>();
         assert_eq!(expected, admin_addrs);
+
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -386,10 +370,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let blueprint = BlueprintBuilder::build_empty_with_sleds(
-            iter::once(SledUuid::new_v4()),
-            "test",
-        );
+        let blueprint = BlueprintBuilder::build_empty("test");
         let blueprint_target = BlueprintTarget {
             target_id: blueprint.id,
             enabled: true,
@@ -397,7 +378,10 @@ mod tests {
         };
 
         let (_tx_blueprint, rx_blueprint) =
-            watch::channel(Some(Arc::new((blueprint_target, blueprint))));
+            watch::channel(Some(LoadedTargetBlueprint {
+                target: blueprint_target,
+                blueprint: Arc::new(blueprint),
+            }));
         let mut collector =
             CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
 
@@ -449,10 +433,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let blueprint = BlueprintBuilder::build_empty_with_sleds(
-            iter::once(SledUuid::new_v4()),
-            "test",
-        );
+        let blueprint = BlueprintBuilder::build_empty("test");
         let blueprint_target = BlueprintTarget {
             target_id: blueprint.id,
             enabled: true,
@@ -460,7 +441,10 @@ mod tests {
         };
 
         let (_tx_blueprint, rx_blueprint) =
-            watch::channel(Some(Arc::new((blueprint_target, blueprint))));
+            watch::channel(Some(LoadedTargetBlueprint {
+                target: blueprint_target,
+                blueprint: Arc::new(blueprint),
+            }));
         let mut collector =
             CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
 

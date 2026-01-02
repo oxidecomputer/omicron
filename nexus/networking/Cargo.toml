@@ -1,11 +1,14 @@
 [package]
 name = "nexus-networking"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
 workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
 
 [dependencies]
 futures.workspace = true
@@ -19,3 +22,6 @@ sled-agent-client.workspace = true
 slog.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"

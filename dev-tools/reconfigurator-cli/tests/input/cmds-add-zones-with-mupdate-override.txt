@@ -1,0 +1,40 @@
+# This script tests the add-zones-with-mupdate-override
+# planner config.
+
+# Load example system
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Create a TUF repository from a fake manifest. We're going to use this
+# repository to test out the minimum release generation flow.
+tuf-assemble ../../update-common/manifests/fake.toml
+set target-release repo-1.0.0.zip
+
+# Update the install dataset on this sled to the target release.
+# (This populates the zone manifest, used for no-op conversions from
+# install dataset to artifact down the road.)
+sled-update-install-dataset serial0 --to-target-release
+
+# Simulate a mupdate on sled 0 by setting the mupdate override field to a
+# new UUID (generated using uuidgen).
+sled-set serial0 mupdate-override 2d0f6cbc-addc-47a2-962a-6a01e13376bf
+
+# Generate a new inventory and plan against that.
+inventory-generate
+blueprint-plan latest latest
+
+# Diff the blueprints. This diff should show "will remove mupdate override"
+# and the target release minimum generation being set.
+blueprint-diff latest
+
+# Set Nexus redundancy to 4.
+set num-nexus 4
+
+# Plan with the new Nexus. This will not add any Nexus zones.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Set the add-zones-with-mupdate-override config, then do a planning run.
+# This *will* add a new Nexus zone.
+set planner-config --add-zones-with-mupdate-override true
+blueprint-plan latest latest
+blueprint-diff latest

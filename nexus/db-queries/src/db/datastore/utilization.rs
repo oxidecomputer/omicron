@@ -9,6 +9,7 @@ use diesel::BoolExpressionMethods;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -57,6 +58,12 @@ impl DataStore {
                 .or(dsl::memory_allocated.gt(0))
                 .or(dsl::storage_allocated.gt(0)),
         )
+        // Filter out default silo from utilization response by its well-known
+        // ID because it has gigantic quotas that confuse everyone. The proper
+        // solution will be to eliminate the default silo altogether, but this
+        // is dramatically easier.
+        // See https://github.com/oxidecomputer/omicron/issues/5731
+        .filter(dsl::silo_id.ne(DEFAULT_SILO_ID))
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))

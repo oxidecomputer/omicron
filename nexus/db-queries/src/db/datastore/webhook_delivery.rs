@@ -191,8 +191,10 @@ impl DataStore {
         opctx: &OpContext,
         rx_id: &AlertReceiverUuid,
         cfg: &DeliveryConfig,
-    ) -> Result<impl ExactSizeIterator<Item = DeliveryAndEvent> + 'static, Error>
-    {
+    ) -> Result<
+        impl ExactSizeIterator<Item = DeliveryAndEvent> + 'static + use<>,
+        Error,
+    > {
         let conn = self.pool_connection_authorized(opctx).await?;
         let now =
             diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
@@ -549,8 +551,10 @@ mod test {
         );
 
         let mut all_deliveries = std::collections::HashSet::new();
-        let mut paginator =
-            Paginator::new(crate::db::datastore::SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            crate::db::datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let deliveries = datastore
                 .webhook_rx_delivery_list(

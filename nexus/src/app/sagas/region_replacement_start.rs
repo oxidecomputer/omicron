@@ -683,7 +683,7 @@ async fn srrs_create_fake_volume(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            generation: 0,
             opts: CrucibleOpts {
                 id: *new_volume_id.as_untyped_uuid(),
                 target: vec![old_region_address.into()],
@@ -764,14 +764,13 @@ async fn srrs_update_request_record(
 pub(crate) mod test {
     use crate::{
         app::RegionAllocationStrategy, app::db::DataStore,
-        app::saga::create_saga_dag,
+        app::db::datastore::Disk, app::saga::create_saga_dag,
         app::sagas::region_replacement_start::Params,
         app::sagas::region_replacement_start::SagaRegionReplacementStart,
         app::sagas::region_replacement_start::find_only_new_region,
         app::sagas::test_helpers::test_opctx,
     };
     use chrono::Utc;
-    use nexus_db_lookup::LookupPath;
     use nexus_db_model::CrucibleDataset;
     use nexus_db_model::Region;
     use nexus_db_model::RegionReplacement;
@@ -785,6 +784,7 @@ pub(crate) mod test {
     use nexus_types::identity::Asset;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::VolumeUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
@@ -819,14 +819,15 @@ pub(crate) mod test {
 
         // Assert disk has three allocated regions
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk_id)
-            .fetch()
-            .await
-            .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+        let Disk::Crucible(disk) =
+            datastore.disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+            datastore.get_allocated_regions(disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         // Replace one of the disk's regions
@@ -875,7 +876,7 @@ pub(crate) mod test {
 
         // Validate number of regions for disk didn't change
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+            datastore.get_allocated_regions(disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         // Validate that one of the regions for the disk is the new one
@@ -897,30 +898,30 @@ pub(crate) mod test {
     async fn test_find_only_new_region(cptestctx: &ControlPlaneTestContext) {
         let log = &cptestctx.logctx.log;
 
-        let datasets = vec![
+        let datasets = [
             CrucibleDataset::new(
                 DatasetUuid::new_v4(),
-                Uuid::new_v4(),
+                ZpoolUuid::new_v4(),
                 "[fd00:1122:3344:101::1]:12345".parse().unwrap(),
             ),
             CrucibleDataset::new(
                 DatasetUuid::new_v4(),
-                Uuid::new_v4(),
+                ZpoolUuid::new_v4(),
                 "[fd00:1122:3344:102::1]:12345".parse().unwrap(),
             ),
             CrucibleDataset::new(
                 DatasetUuid::new_v4(),
-                Uuid::new_v4(),
+                ZpoolUuid::new_v4(),
                 "[fd00:1122:3344:103::1]:12345".parse().unwrap(),
             ),
             CrucibleDataset::new(
                 DatasetUuid::new_v4(),
-                Uuid::new_v4(),
+                ZpoolUuid::new_v4(),
                 "[fd00:1122:3344:104::1]:12345".parse().unwrap(),
             ),
         ];
 
-        let regions = vec![
+        let regions = [
             Region::new(
                 datasets[0].id(),
                 VolumeUuid::new_v4(),
@@ -1074,8 +1075,8 @@ pub(crate) mod test {
                 }
             }
 
-            VolumeConstructionRequest::Region { gen, .. } => {
-                *gen = 0;
+            VolumeConstructionRequest::Region { generation, .. } => {
+                *generation = 0;
             }
 
             _ => {}
@@ -1136,14 +1137,15 @@ pub(crate) mod test {
         let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk_id)
-            .fetch()
-            .await
-            .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+        let Disk::Crucible(disk) =
+            datastore.disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+            datastore.get_allocated_regions(disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         let region_to_replace: &Region = &allocated_regions[0].1;
@@ -1211,14 +1213,15 @@ pub(crate) mod test {
         let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk_id)
-            .fetch()
-            .await
-            .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+        let Disk::Crucible(disk) =
+            datastore.disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+            datastore.get_allocated_regions(disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         let region_to_replace: &Region = &allocated_regions[0].1;

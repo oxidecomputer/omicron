@@ -9,6 +9,7 @@
 
 mod error;
 pub mod http_pagination;
+pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
 use crate::update::ArtifactId;
@@ -23,12 +24,12 @@ pub use error::*;
 use futures::stream::BoxStream;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use parse_display::Display;
 use parse_display::FromStr;
 use rand::Rng;
-use rand::thread_rng;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
@@ -42,8 +43,10 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::num::ParseIntError;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::ops::Deref;
+use std::ops::RangeInclusive;
 use std::str::FromStr;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -317,7 +320,7 @@ impl JsonSchema for Name {
         "Name".to_string()
     }
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         name_schema(schemars::schema::Metadata {
             title: Some(
@@ -398,13 +401,13 @@ impl JsonSchema for NameOrId {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![
-                    label_schema("id", gen.subschema_for::<Uuid>()),
-                    label_schema("name", gen.subschema_for::<Name>()),
+                    label_schema("id", generator.subschema_for::<Uuid>()),
+                    label_schema("name", generator.subschema_for::<Name>()),
                 ]),
                 ..Default::default()
             })),
@@ -450,7 +453,7 @@ impl JsonSchema for UserId {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         name_schema(schemars::schema::Metadata {
             title: Some("A username for a local-only user".to_string()),
@@ -493,72 +496,6 @@ fn name_schema(
         ..Default::default()
     }
     .into()
-}
-
-/// Name for a built-in role
-#[derive(
-    Clone,
-    Debug,
-    DeserializeFromStr,
-    Display,
-    Eq,
-    FromStr,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    SerializeDisplay,
-)]
-#[display("{resource_type}.{role_name}")]
-pub struct RoleName {
-    // "resource_type" is generally the String value of one of the
-    // `ResourceType` variants.  We could store the parsed `ResourceType`
-    // instead, but it's useful to be able to represent RoleNames for resource
-    // types that we don't know about.  That could happen if we happen to find
-    // them in the database, for example.
-    #[from_str(regex = "[a-z-]+")]
-    resource_type: String,
-    #[from_str(regex = "[a-z-]+")]
-    role_name: String,
-}
-
-impl RoleName {
-    pub fn new(resource_type: &str, role_name: &str) -> RoleName {
-        RoleName {
-            resource_type: String::from(resource_type),
-            role_name: String::from(role_name),
-        }
-    }
-}
-
-/// Custom JsonSchema implementation to encode the constraints on RoleName
-impl JsonSchema for RoleName {
-    fn schema_name() -> String {
-        "RoleName".to_string()
-    }
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("A name for a built-in role".to_string()),
-                description: Some(
-                    "Role names consist of two string components \
-                     separated by dot (\".\")."
-                        .to_string(),
-                ),
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                max_length: Some(63),
-                min_length: None,
-                pattern: Some("[a-z-]+\\.[a-z-]+".to_string()),
-            })),
-            ..Default::default()
-        })
-    }
 }
 
 /// Byte count to express memory or storage capacity.
@@ -641,13 +578,16 @@ impl ByteCount {
 
 impl Display for ByteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        if self.to_bytes() >= TiB && self.to_bytes() % TiB == 0 {
+        if self.to_bytes() >= TiB && self.to_bytes().is_multiple_of(TiB) {
             write!(f, "{} TiB", self.to_whole_tebibytes())
-        } else if self.to_bytes() >= GiB && self.to_bytes() % GiB == 0 {
+        } else if self.to_bytes() >= GiB && self.to_bytes().is_multiple_of(GiB)
+        {
             write!(f, "{} GiB", self.to_whole_gibibytes())
-        } else if self.to_bytes() >= MiB && self.to_bytes() % MiB == 0 {
+        } else if self.to_bytes() >= MiB && self.to_bytes().is_multiple_of(MiB)
+        {
             write!(f, "{} MiB", self.to_whole_mebibytes())
-        } else if self.to_bytes() >= KiB && self.to_bytes() % KiB == 0 {
+        } else if self.to_bytes() >= KiB && self.to_bytes().is_multiple_of(KiB)
+        {
             write!(f, "{} KiB", self.to_whole_kibibytes())
         } else {
             write!(f, "{} B", self.to_bytes())
@@ -656,7 +596,16 @@ impl Display for ByteCount {
 }
 
 // TODO-cleanup This could use the experimental std::num::IntErrorKind.
-#[derive(Debug, Eq, thiserror::Error, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Debug,
+    Eq,
+    thiserror::Error,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
 pub enum ByteCountRangeError {
     #[error("value is too small for a byte count")]
     TooSmall,
@@ -719,7 +668,12 @@ impl From<ByteCount> for i64 {
     Diffable,
 )]
 #[daft(leaf)]
-pub struct Generation(u64);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct Generation(
+    // Generations are restricted to 2**63 - 1 as documented above.
+    #[cfg_attr(any(test, feature = "testing"), strategy(0..=i64::MAX as u64))]
+    u64,
+);
 
 impl Generation {
     // `as` is a little distasteful because it allows lossy conversion, but we
@@ -935,7 +889,7 @@ impl JsonSchema for Hostname {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -965,6 +919,7 @@ impl JsonSchema for Hostname {
 // General types used to implement API resources
 
 /// Identifies a type of API resource
+// NOTE: Please keep this enum in alphabetical order.
 #[derive(
     Clone,
     Copy,
@@ -984,75 +939,80 @@ pub enum ResourceType {
     AddressLotBlock,
     AffinityGroup,
     AffinityGroupMember,
-    AntiAffinityGroup,
-    AntiAffinityGroupMember,
     Alert,
     AlertReceiver,
     AllowList,
+    AntiAffinityGroup,
+    AntiAffinityGroupMember,
+    AuditLogEntry,
     BackgroundTask,
-    BgpConfig,
     BgpAnnounceSet,
+    BgpConfig,
     Blueprint,
-    Fleet,
-    Silo,
-    SiloUser,
-    SiloGroup,
-    SiloQuotas,
-    IdentityProvider,
-    SamlIdentityProvider,
-    SshKey,
     Certificate,
     ConsoleSession,
-    DeviceAuthRequest,
-    DeviceAccessToken,
-    Project,
     Dataset,
+    DeviceAccessToken,
+    DeviceAuthRequest,
     Disk,
+    Fleet,
+    FloatingIp,
+    IdentityProvider,
     Image,
-    SiloImage,
-    ProjectImage,
     Instance,
-    LoopbackAddress,
-    SiloAuthSettings,
-    SwitchPortSettings,
-    SupportBundle,
-    IpPool,
-    IpPoolResource,
     InstanceNetworkInterface,
     InternetGateway,
-    InternetGatewayIpPool,
     InternetGatewayIpAddress,
+    InternetGatewayIpPool,
+    IpPool,
+    IpPoolResource,
+    LldpLinkConfig,
+    LoopbackAddress,
+    MetricProducer,
+    MulticastGroup,
+    MulticastGroupMember,
+    NatEntry,
+    Oximeter,
     PhysicalDisk,
+    Probe,
+    ProbeNetworkInterface,
+    Project,
+    ProjectImage,
     Rack,
+    RoleBuiltin,
+    RouterRoute,
+    SagaDbg,
+    SamlIdentityProvider,
+    ScimClientBearerToken,
     Service,
     ServiceNetworkInterface,
+    Silo,
+    SiloAuthSettings,
+    SiloGroup,
+    SiloImage,
+    SiloQuotas,
+    SiloUser,
     Sled,
     SledInstance,
     SledLedger,
-    Switch,
-    SagaDbg,
     Snapshot,
+    SshKey,
+    SupportBundle,
+    Switch,
+    SwitchPort,
+    SwitchPortSettings,
+    TufArtifact,
+    TufRepo,
+    TufTrustRoot,
+    UserBuiltin,
+    Vmm,
     Volume,
     Vpc,
     VpcFirewallRule,
-    VpcSubnet,
     VpcRouter,
-    RouterRoute,
-    Oximeter,
-    MetricProducer,
-    RoleBuiltin,
-    TufRepo,
-    TufArtifact,
-    SwitchPort,
-    UserBuiltin,
-    Zpool,
-    Vmm,
-    Ipv4NatEntry,
-    FloatingIp,
-    Probe,
-    ProbeNetworkInterface,
-    LldpLinkConfig,
+    VpcSubnet,
     WebhookSecret,
+    Zpool,
 }
 
 // IDENTITY METADATA
@@ -1257,6 +1217,10 @@ pub struct Instance {
 
     #[serde(flatten)]
     pub auto_restart_status: InstanceAutoRestartStatus,
+
+    /// The CPU platform for this instance. If this is `null`, the instance
+    /// requires no particular CPU platform.
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
 /// Status of control-plane driven automatic failure recovery for this instance.
@@ -1321,6 +1285,51 @@ pub enum InstanceAutoRestartPolicy {
     BestEffort,
 }
 
+/// A required CPU platform for an instance.
+///
+/// When an instance specifies a required CPU platform:
+///
+/// - The system may expose (to the VM) new CPU features that are only present
+///   on that platform (or on newer platforms of the same lineage that also
+///   support those features).
+/// - The instance must run on hosts that have CPUs that support all the
+///   features of the supplied platform.
+///
+/// That is, the instance is restricted to hosts that have the CPUs which
+/// support all features of the required platform, but in exchange the CPU
+/// features exposed by the platform are available for the guest to use. Note
+/// that this may prevent an instance from starting (if the hosts that could run
+/// it are full but there is capacity on other incompatible hosts).
+///
+/// If an instance does not specify a required CPU platform, then when
+/// it starts, the control plane selects a host for the instance and then
+/// supplies the guest with the "minimum" CPU platform supported by that host.
+/// This maximizes the number of hosts that can run the VM if it later needs to
+/// migrate to another host.
+///
+/// In all cases, the CPU features presented by a given CPU platform are a
+/// subset of what the corresponding hardware may actually support; features
+/// which cannot be used from a virtual environment or do not have full
+/// hypervisor support may be masked off. See RFD 314 for specific CPU features
+/// in a CPU platform.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceCpuPlatform {
+    /// An AMD Milan-like CPU platform.
+    AmdMilan,
+
+    /// An AMD Turin-like CPU platform.
+    // Note that there is only Turin, not Turin Dense - feature-wise there are
+    // collapsed together as the guest-visible platform is the same.
+    // If the two must be distinguished for instance placement, we'll want to
+    // track whatever the motivating constraint is more explicitly. CPU
+    // families, and especially the vendor code names, don't necessarily promise
+    // details about specific processor packaging choices.
+    AmdTurin,
+}
+
 // AFFINITY GROUPS
 
 /// Affinity policy used to describe "what to do when a request cannot be satisfied"
@@ -1362,7 +1371,12 @@ pub enum AffinityGroupMember {
     ///
     /// Instances can belong to up to 16 affinity groups.
     // See: INSTANCE_MAX_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
 }
 
 impl SimpleIdentityOrName for AffinityGroupMember {
@@ -1393,7 +1407,12 @@ pub enum AntiAffinityGroupMember {
     ///
     /// Instances can belong to up to 16 anti-affinity groups.
     // See: INSTANCE_MAX_ANTI_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
 }
 
 impl SimpleIdentityOrName for AntiAffinityGroupMember {
@@ -1414,6 +1433,13 @@ impl SimpleIdentityOrName for AntiAffinityGroupMember {
 
 // DISKS
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskType {
+    Distributed,
+    Local,
+}
+
 /// View of a Disk
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
@@ -1428,6 +1454,7 @@ pub struct Disk {
     pub block_size: ByteCount,
     pub state: DiskState,
     pub device_path: String,
+    pub disk_type: DiskType,
 }
 
 /// State of a Disk
@@ -1842,11 +1869,135 @@ pub struct VpcFirewallRuleFilter {
 
 /// The protocols that may be specified in a firewall rule's filter
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "UPPERCASE")]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
 pub enum VpcFirewallRuleProtocol {
     Tcp,
     Udp,
-    Icmp,
+    Icmp(Option<VpcFirewallIcmpFilter>),
+    // TODO: IPv6 not supported by instances.
+    // Icmpv6(Option<VpcFirewallIcmpFilter>),
+    // TODO: OPTE does not yet permit further L4 protocols. (opte#609)
+    // Other(u16),
+}
+
+impl FromStr for VpcFirewallRuleProtocol {
+    type Err = Error;
+
+    fn from_str(proto: &str) -> Result<Self, Self::Err> {
+        let (ty_str, content_str) = match proto.split_once(':') {
+            None => (proto, None),
+            Some((lhs, rhs)) => (lhs, Some(rhs)),
+        };
+
+        match (ty_str, content_str) {
+            (lhs, None) if lhs.eq_ignore_ascii_case("tcp") => Ok(Self::Tcp),
+            (lhs, None) if lhs.eq_ignore_ascii_case("udp") => Ok(Self::Udp),
+            (lhs, None) if lhs.eq_ignore_ascii_case("icmp") => {
+                Ok(Self::Icmp(None))
+            }
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp") => {
+                Ok(Self::Icmp(Some(rhs.parse()?)))
+            }
+            (lhs, None) => Err(Error::invalid_value(
+                "vpc_firewall_rule_protocol",
+                format!("unrecognized protocol: {lhs}"),
+            )),
+            (lhs, Some(rhs)) => Err(Error::invalid_value(
+                "vpc_firewall_rule_protocol",
+                format!(
+                    "cannot specify extra filters ({rhs}) for protocol \"{lhs}\""
+                ),
+            )),
+        }
+    }
+}
+
+impl TryFrom<String> for VpcFirewallRuleProtocol {
+    type Error = <VpcFirewallRuleProtocol as FromStr>::Err;
+
+    fn try_from(proto: String) -> Result<Self, Self::Error> {
+        proto.parse()
+    }
+}
+
+impl Display for VpcFirewallRuleProtocol {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        match self {
+            VpcFirewallRuleProtocol::Tcp => write!(f, "tcp"),
+            VpcFirewallRuleProtocol::Udp => write!(f, "udp"),
+            VpcFirewallRuleProtocol::Icmp(None) => write!(f, "icmp"),
+            VpcFirewallRuleProtocol::Icmp(Some(v)) => write!(f, "icmp:{v}"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallIcmpFilter {
+    pub icmp_type: u8,
+    pub code: Option<IcmpParamRange>,
+}
+
+impl Display for VpcFirewallIcmpFilter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        write!(f, "{}", self.icmp_type)?;
+        if let Some(code) = self.code {
+            write!(f, ",{code}")?;
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for VpcFirewallIcmpFilter {
+    type Err = Error;
+
+    fn from_str(filter: &str) -> Result<Self, Self::Err> {
+        let (ty_str, code_str) = match filter.split_once(',') {
+            None => (filter, None),
+            Some((lhs, rhs)) => (lhs, Some(rhs)),
+        };
+
+        Ok(Self {
+            icmp_type: ty_str.parse::<u8>().map_err(|e| {
+                Error::invalid_value(
+                    "icmp_type",
+                    format!("{ty_str:?} unparsable for type: {e}"),
+                )
+            })?,
+            code: code_str
+                .map(|v| {
+                    v.parse::<IcmpParamRange>().map_err(|e| {
+                        Error::invalid_value("code", e.to_string())
+                    })
+                })
+                .transpose()?,
+        })
+    }
+}
+
+impl From<u8> for IcmpParamRange {
+    fn from(value: u8) -> Self {
+        Self { first: value, last: value }
+    }
+}
+
+impl TryFrom<RangeInclusive<u8>> for IcmpParamRange {
+    type Error = IcmpParamRangeError;
+
+    fn try_from(value: RangeInclusive<u8>) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(IcmpParamRangeError::EmptyRange)
+        } else {
+            let (first, last) = value.into_inner();
+            Ok(Self { first, last })
+        }
+    }
+}
+
+impl From<IcmpParamRange> for RangeInclusive<u8> {
+    fn from(value: IcmpParamRange) -> Self {
+        value.first..=value.last
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -1976,30 +2127,48 @@ pub struct L4PortRange {
 }
 
 impl FromStr for L4PortRange {
-    type Err = String;
+    type Err = L4PortRangeError;
     fn from_str(range: &str) -> Result<Self, Self::Err> {
-        const INVALID_PORT_NUMBER_MSG: &str = "invalid port number";
-
         match range.split_once('-') {
             None => {
                 let port = range
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .map_err(|e| L4PortRangeError::Value(range.into(), e))?
                     .into();
                 Ok(L4PortRange { first: port, last: port })
             }
+            Some(("", _)) => Err(L4PortRangeError::MissingStart),
+            Some((_, "")) => Err(L4PortRangeError::MissingEnd),
             Some((left, right)) => {
                 let first = left
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .map_err(|e| L4PortRangeError::Value(left.into(), e))?
                     .into();
                 let last = right
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .map_err(|e| L4PortRangeError::Value(right.into(), e))?
                     .into();
                 Ok(L4PortRange { first, last })
             }
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum L4PortRangeError {
+    #[error("range has no start value")]
+    MissingStart,
+    #[error("range has no end value")]
+    MissingEnd,
+    #[error("range has larger start value than end value")]
+    EmptyRange,
+    #[error("{0:?} unparsable for type: {1}")]
+    Value(String, ParseIntError),
+}
+
+impl From<L4PortRangeError> for Error {
+    fn from(value: L4PortRangeError) -> Self {
+        Error::invalid_value("l4_port_range", value.to_string())
     }
 }
 
@@ -2027,7 +2196,7 @@ impl JsonSchema for L4PortRange {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2048,6 +2217,126 @@ impl JsonSchema for L4PortRange {
                 min_length: Some(1),
                 pattern: Some(
                     r#"^[0-9]{1,5}(-[0-9]{1,5})?$"#.to_string(),
+                ),
+            })),
+            ..Default::default()
+        }.into()
+    }
+}
+
+impl From<L4Port> for L4PortRange {
+    fn from(value: L4Port) -> Self {
+        Self { first: value, last: value }
+    }
+}
+
+impl TryFrom<RangeInclusive<L4Port>> for L4PortRange {
+    type Error = L4PortRangeError;
+
+    fn try_from(value: RangeInclusive<L4Port>) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(L4PortRangeError::EmptyRange)
+        } else {
+            let (first, last) = value.into_inner();
+            Ok(Self { first, last })
+        }
+    }
+}
+
+/// A range of ICMP(v6) types or codes. This range is inclusive on both ends.
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, SerializeDisplay, PartialEq,
+)]
+pub struct IcmpParamRange {
+    /// The first number in the range
+    pub first: u8,
+    /// The last number in the range
+    pub last: u8,
+}
+
+impl FromStr for IcmpParamRange {
+    type Err = IcmpParamRangeError;
+    fn from_str(range: &str) -> Result<Self, Self::Err> {
+        match range.split_once('-') {
+            None => {
+                let param = range
+                    .parse::<u8>()
+                    .map_err(|e| IcmpParamRangeError::Value(range.into(), e))?;
+                Ok(IcmpParamRange { first: param, last: param })
+            }
+            Some(("", _)) => Err(IcmpParamRangeError::MissingStart),
+            Some((_, "")) => Err(IcmpParamRangeError::MissingEnd),
+            Some((left, right)) => {
+                let first = left
+                    .parse::<u8>()
+                    .map_err(|e| IcmpParamRangeError::Value(left.into(), e))?;
+                let last = right
+                    .parse::<u8>()
+                    .map_err(|e| IcmpParamRangeError::Value(right.into(), e))?;
+
+                Ok(IcmpParamRange { first, last })
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum IcmpParamRangeError {
+    #[error("range has no start value")]
+    MissingStart,
+    #[error("range has no end value")]
+    MissingEnd,
+    #[error("range has larger start value than end value")]
+    EmptyRange,
+    #[error("{0:?} unparsable for type: {1}")]
+    Value(String, ParseIntError),
+}
+
+impl TryFrom<String> for IcmpParamRange {
+    type Error = <IcmpParamRange as FromStr>::Err;
+
+    fn try_from(range: String) -> Result<Self, Self::Error> {
+        range.parse()
+    }
+}
+
+impl Display for IcmpParamRange {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.first == self.last {
+            write!(f, "{}", self.first)
+        } else {
+            write!(f, "{}-{}", self.first, self.last)
+        }
+    }
+}
+
+impl JsonSchema for IcmpParamRange {
+    fn schema_name() -> String {
+        "IcmpParamRange".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A range of ICMP(v6) types or codes".to_string()),
+                description: Some(
+                    "An inclusive-inclusive range of ICMP(v6) types or codes. \
+                    The second value may be omitted to represent a single parameter."
+                        .to_string(),
+                ),
+                examples: vec!["3".into(), "20-120".into()],
+                ..Default::default()
+            })),
+            instance_type: Some(
+                schemars::schema::InstanceType::String.into()
+            ),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(7),  // 3 digits for each value and the dash
+                min_length: Some(1),
+                pattern: Some(
+                    r#"^[0-9]{1,3}(-[0-9]{1,3})?$"#.to_string(),
                 ),
             })),
             ..Default::default()
@@ -2102,15 +2391,15 @@ impl MacAddr {
 
     /// Generate a random MAC address for a guest network interface
     pub fn random_guest() -> Self {
-        let value =
-            thread_rng().gen_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
+        let value = rand::rng()
+            .random_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
         Self::from_i64(value)
     }
 
     /// Generate a random MAC address in the system address range
     pub fn random_system() -> Self {
-        let value = thread_rng()
-            .gen_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
+        let value = rand::rng()
+            .random_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
         Self::from_i64(value)
     }
 
@@ -2199,7 +2488,7 @@ impl JsonSchema for MacAddr {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2249,17 +2538,23 @@ impl Vni {
     /// The VNI for the builtin services VPC.
     pub const SERVICES_VNI: Self = Self(100);
 
+    /// VNI default if no VPC is provided for a multicast group.
+    ///
+    /// This is a low-numbered VNI to avoid colliding with user VNIs.
+    /// However, it is not in the Oxide-reserved range yet.
+    pub const DEFAULT_MULTICAST_VNI: Self = Self(77);
+
     /// Oxide reserves a slice of initial VNIs for its own use.
     pub const MIN_GUEST_VNI: u32 = 1024;
 
     /// Create a new random VNI.
     pub fn random() -> Self {
-        Self(rand::thread_rng().gen_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
+        Self(rand::rng().random_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
     }
 
     /// Create a new random VNI in the Oxide-reserved space.
     pub fn random_system() -> Self {
-        Self(rand::thread_rng().gen_range(0..Self::MIN_GUEST_VNI))
+        Self(rand::rng().random_range(0..Self::MIN_GUEST_VNI))
     }
 }
 
@@ -2385,6 +2680,16 @@ pub struct AddressLotCreateResponse {
     pub lot: AddressLot,
 
     /// The address lot blocks that were created.
+    pub blocks: Vec<AddressLotBlock>,
+}
+
+/// An address lot and associated blocks resulting from viewing an address lot.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AddressLotViewResponse {
+    /// The address lot.
+    pub lot: AddressLot,
+
+    /// The address lot blocks.
     pub blocks: Vec<AddressLotBlock>,
 }
 
@@ -2816,7 +3121,8 @@ pub struct SwitchPortRouteConfig {
     /// over an 802.1Q tagged L2 segment.
     pub vlan_id: Option<u16>,
 
-    /// RIB Priority indicating priority within and across protocols.
+    /// Route RIB priority. Higher priority indicates precedence within and across
+    /// protocols.
     pub rib_priority: Option<u8>,
 }
 
@@ -2988,6 +3294,11 @@ pub enum BgpPeerState {
     /// Waiting for keepaliave or notification from peer.
     OpenConfirm,
 
+    /// There is an ongoing Connection Collision that hasn't yet been resolved.
+    /// Two connections are maintained until one connection receives an Open or
+    /// is able to progress into Established.
+    ConnectionCollision,
+
     /// Synchronizing with peer.
     SessionSetup,
 
@@ -3005,6 +3316,9 @@ impl From<mg_admin_client::types::FsmStateKind> for BgpPeerState {
             FsmStateKind::Active => BgpPeerState::Active,
             FsmStateKind::OpenSent => BgpPeerState::OpenSent,
             FsmStateKind::OpenConfirm => BgpPeerState::OpenConfirm,
+            FsmStateKind::ConnectionCollision => {
+                BgpPeerState::ConnectionCollision
+            }
             FsmStateKind::SessionSetup => BgpPeerState::SessionSetup,
             FsmStateKind::Established => BgpPeerState::Established,
         }
@@ -3055,12 +3369,12 @@ impl BgpMessageHistory {
 
 impl JsonSchema for BgpMessageHistory {
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         let obj = schemars::schema::Schema::Object(
             schemars::schema::SchemaObject::default(),
         );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        generator.definitions_mut().insert(Self::schema_name(), obj.clone());
         obj
     }
 
@@ -3127,6 +3441,32 @@ pub enum BfdMode {
     MultiHop,
 }
 
+/// Configuration of inbound ICMP allowed by API services.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+pub struct ServiceIcmpConfig {
+    /// When enabled, Nexus is able to receive ICMP Destination Unreachable
+    /// type 3 (port unreachable) and type 4 (fragmentation needed),
+    /// Redirect, and Time Exceeded messages. These enable Nexus to perform Path
+    /// MTU discovery and better cope with fragmentation issues. Otherwise all
+    /// inbound ICMP traffic will be dropped.
+    pub enabled: bool,
+}
+
+// TODO: move these TUF repo structs out of this file. They're not external
+// anymore after refactors that use views::TufRepo in the external API. They are
+// still used extensively in internal services.
+
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoDescription {
@@ -3186,40 +3526,19 @@ pub struct TufArtifactMeta {
 
     /// The size of the artifact in bytes.
     pub size: u64,
-}
 
-/// Data about a successful TUF repo import into Nexus.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct TufRepoInsertResponse {
-    /// The repository as present in the database.
-    pub recorded: TufRepoDescription,
+    /// Contents of the `BORD` field of a Hubris archive caboose. Only
+    /// applicable to artifacts that are Hubris archives.
+    ///
+    /// This field should always be `Some(_)` if `sign` is `Some(_)`, but the
+    /// opposite is not true (SP images will have a `board` but not a `sign`).
+    pub board: Option<String>,
 
-    /// Whether this repository already existed or is new.
-    pub status: TufRepoInsertStatus,
-}
-
-/// Status of a TUF repo import.
-///
-/// Part of `TufRepoInsertResponse`.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum TufRepoInsertStatus {
-    /// The repository already existed in the database.
-    AlreadyExists,
-
-    /// The repository did not exist, and was inserted into the database.
-    Inserted,
-}
-
-/// Data about a successful TUF repo get from Nexus.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct TufRepoGetResponse {
-    /// The description of the repository.
-    pub description: TufRepoDescription,
+    /// Contents of the `SIGN` field of a Hubris archive caboose, i.e.,
+    /// an identifier for the set of valid signing keys. Currently only
+    /// applicable to RoT image and bootloader artifacts, where it will
+    /// be an LPC55 Root Key Table Hash (RKTH).
+    pub sign: Option<Vec<u8>>,
 }
 
 #[derive(
@@ -3228,7 +3547,9 @@ pub struct TufRepoGetResponse {
 pub struct Probe {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub sled: Uuid,
+
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
 }
 
 /// Define policy relating to the import and export of prefixes from a BGP
@@ -3257,7 +3578,7 @@ pub enum ImportExportPolicy {
 /// will fail to parse if the key is not present. The JSON Schema in the
 /// OpenAPI definition will also reflect that the field is required. See
 /// <https://github.com/serde-rs/serde/issues/2753>.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct Nullable<T>(pub Option<T>);
 
 impl<T> From<Option<T>> for Nullable<T> {
@@ -3322,11 +3643,12 @@ mod test {
     use super::Generation;
     use super::RouteDestination;
     use super::RouteTarget;
+    use super::VpcFirewallIcmpFilter;
     use super::VpcFirewallRuleHostFilter;
     use super::VpcFirewallRuleTarget;
     use super::{
-        ByteCount, Digest, L4Port, L4PortRange, Name, RoleName,
-        VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
+        ByteCount, Digest, L4Port, L4PortRange, Name, VpcFirewallRuleAction,
+        VpcFirewallRuleDirection, VpcFirewallRuleFilter,
         VpcFirewallRulePriority, VpcFirewallRuleProtocol,
         VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
         VpcFirewallRuleUpdateParams,
@@ -3407,54 +3729,6 @@ mod test {
             eprintln!("check name \"{}\" (should be valid)", name);
             assert_eq!(name, name.parse::<Name>().unwrap().as_str());
         }
-    }
-
-    #[test]
-    fn test_role_name_parse() {
-        // Error cases
-        let bad_inputs = vec![
-            // empty string is always worth testing
-            "",
-            // missing dot
-            "project",
-            // extra dot (or, illegal character in the second component)
-            "project.admin.super",
-            // missing resource type (or, another bogus resource type)
-            ".admin",
-            // missing role name
-            "project.",
-            // illegal characters in role name
-            "project.not_good",
-        ];
-
-        for input in bad_inputs {
-            eprintln!("check name {:?} (expecting error)", input);
-            let result =
-                input.parse::<RoleName>().expect_err("unexpectedly succeeded");
-            eprintln!("(expected) error: {:?}", result);
-        }
-
-        eprintln!("check name \"project.admin\" (expecting success)");
-        let role_name =
-            "project.admin".parse::<RoleName>().expect("failed to parse");
-        assert_eq!(role_name.to_string(), "project.admin");
-        assert_eq!(role_name.resource_type, "project");
-        assert_eq!(role_name.role_name, "admin");
-
-        eprintln!("check name \"barf.admin\" (expecting success)");
-        let role_name =
-            "barf.admin".parse::<RoleName>().expect("failed to parse");
-        assert_eq!(role_name.to_string(), "barf.admin");
-        assert_eq!(role_name.resource_type, "barf");
-        assert_eq!(role_name.role_name, "admin");
-
-        eprintln!("check name \"organization.super-user\" (expecting success)");
-        let role_name = "organization.super-user"
-            .parse::<RoleName>()
-            .expect("failed to parse");
-        assert_eq!(role_name.to_string(), "organization.super-user");
-        assert_eq!(role_name.resource_type, "organization");
-        assert_eq!(role_name.role_name, "super-user");
     }
 
     #[test]
@@ -3664,32 +3938,54 @@ mod test {
         );
 
         assert_eq!(
-            L4PortRange::try_from("".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"\" unparsable for type: cannot parse integer from empty string"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("65536".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("65536".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"65536\" unparsable for type: number too large to fit in target type"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("65535-65536".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("65535-65536".to_string())
+                .map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"65536\" unparsable for type: number too large to fit in target type"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("0x23".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("0x23".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"0x23\" unparsable for type: invalid digit found in string"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("0".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("0".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"0\" unparsable for type: number would be zero for non-zero type"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("0-20".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("0-20".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"0\" unparsable for type: number would be zero for non-zero type"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("-20".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("-20".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "range has no start value"
+            ))
         );
     }
 
@@ -3729,7 +4025,7 @@ mod test {
                 "status": "disabled",
                 "direction": "outbound",
                 "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": {"ports": [ "22-25", "27" ], "protocols": [ "UDP" ]},
+                "filters": {"ports": [ "22-25", "27" ], "protocols": [ { "type": "udp" } ]},
                 "action": "deny",
                 "priority": 65533,
                 "description": "second rule"
@@ -3918,6 +4214,77 @@ mod test {
         );
         assert!("foo:foo".parse::<VpcFirewallRuleHostFilter>().is_err());
         assert!("foo".parse::<VpcFirewallRuleHostFilter>().is_err());
+    }
+
+    #[test]
+    fn test_firewall_rule_proto_filter_parse() {
+        assert_eq!(VpcFirewallRuleProtocol::Tcp, "tcp".parse().unwrap());
+        assert_eq!(VpcFirewallRuleProtocol::Udp, "udp".parse().unwrap());
+
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(None),
+            "icmp".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 4,
+                code: None
+            })),
+            "icmp:4".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 60,
+                code: Some(0.into())
+            })),
+            "icmp:60,0".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 60,
+                code: Some((0..=10).try_into().unwrap())
+            })),
+            "icmp:60,0-10".parse().unwrap()
+        );
+        assert_eq!(
+            "icmp:".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value(
+                "icmp_type",
+                "\"\" unparsable for type: cannot parse integer from empty string"
+            ))
+        );
+        assert_eq!(
+            "icmp:20-30".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value(
+                "icmp_type",
+                "\"20-30\" unparsable for type: invalid digit found in string"
+            ))
+        );
+        assert_eq!(
+            "icmp:10,".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value(
+                "code",
+                "\"\" unparsable for type: cannot parse integer from empty string"
+            ))
+        );
+        assert_eq!(
+            "icmp:257,".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value(
+                "icmp_type",
+                "\"257\" unparsable for type: number too large to fit in target type"
+            ))
+        );
+        assert_eq!(
+            "icmp:0,1000-1001".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value(
+                "code",
+                "\"1000\" unparsable for type: number too large to fit in target type"
+            ))
+        );
+        assert_eq!(
+            "icmp:0,30-".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value("code", "range has no end value"))
+        );
     }
 
     #[test]

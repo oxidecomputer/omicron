@@ -71,6 +71,10 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
             false,
             // Auto-restart policy=
             None,
+            // Instance CPU platform=
+            None,
+            // Multicast groups=
+            Vec::new(),
         )
         .await
     }

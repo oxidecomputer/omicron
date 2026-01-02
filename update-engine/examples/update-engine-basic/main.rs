@@ -29,6 +29,11 @@ use update_engine::{
 mod display;
 mod spec;
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "using tokio::main avoids an `oxide-tokio-rt` dependency for \
+        examples"
+)]
 #[tokio::main(worker_threads = 2)]
 async fn main() -> Result<()> {
     let app = App::parse();

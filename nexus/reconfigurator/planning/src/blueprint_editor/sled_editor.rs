@@ -4,13 +4,26 @@
 
 //! Support for editing the blueprint details of a single sled.
 
+use crate::blueprint_builder::BpMupdateOverrideNotClearedReason;
+use crate::blueprint_builder::EditedSledScalarEdits;
+use crate::blueprint_builder::EnsureMupdateOverrideAction;
+use crate::blueprint_builder::EnsureMupdateOverrideUpdatedZone;
 use crate::blueprint_builder::SledEditCounts;
+use crate::planner::NoopConvertGlobalIneligibleReason;
+use crate::planner::NoopConvertSledEligible;
+use crate::planner::NoopConvertSledIneligibleReason;
+use crate::planner::NoopConvertSledInfoMut;
+use crate::planner::NoopConvertSledStatus;
 use crate::planner::SledPlannerRng;
+use host_phase_2::HostPhase2Editor;
+use iddqd::IdOrdMap;
+use iddqd::id_ord_map::Entry;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -18,18 +31,22 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use scalar::ScalarEditor;
+use sled_agent_types::inventory::MupdateOverrideBootInventory;
+use sled_agent_types::inventory::ZoneKind;
 use std::iter;
 use std::mem;
 use std::net::Ipv6Addr;
@@ -37,6 +54,7 @@ use underlay_ip_allocator::SledUnderlayIpAllocator;
 
 mod datasets;
 mod disks;
+mod host_phase_2;
 mod scalar;
 mod underlay_ip_allocator;
 mod zones;
@@ -116,12 +134,21 @@ pub enum SledEditError {
     ZoneOnNonexistentZpool { zone_id: OmicronZoneUuid, zpool: ZpoolName },
     #[error("ran out of underlay IP addresses")]
     OutOfUnderlayIps,
+    #[error(
+        "noop conversion info's mupdate_override_id ({noop_id:?}) didn't \
+        match cached value in blueprint ({blueprint_id})"
+    )]
+    NoopMupdateOverrideMismatch {
+        noop_id: Option<MupdateOverrideUuid>,
+        blueprint_id: MupdateOverrideUuid,
+    },
 }
 
 #[derive(Debug)]
 pub(crate) struct SledEditor(InnerSledEditor);
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum InnerSledEditor {
     // Internally, `SledEditor` has a variant for each variant of `SledState`,
     // as the operations allowed in different states are substantially different
@@ -132,30 +159,18 @@ enum InnerSledEditor {
 }
 
 impl SledEditor {
-    pub fn for_existing_active(
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub fn for_existing(
         config: BlueprintSledConfig,
     ) -> Result<Self, SledInputError> {
-        assert_eq!(
-            config.state,
-            SledState::Active,
-            "for_existing_active called on non-active sled"
-        );
-        let inner = ActiveSledEditor::new(subnet, config)?;
-        Ok(Self(InnerSledEditor::Active(inner)))
-    }
-
-    pub fn for_existing_decommissioned(
-        config: BlueprintSledConfig,
-    ) -> Result<Self, SledInputError> {
-        assert_eq!(
-            config.state,
-            SledState::Decommissioned,
-            "for_existing_decommissioned called on non-decommissioned sled"
-        );
-        let inner =
-            EditedSled { config, edit_counts: SledEditCounts::zeroes() };
-        Ok(Self(InnerSledEditor::Decommissioned(inner)))
+        let inner = match config.state {
+            SledState::Active => {
+                InnerSledEditor::Active(ActiveSledEditor::new(config)?)
+            }
+            SledState::Decommissioned => {
+                InnerSledEditor::Decommissioned(EditedSled::new(config))
+            }
+        };
+        Ok(Self(inner))
     }
 
     pub fn for_new_active(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
@@ -173,6 +188,17 @@ impl SledEditor {
         match &self.0 {
             InnerSledEditor::Active(_) => SledState::Active,
             InnerSledEditor::Decommissioned(_) => SledState::Decommissioned,
+        }
+    }
+
+    /// Returns the subnet of this sled if it is active, or `None` if it is
+    /// decommissioned.
+    pub fn subnet(&self) -> Option<Ipv6Subnet<SLED_PREFIX>> {
+        match &self.0 {
+            InnerSledEditor::Active(active) => {
+                Some(active.underlay_ip_allocator.subnet())
+            }
+            InnerSledEditor::Decommissioned(_) => None,
         }
     }
 
@@ -286,6 +312,27 @@ impl SledEditor {
         }
     }
 
+    pub fn host_phase_2(&self) -> BlueprintHostPhase2DesiredSlots {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => editor.host_phase_2(),
+            InnerSledEditor::Decommissioned(edited) => {
+                edited.config.host_phase_2.clone()
+            }
+        }
+    }
+
+    /// Returns the remove_mupdate_override field for this sled.
+    pub fn get_remove_mupdate_override(&self) -> Option<MupdateOverrideUuid> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                *editor.remove_mupdate_override.value()
+            }
+            InnerSledEditor::Decommissioned(sled) => {
+                sled.config.remove_mupdate_override
+            }
+        }
+    }
+
     fn as_active_mut(
         &mut self,
     ) -> Result<&mut ActiveSledEditor, SledEditError> {
@@ -342,15 +389,52 @@ impl SledEditor {
         self.as_active_mut()?.mark_expunged_zone_ready_for_cleanup(zone_id)
     }
 
-    /// Sets the image source for a zone.
-    ///
-    /// Currently only used by test code.
+    /// Sets the image source for a zone, returning the old image source.
     pub fn set_zone_image_source(
         &mut self,
         zone_id: &OmicronZoneUuid,
         image_source: BlueprintZoneImageSource,
     ) -> Result<BlueprintZoneImageSource, SledEditError> {
         self.as_active_mut()?.set_zone_image_source(zone_id, image_source)
+    }
+
+    // Sets the desired host phase 2 contents.
+    pub fn set_host_phase_2(
+        &mut self,
+        host_phase_2: BlueprintHostPhase2DesiredSlots,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.set_host_phase_2(host_phase_2);
+        Ok(())
+    }
+
+    // Sets the desired host phase 2 contents of a particular slot.
+    pub fn set_host_phase_2_slot(
+        &mut self,
+        slot: M2Slot,
+        host_phase_2: BlueprintHostPhase2DesiredContents,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.set_host_phase_2_slot(slot, host_phase_2);
+        Ok(())
+    }
+
+    /// Updates a sled's mupdate override field based on the mupdate override
+    /// provided by inventory.
+    pub fn ensure_mupdate_override(
+        &mut self,
+        // inv_mupdate_override_info has a weird type (not Option<&T>, not &str)
+        // because this is what `Result::as_ref` returns.
+        inv_mupdate_override_info: Result<
+            &Option<MupdateOverrideBootInventory>,
+            &String,
+        >,
+        pending_mgs_update: Entry<'_, PendingMgsUpdate>,
+        noop_sled_info: NoopConvertSledInfoMut<'_>,
+    ) -> Result<EnsureMupdateOverrideAction, SledEditError> {
+        self.as_active_mut()?.ensure_mupdate_override(
+            inv_mupdate_override_info,
+            pending_mgs_update,
+            noop_sled_info,
+        )
     }
 
     /// Sets remove-mupdate-override configuration for this sled.
@@ -394,6 +478,7 @@ struct ActiveSledEditor {
     disks: DisksEditor,
     datasets: DatasetsEditor,
     remove_mupdate_override: ScalarEditor<Option<MupdateOverrideUuid>>,
+    host_phase_2: HostPhase2Editor,
     debug_force_generation_bump: bool,
 }
 
@@ -401,13 +486,21 @@ struct ActiveSledEditor {
 pub(crate) struct EditedSled {
     pub config: BlueprintSledConfig,
     pub edit_counts: SledEditCounts,
+    pub scalar_edits: EditedSledScalarEdits,
+}
+
+impl EditedSled {
+    fn new(config: BlueprintSledConfig) -> Self {
+        Self {
+            config,
+            edit_counts: SledEditCounts::zeroes(),
+            scalar_edits: EditedSledScalarEdits::zeroes(),
+        }
+    }
 }
 
 impl ActiveSledEditor {
-    pub fn new(
-        subnet: Ipv6Subnet<SLED_PREFIX>,
-        config: BlueprintSledConfig,
-    ) -> Result<Self, SledInputError> {
+    pub fn new(config: BlueprintSledConfig) -> Result<Self, SledInputError> {
         let zones =
             ZonesEditor::new(config.sled_agent_generation, config.zones);
 
@@ -420,7 +513,8 @@ impl ActiveSledEditor {
 
         Ok(Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
-                subnet, zone_ips,
+                config.subnet,
+                zone_ips,
             ),
             incoming_sled_agent_generation: config.sled_agent_generation,
             zones,
@@ -429,6 +523,7 @@ impl ActiveSledEditor {
             remove_mupdate_override: ScalarEditor::new(
                 config.remove_mupdate_override,
             ),
+            host_phase_2: HostPhase2Editor::new(config.host_phase_2),
             debug_force_generation_bump: false,
         })
     }
@@ -448,6 +543,9 @@ impl ActiveSledEditor {
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
             remove_mupdate_override: ScalarEditor::new(None),
+            host_phase_2: HostPhase2Editor::new(
+                BlueprintHostPhase2DesiredSlots::current_contents(),
+            ),
             debug_force_generation_bump: false,
         }
     }
@@ -458,7 +556,13 @@ impl ActiveSledEditor {
         let (zones, zones_counts) = self.zones.finalize();
         let remove_mupdate_override_is_modified =
             self.remove_mupdate_override.is_modified();
+        let changed_host_phase_2 = self.host_phase_2.is_modified();
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
+
+        let scalar_edits = EditedSledScalarEdits {
+            debug_force_generation_bump: self.debug_force_generation_bump,
+            remove_mupdate_override: remove_mupdate_override_is_modified,
+        };
 
         // Bump the generation if we made any changes of concern to sled-agent.
         if self.debug_force_generation_bump
@@ -466,6 +570,7 @@ impl ActiveSledEditor {
             || datasets_counts.has_nonzero_counts()
             || zones_counts.has_nonzero_counts()
             || remove_mupdate_override_is_modified
+            || changed_host_phase_2
         {
             sled_agent_generation = sled_agent_generation.next();
         }
@@ -473,6 +578,7 @@ impl ActiveSledEditor {
         EditedSled {
             config: BlueprintSledConfig {
                 state: SledState::Active,
+                subnet: self.underlay_ip_allocator.subnet(),
                 sled_agent_generation,
                 disks,
                 datasets,
@@ -480,12 +586,14 @@ impl ActiveSledEditor {
                 remove_mupdate_override: self
                     .remove_mupdate_override
                     .finalize(),
+                host_phase_2: self.host_phase_2.finalize(),
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,
                 datasets: datasets_counts,
                 zones: zones_counts,
             },
+            scalar_edits,
         }
     }
 
@@ -546,6 +654,10 @@ impl ActiveSledEditor {
         self.zones.zones(filter)
     }
 
+    pub fn host_phase_2(&self) -> BlueprintHostPhase2DesiredSlots {
+        self.host_phase_2.value()
+    }
+
     pub fn ensure_disk(
         &mut self,
         disk: BlueprintPhysicalDiskConfig,
@@ -555,13 +667,19 @@ impl ActiveSledEditor {
 
         self.disks.ensure(disk)?;
 
-        // Every disk also gets a Debug and Transient Zone Root dataset; ensure
-        // both of those exist as well.
-        let debug = PartialDatasetConfig::for_debug(zpool);
-        let zone_root = PartialDatasetConfig::for_transient_zone_root(zpool);
+        // Every disk also gets:
+        let dataset_configs = [
+            // a Debug dataset
+            PartialDatasetConfig::for_debug(zpool),
+            // Transient Zone Root dataset
+            PartialDatasetConfig::for_transient_zone_root(zpool),
+            // a LocalStorage dataset
+            PartialDatasetConfig::for_local_storage_root(zpool),
+        ];
 
-        self.datasets.ensure_in_service(debug, rng);
-        self.datasets.ensure_in_service(zone_root, rng);
+        for dataset_config in dataset_configs {
+            self.datasets.ensure_in_service(dataset_config, rng);
+        }
 
         Ok(())
     }
@@ -672,6 +790,25 @@ impl ActiveSledEditor {
         Ok(self.zones.set_zone_image_source(zone_id, image_source)?)
     }
 
+    /// Sets the desired host phase 2 contents for this sled.
+    ///
+    /// Returns the old host phase 2 contents.
+    pub fn set_host_phase_2(
+        &mut self,
+        host_phase_2: BlueprintHostPhase2DesiredSlots,
+    ) -> BlueprintHostPhase2DesiredSlots {
+        self.host_phase_2.set_value(host_phase_2)
+    }
+
+    // Sets the desired host phase 2 contents for a specific slot on this sled.
+    pub fn set_host_phase_2_slot(
+        &mut self,
+        slot: M2Slot,
+        host_phase_2: BlueprintHostPhase2DesiredContents,
+    ) {
+        self.host_phase_2.set_slot(slot, host_phase_2);
+    }
+
     /// Backwards compatibility / test helper: If we're given a blueprint that
     /// has zones but wasn't created via `SledEditor`, it might not have
     /// datasets for all its zones. This method backfills them.
@@ -684,6 +821,234 @@ impl ActiveSledEditor {
                 .ensure_in_service(&mut self.datasets, rng);
         }
         Ok(())
+    }
+
+    /// Update a sled's mupdate override field based on the mupdate override
+    /// provided by inventory.
+    pub fn ensure_mupdate_override(
+        &mut self,
+        // inv_mupdate_override_info has a weird type (not Option<&T>, not &str)
+        // because this is what `Result::as_ref` returns.
+        inv_mupdate_override_info: Result<
+            &Option<MupdateOverrideBootInventory>,
+            &String,
+        >,
+        pending_mgs_update: Entry<'_, PendingMgsUpdate>,
+        noop_sled_info: NoopConvertSledInfoMut<'_>,
+    ) -> Result<EnsureMupdateOverrideAction, SledEditError> {
+        match (inv_mupdate_override_info, *self.remove_mupdate_override.value())
+        {
+            (Ok(Some(inv_override)), Some(bp_override))
+                if inv_override.mupdate_override_id == bp_override =>
+            {
+                // If the inventory and blueprint overrides are the same, the
+                // sled agent hasn't yet removed the override. Nothing to do at
+                // the moment.
+                Ok(EnsureMupdateOverrideAction::NoAction {
+                    mupdate_override_id: Some(bp_override),
+                })
+            }
+            (Ok(Some(inv_override)), bp_override) => {
+                // Inventory says there's an override in place, but the
+                // blueprint doesn't (or has a different override in place).
+                // This means that a MUPdate happened since we last did
+                // blueprint planning.
+                //
+                // Set the blueprint's remove_mupdate_override.
+                self.set_remove_mupdate_override(Some(
+                    inv_override.mupdate_override_id,
+                ));
+                // Also update the cached value inside `noop_sled_info`.
+                if let NoopConvertSledInfoMut::Ok(mut info) = noop_sled_info {
+                    use NoopConvertSledIneligibleReason::*;
+
+                    match &mut info.status {
+                        NoopConvertSledStatus::Ineligible(
+                            MupdateOverride { mupdate_override_id, .. },
+                        ) => {
+                            *mupdate_override_id =
+                                inv_override.mupdate_override_id;
+                        }
+                        NoopConvertSledStatus::Ineligible(_) => {
+                            // Some other reason -- sled remains ineligible.
+                        }
+                        NoopConvertSledStatus::Eligible(eligible) => {
+                            // Transition to Ineligible with the new override.
+                            let zones = mem::take(&mut eligible.zones);
+                            info.status = NoopConvertSledStatus::Ineligible(
+                                MupdateOverride {
+                                    mupdate_override_id: inv_override
+                                        .mupdate_override_id,
+                                    zones,
+                                    host_phase_2: Box::new(
+                                        eligible.host_phase_2.clone(),
+                                    ),
+                                },
+                            );
+                        }
+                    }
+                }
+
+                // Set all zone image sources to InstallDataset. This is an
+                // acknowledgement of the current state of the world.
+                let zone_ids: Vec<_> = self
+                    .zones(BlueprintZoneDisposition::is_in_service)
+                    .map(|zone| (zone.id, zone.kind()))
+                    .collect();
+
+                let mut zones = IdOrdMap::with_capacity(zone_ids.len());
+                for (zone_id, kind) in zone_ids {
+                    let old_image_source = self.zones.set_zone_image_source(
+                        &zone_id,
+                        BlueprintZoneImageSource::InstallDataset,
+                    )?;
+                    let item = EnsureMupdateOverrideUpdatedZone {
+                        zone_id,
+                        kind,
+                        old_image_source,
+                        new_image_source:
+                            BlueprintZoneImageSource::InstallDataset,
+                    };
+                    zones.insert_unique(item).expect(
+                        "self.zones is a BTreeMap so zone IDs are unique",
+                    );
+                }
+
+                // Clear out the pending MGS update for this sled.
+                let prev_mgs_update = match pending_mgs_update {
+                    Entry::Vacant(_) => None,
+                    Entry::Occupied(entry) => Some(Box::new(entry.remove())),
+                };
+
+                // Clear out the host phase 2 information for this sled as well.
+                let prev_host_phase_2 = self.set_host_phase_2(
+                    BlueprintHostPhase2DesiredSlots::current_contents(),
+                );
+
+                Ok(EnsureMupdateOverrideAction::BpSetOverride {
+                    inv_override: inv_override.mupdate_override_id,
+                    prev_bp_override: bp_override,
+                    zones,
+                    prev_mgs_update,
+                    prev_host_phase_2,
+                })
+            }
+            (Ok(None), Some(bp_override)) => {
+                // The blueprint says there's an override in place, but the
+                // inventory doesn't. This means that the sled has removed its
+                // override that was set in the above branch.
+                use BpMupdateOverrideNotClearedReason::*;
+
+                match noop_sled_info {
+                    NoopConvertSledInfoMut::Ok(mut info) => match &mut info
+                        .status
+                    {
+                        NoopConvertSledStatus::Ineligible(
+                            NoopConvertSledIneligibleReason::MupdateOverride {
+                                mupdate_override_id,
+                                zones,
+                                host_phase_2,
+                            },
+                        ) => {
+                            // Check that the mupdate override is the same as
+                            // what's in the blueprint.
+                            if *mupdate_override_id == bp_override {
+                                // Clear the mupdate override field.
+                                //
+                                // The actual conversion process will happen
+                                // later, during do_plan_noop_image_source.
+                                self.set_remove_mupdate_override(None);
+                                let zones =
+                                    mem::replace(zones, IdOrdMap::new());
+                                info.status = NoopConvertSledStatus::Eligible(
+                                    NoopConvertSledEligible {
+                                        zones,
+                                        host_phase_2: *host_phase_2.clone(),
+                                    },
+                                );
+                                Ok(EnsureMupdateOverrideAction::BpClearOverride {
+                                    prev_bp_override: bp_override,
+                                })
+                            } else {
+                                Err(
+                                    SledEditError::NoopMupdateOverrideMismatch {
+                                        noop_id: Some(*mupdate_override_id),
+                                        blueprint_id: bp_override,
+                                    },
+                                )
+                            }
+                        }
+                        NoopConvertSledStatus::Ineligible(reason) => Ok(
+                            EnsureMupdateOverrideAction::BpOverrideNotCleared {
+                                bp_override,
+                                reason: NoopSledIneligible(reason.clone()),
+                            },
+                        ),
+                        NoopConvertSledStatus::Eligible(_) => {
+                            // If the override is set, then we should always be
+                            // in the Ineligible state (handled above).
+                            Err(SledEditError::NoopMupdateOverrideMismatch {
+                                noop_id: None,
+                                blueprint_id: bp_override,
+                            })
+                        }
+                    },
+                    NoopConvertSledInfoMut::GlobalIneligible(
+                        NoopConvertGlobalIneligibleReason::NoTargetRelease,
+                    ) => {
+                        // It's fine to clear the override when there's no
+                        // target release, even though noop conversions aren't
+                        // possible.
+                        self.set_remove_mupdate_override(None);
+                        Ok(EnsureMupdateOverrideAction::BpClearOverride {
+                            prev_bp_override: bp_override,
+                        })
+                    }
+                }
+            }
+            (Ok(None), None) => {
+                // No override in place, nothing to do.
+                Ok(EnsureMupdateOverrideAction::NoAction {
+                    mupdate_override_id: None,
+                })
+            }
+            (Err(message), bp_override) => {
+                // If there's an error obtaining mupdate override information:
+                //
+                // * Don't set zone image sources to InstallDataset, because
+                //   Sled Agent *will* run zones out of the install dataset in
+                //   case of an error, but will not run zones with an artifact
+                //   source.
+                // * Do clear host phase 2 and pending MGS updates to reflect
+                //   the reality that Sled Agent will not run zones in this
+                //   case.
+
+                let prev_mgs_update = match pending_mgs_update {
+                    Entry::Vacant(_) => None,
+                    Entry::Occupied(entry) => Some(Box::new(entry.remove())),
+                };
+
+                let prev_host_phase_2 = self.set_host_phase_2(
+                    BlueprintHostPhase2DesiredSlots::current_contents(),
+                );
+
+                // Also update the cached value inside `noop_sled_info`.
+                if let NoopConvertSledInfoMut::Ok(mut info) = noop_sled_info {
+                    info.status = NoopConvertSledStatus::Ineligible(
+                        NoopConvertSledIneligibleReason::MupdateOverrideError {
+                            message: message.clone(),
+                        },
+                    );
+                }
+
+                Ok(EnsureMupdateOverrideAction::GetOverrideError {
+                    message: message.clone(),
+                    bp_override,
+                    prev_mgs_update,
+                    prev_host_phase_2,
+                })
+            }
+        }
     }
 
     /// Set remove-mupdate-override configuration for this sled.

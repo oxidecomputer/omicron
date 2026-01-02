@@ -43,7 +43,7 @@ pub fn run_cmd() -> Result<()> {
             nerrors += 1;
         }
 
-        if pkg_info.name == WORKSPACE_HACK_PACKAGE_NAME {
+        if pkg_info.name.as_str() == WORKSPACE_HACK_PACKAGE_NAME {
             // Skip over workspace-hack because hakari doesn't yet support
             // workspace deps: https://github.com/guppy-rs/guppy/issues/7
             continue;

@@ -9,9 +9,9 @@ use anyhow::Context;
 use anyhow::anyhow;
 use futures::StreamExt;
 use futures::stream;
+use iddqd::IdOrdMap;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::BlueprintSledConfig;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog::warn;
@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 /// the corresponding sleds
 pub(crate) async fn deploy_sled_configs(
     opctx: &OpContext,
-    sleds_by_id: &BTreeMap<SledUuid, Sled>,
+    sleds_by_id: &IdOrdMap<Sled>,
     sled_configs: &BTreeMap<SledUuid, BlueprintSledConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(sled_configs)
@@ -32,7 +32,7 @@ pub(crate) async fn deploy_sled_configs(
                 "generation" => i64::from(&config.sled_agent_generation),
             ));
 
-            let db_sled = match sleds_by_id.get(&sled_id) {
+            let db_sled = match sleds_by_id.get(sled_id) {
                 Some(sled) => sled,
                 None => {
                     if config.are_all_items_expunged() {
@@ -50,7 +50,7 @@ pub(crate) async fn deploy_sled_configs(
             };
 
             let client = nexus_networking::sled_client_from_address(
-                sled_id.into_untyped_uuid(),
+                *sled_id,
                 db_sled.sled_agent_address(),
                 &log,
             );
@@ -80,12 +80,11 @@ pub(crate) async fn deploy_sled_configs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use id_map::IdMap;
-    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
-    use nexus_sled_agent_shared::inventory::SledRole;
+    use iddqd::id_ord_map;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintDatasetConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
+    use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskConfig;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneConfig;
@@ -96,6 +95,7 @@ mod tests {
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
@@ -108,6 +108,9 @@ mod tests {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::OmicronZonesConfig;
+    use sled_agent_types::inventory::SledRole;
+    use std::net::Ipv6Addr;
     use std::net::SocketAddr;
 
     type ControlPlaneTestContext =
@@ -131,8 +134,7 @@ mod tests {
         let sim_sled_agent_config_generation =
             sim_sled_agent.omicron_zones_list().generation;
 
-        let sleds_by_id = BTreeMap::from([(
-            sim_sled_agent.id,
+        let sleds_by_id = id_ord_map! {
             Sled::new(
                 sim_sled_agent.id,
                 SledPolicy::InService {
@@ -142,7 +144,7 @@ mod tests {
                 REPO_DEPOT_PORT,
                 SledRole::Scrimlet,
             ),
-        )]);
+        };
 
         // This is a fully fabricated dataset list for a simulated sled agent.
         //
@@ -157,30 +159,34 @@ mod tests {
         let disk_id = PhysicalDiskUuid::new_v4();
         let disk_pool_id = ZpoolUuid::new_v4();
         let expunged_disk_id = PhysicalDiskUuid::new_v4();
-        let mut disks = IdMap::new();
-        disks.insert(BlueprintPhysicalDiskConfig {
-            disposition: BlueprintPhysicalDiskDisposition::InService,
-            identity: DiskIdentity {
-                vendor: "test-vendor".to_string(),
-                model: "test-model".to_string(),
-                serial: disk_id.to_string(),
-            },
-            id: disk_id,
-            pool_id: disk_pool_id,
-        });
-        disks.insert(BlueprintPhysicalDiskConfig {
-            disposition: BlueprintPhysicalDiskDisposition::Expunged {
-                as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
-            },
-            identity: DiskIdentity {
-                vendor: "test-vendor".to_string(),
-                model: "test-model".to_string(),
-                serial: expunged_disk_id.to_string(),
-            },
-            id: expunged_disk_id,
-            pool_id: ZpoolUuid::new_v4(),
-        });
+        let mut disks = IdOrdMap::new();
+        disks
+            .insert_unique(BlueprintPhysicalDiskConfig {
+                disposition: BlueprintPhysicalDiskDisposition::InService,
+                identity: DiskIdentity {
+                    vendor: "test-vendor".to_string(),
+                    model: "test-model".to_string(),
+                    serial: disk_id.to_string(),
+                },
+                id: disk_id,
+                pool_id: disk_pool_id,
+            })
+            .unwrap();
+        disks
+            .insert_unique(BlueprintPhysicalDiskConfig {
+                disposition: BlueprintPhysicalDiskDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    ready_for_cleanup: false,
+                },
+                identity: DiskIdentity {
+                    vendor: "test-vendor".to_string(),
+                    model: "test-model".to_string(),
+                    serial: expunged_disk_id.to_string(),
+                },
+                id: expunged_disk_id,
+                pool_id: ZpoolUuid::new_v4(),
+            })
+            .unwrap();
 
         // Create two datasets which look like they came from the blueprint: One
         // which is in-service, and one which is expunged.
@@ -190,27 +196,31 @@ mod tests {
         let dataset_id = DatasetUuid::new_v4();
         let dataset_pool = ZpoolName::new_external(disk_pool_id);
         let expunged_dataset_id = DatasetUuid::new_v4();
-        let mut datasets = IdMap::new();
-        datasets.insert(BlueprintDatasetConfig {
-            disposition: BlueprintDatasetDisposition::InService,
-            id: dataset_id,
-            pool: dataset_pool,
-            kind: DatasetKind::Crucible,
-            address: None,
-            quota: None,
-            reservation: None,
-            compression: CompressionAlgorithm::Off,
-        });
-        datasets.insert(BlueprintDatasetConfig {
-            disposition: BlueprintDatasetDisposition::Expunged,
-            id: expunged_dataset_id,
-            pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
-            kind: DatasetKind::Crucible,
-            address: None,
-            quota: None,
-            reservation: None,
-            compression: CompressionAlgorithm::Off,
-        });
+        let mut datasets = IdOrdMap::new();
+        datasets
+            .insert_unique(BlueprintDatasetConfig {
+                disposition: BlueprintDatasetDisposition::InService,
+                id: dataset_id,
+                pool: dataset_pool,
+                kind: DatasetKind::Crucible,
+                address: None,
+                quota: None,
+                reservation: None,
+                compression: CompressionAlgorithm::Off,
+            })
+            .unwrap();
+        datasets
+            .insert_unique(BlueprintDatasetConfig {
+                disposition: BlueprintDatasetDisposition::Expunged,
+                id: expunged_dataset_id,
+                pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+                kind: DatasetKind::Crucible,
+                address: None,
+                quota: None,
+                reservation: None,
+                compression: CompressionAlgorithm::Off,
+            })
+            .unwrap();
 
         // Create two zones which look like they came from the blueprint: One
         // which is in-service, and one which is expunged.
@@ -218,40 +228,46 @@ mod tests {
         // During deployment, the in-service zone should be deployed, but the
         // expunged zone should be ignored.
         let zone_id = OmicronZoneUuid::new_v4();
-        let mut zones = IdMap::new();
-        zones.insert(BlueprintZoneConfig {
-            disposition: BlueprintZoneDisposition::InService,
-            id: zone_id,
-            filesystem_pool: dataset_pool,
-            zone_type: BlueprintZoneType::Oximeter(
-                blueprint_zone_type::Oximeter {
-                    address: "[::1]:0".parse().unwrap(),
+        let mut zones = IdOrdMap::new();
+        zones
+            .insert_unique(BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: zone_id,
+                filesystem_pool: dataset_pool,
+                zone_type: BlueprintZoneType::Oximeter(
+                    blueprint_zone_type::Oximeter {
+                        address: "[::1]:0".parse().unwrap(),
+                    },
+                ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            })
+            .unwrap();
+        zones
+            .insert_unique(BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    ready_for_cleanup: false,
                 },
-            ),
-            image_source: BlueprintZoneImageSource::InstallDataset,
-        });
-        zones.insert(BlueprintZoneConfig {
-            disposition: BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
-            },
-            id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: dataset_pool,
-            zone_type: BlueprintZoneType::Oximeter(
-                blueprint_zone_type::Oximeter {
-                    address: "[::1]:0".parse().unwrap(),
-                },
-            ),
-            image_source: BlueprintZoneImageSource::InstallDataset,
-        });
+                id: OmicronZoneUuid::new_v4(),
+                filesystem_pool: dataset_pool,
+                zone_type: BlueprintZoneType::Oximeter(
+                    blueprint_zone_type::Oximeter {
+                        address: "[::1]:0".parse().unwrap(),
+                    },
+                ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            })
+            .unwrap();
 
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
+            subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             sled_agent_generation: sim_sled_agent_config_generation.next(),
             disks,
             datasets,
             zones,
             remove_mupdate_override: None,
+            host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(),
         };
         let sled_configs =
             [(sim_sled_agent.id, sled_config.clone())].into_iter().collect();

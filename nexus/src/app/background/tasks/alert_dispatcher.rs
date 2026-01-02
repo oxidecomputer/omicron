@@ -129,7 +129,10 @@ impl AlertDispatcher {
         // haven't yet been updated may lack exact subscriptions to event
         // classes that match its globs but were added after the last time its
         // globs were reprocessed.
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let mut globs_reprocessed = 0;
         let mut globs_failed = 0;
         let mut globs_already_reprocessed = 0;
@@ -527,7 +530,10 @@ mod test {
         // webhook_deliverator background task may have activated and might
         // attempt to deliver the event, making it no longer show up in the
         // "ready" query.
-        let mut paginator = Paginator::new(db::datastore::SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            db::datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let mut deliveries = Vec::new();
         while let Some(p) = paginator.next() {
             let batch = datastore

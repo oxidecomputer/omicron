@@ -147,7 +147,10 @@ impl InstanceReincarnation {
     ) -> anyhow::Result<()> {
         let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
 
-        let mut paginator = Paginator::new(self.concurrency_limit);
+        let mut paginator = Paginator::new(
+            self.concurrency_limit,
+            dropshot::PaginationOrder::Ascending,
+        );
         let instances_found = status.instances_found.entry(reason).or_insert(0);
         let mut sagas_started = 0;
         while let Some(p) = paginator.next() {
@@ -313,6 +316,7 @@ mod test {
     use nexus_db_model::InstanceRuntimeState;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Vmm;
+    use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_db_queries::authz;
@@ -325,6 +329,7 @@ mod test {
     use omicron_common::api::external::InstanceAutoRestartPolicy;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::SledUuid;
     use std::time::Duration;
 
     type ControlPlaneTestContext =
@@ -386,10 +391,12 @@ mod test {
                     external_ips: Vec::new(),
                     disks: Vec::new(),
                     boot_disk: None,
+                    cpu_platform: None,
                     ssh_public_keys: None,
                     start: state == InstanceState::Vmm,
                     auto_restart_policy,
                     anti_affinity_groups: Vec::new(),
+                    multicast_groups: Vec::new(),
                 },
             )
             .await;
@@ -431,12 +438,13 @@ mod test {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
+                        generation: Generation::new(),
                         state: VmmState::SagaUnwound,
                     },
                 },
@@ -454,7 +462,7 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    r#gen: Generation(prev_state.r#gen.next()),
+                    generation: Generation(prev_state.generation.next()),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm_id),
                     ..prev_state
@@ -502,7 +510,7 @@ mod test {
                     time_updated: Utc::now(),
                     nexus_state: state,
                     propolis_id,
-                    r#gen: Generation(prev_state.r#gen.next()),
+                    generation: Generation(prev_state.generation.next()),
                     ..prev_state
                 },
             )
@@ -903,8 +911,10 @@ mod test {
         .await;
 
         // Activate the background task again. Now, only instance 2 should be
-        // restarted.
+        // restarted.  Possible test flake here and this adds a bit more debug
+        // if we see this assertion fail.
         let status = assert_activation_ok!(task.activate(&opctx).await);
+        eprintln!("status: {:?}", status);
         assert_eq!(status.total_instances_found(), 1);
         assert_eq!(
             status.instances_reincarnated,

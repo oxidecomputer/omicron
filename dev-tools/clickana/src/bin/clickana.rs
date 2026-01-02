@@ -10,20 +10,21 @@ use std::net::SocketAddr;
 
 const CLICKANA_LOG_FILE: &str = "/tmp/clickana.log";
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args = Cli::parse();
 
     let terminal = ratatui::init();
-    let result = Clickana::new(
-        args.clickhouse_addr,
-        args.log_path,
-        args.sampling_interval,
-        args.time_range,
-        args.refresh_interval,
-    )
-    .run(terminal)
-    .await;
+    let result = oxide_tokio_rt::run(async move {
+        Clickana::new(
+            args.clickhouse_addr,
+            args.log_path,
+            args.sampling_interval,
+            args.time_range,
+            args.refresh_interval,
+        )
+        .run(terminal)
+        .await
+    });
     ratatui::restore();
     result
 }

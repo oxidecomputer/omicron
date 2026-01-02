@@ -1,14 +1,13 @@
 [package]
 name = "installinator-client"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
 workspace = true
 
 [dependencies]
-installinator-common.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 progenitor.workspace = true

@@ -67,40 +67,28 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
-use super::plan::service::SledConfig;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::rack_setup::plan::service::{
-    Plan as ServicePlan, PlanError as ServicePlanError,
-};
+use crate::bootstrap::trust_quorum_setup::TRUST_QUORUM_INTEGRATION_ENABLED;
+use crate::rack_setup::plan::service::PlanError as ServicePlanError;
 use crate::rack_setup::plan::sled::Plan as SledPlan;
-use anyhow::{Context, bail};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
-use chrono::Utc;
 use dns_service_client::DnsError;
-use id_map::IdMap;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
-use nexus_client::{
+use itertools::Itertools;
+use nexus_lockstep_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
-use nexus_sled_agent_shared::inventory::{
-    ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
-    OmicronZoneType, OmicronZonesConfig,
+use nexus_types::deployment::{BlueprintZoneType, blueprint_zone_type};
+use ntp_admin_client::{
+    Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
-use nexus_types::deployment::{
-    Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
-    BlueprintZoneType, CockroachDbPreserveDowngrade, blueprint_zone_type,
-};
-use nexus_types::deployment::{
-    BlueprintSledConfig, OximeterReadMode, PendingMgsUpdates,
-};
-use nexus_types::external_api::views::SledState;
-use omicron_common::address::{COCKROACH_ADMIN_PORT, get_sled_address};
+use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
@@ -110,9 +98,8 @@ use omicron_common::backoff::{
 use omicron_common::disk::DatasetKind;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -122,22 +109,32 @@ use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
+use sled_agent_types::inventory::{
+    ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
+};
 use sled_agent_types::rack_init::{
     BootstrapAddressDiscovery, RackInitializeRequest as Config,
+    RackInitializeRequestParams,
 };
 use sled_agent_types::rack_ops::RssStep;
-use sled_agent_types::sled::StartSledAgentRequest;
-use sled_agent_types::time_sync::TimeSync;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
-use slog_error_chain::InlineErrorChain;
-use std::collections::{BTreeMap, BTreeSet, btree_map};
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
+use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
+use trust_quorum::{NodeApiError, ProxyError};
+use trust_quorum_protocol::CommitError;
+use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
+
+pub(crate) use crate::rack_setup::plan::service::Plan as ServicePlan;
+pub(crate) use crate::rack_setup::plan::service::PlannedSledDescription;
 
 /// For tracking the current RSS step and sending notifications about it.
 pub struct RssProgress {
@@ -156,19 +153,19 @@ impl RssProgress {
 }
 
 /// Describes errors which may occur while operating the setup service.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, SlogInlineError)]
 pub enum SetupServiceError {
-    #[error("I/O error while {message}: {err}")]
+    #[error("I/O error while {message}")]
     Io {
         message: String,
         #[source]
         err: std::io::Error,
     },
 
-    #[error("Failed to access ledger: {0}")]
+    #[error("Failed to access ledger")]
     Ledger(#[from] ledger::Error),
 
-    #[error("Cannot create plan for sled services: {0}")]
+    #[error("Cannot create plan for sled services")]
     ServicePlan(#[from] ServicePlanError),
 
     #[error("Bad configuration for setting up rack: {0}")]
@@ -198,34 +195,37 @@ pub enum SetupServiceError {
     #[error("Error resetting sled: {0}")]
     SledReset(String),
 
-    #[error("Error making HTTP request to Sled Agent: {0}")]
+    #[error("Error making HTTP request to Sled Agent")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
 
     #[error("Sled config not yet reconciled: {0}")]
     ConfigNotYetReconciled(String),
 
-    #[error("Error making HTTP request to Nexus: {0}")]
+    #[error("Error making HTTP request to Nexus")]
     NexusApi(#[from] NexusError<NexusTypes::Error>),
 
-    #[error("Error contacting ddmd: {0}")]
+    #[error("Error making HTTP request to NTP Admin Server")]
+    NtpAdminApi(#[from] NtpAdminError<ntp_admin_client::types::Error>),
+
+    #[error("Error contacting ddmd")]
     DdmError(#[from] DdmError),
 
-    #[error("Failed to monitor for peers: {0}")]
+    #[error("Failed to monitor for peers")]
     PeerMonitor(#[from] tokio::sync::broadcast::error::RecvError),
 
-    #[error("Failed to construct an HTTP client: {0}")]
-    HttpClient(reqwest::Error),
+    #[error("Failed to construct an HTTP client")]
+    HttpClient(#[from] reqwest::Error),
 
-    #[error("Failed to access DNS servers: {0}")]
+    #[error("Failed to access DNS servers")]
     Dns(#[from] DnsError),
 
     #[error("Error during request to Dendrite: {0}")]
     Dendrite(String),
 
-    #[error("Error during DNS lookup: {0}")]
+    #[error("Error during DNS lookup")]
     DnsResolver(#[from] internal_dns_resolver::ResolveError),
 
-    #[error("Bootstore error: {0}")]
+    #[error("Bootstore error")]
     Bootstore(#[from] bootstore::NodeRequestError),
 
     #[error("Failed to convert setup plan to blueprint: {0:#}")]
@@ -241,12 +241,15 @@ pub enum SetupServiceError {
 
     #[error("Rack initialization was interrupted. Clean-slate required")]
     RackInitInterrupted,
-}
 
-// The workload / information allocated to a single sled.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-struct SledAllocation {
-    initialization_request: StartSledAgentRequest,
+    #[error("Trust quorum error")]
+    TrustQuorum(#[from] NodeApiError),
+
+    #[error("Trust quorum proxy commit error")]
+    TrustQuorumProxy(#[from] ProxyError<CommitError>),
+
+    #[error("Trust quorum proxy commit incorrectly 'pending' from {0}")]
+    TrustQuorumProxyCommitPending(BaseboardId),
 }
 
 /// The interface to the Rack Setup Service.
@@ -264,27 +267,30 @@ impl RackSetupService {
     /// - `local_bootstrap_agent`: Communication channel by which we can send
     ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
     /// - `bootstore` - A handle to call bootstore APIs
+    /// - `trust_quorum` - A handle to the trust qurom task
     pub(crate) fn new(
         log: Logger,
-        config: Config,
+        request: RackInitializeRequestParams,
         internal_disks_rx: InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
+        trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
                 .run(
-                    &config,
+                    &request,
                     &internal_disks_rx,
                     local_bootstrap_agent,
                     bootstore,
+                    trust_quorum,
                     step_tx,
                 )
                 .await
             {
-                warn!(log, "RSS injection failed: {}", e);
+                error!(log, "RSS injection failed"; &e);
                 Err(e)
             } else {
                 Ok(())
@@ -409,11 +415,11 @@ impl ServiceInner {
                 error,
             )));
         };
-        let log_failure = |error, delay| {
+        let log_failure = |error: SetupServiceError, delay| {
             warn!(
                 log,
                 "failed to set sled Omicron config";
-                "error" => #%error,
+                &error,
                 "retry_after" => ?delay,
             );
         };
@@ -533,11 +539,11 @@ impl ServiceInner {
                 ))
             }
         };
-        let log_failure = |error, delay| {
+        let log_failure = |error: SetupServiceError, delay| {
             warn!(
                 log,
                 "sled config not yet reconciled";
-                "error" => #%error,
+                &error,
                 "retry_after" => ?delay,
             );
         };
@@ -568,7 +574,9 @@ impl ServiceInner {
         zone_configs: &HashMap<SocketAddrV6, OmicronZonesConfig>,
     ) -> Result<(), SetupServiceError> {
         cancel_safe_futures::future::join_all_then_try(
-            plan.services.iter().map(|(sled_address, config)| async move {
+            plan.all_sleds.iter().map(|sled_description| async move {
+                let sled_address = &sled_description.underlay_address;
+                let config = &sled_description.config;
                 let zones_config = zone_configs
                     .get(sled_address)
                     .ok_or_else(|| {
@@ -592,6 +600,7 @@ impl ServiceInner {
                     datasets: config.datasets.values().cloned().collect(),
                     zones: zones_config.zones.into_iter().collect(),
                     remove_mupdate_override: None,
+                    host_phase_2: HostPhase2DesiredSlots::current_contents(),
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
@@ -613,35 +622,31 @@ impl ServiceInner {
         &self,
         service_plan: &ServicePlan,
     ) -> Result<(), SetupServiceError> {
+        use blueprint_zone_type::InternalDns;
+
         let log = &self.log;
 
         // Determine the list of DNS servers that are supposed to exist based on
         // the service plan that has just been deployed.
-        let dns_server_ips =
-            // iterate sleds
-            service_plan.services.iter().filter_map(
-                |(_, sled_config)| {
-                    // iterate zones for this sled
-                    let dns_addrs: Vec<SocketAddrV6> = sled_config
-                        .zones
-                        .iter()
-                        .filter_map(|zone_config| {
-                            match &zone_config.zone_type {
-                                BlueprintZoneType::InternalDns(blueprint_zone_type::InternalDns{ http_address, .. })
-                                => {
-                                    Some(*http_address)
-                                },
-                                _ => None,
-                            }
-                        })
-                        .collect();
-                    if !dns_addrs.is_empty() {
-                        Some(dns_addrs)
-                    } else {
-                        None
-                    }
-                }
-            )
+        let dns_server_ips = service_plan
+            .all_sleds
+            .iter()
+            .map(|sled_description| &sled_description.config)
+            .filter_map(|sled_config| {
+                // iterate zones for this sled
+                let dns_addrs: Vec<SocketAddrV6> = sled_config
+                    .zones
+                    .iter()
+                    .filter_map(|zone_config| match &zone_config.zone_type {
+                        BlueprintZoneType::InternalDns(InternalDns {
+                            http_address,
+                            ..
+                        }) => Some(*http_address),
+                        _ => None,
+                    })
+                    .collect();
+                if !dns_addrs.is_empty() { Some(dns_addrs) } else { None }
+            })
             .flatten()
             .collect::<Vec<SocketAddrV6>>();
 
@@ -690,27 +695,11 @@ impl ServiceInner {
 
     async fn sled_timesync(
         &self,
-        sled_address: &SocketAddrV6,
+        client: &NtpAdminClient,
     ) -> Result<TimeSync, SetupServiceError> {
-        let dur = std::time::Duration::from_secs(60);
+        info!(client.inner(), "Checking time synchronization");
 
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
-        let client = SledAgentClient::new_with_client(
-            &format!("http://{}", sled_address),
-            client,
-            self.log.new(o!("SledAgentClient" => sled_address.to_string())),
-        );
-
-        info!(
-            self.log,
-            "Checking time synchronization for {}...", sled_address
-        );
-
-        let ts = client.timesync_get().await?.into_inner();
+        let ts = client.timesync().await?.into_inner();
         Ok(TimeSync {
             sync: ts.sync,
             ref_id: ts.ref_id,
@@ -723,7 +712,7 @@ impl ServiceInner {
 
     async fn wait_for_timesync(
         &self,
-        sled_addresses: &Vec<SocketAddrV6>,
+        ntp_admin_clients: &Vec<NtpAdminClient>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Waiting for rack time synchronization");
 
@@ -731,9 +720,12 @@ impl ServiceInner {
             let mut synced_peers = 0;
             let mut sync = true;
 
-            for sled_address in sled_addresses {
-                if let Ok(ts) = self.sled_timesync(sled_address).await {
-                    info!(self.log, "Timesync for {} {:?}", sled_address, ts);
+            for ntp_client in ntp_admin_clients {
+                if let Ok(ts) = self.sled_timesync(ntp_client).await {
+                    info!(
+                        ntp_client.inner(),
+                        "Timesync accessed"; "timesync" => ?ts
+                    );
                     if !ts.sync {
                         sync = false;
                     } else {
@@ -750,7 +742,7 @@ impl ServiceInner {
                 Err(BackoffError::transient(format!(
                     "Time is synchronized on {}/{} sleds",
                     synced_peers,
-                    sled_addresses.len()
+                    ntp_admin_clients.len()
                 )))
             }
         };
@@ -778,22 +770,32 @@ impl ServiceInner {
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
         port_discovery_mode: ExternalPortDiscovery,
-        nexus_address: SocketAddrV6,
+        nexus_lockstep_address: SocketAddrV6,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
-        // Remap our plan into an easier-to-use type...
-        let sled_configs_by_id =
-            build_sled_configs_by_id(sled_plan, service_plan)
-                .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
-        // ... and use that to derive the initial blueprint from our plan.
-        let blueprint = build_initial_blueprint_from_plan(
-            &sled_configs_by_id,
-            service_plan,
-        )
-        .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
+        // Convert `service_plan` into the initial blueprint for the system.
+        let blueprint = service_plan
+            .to_blueprint(
+                // This is a bit of a hack. We only construct a blueprint after
+                // completing RSS, so we need to know the final generation value
+                // sent to all sleds. Arguably, we should record this in
+                // `service_plan`; however, that doesn't match how we use it:
+                // `service_plan` contains the final set of configs on
+                // constructing, then as we run RSS we send sleds a filtered
+                // down config at earlier generations. We know that the final
+                // config sent to all sleds used `V5_EVERYTHING` (i.e., "don't
+                // filter anything out"), so use that as the generation for all
+                // sled configs in the blueprint, too.
+                DeployStepVersion::V5_EVERYTHING,
+            )
+            .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
-        info!(self.log, "Nexus address: {}", nexus_address.to_string());
+        info!(
+            self.log,
+            "Nexus lockstep address: {}",
+            nexus_lockstep_address.to_string()
+        );
 
         const CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
         let client = reqwest::Client::builder()
@@ -803,7 +805,7 @@ impl ServiceInner {
             .map_err(SetupServiceError::HttpClient)?;
 
         let nexus_client = NexusClient::new_with_client(
-            &format!("http://{}", nexus_address),
+            &format!("http://{}", nexus_lockstep_address),
             client,
             self.log.new(o!("component" => "NexusClient")),
         );
@@ -979,10 +981,10 @@ impl ServiceInner {
                     local: spec.local,
                     mode: match spec.mode {
                         omicron_common::api::external::BfdMode::SingleHop => {
-                            nexus_client::types::BfdMode::SingleHop
+                            NexusTypes::BfdMode::SingleHop
                         }
                         omicron_common::api::external::BfdMode::MultiHop => {
-                            nexus_client::types::BfdMode::MultiHop
+                            NexusTypes::BfdMode::MultiHop
                         }
                     },
                     remote: spec.remote,
@@ -995,29 +997,33 @@ impl ServiceInner {
         };
         info!(self.log, "rack_network_config: {:#?}", rack_network_config);
 
-        let physical_disks: Vec<_> = sled_configs_by_id
+        let physical_disks: Vec<_> = service_plan
+            .all_sleds
             .iter()
-            .flat_map(|(sled_id, config)| {
-                config.disks.iter().map(|config| {
+            .flat_map(|sled_description| {
+                sled_description.config.disks.iter().map(|config| {
                     NexusTypes::PhysicalDiskPutRequest {
                         id: config.id,
                         vendor: config.identity.vendor.clone(),
                         serial: config.identity.serial.clone(),
                         model: config.identity.model.clone(),
                         variant: NexusTypes::PhysicalDiskKind::U2,
-                        sled_id: sled_id.into_untyped_uuid(),
+                        sled_id: sled_description.sled_id.into_untyped_uuid(),
                     }
                 })
             })
             .collect();
 
-        let zpools = sled_configs_by_id
+        let zpools = service_plan
+            .all_sleds
             .iter()
-            .flat_map(|(sled_id, config)| {
-                config.disks.iter().map(|config| NexusTypes::ZpoolPutRequest {
-                    id: config.pool_id.into_untyped_uuid(),
-                    physical_disk_id: config.id,
-                    sled_id: sled_id.into_untyped_uuid(),
+            .flat_map(|sled_description| {
+                sled_description.config.disks.iter().map(|config| {
+                    NexusTypes::ZpoolPutRequest {
+                        id: config.pool_id.into_untyped_uuid(),
+                        physical_disk_id: config.id,
+                        sled_id: sled_description.sled_id.into_untyped_uuid(),
+                    }
                 })
             })
             .collect();
@@ -1102,8 +1108,9 @@ impl ServiceInner {
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
         let crdb_admin_address = service_plan
-            .services
-            .values()
+            .all_sleds
+            .iter()
+            .map(|sled_description| &sled_description.config)
             .flat_map(|sled_config| sled_config.zones.iter())
             .find_map(|zone_config| match &zone_config.zone_type {
                 BlueprintZoneType::CockroachDb(cockroach_db) => {
@@ -1175,14 +1182,17 @@ impl ServiceInner {
     //    remaining is to handoff to Nexus.
     async fn run(
         &self,
-        config: &Config,
+        request: &RackInitializeRequestParams,
         internal_disks_rx: &InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
+        trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
-        info!(self.log, "Injecting RSS configuration: {:#?}", config);
+        info!(self.log, "Injecting RSS configuration: {:#?}", request);
         let mut rss_step = RssProgress::new(step_tx);
+        let config = &request.rack_initialize_request;
+        let skip_timesync = request.skip_timesync;
 
         let resolver = DnsResolver::new_from_subnet(
             self.log.new(o!("component" => "DnsResolver")),
@@ -1278,6 +1288,18 @@ impl ServiceInner {
             bootstore
                 .init_rack(sled_plan.rack_id.into(), initial_membership)
                 .await?;
+
+            if TRUST_QUORUM_INTEGRATION_ENABLED {
+                let tq_members: BTreeSet<BaseboardId> = peers
+                    .iter()
+                    .cloned()
+                    .map(|id| id.try_into().expect("known baseboard type"))
+                    .collect();
+                let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
+
+                init_trust_quorum(&self.log, trust_quorum, tq_members, rack_id)
+                    .await?;
+            }
         }
 
         // Save the relevant network config in the bootstore. We want this to
@@ -1362,14 +1384,55 @@ impl ServiceInner {
 
         // Wait until time is synchronized on all sleds before proceeding.
         rss_step.update(RssStep::WaitForTimeSync);
-        let sled_addresses: Vec<_> = sled_plan
-            .sleds
-            .values()
-            .map(|initialization_request| {
-                get_sled_address(initialization_request.body.subnet)
+        let ntp_addresses: Vec<_> = service_plan
+            .all_sleds
+            .iter()
+            .map(|sled_description| &sled_description.config)
+            .map(|sled_config| {
+                sled_config
+                    .zones
+                    .iter()
+                    .filter_map(|zone_config| match &zone_config.zone_type {
+                        BlueprintZoneType::BoundaryNtp(
+                            blueprint_zone_type::BoundaryNtp {
+                                address, ..
+                            },
+                        )
+                        | BlueprintZoneType::InternalNtp(
+                            blueprint_zone_type::InternalNtp { address },
+                        ) => {
+                            let mut ntp_admin_addr = *address;
+                            ntp_admin_addr.set_port(NTP_ADMIN_PORT);
+                            Some(ntp_admin_addr)
+                        }
+                        _ => None,
+                    })
+                    .exactly_one()
+                    .expect("Multiple NTP zones detected on a sled")
             })
             .collect();
-        self.wait_for_timesync(&sled_addresses).await?;
+
+        if !skip_timesync {
+            let ntp_clients = ntp_addresses
+                .into_iter()
+                .map(|address| {
+                    let dur = std::time::Duration::from_secs(60);
+                    let client = reqwest::ClientBuilder::new()
+                        .connect_timeout(dur)
+                        .timeout(dur)
+                        .build()
+                        .map_err(SetupServiceError::HttpClient)?;
+                    let client = NtpAdminClient::new_with_client(
+                        &format!("http://{}", address),
+                        client,
+                        self.log
+                            .new(o!("NtpAdminClient" => address.to_string())),
+                    );
+                    Ok(client)
+                })
+                .collect::<Result<Vec<_>, SetupServiceError>>()?;
+            self.wait_for_timesync(&ntp_clients).await?;
+        }
 
         info!(self.log, "Finished setting up Internal DNS and NTP");
 
@@ -1404,8 +1467,8 @@ impl ServiceInner {
 
         info!(self.log, "Finished setting up services");
 
-        let nexus_address =
-            resolver.lookup_socket_v6(ServiceName::Nexus).await?;
+        let nexus_lockstep_address =
+            resolver.lookup_socket_v6(ServiceName::NexusLockstep).await?;
 
         rss_step.update(RssStep::NexusHandoff);
         // At this point, even if we reboot, we must not try to manage sleds,
@@ -1415,7 +1478,7 @@ impl ServiceInner {
             &sled_plan,
             &service_plan,
             ExternalPortDiscovery::Auto(switch_mgmt_addrs),
-            nexus_address,
+            nexus_lockstep_address,
         )
         .await?;
 
@@ -1429,6 +1492,96 @@ impl ServiceInner {
 
         Ok(())
     }
+}
+
+async fn init_trust_quorum(
+    log: &Logger,
+    trust_quorum_handle: trust_quorum::NodeTaskHandle,
+    members: BTreeSet<BaseboardId>,
+    rack_id: RackUuid,
+) -> Result<(), SetupServiceError> {
+    let threshold = trust_quorum_types::types::Threshold(
+        u8::try_from(members.len()).unwrap() / 2 + 1,
+    );
+
+    let initial_epoch = trust_quorum_types::types::Epoch(1);
+
+    let msg = TqReconfigureMsg {
+        rack_id,
+        epoch: initial_epoch,
+        last_committed_epoch: None,
+        members: members.clone(),
+        threshold,
+    };
+
+    // Start the initial configuration with this node as coordinator
+    trust_quorum_handle.reconfigure(msg).await?;
+
+    // Poll indefinitely until all nodes have prepared
+    info!(log, "RSS: Starting to prepare trust quorum initial configuration");
+    loop {
+        let status = trust_quorum_handle
+            .coordinator_status()
+            .await?
+            .expect("This node is a coordinator");
+
+        if status.acked_prepares == members {
+            info!(log, "RSS: trust quorum prepared at all nodes");
+            break;
+        }
+
+        let mut still_waiting = String::new();
+        for member in members.difference(&status.acked_prepares) {
+            still_waiting.push_str(&member.to_string());
+            still_waiting.push(',');
+        }
+        let _ = still_waiting.strip_suffix(",");
+
+        info!(
+            log,
+            "RSS: Trust quorum coordinator waiting for PrepareAcks";
+            "waiting_for" => still_waiting
+        );
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    info!(log, "RSS: Starting to commit trust quorum initial configuration");
+    // Continue to commit at all nodes until done
+
+    // Commit at this node.
+    trust_quorum_handle.commit(rack_id, initial_epoch).await?;
+
+    // Proxy commit at the rest of the nodes
+    //
+    // At this point we know that all nodes are connected because they have
+    // acknowledged their `Prepare` from this node. Therefore we can attempt
+    // to proxy commit. Any failure should be treated seriously as there is no
+    // reason for a sprockets connection to be torn down during RSS.
+    let mut acked = BTreeSet::new();
+    let proxy = trust_quorum_handle.proxy();
+    for id in
+        members.iter().filter(|&id| id != trust_quorum_handle.baseboard_id())
+    {
+        info!(log, "RSS: Attempting to commit initial trust quorum at {id}");
+        match proxy.commit(id.clone(), rack_id, initial_epoch).await? {
+            trust_quorum_types::status::CommitStatus::Committed => {
+                info!(log, "RSS: Committed initial trust quorum at {id}");
+                let _ = acked.insert(id.clone());
+            }
+            trust_quorum_types::status::CommitStatus::Pending => {
+                error!(
+                    log,
+                    "RSS: Failed to commit {id} to trust quorum: Pending"
+                );
+                return Err(SetupServiceError::TrustQuorumProxyCommitPending(
+                    id.clone(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// The service plan describes all the zones that we will eventually
@@ -1464,155 +1617,6 @@ impl DeployStepVersion {
     const V5_EVERYTHING: Generation = Self::V4_COCKROACHDB.next();
 }
 
-// Build a map of sled ID to `SledConfig` based on the two plan types we
-// generate. This is a bit of a code smell (why doesn't the plan generate this
-// on its own if we need it?); we should be able to get rid of it when
-// we get to https://github.com/oxidecomputer/omicron/issues/5272.
-fn build_sled_configs_by_id(
-    sled_plan: &SledPlan,
-    service_plan: &ServicePlan,
-) -> anyhow::Result<BTreeMap<SledUuid, SledConfig>> {
-    let mut sled_configs = BTreeMap::new();
-    for sled_request in sled_plan.sleds.values() {
-        let sled_addr = get_sled_address(sled_request.body.subnet);
-        let sled_id = sled_request.body.id;
-        let entry = match sled_configs.entry(sled_id) {
-            btree_map::Entry::Vacant(entry) => entry,
-            btree_map::Entry::Occupied(_) => {
-                bail!(
-                    "duplicate sled address found while deriving blueprint: \
-                     {sled_addr}"
-                );
-            }
-        };
-        let sled_config =
-            service_plan.services.get(&sled_addr).with_context(|| {
-                format!(
-                    "missing services in plan for sled {sled_id} ({sled_addr})"
-                )
-            })?;
-        entry.insert(sled_config.clone());
-    }
-
-    if sled_configs.len() != service_plan.services.len() {
-        bail!(
-            "error mapping service plan to sled IDs; converted {} sled \
-             addresses into {} sled configs",
-            service_plan.services.len(),
-            sled_configs.len(),
-        );
-    }
-
-    Ok(sled_configs)
-}
-
-// Build an initial blueprint
-fn build_initial_blueprint_from_plan(
-    sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
-    service_plan: &ServicePlan,
-) -> anyhow::Result<Blueprint> {
-    build_initial_blueprint_from_sled_configs(
-        sled_configs_by_id,
-        service_plan.dns_config.generation,
-    )
-}
-
-pub(crate) fn build_initial_blueprint_from_sled_configs(
-    sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
-    internal_dns_version: Generation,
-) -> anyhow::Result<Blueprint> {
-    let mut blueprint_sleds = BTreeMap::new();
-    for (sled_id, sled_config) in sled_configs_by_id {
-        let mut datasets = IdMap::new();
-        for d in sled_config.datasets.values() {
-            // Only the "Crucible" dataset needs to know the address
-            let address = if *d.name.kind() == DatasetKind::Crucible {
-                let address = sled_config.zones.iter().find_map(|z| {
-                    if let BlueprintZoneType::Crucible(
-                        blueprint_zone_type::Crucible { address, dataset },
-                    ) = &z.zone_type
-                    {
-                        if &dataset.pool_name == d.name.pool() {
-                            return Some(*address);
-                        }
-                    };
-                    None
-                });
-                if address.is_some() {
-                    address
-                } else {
-                    bail!(
-                        "could not find Crucible zone for zpool {}",
-                        d.name.pool()
-                    )
-                }
-            } else {
-                None
-            };
-
-            datasets.insert(BlueprintDatasetConfig {
-                disposition: BlueprintDatasetDisposition::InService,
-                id: d.id,
-                pool: *d.name.pool(),
-                kind: d.name.kind().clone(),
-                address,
-                compression: d.inner.compression,
-                quota: d.inner.quota,
-                reservation: d.inner.reservation,
-            });
-        }
-
-        blueprint_sleds.insert(
-            *sled_id,
-            BlueprintSledConfig {
-                state: SledState::Active,
-                // This is a bit of a hack. We only construct a blueprint after
-                // completing RSS, so we need to know the final generation value
-                // sent to all sleds. Arguably, we should record this in the
-                // serialized RSS plan; however, we have already deployed
-                // systems that did not. We know that every such system used
-                // `V5_EVERYTHING` as the final generation count, so we can just
-                // use that value here. If we ever change this, in particular in
-                // a way where newly-deployed systems will have a different
-                // value, we will need to revisit storing this in the serialized
-                // RSS plan.
-                sled_agent_generation: DeployStepVersion::V5_EVERYTHING,
-                disks: sled_config.disks.clone(),
-                datasets,
-                zones: sled_config.zones.iter().cloned().collect(),
-                remove_mupdate_override: None,
-            },
-        );
-    }
-
-    Ok(Blueprint {
-        id: BlueprintUuid::new_v4(),
-        sleds: blueprint_sleds,
-        pending_mgs_updates: PendingMgsUpdates::new(),
-        parent_blueprint_id: None,
-        internal_dns_version,
-        // We don't configure external DNS during RSS, so set it to an initial
-        // generation of 1. Nexus will bump this up when it updates external DNS
-        // (including creating the recovery silo).
-        external_dns_version: Generation::new(),
-        target_release_minimum_generation: Generation::new(),
-        // Nexus will fill in the CockroachDB values during initialization.
-        cockroachdb_fingerprint: String::new(),
-        cockroachdb_setting_preserve_downgrade:
-            CockroachDbPreserveDowngrade::DoNotModify,
-        // We do not create clickhouse clusters in RSS. We create them via
-        // reconfigurator only.
-        clickhouse_cluster_config: None,
-        // The oximeter read policy always defaults to single node. The
-        // initial generation of this policy in the DB is 1
-        oximeter_read_mode: OximeterReadMode::SingleNode,
-        oximeter_read_version: Generation::new(),
-        time_created: Utc::now(),
-        creator: "RSS".to_string(),
-        comment: "initial blueprint from rack setup".to_string(),
-    })
-}
-
 /// Facilitates creating a sequence of OmicronZonesConfig objects for each sled
 /// in a service plan to enable phased rollout of services
 ///
@@ -1637,11 +1641,11 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
         initial_version: Generation,
     ) -> Self {
         let last_configs = service_plan
-            .services
-            .keys()
-            .map(|sled_address| {
+            .all_sleds
+            .iter()
+            .map(|sled_description| {
                 (
-                    *sled_address,
+                    sled_description.underlay_address,
                     OmicronZonesConfig {
                         generation: initial_version,
                         zones: vec![],
@@ -1671,9 +1675,11 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
     ) -> OmicronZonesConfigGenerator<'a> {
         let last_configs = self
             .service_plan
-            .services
+            .all_sleds
             .iter()
-            .map(|(sled_address, sled_config)| {
+            .map(|sled_description| {
+                let sled_address = &sled_description.underlay_address;
+                let sled_config = &sled_description.config;
                 let mut zones = match self.last_configs.get(sled_address) {
                     Some(config) => {
                         assert!(version > config.generation);
@@ -1711,16 +1717,17 @@ mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
-    use nexus_sled_agent_shared::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        OmicronZoneType, SledRole,
-    };
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
         api::external::{ByteCount, Generation},
         disk::{DiskIdentity, DiskVariant},
     };
     use omicron_uuid_kinds::SledUuid;
+    use sled_agent_types::inventory::{
+        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
+        Inventory, InventoryDisk, OmicronZoneType, SledCpuFamily, SledRole,
+        ZoneImageResolverInventory,
+    };
 
     fn make_sled_info(
         sled_id: SledUuid,
@@ -1739,6 +1746,7 @@ mod test {
                 baseboard: Baseboard::Unknown,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
+                cpu_family: SledCpuFamily::AmdMilan,
                 reservoir_size: ByteCount::from_gibibytes_u32(0),
                 disks: (0..u2_count)
                     .map(|i| InventoryDisk {
@@ -1761,6 +1769,8 @@ mod test {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
+                zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                health_monitor: HealthMonitorInventory::new(),
             },
             true,
         )
@@ -1810,10 +1820,7 @@ mod test {
         let g1 = Generation::new();
         let v1 =
             OmicronZonesConfigGenerator::initial_version(&service_plan, g1);
-        assert_eq!(
-            service_plan.services.keys().len(),
-            v1.sled_configs().keys().len()
-        );
+        assert_eq!(service_plan.all_sleds.len(), v1.sled_configs().len());
         for (_, configs) in v1.sled_configs() {
             assert_eq!(configs.generation, g1);
             assert!(configs.zones.is_empty());
@@ -1907,7 +1914,13 @@ mod test {
             v6_nfound += config.zones.len();
             assert_eq!(
                 config.zones.len(),
-                service_plan.services.get(sled_address).unwrap().zones.len()
+                service_plan
+                    .all_sleds
+                    .get(sled_address)
+                    .unwrap()
+                    .config
+                    .zones
+                    .len()
             );
         }
         assert!(v6_nfound > v5_nfound);
@@ -1922,31 +1935,16 @@ mod test {
         let fake_sleds = make_fake_sleds();
 
         let rss_config = Config::test_config();
-        let use_trust_quorum = false;
-        let sled_plan = SledPlan::create(
-            &logctx.log,
-            &rss_config,
-            fake_sleds
-                .iter()
-                .map(|sled_info| *sled_info.sled_address.ip())
-                .collect(),
-            use_trust_quorum,
-        );
         let service_plan =
             ServicePlan::create_transient(&rss_config, fake_sleds)
                 .expect("created service plan");
 
-        let sled_configs_by_id =
-            build_sled_configs_by_id(&sled_plan, &service_plan)
-                .expect("built sled configs");
-        let blueprint = build_initial_blueprint_from_plan(
-            &sled_configs_by_id,
-            &service_plan,
-        )
-        .expect("built blueprint");
+        let blueprint = service_plan
+            .to_blueprint(DeployStepVersion::V5_EVERYTHING)
+            .expect("built blueprint");
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
 
         if !report.notes().is_empty() {
             eprintln!("{}", report.display());

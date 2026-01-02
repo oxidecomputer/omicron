@@ -366,6 +366,7 @@ use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
 use steno::{ActionError, DagBuilder, Node};
 use uuid::Uuid;
@@ -494,7 +495,7 @@ struct UpdatesRequired {
 #[derive(Debug, Deserialize, Serialize)]
 enum NetworkConfigUpdate {
     Delete,
-    Update { active_propolis_id: PropolisUuid, new_sled_id: Uuid },
+    Update { active_propolis_id: PropolisUuid, new_sled_id: SledUuid },
 }
 
 /// Virtual provisioning counters to release when an instance no longer has a
@@ -512,7 +513,7 @@ impl UpdatesRequired {
         snapshot: &InstanceGestalt,
     ) -> Option<Self> {
         let mut new_runtime = snapshot.instance.runtime().clone();
-        new_runtime.gen = Generation(new_runtime.gen.next());
+        new_runtime.generation = Generation(new_runtime.generation.next());
         new_runtime.time_updated = Utc::now();
         let mut new_intent = None;
         let instance_id = snapshot.instance.id();
@@ -746,7 +747,7 @@ impl NetworkConfigUpdate {
     fn to_vmm(vmm: &Vmm) -> Self {
         Self::Update {
             active_propolis_id: PropolisUuid::from_untyped_uuid(vmm.id),
-            new_sled_id: vmm.sled_id,
+            new_sled_id: vmm.sled_id(),
         }
     }
 }
@@ -1222,6 +1223,36 @@ async fn siu_commit_instance_updates(
 
         nexus.background_tasks.task_v2p_manager.activate();
         nexus.vpc_needed_notify_sleds();
+
+        // If this network config update was due to instance migration (sled change),
+        // update multicast member sled_id for faster convergence
+        if let Some(NetworkConfigUpdate::Update { new_sled_id, .. }) =
+            &update.network_config
+        {
+            if nexus.multicast_enabled() {
+                if let Err(e) = osagactx
+                    .datastore()
+                    .multicast_group_member_update_sled_id(
+                        &opctx,
+                        InstanceUuid::from_untyped_uuid(instance_id),
+                        Some((*new_sled_id).into()),
+                    )
+                    .await
+                {
+                    // The reconciler will fix this later
+                    info!(log,
+                          "instance update: failed to update multicast member sled_id after migration, reconciler will fix";
+                          "instance_id" => %instance_id,
+                          "new_sled_id" => %new_sled_id,
+                          "error" => ?e);
+                } else {
+                    info!(log,
+                          "instance update: updated multicast member sled_id after migration";
+                          "instance_id" => %instance_id,
+                          "new_sled_id" => %new_sled_id);
+                }
+            }
+        }
     }
 
     Ok(())
@@ -1577,9 +1608,11 @@ mod test {
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
+                cpu_platform: None,
                 start: true,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             },
         )
         .await
@@ -1690,7 +1723,9 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    gen: Generation(instance.runtime().gen.0.next()),
+                    generation: Generation(
+                        instance.runtime().generation.0.next(),
+                    ),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -1916,7 +1951,7 @@ mod test {
                 &vmm_id,
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    gen: Generation(vmm.runtime.gen.0.next()),
+                    generation: Generation(vmm.runtime.generation.0.next()),
                     state: VmmState::Destroyed,
                 },
             )
@@ -2467,15 +2502,13 @@ mod test {
 
             let vmm = state.vmm().as_ref().unwrap();
             let dst_sled_id = cptestctx
-                .find_sled_agent(vmm.sled_id)
+                .find_sled_agent(vmm.sled_id())
                 .expect("need at least one other sled");
             let params = instance_migrate::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
                 instance: state.instance().clone(),
                 src_vmm: vmm.clone(),
-                migrate_params: InstanceMigrateRequest {
-                    dst_sled_id: dst_sled_id.into_untyped_uuid(),
-                },
+                migrate_params: InstanceMigrateRequest { dst_sled_id },
             };
 
             nexus
@@ -2578,7 +2611,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(src_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                gen: Generation(src_vmm.runtime.gen.0.next()),
+                generation: Generation(src_vmm.runtime.generation.0.next()),
                 state: vmm_state,
             };
 
@@ -2590,7 +2623,7 @@ mod test {
             let migration_out = MigrationRuntimeState {
                 migration_id: migration.id,
                 state: migration_state,
-                gen: migration.source_gen.0.next(),
+                generation: migration.source_gen.0.next(),
                 time_updated: Utc::now(),
             };
             let migrations = Migrations {
@@ -2635,7 +2668,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(target_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                gen: Generation(target_vmm.runtime.gen.0.next()),
+                generation: Generation(target_vmm.runtime.generation.0.next()),
                 state: vmm_state,
             };
 
@@ -2647,7 +2680,7 @@ mod test {
             let migration_in = MigrationRuntimeState {
                 migration_id: migration.id,
                 state: migration_state,
-                gen: migration.target_gen.0.next(),
+                generation: migration.target_gen.0.next(),
                 time_updated: Utc::now(),
             };
             let migrations = Migrations {

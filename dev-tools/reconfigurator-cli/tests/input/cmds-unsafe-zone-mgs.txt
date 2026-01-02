@@ -1,0 +1,105 @@
+# Load example system
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Create a TUF repository from a fake manifest. (The output TUF repo is
+# written to a temporary directory that this invocation of `reconfigurator-cli`
+# is running out of as its working directory.)
+#
+# This is used to simulate the initial version of the system.
+tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-0.0.1.zip
+
+# Print the default target release.
+show
+
+# Update the install dataset on all sleds to the target release.
+# This will cause zones to be noop converted over to Artifact,
+# unblocking upgrades.
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+sled-update-install-dataset serial2 --to-target-release
+
+# Generate inventory, then do a planning run to ensure that all zones
+# are set to Artifact.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+# The above blueprint includes a pending MGS update, which we should delete
+# (we want to start from a fresh state).
+blueprint-edit latest delete-sp-update serial0
+# Also set the Omicron config for all sleds to reflect the
+# corresponding image sources.
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+# Generate inventory once more to reflect the omicron config changes.
+inventory-generate
+inventory-show latest
+
+# Setup is now done -- create another TUF repository which will act as the
+# target release being updated to.
+tuf-assemble ../../update-common/manifests/fake.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-1.0.0.zip
+
+# First, print out sled information.
+sled-list
+
+# Retrieve blueprint information to know the ID of the zone to expunge
+blueprint-show latest
+
+# We expunge a single internal_dns zone
+#
+# Note that since we are not running the command to emulate the sled-agent
+# performing an inventory collection and seeing the DNS zone has gone away, the
+# planner will not attemt to restore the internal DNS zone. This is intentional
+# as we want the zone to stay in this state for the purposes of this test
+blueprint-edit latest expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
+blueprint-diff latest
+
+# Attempt to upgrade one RoT bootloader. This should successfully plan the
+# pending RoT bootloader update
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We generate another plan, there should be no changes
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now, forcibly update the simulated RoT bootloader in all sleds to reflect that
+# the update completed.
+# Collect inventory from it and use that collection for another planning step.
+# This should report that the update completed, and successfully plan a
+# pending RoT update
+sled-update-rot-bootloader serial0 --stage0 1.0.0
+sled-update-rot-bootloader serial1 --stage0 1.0.0
+sled-update-rot-bootloader serial2 --stage0 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We repeat the same process with the RoT, but now expecting to see a single
+# blocked SP update due to serial0 containing an unsafe zone. We also see a
+# pending SP update on serial1 which has no unsafe zones.
+sled-update-rot serial0 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+sled-update-rot serial1 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+sled-update-rot serial2 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Since there was a blocked update on serial0, the planner has moved on to
+# serial1. This sled has no unsafe zones, so we forcibly update it along with
+# the SPs to see the errors with the Host OS on serial2 and serial0, and plan no
+# pending updates
+sled-update-sp serial0 --active 1.0.0
+sled-update-sp serial1 --active 1.0.0
+sled-update-sp serial2 --active 1.0.0
+sled-update-host-phase2 serial1 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
+sled-update-host-phase1 serial1 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest

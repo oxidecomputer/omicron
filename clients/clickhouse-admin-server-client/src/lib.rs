@@ -6,7 +6,7 @@
 //! running in an omicron zone.
 
 progenitor::generate_api!(
-    spec = "../../openapi/clickhouse-admin-server.json",
+    spec = "../../openapi/clickhouse-admin-server/clickhouse-admin-server-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
@@ -19,9 +19,11 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
+    crates = {
+        "omicron-uuid-kinds" = "*",
+    },
     derives = [schemars::JsonSchema],
     replace = {
-        TypedUuidForOmicronZoneKind = omicron_uuid_kinds::OmicronZoneUuid,
-        ServerConfigurableSettings = clickhouse_admin_types::ServerConfigurableSettings,
+        ServerConfigurableSettings = clickhouse_admin_types::server::ServerConfigurableSettings,
     }
 );

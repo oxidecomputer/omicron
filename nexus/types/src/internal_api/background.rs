@@ -2,22 +2,34 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::deployment::PlanningReport;
 use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
+use gateway_types::component::SpType;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
+use swrite::SWrite;
+use swrite::swriteln;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
@@ -133,6 +145,39 @@ impl InstanceUpdaterStatus {
     }
 }
 
+/// The status of a `multicast_reconciler` background task activation.
+#[derive(Default, Serialize, Deserialize, Debug)]
+pub struct MulticastGroupReconcilerStatus {
+    /// Whether the multicast reconciler is disabled due to the feature not
+    /// being enabled.
+    ///
+    /// We use disabled here to match other background task status structs.
+    pub disabled: bool,
+    /// Number of multicast groups transitioned from "Creating" to "Active" state.
+    pub groups_created: usize,
+    /// Number of multicast groups cleaned up (fully removed after "Deleting").
+    pub groups_deleted: usize,
+    /// Number of active multicast groups verified on dataplane switches.
+    pub groups_verified: usize,
+    /// Number of members processed ("Joining"→"Joined", "Left" with
+    /// time_deleted→hard-deleted cleanup).
+    pub members_processed: usize,
+    /// Number of members deleted (Left + time_deleted).
+    pub members_deleted: usize,
+    /// Errors that occurred during reconciliation operations.
+    pub errors: Vec<String>,
+}
+
+impl MulticastGroupReconcilerStatus {
+    pub fn total_groups_processed(&self) -> usize {
+        self.groups_created + self.groups_deleted + self.groups_verified
+    }
+
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+}
+
 /// The status of an `instance_reincarnation` background task activation.
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct InstanceReincarnationStatus {
@@ -148,7 +193,7 @@ pub struct InstanceReincarnationStatus {
     /// UUIDs of instances which changed state before they could be
     /// reincarnated.
     pub changed_state: Vec<ReincarnatableInstance>,
-    /// Any errors that occured while finding instances in need of reincarnation.
+    /// Any errors that occurred while finding instances in need of reincarnation.
     pub errors: Vec<String>,
     /// Errors that occurred while restarting individual instances.
     pub restart_errors: Vec<(ReincarnatableInstance, String)>,
@@ -228,23 +273,80 @@ pub struct SupportBundleCleanupReport {
 pub struct SupportBundleCollectionReport {
     pub bundle: SupportBundleUuid,
 
-    /// True iff we could list in-service sleds
-    pub listed_in_service_sleds: bool,
-
-    /// True iff we could list the service processors.
-    pub listed_sps: bool,
-
     /// True iff the bundle was successfully made 'active' in the database.
     pub activated_in_db_ok: bool,
+
+    /// All steps taken, alongside their timing information, when collecting the
+    /// bundle.
+    pub steps: Vec<SupportBundleCollectionStep>,
+
+    /// Status of ereport collection, or `None` if no ereports were requested
+    /// for this support bundle.
+    pub ereports: Option<SupportBundleEreportStatus>,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleCollectionStep {
+    pub name: String,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub status: SupportBundleCollectionStepStatus,
+}
+
+impl SupportBundleCollectionStep {
+    /// Step name constants for the main collection steps.
+    ///
+    /// These are used both when creating steps and when validating in tests.
+    pub const STEP_BUNDLE_ID: &'static str = "bundle id";
+    pub const STEP_RECONFIGURATOR_STATE: &'static str = "reconfigurator state";
+    pub const STEP_EREPORTS: &'static str = "ereports";
+    pub const STEP_SLED_CUBBY_INFO: &'static str = "sled cubby info";
+    pub const STEP_SPAWN_SP_DUMPS: &'static str =
+        "spawn steps to query all SP dumps";
+    pub const STEP_SPAWN_SLEDS: &'static str = "spawn steps to query all sleds";
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SupportBundleCollectionStepStatus {
+    Ok,
+    Skipped,
+    Failed(String),
+}
+
+impl std::fmt::Display for SupportBundleCollectionStepStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use SupportBundleCollectionStepStatus::*;
+        match self {
+            Ok => write!(f, "ok"),
+            Skipped => write!(f, "skipped"),
+            Failed(why) => write!(f, "failed: {why}"),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleEreportStatus {
+    /// The total number of ereports found that match the requested filters.
+    ///
+    /// This may be greater than `n_collected` if some ereports were malformed.
+    pub n_found: usize,
+    /// The total number of ereports added to the bundle.
+    ///
+    /// This may be non-zero even if some errors occurred.
+    pub n_collected: usize,
+    /// Any errors which occurred while collecting ereports. Some errors may be
+    /// fatal and result in the termination of ereport collection, while others
+    /// may only indicate a failure to collect a particular ereport.
+    pub errors: Vec<String>,
 }
 
 impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
         Self {
             bundle,
-            listed_in_service_sleds: false,
-            listed_sps: false,
             activated_in_db_ok: false,
+            steps: vec![],
+            ereports: None,
         }
     }
 }
@@ -358,6 +460,142 @@ pub enum TufArtifactReplicationOperation {
     Copy { hash: ArtifactHash, source_sled: SledUuid },
 }
 
+/// High-level status of the TUF repo pruner background task.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
+pub enum TufRepoPrunerStatus {
+    /// The TUF repo pruner is disabled.
+    Disabled {
+        /// The reason why the pruner is disabled.
+        reason: String,
+    },
+    /// The TUF repo pruner is enabled and ran successfully.
+    Enabled(TufRepoPrunerDetails),
+}
+
+/// Details about a TUF repo pruner run when the task is enabled.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TufRepoPrunerDetails {
+    // Input
+    /// how many recent releases we're configured to keep
+    pub nkeep_recent_releases: u8,
+    /// how many recent uploads we're configured to keep
+    pub nkeep_recent_uploads: u8,
+
+    // Output
+    /// repos that we're keeping because they're a recent target release
+    pub repos_keep_target_release: IdOrdMap<TufRepoInfo>,
+    /// repos that we're keeping because they were recently uploaded
+    pub repos_keep_recent_uploads: IdOrdMap<TufRepoInfo>,
+    /// repo that we're pruning
+    pub repo_prune: Option<TufRepoInfo>,
+    /// other repos that were eligible for pruning
+    pub other_repos_eligible_to_prune: IdOrdMap<TufRepoInfo>,
+    /// runtime warnings while attempting to prune repos
+    pub warnings: Vec<String>,
+}
+
+impl std::fmt::Display for TufRepoPrunerDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn print_collection(c: &IdOrdMap<TufRepoInfo>) -> String {
+            if c.is_empty() {
+                return String::from("none\n");
+            }
+
+            let mut rv = String::from("\n");
+            for repo in c {
+                swriteln!(
+                    rv,
+                    "        {} ({}, created {})",
+                    repo.id,
+                    repo.system_version,
+                    repo.time_created,
+                );
+            }
+
+            rv
+        }
+
+        // This is indented appropriately for use in `omdb`.
+        writeln!(f, "    configuration:")?;
+        writeln!(
+            f,
+            "        nkeep_recent_releases: {}",
+            self.nkeep_recent_releases
+        )?;
+        writeln!(
+            f,
+            "        nkeep_recent_uploads:  {}",
+            self.nkeep_recent_releases
+        )?;
+
+        write!(f, "    repo pruned:")?;
+        if let Some(pruned) = &self.repo_prune {
+            writeln!(
+                f,
+                " {} ({}, created {})",
+                pruned.id, pruned.system_version, pruned.time_created
+            )?;
+        } else {
+            writeln!(f, " none")?;
+        }
+
+        write!(
+            f,
+            "    repos kept because they're recent target releases: {}",
+            print_collection(&self.repos_keep_target_release)
+        )?;
+
+        write!(
+            f,
+            "    repos kept because they're recent uploads: {}",
+            print_collection(&self.repos_keep_recent_uploads)
+        )?;
+
+        write!(
+            f,
+            "    other repos eligible for pruning: {}",
+            print_collection(&self.other_repos_eligible_to_prune)
+        )?;
+
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for TufRepoPrunerStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TufRepoPrunerStatus::Disabled { reason } => {
+                writeln!(f, "    status: disabled")?;
+                writeln!(f, "    reason: {}", reason)?;
+                Ok(())
+            }
+            TufRepoPrunerStatus::Enabled(details) => {
+                writeln!(f, "    status: enabled")?;
+                details.fmt(f)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TufRepoInfo {
+    pub id: TufRepoUuid,
+    pub system_version: Version,
+    pub time_created: DateTime<Utc>,
+}
+
+impl IdOrdItem for TufRepoInfo {
+    type Key<'a> = &'a TufRepoUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    id_upcast!();
+}
+
 /// The status of an `blueprint_rendezvous` background task activation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintRendezvousStatus {
@@ -371,25 +609,30 @@ pub struct BlueprintRendezvousStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintRendezvousStats {
-    pub debug_dataset: DebugDatasetsRendezvousStats,
+    pub debug_dataset: DatasetsRendezvousStats,
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
+    pub local_storage_dataset: DatasetsRendezvousStats,
 }
 
+/// Stats for the rendezvous table that stores Crucible datasets
+///
+/// These were created before reconfigurator so there are less fields than other
+/// reconfigurator managed rendezvous tables.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
 )]
 pub struct CrucibleDatasetsRendezvousStats {
-    /// Number of new Crucible datasets recorded.
+    /// Number of new datasets recorded.
     ///
-    /// This is a count of in-service Crucible datasets that were also present
-    /// in inventory and newly-inserted into `crucible_dataset`.
+    /// This is a count of in-service datasets that were also present in
+    /// inventory and newly-inserted into the associated table.
     pub num_inserted: usize,
-    /// Number of Crucible datasets that would have been inserted, except
-    /// records for them already existed.
+    /// Number of datasets that would have been inserted, except records for
+    /// them already existed.
     pub num_already_exist: usize,
-    /// Number of Crucible datasets that the current blueprint says are
-    /// in-service, but we did not attempt to insert them because they're not
-    /// present in the latest inventory collection.
+    /// Number of datasets that the current blueprint says are in-service, but
+    /// we did not attempt to insert them because they're not present in the
+    /// latest inventory collection.
     pub num_not_in_inventory: usize,
 }
 
@@ -409,31 +652,36 @@ impl slog::KV for CrucibleDatasetsRendezvousStats {
     }
 }
 
+/// Stats for rendezvous tables
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
 )]
-pub struct DebugDatasetsRendezvousStats {
-    /// Number of new Debug datasets recorded.
+pub struct DatasetsRendezvousStats {
+    /// Number of new datasets recorded.
     ///
-    /// This is a count of in-service Debug datasets that were also present
-    /// in inventory and newly-inserted into `rendezvous_debug_dataset`.
+    /// This is a count of in-service datasets that were also present in
+    /// inventory and newly-inserted into their table.
     pub num_inserted: usize,
-    /// Number of Debug datasets that would have been inserted, except
-    /// records for them already existed.
+
+    /// Number of datasets that would have been inserted, except records for
+    /// them already existed.
     pub num_already_exist: usize,
-    /// Number of Debug datasets that the current blueprint says are
-    /// in-service, but we did not attempt to insert them because they're not
-    /// present in the latest inventory collection.
+
+    /// Number of datasets that the current blueprint says are in-service, but
+    /// we did not attempt to insert them because they're not present in the
+    /// latest inventory collection.
     pub num_not_in_inventory: usize,
-    /// Number of Debug datasets that we tombstoned based on their disposition
-    /// in the current blueprint being expunged.
+
+    /// Number of datasets that we tombstoned based on their disposition in the
+    /// current blueprint being expunged.
     pub num_tombstoned: usize,
-    /// Number of Debug datasets that we would have tombstoned, except they were
+
+    /// Number of datasets that we would have tombstoned, except they were
     /// already tombstoned or deleted.
     pub num_already_tombstoned: usize,
 }
 
-impl slog::KV for DebugDatasetsRendezvousStats {
+impl slog::KV for DatasetsRendezvousStats {
     fn serialize(
         &self,
         _record: &slog::Record,
@@ -459,6 +707,23 @@ impl slog::KV for DebugDatasetsRendezvousStats {
     }
 }
 
+/// The status of an `inventory_load` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum InventoryLoadStatus {
+    /// An error occurred.
+    Error(String),
+
+    /// We have no collections.
+    NoCollections,
+
+    /// We've loaded the most recent collection as of `time_loaded`.
+    Loaded {
+        collection_id: CollectionUuid,
+        time_started: DateTime<Utc>,
+        time_loaded: DateTime<Utc>,
+    },
+}
+
 /// The status of a `blueprint_planner` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum BlueprintPlannerStatus {
@@ -466,20 +731,43 @@ pub enum BlueprintPlannerStatus {
     /// by the config file.
     Disabled,
 
+    /// The blueprint limit was reached, so automatic blueprint planning was
+    /// disabled.
+    ///
+    /// `report` contains what was planned.
+    LimitReached { limit: u64, report: Arc<PlanningReport> },
+
     /// An error occurred during planning or blueprint insertion.
     Error(String),
 
     /// Planning produced a blueprint identital to the current target,
     /// so we threw it away and did nothing.
-    Unchanged { parent_blueprint_id: BlueprintUuid },
+    Unchanged {
+        parent_blueprint_id: BlueprintUuid,
+        report: Arc<PlanningReport>,
+        blueprint_count: u64,
+        limit: u64,
+    },
 
     /// Planning produced a new blueprint, but we failed to make it
     /// the current target and so deleted it.
-    Planned { parent_blueprint_id: BlueprintUuid, error: String },
+    Planned {
+        parent_blueprint_id: BlueprintUuid,
+        error: String,
+        report: Arc<PlanningReport>,
+        blueprint_count: u64,
+        limit: u64,
+    },
 
     /// Planing succeeded, and we saved and made the new blueprint the
     /// current target.
-    Targeted { parent_blueprint_id: BlueprintUuid, blueprint_id: BlueprintUuid },
+    Targeted {
+        parent_blueprint_id: BlueprintUuid,
+        blueprint_id: BlueprintUuid,
+        report: Arc<PlanningReport>,
+        blueprint_count: u64,
+        limit: u64,
+    },
 }
 
 /// The status of a `alert_dispatcher` background task activation.
@@ -551,4 +839,146 @@ pub struct WebhookDeliveryFailure {
 pub struct ReadOnlyRegionReplacementStartStatus {
     pub requests_created_ok: Vec<String>,
     pub errors: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct SpEreportIngesterStatus {
+    /// If `true`, then ereport ingestion has been explicitly disabled by
+    /// the config file.
+    pub disabled: bool,
+    pub sps: Vec<SpEreporterStatus>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct SpEreporterStatus {
+    pub sp_type: SpType,
+    pub slot: u16,
+    #[serde(flatten)]
+    pub status: EreporterStatus,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct EreporterStatus {
+    /// total number of ereports received from this reporter
+    pub ereports_received: usize,
+    /// number of new ereports ingested from this reporter (this may be less
+    /// than `ereports_received` if some ereports were collected by another
+    /// Nexus)
+    pub new_ereports: usize,
+    /// total number of HTTP requests sent.
+    pub requests: usize,
+    pub errors: Vec<String>,
+}
+
+/// The status of a `fm_sitrep_loader` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SitrepLoadStatus {
+    /// An error occurred.
+    Error(String),
+
+    /// There is no current sitrep.
+    NoSitrep,
+
+    /// We've loaded the most recent sitrep as of `time_loaded`.
+    Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
+}
+
+/// The status of a `fm_sitrep_gc` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SitrepGcStatus {
+    pub orphaned_sitreps_found: usize,
+    pub orphaned_sitreps_deleted: usize,
+    pub errors: Vec<String>,
+}
+
+/// The status of a `fm_sitrep_execution` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SitrepExecutionStatus {
+    NoSitrep,
+    Executed { sitrep_id: SitrepUuid, alerts: SitrepAlertRequestStatus },
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SitrepAlertRequestStatus {
+    /// The total number of alerts requested by the current sitrep.
+    pub total_alerts_requested: usize,
+    /// The total number of alerts which were *first* requested in the current sitrep.
+    pub current_sitrep_alerts_requested: usize,
+    /// The number of alerts created by this activation.
+    pub alerts_created: usize,
+    /// Errors that occurred during this activation.
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProbeError {
+    /// ID of the sled we failed to send a probe to.
+    pub sled_id: SledUuid,
+    /// IP address of the sled we failed to send a probe to.
+    pub sled_ip: Ipv6Addr,
+    /// Error message describing the failure.
+    pub error: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProbeDistributorStatus {
+    /// Count of successfully sent probes to each sled.
+    pub probes_by_sled: HashMap<SledUuid, usize>,
+    /// Errors when sending a probe.
+    pub errors: Vec<ProbeError>,
+}
+
+#[cfg(test)]
+mod test {
+    use super::TufRepoInfo;
+    use super::TufRepoPrunerDetails;
+    use super::TufRepoPrunerStatus;
+    use expectorate::assert_contents;
+    use iddqd::IdOrdMap;
+
+    #[test]
+    fn test_display_tuf_repo_pruner_status_enabled() {
+        let repo1 = TufRepoInfo {
+            id: "4e8a87a0-3102-4014-99d3-e1bf486685bd".parse().unwrap(),
+            system_version: "1.2.3".parse().unwrap(),
+            time_created: "2025-09-29T01:23:45Z".parse().unwrap(),
+        };
+        let repo2 = TufRepoInfo {
+            id: "867e42ae-ed72-4dc3-abcd-508b875c9601".parse().unwrap(),
+            system_version: "4.5.6".parse().unwrap(),
+            time_created: "2025-09-29T02:34:56Z".parse().unwrap(),
+        };
+        let repo_map: IdOrdMap<_> = std::iter::once(repo1.clone()).collect();
+
+        let details = TufRepoPrunerDetails {
+            nkeep_recent_releases: 1,
+            nkeep_recent_uploads: 2,
+            repos_keep_target_release: repo_map,
+            repos_keep_recent_uploads: IdOrdMap::new(),
+            repo_prune: Some(repo1.clone()),
+            other_repos_eligible_to_prune: [repo1.clone(), repo2.clone()]
+                .into_iter()
+                .collect(),
+            warnings: vec![String::from("fake-oh problem-oh")],
+        };
+        let status = TufRepoPrunerStatus::Enabled(details);
+
+        assert_contents(
+            "output/tuf_repo_pruner_status_enabled.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_tuf_repo_pruner_status_disabled() {
+        let status = TufRepoPrunerStatus::Disabled {
+            reason: "disabled in this test".to_string(),
+        };
+
+        assert_contents(
+            "output/tuf_repo_pruner_status_disabled.out",
+            &status.to_string(),
+        );
+    }
 }

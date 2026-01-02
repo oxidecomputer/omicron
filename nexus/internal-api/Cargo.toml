@@ -1,7 +1,7 @@
 [package]
 name = "nexus-internal-api"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -9,11 +9,12 @@ workspace = true
 
 [dependencies]
 dropshot.workspace = true
+dropshot-api-manager-types.workspace = true
 http.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
-serde.workspace = true
 schemars.workspace = true
+serde.workspace = true
 uuid.workspace = true

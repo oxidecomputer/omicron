@@ -5,24 +5,23 @@
 //! Background task for detecting changes to service zone locations and
 //! updating the NAT rpw table accordingly
 
-use crate::app::switch_zone_address_mappings;
+use crate::app::dpd_clients;
 
-use super::networking::build_dpd_clients;
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::Ipv4NatValues;
+use nexus_db_model::NatEntryValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
+use nexus_types::inventory::Collection;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
-use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
-use std::net::{IpAddr, SocketAddr};
+use sled_agent_types::inventory::OmicronZoneType;
 use std::sync::Arc;
+use tokio::sync::watch;
 
 // Minumum number of boundary NTP zones that should be present in a valid
 // set of service zone nat configurations.
@@ -41,11 +40,16 @@ const MIN_EXTERNAL_DNS_COUNT: usize = 1;
 pub struct ServiceZoneNatTracker {
     datastore: Arc<DataStore>,
     resolver: Resolver,
+    rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
 }
 
 impl ServiceZoneNatTracker {
-    pub fn new(datastore: Arc<DataStore>, resolver: Resolver) -> Self {
-        Self { datastore, resolver }
+    pub fn new(
+        datastore: Arc<DataStore>,
+        resolver: Resolver,
+        rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
+    ) -> Self {
+        Self { datastore, resolver, rx_inventory }
     }
 }
 
@@ -57,56 +61,31 @@ impl BackgroundTask for ServiceZoneNatTracker {
         async {
             let log = &opctx.log;
 
-            // check inventory
-            let inventory = match self
-                .datastore
-                .inventory_get_latest_collection(
-                    opctx,
-                )
-                .await
-            {
-                Ok(inventory) => inventory,
-                Err(e) => {
-                    error!(
-                        &log,
-                        "failed to collect inventory";
-                        "error" => format!("{:#}", e)
-                    );
-                    return json!({
-                        "error":
-                            format!(
-                                "failed collect inventory: \
-                                {:#}",
-                                e
-                            )
-                    });
-                }
-            };
-
-            // generate set of Service Zone NAT entries
-            let collection = match inventory {
-                Some(c) => c,
+            // Get the inventory most recently seen by the inventory loader
+            // background task. We clone the Arc to avoid keeping the channel
+            // locked for the rest of our execution.
+            let Some(collection) =
+                self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone)
+            else {
                 // this could happen if we check the inventory table before the
                 // inventory job has finished running for the first time
-                None => {
-                    warn!(
-                        &log,
-                        "inventory collection is None";
-                    );
-                    return json!({
-                        "error": "inventory collection is None"
-                    });
-                }
+                warn!(
+                    &log,
+                    "inventory collection is None";
+                );
+                return json!({
+                    "error": "inventory collection is None"
+                });
             };
 
-            let mut ipv4_nat_values: Vec<Ipv4NatValues> = vec![];
+            let mut nat_values: Vec<NatEntryValues> = vec![];
             let mut ntp_count = 0;
             let mut nexus_count = 0;
             let mut dns_count = 0;
 
-            for (sled_id, sa) in collection.sled_agents {
+            for sa in &collection.sled_agents {
                 let (_, sled) = match LookupPath::new(opctx, &*self.datastore)
-                    .sled_id(sled_id.into_untyped_uuid())
+                    .sled_id(sa.sled_id)
                     .fetch()
                     .await
                     .context("failed to look up sled")
@@ -116,7 +95,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
                         error!(
                             &log,
                             "failed to lookup sled by id";
-                            "id" => ?sled_id,
+                            "id" => ?sa.sled_id,
                             "error" => ?e,
                         );
                         continue;
@@ -144,27 +123,13 @@ impl BackgroundTask for ServiceZoneNatTracker {
                         OmicronZoneType::BoundaryNtp {
                             nic, snat_cfg, ..
                         } => {
-                            let external_ip = match snat_cfg.ip {
-                                IpAddr::V4(addr) => addr,
-                                IpAddr::V6(_) => {
-                                    error!(
-                                        &log,
-                                        "ipv6 addresses for service zone nat not implemented";
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            let external_address =
-                                oxnet::Ipv4Net::new(external_ip, 32)
-                                    .unwrap();
-
+                            let external_address = nexus_db_model::IpNet::from(
+                                oxnet::IpNet::host_net(snat_cfg.ip)
+                            );
                             let (snat_first_port, snat_last_port) =
                                 snat_cfg.port_range_raw();
-                            let nat_value = Ipv4NatValues {
-                                external_address: nexus_db_model::Ipv4Net(
-                                        external_address,
-                                ),
+                            let nat_value = NatEntryValues {
+                                external_address,
                                 first_port: snat_first_port.into(),
                                 last_port: snat_last_port.into(),
                                 sled_address: sled_address.into(),
@@ -172,30 +137,16 @@ impl BackgroundTask for ServiceZoneNatTracker {
                                 mac: nexus_db_model::MacAddr(nic.mac),
                             };
 
-                            // Append ipv4 nat entry
-                            ipv4_nat_values.push(nat_value);
+                            // Append NAT entry
+                            nat_values.push(nat_value);
                             ntp_count += 1;
                         }
                         OmicronZoneType::Nexus { nic, external_ip, .. } => {
-                            let external_ip = match external_ip {
-                                IpAddr::V4(addr) => addr,
-                                IpAddr::V6(_) => {
-                                    error!(
-                                        &log,
-                                        "ipv6 addresses for service zone nat not implemented";
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            let external_address =
-                                oxnet::Ipv4Net::new(external_ip, 32)
-                                    .unwrap();
-
-                            let nat_value = Ipv4NatValues {
-                                external_address: nexus_db_model::Ipv4Net(
-                                        external_address,
-                                ),
+                            let external_address = nexus_db_model::IpNet::from(
+                                oxnet::IpNet::host_net(external_ip)
+                            );
+                            let nat_value = NatEntryValues {
+                                external_address,
                                 first_port: MIN_PORT.into(),
                                 last_port: MAX_PORT.into(),
                                 sled_address: sled_address.into(),
@@ -203,32 +154,16 @@ impl BackgroundTask for ServiceZoneNatTracker {
                                 mac: nexus_db_model::MacAddr(nic.mac),
                             };
 
-                            // Append ipv4 nat entry
-                            ipv4_nat_values.push(nat_value);
+                            // Append NAT entry
+                            nat_values.push(nat_value);
                             nexus_count += 1;
                         },
                         OmicronZoneType::ExternalDns { nic, dns_address, .. } => {
-                            let external_ip = match dns_address {
-                                SocketAddr::V4(v4) => {
-                                    *v4.ip()
-                                },
-                                SocketAddr::V6(_) => {
-                                    error!(
-                                        &log,
-                                        "ipv6 addresses for service zone nat not implemented";
-                                    );
-                                    continue;
-                                },
-                            };
-
-                            let external_address =
-                                oxnet::Ipv4Net::new(external_ip, 32)
-                                    .unwrap();
-
-                            let nat_value = Ipv4NatValues {
-                                external_address: nexus_db_model::Ipv4Net(
-                                        external_address,
-                                ),
+                            let external_address = nexus_db_model::IpNet::from(
+                                oxnet::IpNet::host_net(dns_address.ip())
+                            );
+                            let nat_value = NatEntryValues {
+                                external_address,
                                 first_port: MIN_PORT.into(),
                                 last_port: MAX_PORT.into(),
                                 sled_address: sled_address.into(),
@@ -236,8 +171,8 @@ impl BackgroundTask for ServiceZoneNatTracker {
                                 mac: nexus_db_model::MacAddr(nic.mac),
                             };
 
-                            // Append ipv4 nat entry
-                            ipv4_nat_values.push(nat_value);
+                            // Append NAT entry
+                            nat_values.push(nat_value);
                             dns_count += 1;
                         },
                         // we explictly list all cases instead of using a wildcard,
@@ -260,7 +195,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
             // if we make it this far this should not be empty:
             // * nexus is running so we should at least have generated a nat value for it
             // * nexus requies other services zones that require nat to come up first
-            if ipv4_nat_values.is_empty() {
+            if nat_values.is_empty() {
                 error!(
                     &log,
                     "nexus is running but no service zone nat values could be generated from inventory";
@@ -303,7 +238,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
             }
 
             // reconcile service zone nat entries
-            let result = match self.datastore.ipv4_nat_sync_service_zones(opctx, &ipv4_nat_values).await {
+            let result = match self.datastore.nat_sync_service_zones(opctx, &nat_values).await {
                 Ok(num) => num,
                 Err(e) => {
                     error!(
@@ -325,9 +260,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
             // notify dpd if we've added any new records
             if result > 0 {
 
-                let mappings = match
-                    switch_zone_address_mappings(&self.resolver, log).await
-                {
+                let dpd_clients = match dpd_clients(&self.resolver, log).await {
                     Ok(mappings) => mappings,
                     Err(e) => {
                         error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
@@ -340,8 +273,6 @@ impl BackgroundTask for ServiceZoneNatTracker {
                         });
                     },
                 };
-
-                let dpd_clients = build_dpd_clients(&mappings, log);
 
                 for (_location, client) in dpd_clients {
                     if let Err(e) = client.ipv4_nat_trigger_update().await {

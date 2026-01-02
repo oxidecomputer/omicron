@@ -13,7 +13,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::TransitionError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::views::SledState;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 
 pub(crate) async fn decommission_sleds(
@@ -56,7 +55,7 @@ async fn decommission_one_sled(
     sled_id: SledUuid,
 ) -> anyhow::Result<()> {
     let (authz_sled,) = LookupPath::new(opctx, datastore)
-        .sled_id(sled_id.into_untyped_uuid())
+        .sled_id(sled_id)
         .lookup_for(Action::Modify)
         .await
         .with_context(|| {
@@ -97,7 +96,7 @@ mod tests {
             .await
             .expect("listing sleds")
             .into_iter()
-            .map(|sled| SledUuid::from_untyped_uuid(sled.id()))
+            .map(|sled| sled.id())
             .collect()
     }
 
@@ -121,7 +120,7 @@ mod tests {
 
         // Expunge the sled (required prior to decommissioning).
         let (authz_sled,) = LookupPath::new(&opctx, datastore)
-            .sled_id(decommissioned_sled_id.into_untyped_uuid())
+            .sled_id(decommissioned_sled_id)
             .lookup_for(Action::Modify)
             .await
             .expect("lookup authz_sled");

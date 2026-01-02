@@ -8,8 +8,12 @@ use chrono::{DateTime, Utc};
 use std::time::Duration;
 
 pub mod point;
+pub mod query_summary;
 pub mod table;
 
+pub use self::query_summary::IoCount;
+pub use self::query_summary::IoSummary;
+pub use self::query_summary::QuerySummary;
 pub use self::table::Table;
 pub use self::table::Timeseries;
 

@@ -287,7 +287,7 @@ mod swapctl {
 
     // swapctl(2)
     #[cfg(target_os = "illumos")]
-    extern "C" {
+    unsafe extern "C" {
         fn swapctl(cmd: i32, arg: *mut libc::c_void) -> i32;
     }
 
@@ -298,7 +298,7 @@ mod swapctl {
     // sled agent work on non-illumos targets. So for now, just stub out this
     // piece.
     #[cfg(not(target_os = "illumos"))]
-    fn swapctl(_cmd: i32, _arg: *mut libc::c_void) -> i32 {
+    unsafe fn swapctl(_cmd: i32, _arg: *mut libc::c_void) -> i32 {
         panic!("swapctl(2) only on illumos");
     }
 
@@ -381,7 +381,7 @@ mod swapctl {
             None => std::ptr::null_mut(),
         };
 
-        let res = swapctl(cmd, ptr);
+        let res = unsafe { swapctl(cmd, ptr) };
         if res == -1 {
             return Err(std::io::Error::last_os_error());
         }

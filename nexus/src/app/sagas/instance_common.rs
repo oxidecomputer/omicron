@@ -9,12 +9,12 @@ use std::net::{IpAddr, Ipv6Addr};
 use crate::Nexus;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
-    ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
-    SledReservationConstraints, SledResourceVmm, VmmState,
+    ByteCount, ExternalIp, InstanceState, IpAttachState, NatEntry,
+    SledReservationConstraints, SledResourceVmm, VmmCpuPlatform, VmmState,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
-use omicron_common::api::external::{Error, NameOrId};
+use omicron_common::api::external::{Error, IpVersion, NameOrId};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
 use steno::ActionError;
@@ -94,6 +94,7 @@ pub async fn create_and_insert_vmm_record(
     propolis_id: PropolisUuid,
     sled_id: SledUuid,
     propolis_ip: Ipv6Addr,
+    cpu_platform: VmmCpuPlatform,
 ) -> Result<db::model::Vmm, ActionError> {
     let vmm = db::model::Vmm::new(
         propolis_id,
@@ -101,6 +102,7 @@ pub async fn create_and_insert_vmm_record(
         sled_id,
         IpAddr::V6(propolis_ip).into(),
         DEFAULT_PROPOLIS_PORT,
+        cpu_platform,
     );
 
     let vmm = datastore
@@ -213,7 +215,7 @@ pub(super) async fn instance_ip_get_instance_state(
     let mut propolis_and_sled_id =
         inst_and_vmm.vmm().as_ref().map(|vmm| VmmAndSledIds {
             vmm_id: PropolisUuid::from_untyped_uuid(vmm.id),
-            sled_id: SledUuid::from_untyped_uuid(vmm.sled_id),
+            sled_id: vmm.sled_id(),
         });
 
     slog::debug!(
@@ -333,7 +335,7 @@ pub async fn instance_ip_add_nat(
     authz_instance: &authz::Instance,
     sled_uuid: Option<SledUuid>,
     target_ip: ModifyStateForExternalIp,
-) -> Result<Option<Ipv4NatEntry>, ActionError> {
+) -> Result<Option<NatEntry>, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx =
@@ -356,7 +358,7 @@ pub async fn instance_ip_add_nat(
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
-        .sled_id(sled_uuid.into_untyped_uuid())
+        .sled_id(sled_uuid)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -532,6 +534,6 @@ pub(super) async fn instance_ip_remove_opte(
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ExternalIpAttach {
-    Ephemeral { pool: Option<NameOrId> },
+    Ephemeral { pool: Option<NameOrId>, ip_version: Option<IpVersion> },
     Floating { floating_ip: authz::FloatingIp },
 }

@@ -8,11 +8,13 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::{HttpErrorResponseBody, ResultsPage};
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
+use nexus_config::NexusConfig;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::{
-    object_delete_error, object_get, object_put, object_put_error,
+    create_local_user, create_session_for_user, object_delete_error,
+    object_get, object_put, object_put_error, test_params,
 };
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest, RequestBuilder},
@@ -26,9 +28,10 @@ use nexus_types::external_api::{
         DeviceAccessTokenGrant, DeviceAccessTokenType, DeviceAuthResponse,
     },
 };
+use omicron_uuid_kinds::SiloUserUuid;
 
 use http::{StatusCode, header, method::Method};
-use oxide_client::types::SiloRole;
+use oxide_client::types::{FleetRole, SiloRole};
 use serde::Deserialize;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
@@ -245,6 +248,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
 /// as a string
 async fn get_device_token(
     testctx: &ClientTestContext,
+    authn_mode: AuthnMode,
 ) -> DeviceAccessTokenGrant {
     let client_id = Uuid::new_v4();
     let authn_params = DeviceAuthRequest { client_id, ttl_seconds: None };
@@ -272,7 +276,7 @@ async fn get_device_token(
             .body(Some(&confirm_params))
             .expect_status(Some(StatusCode::NO_CONTENT)),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(authn_mode.clone())
     .execute()
     .await
     .expect("failed to confirm");
@@ -290,7 +294,7 @@ async fn get_device_token(
             .body_urlencoded(Some(&token_params))
             .expect_status(Some(StatusCode::OK)),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(authn_mode)
     .execute()
     .await
     .expect("failed to get token")
@@ -311,7 +315,8 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
 
     // get a token for the privileged user. default silo max token expiration
     // is null, so tokens don't expire
-    let initial_token_grant = get_device_token(testctx).await;
+    let initial_token_grant =
+        get_device_token(testctx, AuthnMode::PrivilegedUser).await;
     let initial_token = initial_token_grant.access_token;
 
     // now there is a token in the list
@@ -381,7 +386,8 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(settings.device_token_max_ttl_seconds, Some(3));
 
     // create token again (this one will have the 3-second expiration)
-    let expiring_token_grant = get_device_token(testctx).await;
+    let expiring_token_grant =
+        get_device_token(testctx, AuthnMode::PrivilegedUser).await;
 
     // check that expiration time is there and in the right range
     let exp = expiring_token_grant
@@ -624,6 +630,429 @@ async fn test_device_token_request_ttl(cptestctx: &ControlPlaneTestContext) {
         .expect("token should be expired");
 }
 
+/// Verifies that device tokens created without specifying TTL are automatically
+/// clamped to the authenticating token's expiration time.
+#[nexus_test]
+async fn test_device_token_clamps_to_auth_token_when_no_ttl_specified(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let testctx = &cptestctx.external_client;
+
+    // Set silo max TTL to 15 seconds
+    let _: views::SiloAuthSettings = object_put(
+        testctx,
+        "/v1/auth-settings",
+        &params::SiloAuthSettingsUpdate {
+            device_token_max_ttl_seconds: NonZeroU32::new(15).into(),
+        },
+    )
+    .await;
+
+    let client_id = Uuid::new_v4();
+
+    // Create an initial token with 8 second TTL
+    let (initial_token_grant, initial_confirm_time) =
+        create_and_confirm_device_auth(
+            testctx,
+            client_id,
+            NonZeroU32::new(8),
+            AuthnMode::PrivilegedUser,
+        )
+        .await;
+
+    let initial_token = initial_token_grant.access_token;
+    let initial_expiration = initial_token_grant.time_expires.unwrap();
+
+    // Verify initial token expires in roughly 8 seconds
+    let initial_ttl_secs =
+        (initial_expiration - initial_confirm_time).num_seconds();
+    assert!(
+        7 <= initial_ttl_secs && initial_ttl_secs <= 9,
+        "initial token should expire in ~8 seconds, got {initial_ttl_secs}"
+    );
+
+    // Create a new token WITHOUT specifying TTL, using the initial token as auth.
+    // This should succeed with the new token's expiration clamped to the auth token's expiration.
+    let (clamped_token_grant, _) = create_and_confirm_device_auth(
+        testctx,
+        client_id,
+        None, // No TTL specified
+        AuthnMode::DeviceToken(initial_token),
+    )
+    .await;
+
+    let clamped_expiration = clamped_token_grant.time_expires.unwrap();
+
+    // The new token should be clamped to the initial token's expiration
+    let time_diff_ms =
+        (clamped_expiration - initial_expiration).num_milliseconds().abs();
+
+    assert!(
+        time_diff_ms <= 1000,
+        "clamped token expiration should match initial token expiration. \
+         Initial: {initial_expiration}, Clamped: {clamped_expiration}, \
+         Diff: {time_diff_ms}ms"
+    );
+}
+
+/// Verifies that device tokens created with explicit TTL exceeding the authenticating
+/// token's remaining lifetime are rejected with a 400 error.
+#[nexus_test]
+async fn test_device_token_cannot_exceed_auth_token_expiration(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let testctx = &cptestctx.external_client;
+
+    // Set silo max TTL to 15 seconds
+    let _: views::SiloAuthSettings = object_put(
+        testctx,
+        "/v1/auth-settings",
+        &params::SiloAuthSettingsUpdate {
+            device_token_max_ttl_seconds: NonZeroU32::new(15).into(),
+        },
+    )
+    .await;
+
+    let client_id = Uuid::new_v4();
+
+    // Create an initial token with 8 second TTL
+    let (initial_token_grant, initial_confirm_time) =
+        create_and_confirm_device_auth(
+            testctx,
+            client_id,
+            NonZeroU32::new(8),
+            AuthnMode::PrivilegedUser,
+        )
+        .await;
+
+    let initial_token = initial_token_grant.access_token;
+    let initial_expiration = initial_token_grant.time_expires.unwrap();
+
+    // Verify initial token expires in roughly 8 seconds
+    let initial_ttl_secs =
+        (initial_expiration - initial_confirm_time).num_seconds();
+    assert!(
+        7 <= initial_ttl_secs && initial_ttl_secs <= 9,
+        "initial token should expire in ~8 seconds, got {initial_ttl_secs}"
+    );
+
+    // Try to create a new token with 12 second TTL using the initial token as auth.
+    // This should fail because 12 seconds exceeds the ~8 seconds remaining on the auth token.
+    let exceeding_ttl_request =
+        DeviceAuthRequest { client_id, ttl_seconds: NonZeroU32::new(12) };
+
+    let auth_response = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&exceeding_ttl_request))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await;
+
+    // Attempting to confirm with the initial token should fail
+    let error = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: auth_response.user_code,
+            }))
+            .header(header::AUTHORIZATION, format!("Bearer {initial_token}"))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .execute_and_parse_unwrap::<HttpErrorResponseBody>()
+    .await;
+
+    assert!(error.message.contains("Requested token TTL would exceed"));
+}
+
+/// Verifies that tokens confirmed with session-based authentication do NOT
+/// have clamped TTLs. Session tokens allow the full silo max TTL to be used
+/// regardless of session expiration.
+#[nexus_test]
+async fn test_session_auth_does_not_clamp_device_token_ttl(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let testctx = &cptestctx.external_client;
+
+    // Get the silo for the privileged user
+    let me = object_get::<views::CurrentUser>(testctx, "/v1/me").await;
+    let silo_name = me.silo_name.as_str();
+
+    // Set silo max TTL to 15 seconds
+    let _: views::SiloAuthSettings = object_put(
+        testctx,
+        "/v1/auth-settings",
+        &params::SiloAuthSettingsUpdate {
+            device_token_max_ttl_seconds: NonZeroU32::new(15).into(),
+        },
+    )
+    .await;
+
+    // Create a local user and get a session token
+    let silo_url = format!("/v1/system/silos/{silo_name}");
+    let test_silo: views::Silo = object_get(testctx, &silo_url).await;
+    let _test_user = create_local_user(
+        testctx,
+        &test_silo,
+        &"session-test-user".parse().unwrap(),
+        test_params::UserPassword::Password("test-password".to_string()),
+    )
+    .await;
+
+    let session_token = create_session_for_user(
+        testctx,
+        silo_name,
+        "session-test-user",
+        "test-password",
+    )
+    .await;
+
+    let client_id = Uuid::new_v4();
+
+    // Test 1: Session auth with explicit TTL = silo max (15 seconds)
+    let (token_with_ttl, confirm_time_with_ttl) =
+        create_and_confirm_device_auth(
+            testctx,
+            client_id,
+            NonZeroU32::new(15),
+            AuthnMode::Session(session_token.clone()),
+        )
+        .await;
+
+    // Verify token gets full silo max (15 seconds), not clamped by session
+    let expiration_with_ttl = token_with_ttl.time_expires.unwrap();
+    let ttl_secs = (expiration_with_ttl - confirm_time_with_ttl).num_seconds();
+    assert!(
+        14 <= ttl_secs && ttl_secs <= 16,
+        "should be full silo max (~15 seconds), got {ttl_secs}"
+    );
+
+    // Test 2: Session auth with no TTL specified - should also get silo max
+    let (token_no_ttl, confirm_time_no_ttl) = create_and_confirm_device_auth(
+        testctx,
+        client_id,
+        None,
+        AuthnMode::Session(session_token),
+    )
+    .await;
+
+    // When no TTL is specified with session auth, token still gets full silo max
+    let expiration_no_ttl = token_no_ttl.time_expires.unwrap();
+    let ttl_secs_no_ttl =
+        (expiration_no_ttl - confirm_time_no_ttl).num_seconds();
+    assert!(
+        14 <= ttl_secs_no_ttl && ttl_secs_no_ttl <= 16,
+        "should be silo max (~15 seconds), got {ttl_secs_no_ttl}"
+    );
+}
+
+#[nexus_test]
+async fn test_admin_logout_deletes_tokens_and_sessions(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let testctx = &cptestctx.external_client;
+
+    let silo_name = cptestctx.silo_name.as_str();
+    // create users so we can have user IDs to pass to authn_as
+    let silo_url = format!("/v1/system/silos/{}", silo_name);
+    let test_suite_silo: views::Silo = object_get(testctx, &silo_url).await;
+    let user1 = create_local_user(
+        testctx,
+        &test_suite_silo,
+        &"user1".parse().unwrap(),
+        test_params::UserPassword::Password("password1".to_string()),
+    )
+    .await;
+    let user2 = create_local_user(
+        testctx,
+        &test_suite_silo,
+        &"user2".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    // no tokens or sessions for user 1 yet
+    let tokens = list_user_tokens(testctx, user1.id).await;
+    assert!(tokens.is_empty());
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert!(sessions.is_empty());
+
+    // create a token and session for user1
+    get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
+    create_session_for_user(testctx, silo_name, "user1", "password1").await;
+
+    // now there is a token and session for user1
+    let tokens = list_user_tokens(testctx, user1.id).await;
+    assert_eq!(tokens.len(), 1);
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert_eq!(sessions.len(), 1);
+
+    let logout_url = format!("/v1/users/{}/logout", user1.id);
+
+    // user 2 cannot hit the logout endpoint for user 1
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, &logout_url)
+            .body(Some(&serde_json::json!({})))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(user2.id))
+    .execute()
+    .await
+    .expect("User has no perms, can't delete another user's tokens");
+
+    let tokens = list_user_tokens(testctx, user1.id).await;
+    assert_eq!(tokens.len(), 1);
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert_eq!(sessions.len(), 1);
+
+    // user 1 can hit the logout endpoint for themselves
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, &logout_url)
+            .body(Some(&serde_json::json!({})))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::SiloUser(user1.id))
+    .execute()
+    .await
+    .expect("User 1 should be able to delete their own tokens");
+
+    let tokens = list_user_tokens(testctx, user1.id).await;
+    assert!(tokens.is_empty());
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert!(sessions.is_empty());
+
+    // create another couple of tokens and sessions for user1
+    get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
+    get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
+    create_session_for_user(testctx, silo_name, "user1", "password1").await;
+    create_session_for_user(testctx, silo_name, "user1", "password1").await;
+
+    let tokens = list_user_tokens(testctx, user1.id).await;
+    assert_eq!(tokens.len(), 2);
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert_eq!(sessions.len(), 2);
+
+    // make user 2 fleet admin to show that fleet admin does not inherit
+    // the appropriate role due to being fleet admin alone
+    grant_iam(
+        testctx,
+        "/v1/system",
+        FleetRole::Admin,
+        user2.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, &logout_url)
+            .body(Some(&serde_json::json!({})))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(user2.id))
+    .execute()
+    .await
+    .expect("Fleet admin is not sufficient to delete another user's tokens");
+
+    let tokens = list_user_tokens(testctx, user1.id).await;
+    assert_eq!(tokens.len(), 2);
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert_eq!(sessions.len(), 2);
+
+    // make user 2 a silo admin so they can delete user 1's tokens
+    grant_iam(
+        testctx,
+        &silo_url,
+        SiloRole::Admin,
+        user2.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, &logout_url)
+            .body(Some(&serde_json::json!({})))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::SiloUser(user1.id))
+    .execute()
+    .await
+    .expect("Silo admin should be able to delete user 1's tokens");
+
+    // they're gone!
+    let tokens = list_user_tokens(testctx, user1.id).await;
+    assert!(tokens.is_empty());
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert!(sessions.is_empty());
+}
+
+// Strictly speaking, this is not about device auth at all, but we need the
+// lovely helpers we've defined in this file to make things convenient. This
+// suggests we could stand to reorganize or rename some test files.
+
+#[tokio::test]
+async fn test_session_list_excludes_expired() {
+    // Test with default TTL - session should not be expired
+    test_session_list_with_config(&|_config| (), 1).await;
+
+    // Test with idle TTL = 0 - session should be expired immediately
+    test_session_list_with_config(
+        &|config| {
+            config.pkg.console.session_idle_timeout_minutes = 0;
+        },
+        0,
+    )
+    .await;
+
+    // Test with abs TTL = 0 - session should be expired immediately
+    test_session_list_with_config(
+        &|config| {
+            config.pkg.console.session_absolute_timeout_minutes = 0;
+        },
+        0,
+    )
+    .await;
+}
+
+/// Set up a test context with the given config, create a user in the test suite
+/// silo, and create a session, and assert about the length of the session list
+async fn test_session_list_with_config(
+    modify_config: &dyn Fn(&mut NexusConfig) -> (),
+    expected_sessions: usize,
+) {
+    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+        "test_session_list_excludes_expired",
+    )
+    .customize_nexus_config(modify_config)
+    .start::<omicron_nexus::Server>()
+    .await;
+    let testctx = &cptestctx.external_client;
+
+    let silo_name = cptestctx.silo_name.as_str();
+    let silo_url = format!("/v1/system/silos/{}", silo_name);
+    let test_suite_silo: views::Silo = object_get(testctx, &silo_url).await;
+    let user1 = create_local_user(
+        testctx,
+        &test_suite_silo,
+        &"user1".parse().unwrap(),
+        test_params::UserPassword::Password("password1".to_string()),
+    )
+    .await;
+
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert!(sessions.is_empty());
+
+    create_session_for_user(testctx, silo_name, "user1", "password1").await;
+
+    let sessions = list_user_sessions(&testctx, user1.id).await;
+
+    assert_eq!(
+        sessions.len(),
+        expected_sessions,
+        "Expected session list to have {expected_sessions} items"
+    );
+
+    cptestctx.teardown().await; // important!
+}
+
 async fn get_tokens_priv(
     testctx: &ClientTestContext,
 ) -> Vec<views::DeviceAccessToken> {
@@ -632,6 +1061,88 @@ async fn get_tokens_priv(
         .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
         .await
         .items
+}
+
+async fn list_user_tokens(
+    testctx: &ClientTestContext,
+    user_id: SiloUserUuid,
+) -> Vec<views::DeviceAccessToken> {
+    NexusRequest::object_get(testctx, "/v1/me/access-tokens")
+        .authn_as(AuthnMode::SiloUser(user_id))
+        .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
+        .await
+        .items
+}
+
+async fn list_user_sessions(
+    testctx: &ClientTestContext,
+    user_id: SiloUserUuid,
+) -> Vec<views::ConsoleSession> {
+    let url = format!("/v1/users/{}/sessions", user_id);
+    NexusRequest::object_get(testctx, &url)
+        .authn_as(AuthnMode::SiloUser(user_id))
+        .execute_and_parse_unwrap::<ResultsPage<views::ConsoleSession>>()
+        .await
+        .items
+}
+
+/// Create a device auth request, confirm it with the given auth, and fetch the
+/// resulting token. Returns the token grant and confirmation time.
+async fn create_and_confirm_device_auth(
+    testctx: &ClientTestContext,
+    client_id: Uuid,
+    ttl_seconds: Option<NonZeroU32>,
+    confirm_auth: AuthnMode,
+) -> (DeviceAccessTokenGrant, chrono::DateTime<Utc>) {
+    let auth_request = DeviceAuthRequest { client_id, ttl_seconds };
+
+    // note only confirm requires auth. initial request and token fetch don't
+    let auth_response = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&auth_request))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await;
+
+    let confirmation_time = Utc::now();
+
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: auth_response.user_code,
+            }))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(confirm_auth)
+    .execute()
+    .await
+    .expect("failed to confirm device auth");
+
+    let token_grant =
+        fetch_device_token(testctx, auth_response.device_code, client_id).await;
+
+    (token_grant, confirmation_time)
+}
+
+async fn fetch_device_token(
+    testctx: &ClientTestContext,
+    device_code: String,
+    client_id: Uuid,
+) -> DeviceAccessTokenGrant {
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&DeviceAccessTokenRequest {
+                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                    .to_string(),
+                device_code,
+                client_id,
+            }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
+    .await
 }
 
 async fn get_tokens_unpriv(

@@ -7,7 +7,8 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use daft::Diffable;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::id_upcast;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -44,12 +45,14 @@ pub struct OmicronPhysicalDiskConfig {
     pub pool_id: ZpoolUuid,
 }
 
-impl IdMappable for OmicronPhysicalDiskConfig {
-    type Id = PhysicalDiskUuid;
+impl IdOrdItem for OmicronPhysicalDiskConfig {
+    type Key<'a> = PhysicalDiskUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+
+    id_upcast!();
 }
 
 #[derive(
@@ -410,12 +413,14 @@ pub struct DatasetConfig {
     pub inner: SharedDatasetConfig,
 }
 
-impl IdMappable for DatasetConfig {
-    type Id = DatasetUuid;
+impl IdOrdItem for DatasetConfig {
+    type Key<'a> = DatasetUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+
+    id_upcast!();
 }
 
 #[derive(
@@ -619,10 +624,41 @@ impl DiskManagementError {
     Deserialize,
     Serialize,
     JsonSchema,
+    Diffable,
+    strum::EnumIter,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum M2Slot {
     A,
     B,
+}
+
+impl M2Slot {
+    /// Flip from `A` to `B` or vice versa.
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
+
+    /// Convert this slot to an MGS "firmware slot" index.
+    pub fn to_mgs_firmware_slot(self) -> u16 {
+        match self {
+            Self::A => 0,
+            Self::B => 1,
+        }
+    }
+
+    /// Convert a putative MGS "firmware slot" index to an `M2Slot`, returning
+    /// `None` if `slot` is invalid.
+    pub fn from_mgs_firmware_slot(slot: u16) -> Option<Self> {
+        match slot {
+            0 => Some(Self::A),
+            1 => Some(Self::B),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for M2Slot {
@@ -630,6 +666,21 @@ impl fmt::Display for M2Slot {
         match self {
             Self::A => f.write_str("A"),
             Self::B => f.write_str("B"),
+        }
+    }
+}
+
+impl FromStr for M2Slot {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "a" | "A" => Ok(Self::A),
+            "b" | "B" => Ok(Self::B),
+            _ => Err(format!(
+                "unrecognized value {s} for M2 slot. \
+                 Must be one of `a`, `A`, `b`, or `B`",
+            )),
         }
     }
 }

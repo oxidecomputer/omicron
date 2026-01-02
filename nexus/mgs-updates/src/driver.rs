@@ -5,19 +5,17 @@
 //! Drive one or more in-progress MGS-managed updates
 
 use crate::ArtifactCache;
-use crate::SpComponentUpdateHelper;
+use crate::common_sp_update::SpComponentUpdateHelper;
 use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
-use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
-use crate::rot_updater::ReconfiguratorRotUpdater;
-use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
-use id_map::IdMap;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::CompletedAttempt;
@@ -26,12 +24,11 @@ use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
 use nexus_types::internal_api::views::WaitingStatus;
-use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::SpUpdateUuid;
 use qorb::resolver::AllBackends;
+use sled_hardware_types::BaseboardId;
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
@@ -101,10 +98,10 @@ pub struct MgsUpdateDriver {
     delayq: DelayQueue<Arc<BaseboardId>>,
 
     /// tracks update attempts that are in-progress right now
-    in_progress: IdMap<InProgressUpdate>,
+    in_progress: IdOrdMap<InProgressUpdate>,
     /// tracks update attempts that are not running right now
     /// (but waiting for a retry)
-    waiting: IdMap<WaitingAttempt>,
+    waiting: IdOrdMap<WaitingAttempt>,
 }
 
 impl MgsUpdateDriver {
@@ -117,8 +114,8 @@ impl MgsUpdateDriver {
     ) -> MgsUpdateDriver {
         let (status_tx, _) = watch::channel(MgsUpdateDriverStatus {
             recent: VecDeque::with_capacity(N_RECENT_COMPLETIONS),
-            in_progress: BTreeMap::new(),
-            waiting: BTreeMap::new(),
+            in_progress: IdOrdMap::new(),
+            waiting: IdOrdMap::new(),
         });
 
         MgsUpdateDriver {
@@ -130,8 +127,8 @@ impl MgsUpdateDriver {
             status_tx,
             futures: FuturesUnordered::new(),
             delayq: DelayQueue::new(),
-            in_progress: IdMap::new(),
-            waiting: IdMap::new(),
+            in_progress: IdOrdMap::new(),
+            waiting: IdOrdMap::new(),
         }
     }
 
@@ -254,7 +251,7 @@ impl MgsUpdateDriver {
             let to_dispatch: Vec<_> = new_config
                 .iter()
                 .filter_map(|new_request| {
-                    let baseboard_id = &new_request.baseboard_id;
+                    let baseboard_id = &*new_request.baseboard_id;
                     let do_dispatch =
                         if let Some(waiting) = self.waiting.get(baseboard_id) {
                             *new_request != waiting.internal_request.request
@@ -275,7 +272,7 @@ impl MgsUpdateDriver {
         for baseboard_id in &to_stop_waiting {
             // Update our bookkeeping.
             // unwrap(): we filtered on this condition above.
-            let waiting = self.waiting.remove(baseboard_id).unwrap();
+            let waiting = self.waiting.remove(&**baseboard_id).unwrap();
 
             // Stop tracking this timeout.
             self.delayq.remove(&waiting.delay_key);
@@ -283,7 +280,7 @@ impl MgsUpdateDriver {
         // Update the status to reflect that.
         self.status_tx.send_modify(|driver_status| {
             for baseboard_id in &to_stop_waiting {
-                driver_status.waiting.remove(baseboard_id);
+                driver_status.waiting.remove(&**baseboard_id);
             }
         });
 
@@ -296,7 +293,7 @@ impl MgsUpdateDriver {
     fn start_attempt(&mut self, internal_request: InternalRequest) {
         let request = &internal_request.request;
         let baseboard_id = &request.baseboard_id;
-        assert!(!self.in_progress.contains_key(baseboard_id));
+        assert!(!self.in_progress.contains_key(&**baseboard_id));
 
         let update_id = SpUpdateUuid::new_v4();
         let log = self.log.new(o!(
@@ -305,33 +302,9 @@ impl MgsUpdateDriver {
         ));
         info!(&log, "begin update attempt for baseboard");
 
-        let (sp_update, updater): (
-            _,
-            Box<dyn SpComponentUpdateHelper + Send + Sync>,
-        ) = match &request.details {
-            nexus_types::deployment::PendingMgsUpdateDetails::Sp { .. } => {
-                let sp_update =
-                    SpComponentUpdate::from_request(&log, &request, update_id);
-
-                (sp_update, Box::new(ReconfiguratorSpUpdater {}))
-            }
-            nexus_types::deployment::PendingMgsUpdateDetails::Rot {
-                ..
-            } => {
-                let sp_update =
-                    SpComponentUpdate::from_request(&log, &request, update_id);
-
-                (sp_update, Box::new(ReconfiguratorRotUpdater {}))
-            }
-            nexus_types::deployment::PendingMgsUpdateDetails::RotBootloader {
-                ..
-            } => {
-                let sp_update =
-                    SpComponentUpdate::from_request(&log, &request, update_id);
-
-                (sp_update, Box::new(ReconfiguratorRotBootloaderUpdater {}))
-            }
-        };
+        let sp_update =
+            SpComponentUpdate::from_request(&log, request, update_id);
+        let updater = SpComponentUpdateHelper::new(&request.details);
 
         let baseboard_id = baseboard_id.clone();
         let nattempts_done = internal_request.nattempts_done;
@@ -346,14 +319,15 @@ impl MgsUpdateDriver {
         // Update status.  We do this before starting the future because it will
         // update this status and expects to find it.
         self.status_tx.send_modify(|driver_status| {
-            driver_status.in_progress.insert(
-                baseboard_id.clone(),
-                InProgressUpdateStatus {
+            driver_status
+                .in_progress
+                .insert_unique(InProgressUpdateStatus {
+                    baseboard_id: baseboard_id.clone(),
                     time_started: in_progress.time_started,
                     status: UpdateAttemptStatus::NotStarted,
                     nattempts_done,
-                },
-            );
+                })
+                .expect("no previous update for this baseboard");
         });
 
         let status_updater = UpdateAttemptStatusUpdater::new(
@@ -366,7 +340,7 @@ impl MgsUpdateDriver {
             let result = apply_update(
                 artifacts,
                 &sp_update,
-                &*updater,
+                &updater,
                 mgs_rx,
                 &request,
                 status_updater,
@@ -381,7 +355,9 @@ impl MgsUpdateDriver {
         self.futures.push(future);
 
         // Update our bookkeeping.
-        assert!(self.in_progress.insert(in_progress).is_none());
+        self.in_progress
+            .insert_unique(in_progress)
+            .expect("baseboard_id must not already be in progress");
     }
 
     /// Invoked when an in-progress update attempt has completed.
@@ -390,7 +366,7 @@ impl MgsUpdateDriver {
         // this attempt.
         let in_progress = self
             .in_progress
-            .remove(&result.baseboard_id)
+            .remove(&*result.baseboard_id)
             .expect("in-progress record for attempt that just completed");
         let nattempts_done = in_progress.internal_request.nattempts_done + 1;
         let completed = CompletedAttempt {
@@ -435,22 +411,24 @@ impl MgsUpdateDriver {
         let retry_timeout = self.retry_timeout;
         let status_time_next = chrono::Utc::now() + retry_timeout;
         let delay_key = self.delayq.insert(baseboard_id.clone(), retry_timeout);
-        self.waiting.insert(WaitingAttempt { delay_key, internal_request });
+        self.waiting
+            .insert_overwrite(WaitingAttempt { delay_key, internal_request });
 
         // Update the overall status to reflect all these changes.
         self.status_tx.send_modify(|driver_status| {
             // Remove this item from the list of in-progress attempts.
-            let found = driver_status.in_progress.remove(&baseboard_id);
+            let found = driver_status.in_progress.remove(&*baseboard_id);
             assert!(found.is_some());
 
             // Add this item to the list of requests waiting to be retried.
-            driver_status.waiting.insert(
-                baseboard_id.clone(),
-                WaitingStatus {
+            driver_status
+                .waiting
+                .insert_unique(WaitingStatus {
+                    baseboard_id: baseboard_id.clone(),
                     next_attempt_time: status_time_next,
                     nattempts_done,
-                },
-            );
+                })
+                .expect("no previous waiting update for this baseboard");
 
             // Report this recently-completed attempt.
             // This is a ringbuffer of recent attempts.  Make space if we're
@@ -468,11 +446,11 @@ impl MgsUpdateDriver {
         // Remove this request from the set of requests waiting to be retried.
         let waiting = self
             .waiting
-            .remove(&baseboard_id)
+            .remove(&*baseboard_id)
             .expect("waiting request for expired retry timer");
         // Update the external status to reflect that.
         self.status_tx.send_modify(|driver_status| {
-            driver_status.waiting.remove(&baseboard_id);
+            driver_status.waiting.remove(&*baseboard_id);
         });
 
         // Find the current configuration for this request.
@@ -511,12 +489,14 @@ impl MgsUpdateDriver {
 }
 
 /// information tracked for each request
+#[derive(Debug)]
 struct InternalRequest {
     request: PendingMgsUpdate,
     nattempts_done: u32,
 }
 
 /// internal bookkeeping for each in-progress update
+#[derive(Debug)]
 struct InProgressUpdate {
     log: slog::Logger,
     time_started: chrono::DateTime<chrono::Utc>,
@@ -524,11 +504,12 @@ struct InProgressUpdate {
     internal_request: InternalRequest,
 }
 
-impl IdMappable for InProgressUpdate {
-    type Id = Arc<BaseboardId>;
-    fn id(&self) -> Self::Id {
-        self.internal_request.request.baseboard_id.clone()
+impl IdOrdItem for InProgressUpdate {
+    type Key<'a> = &'a BaseboardId;
+    fn key(&self) -> Self::Key<'_> {
+        &self.internal_request.request.baseboard_id
     }
+    id_upcast!();
 }
 
 /// internal result of a completed update attempt
@@ -543,17 +524,12 @@ struct WaitingAttempt {
     internal_request: InternalRequest,
 }
 
-impl WaitingAttempt {
-    fn baseboard_id(&self) -> &Arc<BaseboardId> {
+impl IdOrdItem for WaitingAttempt {
+    type Key<'a> = &'a BaseboardId;
+    fn key(&self) -> Self::Key<'_> {
         &self.internal_request.request.baseboard_id
     }
-}
-
-impl IdMappable for WaitingAttempt {
-    type Id = Arc<BaseboardId>;
-    fn id(&self) -> Self::Id {
-        self.baseboard_id().clone()
-    }
+    id_upcast!();
 }
 
 /// Interface used by update attempts to update just their part of the overall
@@ -577,8 +553,8 @@ impl UpdateAttemptStatusUpdater {
             // the future that owns it.  The status entry for this future lives
             // in the `in_progress` struct until it completes.  Thus, we should
             // always have a value here.
-            let my_status =
-                driver_status.in_progress.get_mut(&self.baseboard_id).unwrap();
+            let mut my_status =
+                driver_status.in_progress.get_mut(&*self.baseboard_id).unwrap();
             my_status.status = new_status;
         });
     }

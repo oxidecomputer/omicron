@@ -2,14 +2,40 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use cockroach_admin_types::{NodeDecommission, NodeStatus};
+use cockroach_admin_types_versions::latest;
 use dropshot::{
     HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, RequestContext,
     TypedBody,
 };
-use omicron_uuid_kinds::OmicronZoneUuid;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use dropshot_api_manager_types::api_versions;
+
+api_versions!([
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- Pick a new semver and define it in the list below.  The list MUST
+    // |  remain sorted, which generally means that your version should go at
+    // |  the very top.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // v
+    // (next_int, IDENT),
+    (2, NEWTYPE_UUID_BUMP),
+    (1, INITIAL),
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2, ADD_FOOBAR)
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
 
 #[dropshot::api_description]
 pub trait CockroachAdminApi {
@@ -41,7 +67,7 @@ pub trait CockroachAdminApi {
     }]
     async fn node_status(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ClusterNodeStatus>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::node::ClusterNodeStatus>, HttpError>;
 
     /// Get the CockroachDB node ID of the local cockroach instance.
     #[endpoint {
@@ -50,7 +76,7 @@ pub trait CockroachAdminApi {
     }]
     async fn local_node_id(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<LocalNodeId>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::node::LocalNodeId>, HttpError>;
 
     /// Decommission a node from the CRDB cluster.
     #[endpoint {
@@ -59,38 +85,29 @@ pub trait CockroachAdminApi {
     }]
     async fn node_decommission(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<NodeId>,
-    ) -> Result<HttpResponseOk<NodeDecommission>, HttpError>;
-}
+        body: TypedBody<latest::node::NodeId>,
+    ) -> Result<HttpResponseOk<latest::node::NodeDecommission>, HttpError>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct ClusterNodeStatus {
-    pub all_nodes: Vec<NodeStatus>,
-}
+    /// Proxy to CockroachDB's /_status/vars endpoint
+    //
+    // Dropshot isn't happy about the "_status" portion of the path; it fails
+    // the linter. Instead, I'm adding the prefix "proxy" to make it clear these
+    // are "intended-to-be-proxied" endpoints, rather than exact matches for the
+    // CRDB HTTP interface paths.
+    #[endpoint {
+        method = GET,
+        path = "/proxy/status/vars",
+    }]
+    async fn status_vars(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<String>, HttpError>;
 
-/// CockroachDB Node ID
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct LocalNodeId {
-    /// The ID of this Omicron zone.
-    ///
-    /// This is included to ensure correctness even if a socket address on a
-    /// sled is reused for a different zone; if our caller is trying to
-    /// determine the node ID for a particular Omicron CockroachDB zone, they'll
-    /// contact us by socket address. We include our zone ID in the response for
-    /// their confirmation that we are the zone they intended to contact.
-    pub zone_id: OmicronZoneUuid,
-    // CockroachDB node IDs are integers, in practice, but our use of them is as
-    // input and output to the `cockroach` CLI. We use a string which is a bit
-    // more natural (no need to parse CLI output or stringify an ID to send it
-    // as input) and leaves open the door for the format to change in the
-    // future.
-    pub node_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct NodeId {
-    pub node_id: String,
+    /// Proxy to CockroachDB's /_status/nodes endpoint
+    #[endpoint {
+        method = GET,
+        path = "/proxy/status/nodes",
+    }]
+    async fn status_nodes(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<String>, HttpError>;
 }

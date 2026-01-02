@@ -1,0 +1,888 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ClickHouse Cluster Admin Server API",
+    "description": "API for interacting with the Oxide control plane's ClickHouse cluster replica servers",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/config": {
+      "put": {
+        "summary": "Generate a ClickHouse configuration file for a server node on a specified",
+        "description": "directory and enable the SMF service.",
+        "operationId": "generate_config_and_enable_svc",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerConfigurableSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateConfigResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/distributed-ddl-queue": {
+      "get": {
+        "summary": "Contains information about distributed ddl queries (ON CLUSTER clause)",
+        "description": "that were executed on a cluster.",
+        "operationId": "distributed_ddl_queue",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_DistributedDdlQueue",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DistributedDdlQueue"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/generation": {
+      "get": {
+        "summary": "Retrieve the generation number of a configuration",
+        "operationId": "generation",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generation"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/init": {
+      "put": {
+        "summary": "Idempotently initialize a replicated ClickHouse cluster database.",
+        "operationId": "init_db",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/timeseries/{table}/{metric}/avg": {
+      "get": {
+        "summary": "Retrieve time series from the system database.",
+        "description": "The value of each data point is the average of all stored data points within the interval. These are internal ClickHouse metrics.",
+        "operationId": "system_timeseries_avg",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "metric",
+            "description": "Name of the metric to retrieve.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "description": "Table to query in the `system` database",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SystemTable"
+            }
+          },
+          {
+            "in": "query",
+            "name": "interval",
+            "description": "The interval to collect monitoring metrics in seconds. Default is 60 seconds.",
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "time_range",
+            "description": "Range of time to collect monitoring metrics in seconds. Default is 86400 seconds (24 hrs).",
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "timestamp_format",
+            "description": "Format in which each timeseries timestamp will be in. Default is UTC",
+            "schema": {
+              "$ref": "#/components/schemas/TimestampFormat"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SystemTimeSeries",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SystemTimeSeries"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ClickhouseHost": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ipv6": {
+                "type": "string",
+                "format": "ipv6"
+              }
+            },
+            "required": [
+              "ipv6"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ipv4": {
+                "type": "string",
+                "format": "ipv4"
+              }
+            },
+            "required": [
+              "ipv4"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "domain_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "domain_name"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "DistributedDdlQueue": {
+        "description": "Contains information about distributed ddl queries (ON CLUSTER clause) that were executed on a cluster.",
+        "type": "object",
+        "properties": {
+          "cluster": {
+            "description": "Cluster name",
+            "type": "string"
+          },
+          "entry": {
+            "description": "Query id",
+            "type": "string"
+          },
+          "entry_version": {
+            "description": "Version of the entry",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "exception_code": {
+            "description": "Exception code",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "exception_text": {
+            "description": "Exception message",
+            "type": "string"
+          },
+          "host": {
+            "description": "Hostname",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "initiator_host": {
+            "description": "Host that initiated the DDL operation",
+            "type": "string"
+          },
+          "initiator_port": {
+            "description": "Port used by the initiator",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "port": {
+            "description": "Host Port",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "query": {
+            "description": "Query executed",
+            "type": "string"
+          },
+          "query_create_time": {
+            "description": "Query created time",
+            "type": "string",
+            "format": "date-time"
+          },
+          "query_duration_ms": {
+            "description": "Duration of query execution (in milliseconds)",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "query_finish_time": {
+            "description": "Query finish time",
+            "type": "string",
+            "format": "date-time"
+          },
+          "settings": {
+            "description": "Settings used in the DDL operation",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "description": "Status of the query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cluster",
+          "entry",
+          "entry_version",
+          "exception_code",
+          "exception_text",
+          "host",
+          "initiator_host",
+          "initiator_port",
+          "port",
+          "query",
+          "query_create_time",
+          "query_duration_ms",
+          "query_finish_time",
+          "settings",
+          "status"
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "GenerateConfigResult": {
+        "description": "Result after generating a configuration file",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "replica": {
+                "$ref": "#/components/schemas/ReplicaConfig"
+              }
+            },
+            "required": [
+              "replica"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "keeper": {
+                "$ref": "#/components/schemas/KeeperConfig"
+              }
+            },
+            "required": [
+              "keeper"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "Generation": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "KeeperConfig": {
+        "description": "Configuration for a ClickHouse keeper",
+        "type": "object",
+        "properties": {
+          "coordination_settings": {
+            "description": "Internal coordination settings",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KeeperCoordinationSettings"
+              }
+            ]
+          },
+          "datastore_path": {
+            "description": "Directory for all files generated by ClickHouse itself",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "generation": {
+            "description": "A unique identifier for the configuration generation.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "listen_host": {
+            "description": "Address the keeper is listening on",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "log_storage_path": {
+            "description": "Directory for coordination logs",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "logger": {
+            "description": "Logging settings",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LogConfig"
+              }
+            ]
+          },
+          "raft_config": {
+            "description": "Settings for each server in the keeper cluster",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RaftServers"
+              }
+            ]
+          },
+          "server_id": {
+            "description": "Unique ID for this keeper node",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KeeperId"
+              }
+            ]
+          },
+          "snapshot_storage_path": {
+            "description": "Directory for coordination snapshot storage",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "tcp_port": {
+            "description": "Port for TCP connections",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "coordination_settings",
+          "datastore_path",
+          "generation",
+          "listen_host",
+          "log_storage_path",
+          "logger",
+          "raft_config",
+          "server_id",
+          "snapshot_storage_path",
+          "tcp_port"
+        ]
+      },
+      "KeeperConfigsForReplica": {
+        "type": "object",
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeeperNodeConfig"
+            }
+          }
+        },
+        "required": [
+          "nodes"
+        ]
+      },
+      "KeeperCoordinationSettings": {
+        "type": "object",
+        "properties": {
+          "operation_timeout_ms": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "raft_logs_level": {
+            "$ref": "#/components/schemas/LogLevel"
+          },
+          "session_timeout_ms": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "operation_timeout_ms",
+          "raft_logs_level",
+          "session_timeout_ms"
+        ]
+      },
+      "KeeperId": {
+        "description": "A unique ID for a ClickHouse Keeper",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "KeeperNodeConfig": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "$ref": "#/components/schemas/ClickhouseHost"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "host",
+          "port"
+        ]
+      },
+      "LogConfig": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "errorlog": {
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "level": {
+            "$ref": "#/components/schemas/LogLevel"
+          },
+          "log": {
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "size": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "count",
+          "errorlog",
+          "level",
+          "log",
+          "size"
+        ]
+      },
+      "LogLevel": {
+        "type": "string",
+        "enum": [
+          "trace",
+          "debug"
+        ]
+      },
+      "Macros": {
+        "type": "object",
+        "properties": {
+          "cluster": {
+            "type": "string"
+          },
+          "replica": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "shard": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "cluster",
+          "replica",
+          "shard"
+        ]
+      },
+      "RaftServerConfig": {
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "$ref": "#/components/schemas/ClickhouseHost"
+          },
+          "id": {
+            "$ref": "#/components/schemas/KeeperId"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "hostname",
+          "id",
+          "port"
+        ]
+      },
+      "RaftServers": {
+        "type": "object",
+        "properties": {
+          "servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RaftServerConfig"
+            }
+          }
+        },
+        "required": [
+          "servers"
+        ]
+      },
+      "RemoteServers": {
+        "type": "object",
+        "properties": {
+          "cluster": {
+            "type": "string"
+          },
+          "replicas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerNodeConfig"
+            }
+          },
+          "secret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cluster",
+          "replicas",
+          "secret"
+        ]
+      },
+      "ReplicaConfig": {
+        "description": "Configuration for a ClickHouse replica server",
+        "type": "object",
+        "properties": {
+          "data_path": {
+            "description": "Directory for all files generated by ClickHouse itself",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "generation": {
+            "description": "A unique identifier for the configuration generation.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "http_port": {
+            "description": "Port for HTTP connections",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "interserver_http_port": {
+            "description": "Port for interserver HTTP connections",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "keepers": {
+            "description": "Contains settings that allow ClickHouse servers to interact with a Keeper cluster",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KeeperConfigsForReplica"
+              }
+            ]
+          },
+          "listen_host": {
+            "description": "Address the server is listening on",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "logger": {
+            "description": "Logging settings",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LogConfig"
+              }
+            ]
+          },
+          "macros": {
+            "description": "Parameter substitutions for replicated tables",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Macros"
+              }
+            ]
+          },
+          "remote_servers": {
+            "description": "Configuration of clusters used by the Distributed table engine and bythe cluster table function",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RemoteServers"
+              }
+            ]
+          },
+          "tcp_port": {
+            "description": "Port for TCP connections",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "data_path",
+          "generation",
+          "http_port",
+          "interserver_http_port",
+          "keepers",
+          "listen_host",
+          "logger",
+          "macros",
+          "remote_servers",
+          "tcp_port"
+        ]
+      },
+      "ServerConfigurableSettings": {
+        "description": "The top most type for configuring clickhouse-servers via clickhouse-admin-server-api",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "A unique identifier for the configuration generation.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "settings": {
+            "description": "Configurable settings for a ClickHouse replica server node.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServerSettings"
+              }
+            ]
+          }
+        },
+        "required": [
+          "generation",
+          "settings"
+        ]
+      },
+      "ServerId": {
+        "description": "A unique ID for a Clickhouse Server",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "ServerNodeConfig": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "$ref": "#/components/schemas/ClickhouseHost"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "host",
+          "port"
+        ]
+      },
+      "ServerSettings": {
+        "description": "Configurable settings for a ClickHouse replica server node.",
+        "type": "object",
+        "properties": {
+          "config_dir": {
+            "description": "Directory for the generated server configuration XML file",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "datastore_path": {
+            "description": "Directory for all files generated by ClickHouse itself",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "id": {
+            "description": "Unique ID of the server node",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServerId"
+              }
+            ]
+          },
+          "keepers": {
+            "description": "Addresses for each of the individual nodes in the Keeper cluster",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClickhouseHost"
+            }
+          },
+          "listen_addr": {
+            "description": "Address the server is listening on",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "remote_servers": {
+            "description": "Addresses for each of the individual replica servers",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClickhouseHost"
+            }
+          }
+        },
+        "required": [
+          "config_dir",
+          "datastore_path",
+          "id",
+          "keepers",
+          "listen_addr",
+          "remote_servers"
+        ]
+      },
+      "SystemTimeSeries": {
+        "description": "Retrieved time series from the internal `system` database.",
+        "type": "object",
+        "properties": {
+          "time": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "time",
+          "value"
+        ]
+      },
+      "SystemTable": {
+        "description": "Available metrics tables in the `system` database",
+        "type": "string",
+        "enum": [
+          "asynchronous_metric_log",
+          "metric_log"
+        ]
+      },
+      "TimestampFormat": {
+        "description": "Which format should the timestamp be in.",
+        "type": "string",
+        "enum": [
+          "utc",
+          "unix_epoch"
+        ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

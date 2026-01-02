@@ -160,6 +160,8 @@ impl std::fmt::Display for DnsDiff<'_> {
             Ok(())
         };
 
+        let mut num_names_unchanged = 0;
+        let mut num_records_unchanged = 0;
         for name_diff in self.iter_names() {
             match name_diff {
                 NameDiff::Added(name, records) => {
@@ -180,14 +182,9 @@ impl std::fmt::Display for DnsDiff<'_> {
                     )?;
                     print_records(f, "-", records)?;
                 }
-                NameDiff::Unchanged(name, records) => {
-                    writeln!(
-                        f,
-                        "    name: {:50} (records: {})",
-                        name,
-                        records.len()
-                    )?;
-                    print_records(f, " ", records)?;
+                NameDiff::Unchanged(_name, records) => {
+                    num_names_unchanged += 1;
+                    num_records_unchanged += records.len();
                 }
                 NameDiff::Changed(name, records1, records2) => {
                     writeln!(
@@ -201,6 +198,13 @@ impl std::fmt::Display for DnsDiff<'_> {
                     print_records(f, "+", records2)?;
                 }
             }
+        }
+        if num_names_unchanged > 0 {
+            writeln!(
+                f,
+                "    unchanged names: {num_names_unchanged} \
+                     (records: {num_records_unchanged})"
+            )?;
         }
 
         Ok(())

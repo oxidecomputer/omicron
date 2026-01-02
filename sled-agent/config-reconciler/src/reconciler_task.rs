@@ -12,16 +12,19 @@ use iddqd::IdOrdMap;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use sled_agent_types::inventory::BootPartitionContents as BootPartitionContentsInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::LOCAL_STORAGE_DATASET;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::disk::Disk;
@@ -31,13 +34,16 @@ use slog::warn;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
 
+use crate::InternalDisksReceiver;
+use crate::SledAgentArtifactStore;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::debug_collector::FormerZoneRootArchiver;
+use crate::host_phase_2::BootPartitionReconciler;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;
 use crate::sled_agent_facilities::SledAgentFacilities;
@@ -56,7 +62,7 @@ pub use self::zones::TimeSyncError;
 pub use self::zones::TimeSyncStatus;
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn spawn<T: SledAgentFacilities>(
+pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     mount_config: Arc<MountConfig>,
     dataset_task: DatasetTaskHandle,
     key_requester: StorageKeyRequester,
@@ -64,20 +70,23 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    internal_disks_rx: InternalDisksReceiver,
     external_disks_tx: watch::Sender<HashSet<Disk>>,
+    former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
-    destroy_orphans: Arc<AtomicBool>,
     sled_agent_facilities: T,
+    sled_agent_artifact_store: U,
     log: Logger,
 ) {
     let external_disks = ExternalDisks::new(
         Arc::clone(&mount_config),
         currently_managed_zpools_tx,
         external_disks_tx,
+        former_zone_root_archiver.clone(),
     );
-    let datasets = OmicronDatasets::new(dataset_task, destroy_orphans);
-
+    let datasets = OmicronDatasets::new(dataset_task);
     let zones = OmicronZones::new(mount_config, time_sync_config);
+    let boot_partitions = BootPartitionReconciler::default();
 
     tokio::spawn(
         ReconcilerTask {
@@ -85,12 +94,15 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
             current_config_rx,
             reconciler_result_tx,
             raw_disks_rx,
+            internal_disks_rx,
             external_disks,
+            former_zone_root_archiver,
             datasets,
             zones,
+            boot_partitions,
             log,
         }
-        .run(sled_agent_facilities),
+        .run(sled_agent_facilities, sled_agent_artifact_store),
     );
 }
 
@@ -117,28 +129,28 @@ impl ReconcilerResult {
             .unwrap_or(TimeSyncStatus::NotYetChecked)
     }
 
-    pub(crate) fn all_mounted_debug_datasets(
+    pub(crate) fn all_mounted_datasets_of_kind(
         &self,
+        kind: DatasetKind,
     ) -> impl Iterator<Item = PathInPool> + '_ {
         let Some(latest_result) = &self.latest_result else {
             return Either::Left(std::iter::empty());
         };
         Either::Right(
-            latest_result
-                .all_mounted_datasets(&self.mount_config, DatasetKind::Debug),
+            latest_result.all_mounted_datasets(&self.mount_config, kind),
         )
+    }
+
+    pub(crate) fn all_mounted_debug_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.all_mounted_datasets_of_kind(DatasetKind::Debug)
     }
 
     pub(crate) fn all_mounted_zone_root_datasets(
         &self,
     ) -> impl Iterator<Item = PathInPool> + '_ {
-        let Some(latest_result) = &self.latest_result else {
-            return Either::Left(std::iter::empty());
-        };
-        Either::Right(latest_result.all_mounted_datasets(
-            &self.mount_config,
-            DatasetKind::TransientZoneRoot,
-        ))
+        self.all_mounted_datasets_of_kind(DatasetKind::TransientZoneRoot)
     }
 
     pub(crate) fn to_inventory(
@@ -150,6 +162,12 @@ impl ReconcilerResult {
             self.latest_result.as_ref().map(|r| r.to_inventory());
         (status, latest_result)
     }
+
+    pub(crate) fn all_mounted_local_storage_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.all_mounted_datasets_of_kind(DatasetKind::LocalStorage)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -158,7 +176,7 @@ pub enum ReconcilerTaskStatus {
     WaitingForInternalDisks,
     WaitingForInitialConfig,
     PerformingReconciliation {
-        config: OmicronSledConfig,
+        config: Box<OmicronSledConfig>,
         started_at_time: DateTime<Utc>,
         started_at_instant: Instant,
     },
@@ -204,6 +222,8 @@ struct LatestReconciliationResult {
     orphaned_datasets: IdOrdMap<OrphanedDataset>,
     zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
+    boot_partitions: BootPartitionContentsInventory,
+    remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
 }
 
 impl LatestReconciliationResult {
@@ -214,6 +234,8 @@ impl LatestReconciliationResult {
             datasets: self.datasets.clone(),
             orphaned_datasets: self.orphaned_datasets.clone(),
             zones: self.zones_inventory.clone(),
+            boot_partitions: self.boot_partitions.clone(),
+            remove_mupdate_override: self.remove_mupdate_override.clone(),
         }
     }
 
@@ -226,8 +248,17 @@ impl LatestReconciliationResult {
         // handle the specific `DatasetKind`s used by our callers.
         let mountpoint = match &kind {
             DatasetKind::Debug => U2_DEBUG_DATASET,
+            DatasetKind::LocalStorage => LOCAL_STORAGE_DATASET,
             DatasetKind::TransientZoneRoot => ZONE_DATASET,
-            _ => unreachable!(
+
+            DatasetKind::Clickhouse
+            | DatasetKind::ClickhouseKeeper
+            | DatasetKind::ClickhouseServer
+            | DatasetKind::Cockroach
+            | DatasetKind::Crucible
+            | DatasetKind::ExternalDns
+            | DatasetKind::InternalDns
+            | DatasetKind::TransientZone { .. } => unreachable!(
                 "private function called with unexpected kind {kind:?}"
             ),
         };
@@ -258,14 +289,21 @@ struct ReconcilerTask {
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     raw_disks_rx: RawDisksReceiver,
+    internal_disks_rx: InternalDisksReceiver,
     external_disks: ExternalDisks,
+    former_zone_root_archiver: FormerZoneRootArchiver,
     datasets: OmicronDatasets,
     zones: OmicronZones,
+    boot_partitions: BootPartitionReconciler,
     log: Logger,
 }
 
 impl ReconcilerTask {
-    async fn run<T: SledAgentFacilities>(mut self, sled_agent_facilities: T) {
+    async fn run<T: SledAgentFacilities, U: SledAgentArtifactStore>(
+        mut self,
+        sled_agent_facilities: T,
+        sled_agent_artifact_store: U,
+    ) {
         // If reconciliation fails, we may want to retry it. The "happy path"
         // that requires this is waiting for time sync: during RSS, cold boot,
         // or replacement of the NTP zone, we may fail to start any zones that
@@ -280,7 +318,12 @@ impl ReconcilerTask {
         const SLEEP_BETWEEN_RETRIES: Duration = Duration::from_secs(5);
 
         loop {
-            let result = self.do_reconcilation(&sled_agent_facilities).await;
+            let result = self
+                .do_reconcilation(
+                    &sled_agent_facilities,
+                    &sled_agent_artifact_store,
+                )
+                .await;
 
             let maybe_retry = match result {
                 ReconciliationResult::NoRetryNeeded => {
@@ -359,9 +402,13 @@ impl ReconcilerTask {
         }
     }
 
-    async fn do_reconcilation<T: SledAgentFacilities>(
+    async fn do_reconcilation<
+        T: SledAgentFacilities,
+        U: SledAgentArtifactStore,
+    >(
         &mut self,
         sled_agent_facilities: &T,
+        sled_agent_artifact_store: &U,
     ) -> ReconciliationResult {
         // Take a snapshot of the current state of the input channels on which
         // we act. Clone both to avoid keeping the channels locked while we
@@ -399,6 +446,45 @@ impl ReconcilerTask {
             }
         };
 
+        let internal_disks = self.internal_disks_rx.current();
+
+        // Reconcile the mupdate override field. This can be done independently
+        // of the other parts of reconciliation (and this doesn't have to block
+        // other parts of reconciliation), but the argument for this is somewhat
+        // non-trivial. See docs/mupdate-update-flow.adoc, section
+        // "Sled Agent reconciler error handling".
+        let remove_mupdate_override =
+            if let Some(override_id) = sled_config.remove_mupdate_override {
+                Some(
+                    sled_agent_facilities
+                        .remove_mupdate_override(override_id, &internal_disks),
+                )
+            } else {
+                None
+            };
+
+        // Obtain the resolver status. This will be used to account for mupdate
+        // overrides, as well as errors while reading this information.
+        //
+        // This status is obtained after remove_mupdate_override is processed.
+        let resolver_status =
+            sled_agent_facilities.zone_image_resolver_status();
+
+        // Reconcile any changes to our boot partitions. This is typically a
+        // no-op; if we've successfully read both boot partitions in a previous
+        // reconciliation and don't have new contents to write, it will just
+        // return cached status.
+        let boot_partitions = self
+            .boot_partitions
+            .reconcile(
+                &resolver_status,
+                &internal_disks,
+                &sled_config.host_phase_2,
+                sled_agent_artifact_store,
+                &self.log,
+            )
+            .await;
+
         // ---
         // We go through the removal process first: shut down zones, then stop
         // managing disks, then remove any orphaned datasets.
@@ -409,7 +495,10 @@ impl ReconcilerTask {
             .zones
             .shut_down_zones_if_needed(
                 &sled_config.zones,
+                &resolver_status,
+                &internal_disks,
                 sled_agent_facilities,
+                self.former_zone_root_archiver.clone(),
                 &self.log,
             )
             .await;
@@ -425,11 +514,6 @@ impl ReconcilerTask {
         // Finally, remove any "orphaned" datasets (i.e., datasets of a kind
         // that we ought to be managing that exist on disks we're managing but
         // don't have entries in our current config).
-        //
-        // Note: this doesn't actually delete them yet! We only report the
-        // orphans; after some bake time where we build confidence this won't
-        // remove datasets it shouldn't, we'll change this to actually remove
-        // them. https://github.com/oxidecomputer/omicron/issues/6177
         self.datasets
             .remove_datasets_if_needed(
                 &sled_config.datasets,
@@ -464,7 +548,13 @@ impl ReconcilerTask {
 
         // Collect the current timesync status (needed to start any new zones,
         // and also we want to report it as part of each reconciler result).
-        let timesync_status = self.zones.check_timesync().await;
+        let timesync_status = self.zones.check_timesync(&self.log).await;
+
+        // Call back into sled-agent and let it do any work that needs to happen
+        // once time is sync'd (e.g., rewrite `uptime`).
+        if timesync_status.is_synchronized() {
+            sled_agent_facilities.on_time_sync();
+        }
 
         // We conservatively refuse to start any new zones if any zones have
         // failed to shut down cleanly. This could be more precise, but we want
@@ -480,9 +570,12 @@ impl ReconcilerTask {
                 self.zones
                     .start_zones_if_needed(
                         &sled_config.zones,
+                        &resolver_status,
+                        &internal_disks,
                         sled_agent_facilities,
                         timesync_status.is_synchronized(),
                         &self.datasets,
+                        self.former_zone_root_archiver.clone(),
                         &self.log,
                     )
                     .await;
@@ -510,12 +603,15 @@ impl ReconcilerTask {
         };
 
         let inner = LatestReconciliationResult {
-            sled_config,
+            sled_config: *sled_config,
             external_disks_inventory: self.external_disks.to_inventory(),
             datasets: self.datasets.to_inventory(),
             orphaned_datasets: self.datasets.orphaned_datasets().clone(),
             zones_inventory: self.zones.to_inventory(),
             timesync_status,
+            boot_partitions: boot_partitions.into_inventory(),
+            remove_mupdate_override: remove_mupdate_override
+                .map(|v| v.to_inventory()),
         };
         self.reconciler_result_tx.send_modify(|r| {
             r.status = ReconcilerTaskStatus::Idle {

@@ -40,7 +40,7 @@ impl<'a> SiloUser<'a> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
         let datastore = lookup.datastore;
-        match &self {
+        match self {
             SiloUser::Error(_, error) => Err(error.clone()),
             SiloUser::PrimaryKey(_, v0) => {
                 Self::fetch_by_id_for(opctx, datastore, v0, action).await
@@ -98,7 +98,7 @@ impl<'a> SiloUser<'a> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
         let datastore = lookup.datastore;
-        match &self {
+        match self {
             SiloUser::Error(_, error) => Err(error.clone()),
             SiloUser::PrimaryKey(_, v0) => {
                 let (authz_silo_user, _) = Self::lookup_by_id_no_authz(

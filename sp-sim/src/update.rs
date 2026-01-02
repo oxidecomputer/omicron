@@ -5,14 +5,17 @@
 use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::mem;
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::SIM_GIMLET_BOARD;
 use crate::SIM_ROT_BOARD;
-use crate::SIM_ROT_STAGE0_BOARD;
 use crate::SIM_SIDECAR_BOARD;
+use crate::config::SpCabooses;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
 use gateway_messages::Fwid;
+use gateway_messages::HfError;
 use gateway_messages::RotSlotId;
 use gateway_messages::RotStateV3;
 use gateway_messages::SpComponent;
@@ -21,8 +24,12 @@ use gateway_messages::UpdateChunk;
 use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
 use hubtools::RawHubrisImage;
+use nexus_types::inventory::Caboose;
+use omicron_common::disk::M2Slot;
+use sha2::Sha256;
 use sha3::Digest;
 use sha3::Sha3_256;
+use tokio::sync::mpsc;
 
 pub(crate) struct SimSpUpdate {
     /// tracks the state of any ongoing simulated update
@@ -35,9 +42,18 @@ pub(crate) struct SimSpUpdate {
     last_sp_update_data: Option<Box<[u8]>>,
     /// data from the last completed RoT update (exposed for testing)
     last_rot_update_data: Option<Box<[u8]>>,
-    /// data from the last completed phase1 update for each slot (exposed for
-    /// testing)
-    last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
+    /// current active phase 1 slot
+    phase1_active_slot: u16,
+    /// data in each phase 1 slot
+    phase1_slot_0_data: Vec<u8>,
+    phase1_slot_1_data: Vec<u8>,
+    /// state of hashing each of the host phase1 slots
+    phase1_hash_state: BTreeMap<u16, HostFlashHashState>,
+    /// how do we decide when we're done hashing host phase1 slots? this allows
+    /// us to default to "instant" (e.g., for running sp-sim as a part of
+    /// `omicron-dev`) while giving tests that want explicit control the ability
+    /// to precisely trigger completion of hashing.
+    phase1_hash_policy: HostFlashHashPolicyInner,
 
     /// records whether a change to the stage0 "active slot" has been requested
     pending_stage0_update: bool,
@@ -62,6 +78,8 @@ impl SimSpUpdate {
     pub(crate) fn new(
         baseboard_kind: BaseboardKind,
         no_stage0_caboose: bool,
+        phase1_hash_policy: HostFlashHashPolicy,
+        cabooses: Option<SpCabooses>,
     ) -> Self {
         const SP_GITC0: &str = "ffffffff";
         const SP_GITC1: &str = "fefefefe";
@@ -81,46 +99,78 @@ impl SimSpUpdate {
         const STAGE0_VERS0: &str = "0.0.200";
         const STAGE0_VERS1: &str = "0.0.200";
 
-        let sp_board = baseboard_kind.sp_board();
-        let sp_name = baseboard_kind.sp_name();
-        let rot_name = baseboard_kind.rot_name();
+        // If we find in the config preset cabooses we use those. Otherwise, we
+        // can use default values
+        let (
+            sp_active_src,
+            sp_inactive_src,
+            rot_a_src,
+            rot_b_src,
+            stage0_src,
+            stage0_next_src,
+        ) = if let Some(c) = cabooses {
+            (
+                c.sp_slot_0,
+                c.sp_slot_1,
+                c.rot_slot_a,
+                c.rot_slot_b,
+                c.stage0,
+                c.stage0_next,
+            )
+        } else {
+            let sp_board = baseboard_kind.sp_board().to_string();
+            let sp_name = baseboard_kind.sp_name().to_string();
+            let rot_name = baseboard_kind.rot_name().to_string();
+            (
+                Caboose {
+                    git_commit: SP_GITC0.to_string(),
+                    board: sp_board.clone(),
+                    name: sp_name.clone(),
+                    version: SP_VERS0.to_string(),
+                    sign: None,
+                },
+                Caboose {
+                    git_commit: SP_GITC1.to_string(),
+                    board: sp_board.clone(),
+                    name: sp_name.clone(),
+                    version: SP_VERS1.to_string(),
+                    sign: None,
+                },
+                Caboose {
+                    git_commit: ROT_GITC0.to_string(),
+                    board: SIM_ROT_BOARD.to_string(),
+                    name: rot_name.clone(),
+                    version: ROT_VERS0.to_string(),
+                    sign: Some(ROT_STAGING_DEVEL_SIGN.to_string()),
+                },
+                Caboose {
+                    git_commit: ROT_GITC1.to_string(),
+                    board: SIM_ROT_BOARD.to_string(),
+                    name: rot_name.clone(),
+                    version: ROT_VERS1.to_string(),
+                    sign: Some(ROT_STAGING_DEVEL_SIGN.to_string()),
+                },
+                Caboose {
+                    git_commit: STAGE0_GITC0.to_string(),
+                    board: SIM_ROT_BOARD.to_string(),
+                    name: rot_name.clone(),
+                    version: STAGE0_VERS0.to_string(),
+                    sign: Some(ROT_STAGING_DEVEL_SIGN.to_string()),
+                },
+                Caboose {
+                    git_commit: STAGE0_GITC1.to_string(),
+                    board: SIM_ROT_BOARD.to_string(),
+                    name: rot_name.clone(),
+                    version: STAGE0_VERS1.to_string(),
+                    sign: Some(ROT_STAGING_DEVEL_SIGN.to_string()),
+                },
+            )
+        };
 
-        let caboose_sp_active = CabooseValue::Caboose(
-            hubtools::CabooseBuilder::default()
-                .git_commit(SP_GITC0)
-                .board(sp_board)
-                .name(sp_name)
-                .version(SP_VERS0)
-                .build(),
-        );
-        let caboose_sp_inactive = CabooseValue::Caboose(
-            hubtools::CabooseBuilder::default()
-                .git_commit(SP_GITC1)
-                .board(sp_board)
-                .name(sp_name)
-                .version(SP_VERS1)
-                .build(),
-        );
-
-        let caboose_rot_a = CabooseValue::Caboose(
-            hubtools::CabooseBuilder::default()
-                .git_commit(ROT_GITC0)
-                .board(SIM_ROT_BOARD)
-                .name(rot_name)
-                .version(ROT_VERS0)
-                .sign(ROT_STAGING_DEVEL_SIGN)
-                .build(),
-        );
-
-        let caboose_rot_b = CabooseValue::Caboose(
-            hubtools::CabooseBuilder::default()
-                .git_commit(ROT_GITC1)
-                .board(SIM_ROT_BOARD)
-                .name(rot_name)
-                .version(ROT_VERS1)
-                .sign(ROT_STAGING_DEVEL_SIGN)
-                .build(),
-        );
+        let caboose_sp_active = build_caboose(sp_active_src);
+        let caboose_sp_inactive = build_caboose(sp_inactive_src);
+        let caboose_rot_a = build_caboose(rot_a_src);
+        let caboose_rot_b = build_caboose(rot_b_src);
 
         let (caboose_stage0, caboose_stage0next) = if no_stage0_caboose {
             (
@@ -128,26 +178,7 @@ impl SimSpUpdate {
                 CabooseValue::InvalidMissingAllKeys,
             )
         } else {
-            (
-                CabooseValue::Caboose(
-                    hubtools::CabooseBuilder::default()
-                        .git_commit(STAGE0_GITC0)
-                        .board(SIM_ROT_STAGE0_BOARD)
-                        .name(rot_name)
-                        .version(STAGE0_VERS0)
-                        .sign(ROT_STAGING_DEVEL_SIGN)
-                        .build(),
-                ),
-                CabooseValue::Caboose(
-                    hubtools::CabooseBuilder::default()
-                        .git_commit(STAGE0_GITC1)
-                        .board(SIM_ROT_STAGE0_BOARD)
-                        .name(rot_name)
-                        .version(STAGE0_VERS1)
-                        .sign(ROT_STAGING_DEVEL_SIGN)
-                        .build(),
-                ),
-            )
+            (build_caboose(stage0_src), build_caboose(stage0_next_src))
         };
 
         const SLOT_A_DIGEST: [u8; 32] = [0xaa; 32];
@@ -176,7 +207,11 @@ impl SimSpUpdate {
             state: UpdateState::NotPrepared,
             last_sp_update_data: None,
             last_rot_update_data: None,
-            last_host_phase1_update_data: BTreeMap::new(),
+            phase1_active_slot: 0,
+            phase1_slot_0_data: b"sp-sim fake phase 1 data for slot 0".to_vec(),
+            phase1_slot_1_data: b"sp-sim fake phase 1 data for slot 1".to_vec(),
+            phase1_hash_state: BTreeMap::new(),
+            phase1_hash_policy: phase1_hash_policy.0,
 
             pending_stage0_update: false,
 
@@ -189,6 +224,13 @@ impl SimSpUpdate {
 
             rot_state,
         }
+    }
+
+    pub(crate) fn set_phase1_hash_policy(
+        &mut self,
+        policy: HostFlashHashPolicy,
+    ) {
+        self.phase1_hash_policy = policy.0;
     }
 
     pub(crate) fn sp_update_prepare(
@@ -303,14 +345,25 @@ impl SimSpUpdate {
                 std::io::Write::write_all(data, chunk_data)
                     .map_err(|_| SpError::UpdateIsTooLarge)?;
 
+                // If we're writing to the host flash, invalidate the cached
+                // hash of this slot.
+                if *component == SpComponent::HOST_CPU_BOOT_FLASH {
+                    self.phase1_hash_state
+                        .insert(*slot, HostFlashHashState::HashInvalidated);
+                }
+
                 if data.position() == data.get_ref().len() as u64 {
                     let mut stolen = Cursor::new(Box::default());
                     mem::swap(data, &mut stolen);
                     let data = stolen.into_inner();
 
                     if *component == SpComponent::HOST_CPU_BOOT_FLASH {
-                        self.last_host_phase1_update_data
-                            .insert(*slot, data.clone());
+                        let dest = match slot {
+                            0 => &mut self.phase1_slot_0_data,
+                            1 => &mut self.phase1_slot_1_data,
+                            _ => return Err(SpError::InvalidSlotForComponent),
+                        };
+                        *dest = data.clone().to_vec();
                     }
 
                     let component = *component;
@@ -445,11 +498,105 @@ impl SimSpUpdate {
         self.last_rot_update_data.clone()
     }
 
-    pub(crate) fn last_host_phase1_update_data(
-        &self,
+    pub(crate) fn host_phase1_data(&self, slot: u16) -> Option<Vec<u8>> {
+        match slot {
+            0 => Some(self.phase1_slot_0_data.clone()),
+            1 => Some(self.phase1_slot_1_data.clone()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn start_host_flash_hash(
+        &mut self,
         slot: u16,
-    ) -> Option<Box<[u8]>> {
-        self.last_host_phase1_update_data.get(&slot).cloned()
+    ) -> Result<(), SpError> {
+        self.check_host_flash_state_and_policy(slot);
+        match self
+            .phase1_hash_state
+            .get_mut(&slot)
+            .expect("check_host_flash_state_and_policy always inserts")
+        {
+            // Already hashed; this is a no-op.
+            HostFlashHashState::Hashed(_) => Ok(()),
+            // No current hash; record our start time.
+            state @ (HostFlashHashState::NeverHashed
+            | HostFlashHashState::HashInvalidated) => {
+                *state = HostFlashHashState::HashStarted(Instant::now());
+                Ok(())
+            }
+            // Still hashing; this is an error.
+            HostFlashHashState::HashStarted(_) => {
+                Err(SpError::Hf(HfError::HashInProgress))
+            }
+        }
+    }
+
+    pub(crate) fn get_host_flash_hash(
+        &mut self,
+        slot: u16,
+    ) -> Result<[u8; 32], SpError> {
+        self.check_host_flash_state_and_policy(slot);
+        match self
+            .phase1_hash_state
+            .get_mut(&slot)
+            .expect("check_host_flash_state_and_policy always inserts")
+        {
+            HostFlashHashState::Hashed(hash) => Ok(*hash),
+            HostFlashHashState::NeverHashed => {
+                Err(SpError::Hf(HfError::HashUncalculated))
+            }
+            HostFlashHashState::HashStarted(_) => {
+                Err(SpError::Hf(HfError::HashInProgress))
+            }
+            HostFlashHashState::HashInvalidated => {
+                Err(SpError::Hf(HfError::RecalculateHash))
+            }
+        }
+    }
+
+    fn check_host_flash_state_and_policy(&mut self, slot: u16) {
+        let state = self
+            .phase1_hash_state
+            .entry(slot)
+            .or_insert(HostFlashHashState::NeverHashed);
+
+        // If we've already hashed this slot, we're done.
+        if matches!(state, HostFlashHashState::Hashed(_)) {
+            return;
+        }
+
+        // Should we hash the flash now? It depends on our state + policy.
+        let should_hash = match (&mut self.phase1_hash_policy, state) {
+            // If we want to always assume contents are hashed, compute that
+            // hash _unless_ the contents have changed (in which case a client
+            // would need to send us an explicit "start hashing" request).
+            (
+                HostFlashHashPolicyInner::AssumeAlreadyHashed,
+                HostFlashHashState::HashInvalidated,
+            ) => false,
+            (HostFlashHashPolicyInner::AssumeAlreadyHashed, _) => true,
+            // If we're timer based, only hash if the timer has elapsed.
+            (
+                HostFlashHashPolicyInner::Timer(timeout),
+                HostFlashHashState::HashStarted(started),
+            ) => *timeout >= started.elapsed(),
+            (HostFlashHashPolicyInner::Timer(_), _) => false,
+            // If we're channel based, only hash if we've gotten a request to
+            // start hashing and there's a message in the channel.
+            (
+                HostFlashHashPolicyInner::Channel(rx),
+                HostFlashHashState::HashStarted(_),
+            ) => rx.try_recv().is_ok(),
+            (HostFlashHashPolicyInner::Channel(_), _) => false,
+        };
+
+        if should_hash {
+            let data = self.host_phase1_data(slot);
+            let data = data.as_deref().unwrap_or(&[]);
+            let hash = Sha256::digest(&data).into();
+            self.phase1_hash_state
+                .insert(slot, HostFlashHashState::Hashed(hash));
+        }
     }
 
     pub(crate) fn get_component_caboose_value(
@@ -503,7 +650,14 @@ impl SimSpUpdate {
                     Err(SpError::RequestUnsupportedForComponent)
                 }
             }
-            SpComponent::HOST_CPU_BOOT_FLASH => Ok(()),
+            SpComponent::HOST_CPU_BOOT_FLASH => {
+                if M2Slot::from_mgs_firmware_slot(slot).is_some() {
+                    self.phase1_active_slot = slot;
+                    Ok(())
+                } else {
+                    Err(SpError::InvalidSlotForComponent)
+                }
+            }
             _ => {
                 // The real SP returns `RequestUnsupportedForComponent` for
                 // anything other than the RoT and host boot flash, including
@@ -520,11 +674,15 @@ impl SimSpUpdate {
         match component {
             // The only active component for SP is slot 0.
             SpComponent::SP_ITSELF => Ok(0),
+            // The only active component is stage0
+            SpComponent::STAGE0 => Ok(0),
+
+            // These slots can be controlled
             SpComponent::ROT => Ok(rot_slot_id_to_u16(
                 self.rot_state.persistent_boot_preference,
             )),
-            // The only active component is stage0
-            SpComponent::STAGE0 => Ok(0),
+            SpComponent::HOST_CPU_BOOT_FLASH => Ok(self.phase1_active_slot),
+
             _ => Err(SpError::RequestUnsupportedForComponent),
         }
     }
@@ -552,10 +710,9 @@ impl BaseboardKind {
     }
 
     fn rot_name(&self) -> &str {
-        match self {
-            BaseboardKind::Gimlet => "SimGimletRot",
-            BaseboardKind::Sidecar => "SimSidecarRot",
-        }
+        // In production, all RoTs claim to have the board `oxide-rot-1`. We'll
+        // do something similar but distinct here.
+        "SimRot"
     }
 }
 
@@ -605,6 +762,21 @@ impl CabooseValue {
             CabooseValue::InvalidFailedRead => Err(SpError::CabooseReadError),
         }
     }
+}
+
+// A helper function to build a CabooseValue from Caboose
+fn build_caboose(source: Caboose) -> CabooseValue {
+    let mut builder = hubtools::CabooseBuilder::default()
+        .git_commit(source.git_commit)
+        .board(source.board)
+        .name(source.name)
+        .version(source.version);
+
+    if let Some(sign_str) = source.sign {
+        builder = builder.sign(sign_str);
+    }
+
+    CabooseValue::Caboose(builder.build())
 }
 
 enum UpdateState {
@@ -662,4 +834,66 @@ fn fake_fwid_compute(data: &[u8]) -> Fwid {
     let mut digest = Sha3_256::default();
     digest.update(data);
     Fwid::Sha3_256(digest.finalize().into())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum HostFlashHashState {
+    Hashed([u8; 32]),
+    NeverHashed,
+    HashStarted(Instant),
+    HashInvalidated,
+}
+
+/// Policy controlling how `sp-sim` behaves when asked to flash its host phase 1
+/// contents.
+#[derive(Debug)]
+pub struct HostFlashHashPolicy(HostFlashHashPolicyInner);
+
+impl HostFlashHashPolicy {
+    /// Always return computed hashes when asked.
+    ///
+    /// This emulates an SP that has previously computed its phase 1 flash hash
+    /// and whose contents haven't changed. Most Nexus tests should use this
+    /// policy by default to allow inventory collections to complete promptly.
+    pub fn assume_already_hashed() -> Self {
+        Self(HostFlashHashPolicyInner::AssumeAlreadyHashed)
+    }
+
+    /// Return `HashInProgress` for `timeout` after hashing has started before
+    /// completing it successfully.
+    pub fn timer(timeout: Duration) -> Self {
+        Self(HostFlashHashPolicyInner::Timer(timeout))
+    }
+
+    /// Returns a channel that allows the caller to control when hashing
+    /// completes.
+    pub fn channel() -> (Self, HostFlashHashCompletionSender) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            Self(HostFlashHashPolicyInner::Channel(rx)),
+            HostFlashHashCompletionSender(tx),
+        )
+    }
+}
+
+#[derive(Debug)]
+enum HostFlashHashPolicyInner {
+    /// always assume hashing has already been computed
+    AssumeAlreadyHashed,
+    /// complete hashing after `Duration` has elapsed
+    Timer(Duration),
+    /// complete hashing if there's a message in this channel
+    Channel(mpsc::UnboundedReceiver<()>),
+}
+
+pub struct HostFlashHashCompletionSender(mpsc::UnboundedSender<()>);
+
+impl HostFlashHashCompletionSender {
+    /// Allow the next request to get the hash result to succeed.
+    ///
+    /// Multiple calls to this function will queue multiple hash result
+    /// successes.
+    pub fn complete_next_hashing_attempt(&self) {
+        self.0.send(()).expect("receiving sp-sim instance is gone");
+    }
 }

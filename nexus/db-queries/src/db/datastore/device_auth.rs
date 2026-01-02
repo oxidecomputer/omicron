@@ -9,6 +9,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::DeviceAccessToken;
 use crate::db::model::DeviceAuthRequest;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -24,7 +25,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -48,7 +48,7 @@ impl DataStore {
         let authz_token = authz::DeviceAccessToken::new(
             authz::FLEET,
             db_token.id(),
-            LookupType::ById(db_token.id().into_untyped_uuid()),
+            LookupType::by_id(db_token.id()),
         );
 
         // This check might seem superfluous, but (for now at least) only the
@@ -92,7 +92,7 @@ impl DataStore {
         authz_user: &authz::SiloUser,
         access_token: DeviceAccessToken,
     ) -> CreateResult<DeviceAccessToken> {
-        assert_eq!(authz_user.id(), access_token.silo_user_id);
+        assert_eq!(authz_user.id(), access_token.silo_user_id());
         opctx.authorize(authz::Action::Delete, authz_request).await?;
         opctx.authorize(authz::Action::CreateChild, authz_user).await?;
 
@@ -198,9 +198,45 @@ impl DataStore {
             .actor_required()
             .internal_context("listing current user's tokens")?;
 
+        let silo_user_id = match actor.silo_user_id() {
+            Some(silo_user_id) => silo_user_id,
+            None => {
+                return Err(Error::non_resourcetype_not_found(
+                    "could not find silo user",
+                ))?;
+            }
+        };
+
         use nexus_db_schema::schema::device_access_token::dsl;
         paginated(dsl::device_access_token, dsl::id, &pagparams)
-            .filter(dsl::silo_user_id.eq(actor.actor_id()))
+            .filter(dsl::silo_user_id.eq(to_db_typed_uuid(silo_user_id)))
+            // we don't have time_deleted on tokens. unfortunately this is not
+            // indexed well. maybe it can be!
+            .filter(
+                dsl::time_expires
+                    .is_null()
+                    .or(dsl::time_expires.gt(Utc::now())),
+            )
+            .select(DeviceAccessToken::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List device access tokens for a specific user
+    pub async fn silo_user_token_list(
+        &self,
+        opctx: &OpContext,
+        authz_token_list: authz::SiloUserTokenList,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<DeviceAccessToken> {
+        opctx.authorize(authz::Action::ListChildren, &authz_token_list).await?;
+
+        let silo_user_id = authz_token_list.silo_user().id();
+
+        use nexus_db_schema::schema::device_access_token::dsl;
+        paginated(dsl::device_access_token, dsl::id, &pagparams)
+            .filter(dsl::silo_user_id.eq(to_db_typed_uuid(silo_user_id)))
             // we don't have time_deleted on tokens. unfortunately this is not
             // indexed well. maybe it can be!
             .filter(
@@ -224,9 +260,18 @@ impl DataStore {
             .actor_required()
             .internal_context("deleting current user's token")?;
 
+        let silo_user_id = match actor.silo_user_id() {
+            Some(silo_user_id) => silo_user_id,
+            None => {
+                return Err(Error::non_resourcetype_not_found(
+                    "could not find silo user",
+                ))?;
+            }
+        };
+
         use nexus_db_schema::schema::device_access_token::dsl;
         let num_deleted = diesel::delete(dsl::device_access_token)
-            .filter(dsl::silo_user_id.eq(actor.actor_id()))
+            .filter(dsl::silo_user_id.eq(to_db_typed_uuid(silo_user_id)))
             .filter(dsl::id.eq(token_id))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -240,5 +285,29 @@ impl DataStore {
         }
 
         Ok(())
+    }
+
+    /// Delete all tokens for the user
+    pub async fn silo_user_tokens_delete(
+        &self,
+        opctx: &OpContext,
+        authz_token_list: &authz::SiloUserTokenList,
+    ) -> Result<(), Error> {
+        // authz policy enforces that the opctx actor is a silo admin on the
+        // target user's own silo in particular
+        opctx.authorize(authz::Action::Modify, authz_token_list).await?;
+
+        let silo_user_id = authz_token_list.silo_user().id();
+
+        use nexus_db_schema::schema::device_access_token;
+        diesel::delete(device_access_token::table)
+            .filter(
+                device_access_token::silo_user_id
+                    .eq(to_db_typed_uuid(silo_user_id)),
+            )
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|_x| ())
     }
 }

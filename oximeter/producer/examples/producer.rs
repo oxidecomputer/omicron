@@ -107,6 +107,11 @@ impl Producer for CpuBusyProducer {
     }
 }
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "using tokio::main avoids an `oxide-tokio-rt` dependency for \
+        examples"
+)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();

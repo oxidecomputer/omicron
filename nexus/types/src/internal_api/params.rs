@@ -8,8 +8,6 @@ use crate::deployment::Blueprint;
 use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::shared::Baseboard;
 use crate::external_api::shared::IpRange;
-use nexus_sled_agent_shared::inventory::SledRole;
-use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
@@ -18,12 +16,15 @@ use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types_versions::latest::inventory::{SledCpuFamily, SledRole};
+use sled_agent_types_versions::latest::rack_init::RecoverySiloConfig;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -56,6 +57,9 @@ pub struct SledAgentInfo {
     /// Must be smaller than "usable_physical_ram"
     pub reservoir_size: ByteCount,
 
+    /// The family of the sled's CPU.
+    pub cpu_family: SledCpuFamily,
+
     /// The generation number of this request from sled-agent
     pub generation: Generation,
 
@@ -84,15 +88,20 @@ pub struct PhysicalDiskPutRequest {
     pub model: String,
 
     pub variant: PhysicalDiskKind,
-    pub sled_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled_id: SledUuid,
 }
 
 /// Identifies information about a Zpool that should be part of the control
 /// plane.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutRequest {
-    pub id: Uuid,
-    pub sled_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub id: ZpoolUuid,
+
+    #[schemars(with = "Uuid")]
+    pub sled_id: SledUuid,
+
     pub physical_disk_id: PhysicalDiskUuid,
 }
 
@@ -121,7 +130,7 @@ pub enum ServiceKind {
     Oximeter,
     Dendrite,
     Tfport,
-    BoundaryNtp { snat: SourceNatConfig, nic: ServiceNic },
+    BoundaryNtp { snat: SourceNatConfigGeneric, nic: ServiceNic },
     InternalNtp,
     Mgd,
 }
@@ -210,5 +219,6 @@ pub struct OximeterInfo {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrateRequest {
     /// The ID of the sled to which to migrate the target instance.
-    pub dst_sled_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub dst_sled_id: SledUuid,
 }

@@ -167,23 +167,6 @@ impl Populator for PopulateBuiltinUsers {
     }
 }
 
-/// Populates the built-in roles
-#[derive(Debug)]
-struct PopulateBuiltinRoles;
-impl Populator for PopulateBuiltinRoles {
-    fn populate<'a, 'b>(
-        &self,
-        opctx: &'a OpContext,
-        datastore: &'a DataStore,
-        _args: &'a PopulateArgs,
-    ) -> BoxFuture<'b, Result<(), Error>>
-    where
-        'a: 'b,
-    {
-        async { datastore.load_builtin_roles(opctx).await.map(|_| ()) }.boxed()
-    }
-}
-
 /// Populates the built-in role assignments
 #[derive(Debug)]
 struct PopulateBuiltinRoleAssignments;
@@ -334,9 +317,8 @@ impl Populator for PopulateRack {
     }
 }
 
-const ALL_POPULATORS: [&dyn Populator; 10] = [
+const ALL_POPULATORS: [&dyn Populator; 9] = [
     &PopulateBuiltinUsers {},
-    &PopulateBuiltinRoles {},
     &PopulateBuiltinRoleAssignments {},
     &PopulateBuiltinSilos {},
     &PopulateBuiltinProjects {},
@@ -357,6 +339,7 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db;
+    use nexus_db_queries::db::datastore::IdentityCheckPolicy;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
@@ -382,7 +365,14 @@ mod test {
         let cfg = db::Config { url: db.crdb().pg_config().clone() };
         let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
         let datastore = Arc::new(
-            db::DataStore::new(&logctx.log, pool, None).await.unwrap(),
+            db::DataStore::new(
+                &logctx.log,
+                pool,
+                None,
+                IdentityCheckPolicy::DontCare,
+            )
+            .await
+            .unwrap(),
         );
         let opctx = OpContext::for_background(
             logctx.log.clone(),
@@ -433,7 +423,14 @@ mod test {
         // We need to create the datastore before tearing down the database, as
         // it verifies the schema version of the DB while booting.
         let datastore = Arc::new(
-            db::DataStore::new(&logctx.log, pool, None).await.unwrap(),
+            db::DataStore::new(
+                &logctx.log,
+                pool,
+                None,
+                IdentityCheckPolicy::DontCare,
+            )
+            .await
+            .unwrap(),
         );
         let opctx = OpContext::for_background(
             logctx.log.clone(),

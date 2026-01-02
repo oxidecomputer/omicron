@@ -6,12 +6,14 @@ use super::Nexus;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::HttpAuthnScheme;
+use authn::external::scim::HttpAuthnScimToken;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
 use camino::Utf8PathBuf;
 use chrono::Duration;
 use nexus_config::NexusConfig;
+use nexus_config::OmdbConfig;
 use nexus_config::SchemeName;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::authn::ConsoleSessionWithSiloId;
@@ -21,6 +23,7 @@ use nexus_db_queries::{authn, authz, db};
 use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -106,6 +109,8 @@ pub struct ServerContext {
     pub(crate) external_tls_enabled: bool,
     /// tunable settings needed for the console at runtime
     pub(crate) console_config: ConsoleConfig,
+    /// config supporting `omdb` system introspection
+    pub(crate) omdb_config: OmdbConfig,
 }
 
 pub(crate) struct ConsoleConfig {
@@ -137,6 +142,7 @@ impl ServerContext {
                         Box::new(HttpAuthnSessionCookie)
                     }
                     SchemeName::AccessToken => Box::new(HttpAuthnToken),
+                    SchemeName::ScimToken => Box::new(HttpAuthnScimToken),
                 },
             )
             .collect();
@@ -323,6 +329,7 @@ impl ServerContext {
                 ),
                 static_dir,
             },
+            omdb_config: config.pkg.omdb.clone(),
         }))
     }
 }
@@ -442,7 +449,7 @@ impl authn::external::AuthenticatorContext for ServerContext {
 impl authn::external::SiloUserSilo for ServerContext {
     async fn silo_user_silo(
         &self,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> Result<Uuid, authn::Reason> {
         let opctx = self.nexus.opctx_external_authn();
         self.nexus.lookup_silo_for_authn(opctx, silo_user_id).await
@@ -451,12 +458,15 @@ impl authn::external::SiloUserSilo for ServerContext {
 
 #[async_trait]
 impl authn::external::token::TokenContext for ServerContext {
-    async fn token_actor(
+    async fn authenticate_token(
         &self,
         token: String,
-    ) -> Result<authn::Actor, authn::Reason> {
+    ) -> Result<
+        (authn::Actor, Option<chrono::DateTime<chrono::Utc>>),
+        authn::Reason,
+    > {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.device_access_token_actor(opctx, token).await
+        self.nexus.authenticate_token(opctx, token).await
     }
 }
 
@@ -488,5 +498,16 @@ impl SessionStore for ServerContext {
 
     fn session_absolute_timeout(&self) -> Duration {
         self.console_config.session_absolute_timeout
+    }
+}
+
+#[async_trait]
+impl authn::external::scim::ScimTokenContext for ServerContext {
+    async fn scim_token_actor(
+        &self,
+        token: String,
+    ) -> Result<authn::Actor, authn::Reason> {
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.scim_token_actor(opctx, token).await
     }
 }

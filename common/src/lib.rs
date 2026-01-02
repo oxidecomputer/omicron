@@ -17,8 +17,6 @@
 // We only use rustdoc for internal documentation, including private items, so
 // it's expected that we'll have links to private items in the docs.
 #![allow(rustdoc::private_intra_doc_links)]
-// TODO(#32): Remove this exception once resolved.
-#![allow(clippy::field_reassign_with_default)]
 
 pub mod address;
 pub mod api;
@@ -31,6 +29,7 @@ pub mod progenitor_operation_retry;
 pub mod snake_case_result;
 pub mod update;
 pub mod vlan;
+pub mod zone_images;
 pub mod zpool_name;
 
 /// A type that allows adding file and line numbers to log messages
@@ -85,12 +84,12 @@ impl<T> std::fmt::Debug for NoDebug<T> {
 }
 
 pub fn hex_schema<const N: usize>(
-    gen: &mut schemars::SchemaGenerator,
+    generator: &mut schemars::SchemaGenerator,
 ) -> schemars::schema::Schema {
     use schemars::JsonSchema;
 
     let mut schema: schemars::schema::SchemaObject =
-        <String>::json_schema(gen).into();
+        <String>::json_schema(generator).into();
     schema.format = Some(format!("hex string ({N} bytes)"));
     schema.into()
 }

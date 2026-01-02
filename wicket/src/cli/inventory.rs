@@ -10,7 +10,6 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::{Subcommand, ValueEnum};
 use owo_colors::OwoColorize;
-use sled_hardware_types::Baseboard;
 use slog::Logger;
 use std::fmt;
 use std::net::SocketAddrV6;
@@ -103,12 +102,7 @@ fn print_bootstrap_sled_data(
 ) {
     let slot = desc.id.slot;
 
-    let identifier = match &desc.baseboard {
-        Baseboard::Gimlet { identifier, .. } => identifier.clone(),
-        Baseboard::Pc { identifier, .. } => identifier.clone(),
-        Baseboard::Unknown => "unknown".to_string(),
-    };
-
+    let identifier = desc.baseboard.identifier();
     let address = desc.bootstrap_ip;
 
     // Create status indicators

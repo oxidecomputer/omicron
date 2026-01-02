@@ -27,3 +27,14 @@ fn test_api_dependencies() {
     println!("stderr:\n------\n{}\n-----", stderr_text);
     expectorate::assert_contents("tests/api_dependencies.out", &stdout_text);
 }
+
+#[test]
+fn test_api_check() {
+    let cmd_path = path_to_executable(CMD_LS_APIS);
+    let exec = subprocess::Exec::cmd(cmd_path).arg("check");
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    println!("stderr:\n------\n{}\n-----", stderr_text);
+    expectorate::assert_contents("tests/api_check.out", &stdout_text);
+}

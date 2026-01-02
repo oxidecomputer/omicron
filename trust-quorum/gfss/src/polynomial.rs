@@ -4,7 +4,7 @@
 
 //! Generated polynomials over GF(2^8) used for secret splitting
 
-use rand09::{Rng, distr};
+use rand::{Rng, distr};
 use std::fmt::Display;
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};

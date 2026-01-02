@@ -144,10 +144,6 @@ impl BootstrapAgentStartup {
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
             long_running_task_handles.zone_image_resolver.clone(),
-            long_running_task_handles
-                .config_reconciler
-                .internal_disks_rx()
-                .clone(),
         );
 
         // Inform the hardware monitor that the service manager is ready
@@ -307,7 +303,7 @@ fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
             }
             SledMode::Auto
         }
-        SledModeConfig::Gimlet => SledMode::Gimlet,
+        SledModeConfig::Sled => SledMode::Sled,
         SledModeConfig::Scrimlet => {
             let asic = if cfg!(feature = "switch-asic") {
                 DendriteAsic::TofinoAsic

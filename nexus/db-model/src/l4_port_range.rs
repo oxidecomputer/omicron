@@ -24,7 +24,7 @@ NewtypeDeref! { () pub struct L4PortRange(external::L4PortRange); }
 impl DatabaseString for L4PortRange {
     type Error = <external::L4PortRange as FromStr>::Err;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         self.0.to_string().into()
     }
 

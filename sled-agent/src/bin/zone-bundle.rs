@@ -235,8 +235,11 @@ async fn fetch_underlay_address() -> anyhow::Result<Ipv6Addr> {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> anyhow::Result<()> {
     let args = Cli::parse();
     let host = match args.host {
         Some(host) => host,
@@ -293,7 +296,9 @@ async fn main() -> anyhow::Result<()> {
                             ListFields::TimeCreated => {
                                 bundle.time_created.to_rfc3339()
                             }
-                            ListFields::Cause => format!("{:?}", bundle.cause),
+                            ListFields::Cause => {
+                                format!("{:?}", bundle.cause)
+                            }
                             ListFields::Version => bundle.version.to_string(),
                         })
                         .collect::<Vec<_>>()
@@ -495,7 +500,9 @@ async fn main() -> anyhow::Result<()> {
                     for (dir, utilization) in utilization_by_dir.iter() {
                         for field in fields.iter() {
                             match field {
-                                Directory => print!("{:dir_col_size$}", dir),
+                                Directory => {
+                                    print!("{:dir_col_size$}", dir)
+                                }
                                 BytesUsed => print!(
                                     "{:BYTES_USED_SIZE$}",
                                     as_human_bytes(utilization.bytes_used)

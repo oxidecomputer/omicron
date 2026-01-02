@@ -15,7 +15,7 @@ use omicron_common::backoff::BackoffError;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
@@ -45,13 +45,15 @@ impl Drop for RssHandle {
 
 impl RssHandle {
     /// Executes the rack setup service until it has completed
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn run_rss(
         log: &Logger,
         sprockets: SprocketsConfig,
-        config: RackInitializeRequest,
+        config: RackInitializeRequestParams,
         our_bootstrap_address: Ipv6Addr,
         internal_disks_rx: InternalDisksReceiver,
         bootstore: bootstore::NodeHandle,
+        trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
         let (tx, rx) = rss_channel(our_bootstrap_address, sprockets);
@@ -62,6 +64,7 @@ impl RssHandle {
             internal_disks_rx,
             tx,
             bootstore,
+            trust_quorum,
             step_tx,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));

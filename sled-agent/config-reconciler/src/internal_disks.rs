@@ -13,8 +13,9 @@ use camino::Utf8PathBuf;
 use core::cmp;
 use futures::future;
 use futures::future::Either;
-use id_map::IdMap;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::backoff::Backoff as _;
 use omicron_common::backoff::ExponentialBackoffBuilder;
 use omicron_common::disk::DiskIdentity;
@@ -48,7 +49,6 @@ use tokio::sync::watch::error::RecvError;
 
 use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
-use crate::raw_disks::RawDiskWithId;
 use crate::raw_disks::RawDisksReceiver;
 
 /// A thin wrapper around a [`watch::Receiver`] that presents a similar API.
@@ -61,35 +61,23 @@ pub struct InternalDisksReceiver {
 
 #[derive(Debug, Clone)]
 enum InternalDisksReceiverInner {
-    Real(watch::Receiver<IdMap<InternalDisk>>),
+    Real(watch::Receiver<IdOrdMap<InternalDisk>>),
     #[cfg(any(test, feature = "testing"))]
-    FakeStatic(Arc<IdMap<InternalDiskDetails>>),
+    FakeStatic(Arc<IdOrdMap<InternalDiskDetails>>),
     #[cfg(any(test, feature = "testing"))]
-    FakeDynamic(watch::Receiver<Arc<IdMap<InternalDiskDetails>>>),
+    FakeDynamic(watch::Receiver<Arc<IdOrdMap<InternalDiskDetails>>>),
 }
 
 impl InternalDisksReceiver {
     /// Create an `InternalDisksReceiver` that always reports a fixed set of
     /// disks.
-    ///
-    /// The first disk is set as the boot disk.
     #[cfg(any(test, feature = "testing"))]
     pub fn fake_static(
         mount_config: Arc<MountConfig>,
-        disks: impl Iterator<Item = (DiskIdentity, InternalZpoolUuid)>,
+        disks: impl Iterator<Item = InternalDiskDetails>,
     ) -> Self {
-        let inner = InternalDisksReceiverInner::FakeStatic(Arc::new(
-            disks
-                .enumerate()
-                .map(|(i, (identity, zpool_id))| {
-                    InternalDiskDetails::fake_details(
-                        identity,
-                        zpool_id,
-                        i == 0,
-                    )
-                })
-                .collect(),
-        ));
+        let inner =
+            InternalDisksReceiverInner::FakeStatic(Arc::new(disks.collect()));
 
         // We never report errors from our static set. If there's a Tokio
         // runtime, move the sender to a task that idles so we don't get recv
@@ -114,31 +102,16 @@ impl InternalDisksReceiver {
     #[cfg(any(test, feature = "testing"))]
     pub fn fake_dynamic(
         mount_config: Arc<MountConfig>,
-        mut disks_rx: watch::Receiver<Vec<(DiskIdentity, InternalZpoolUuid)>>,
+        mut disks_rx: watch::Receiver<Vec<InternalDiskDetails>>,
     ) -> Self {
-        let current = disks_rx
-            .borrow_and_update()
-            .clone()
-            .into_iter()
-            .map(|(identity, zpool_id)| {
-                InternalDiskDetails::fake_details(identity, zpool_id, false)
-            })
-            .collect();
+        let current = disks_rx.borrow_and_update().iter().cloned().collect();
         let (mapped_tx, mapped_rx) = watch::channel(Arc::new(current));
 
         // Spawn the task that forwards changes from channel to channel.
         tokio::spawn(async move {
             while let Ok(()) = disks_rx.changed().await {
-                let remapped = disks_rx
-                    .borrow_and_update()
-                    .clone()
-                    .into_iter()
-                    .map(|(identity, zpool_id)| {
-                        InternalDiskDetails::fake_details(
-                            identity, zpool_id, false,
-                        )
-                    })
-                    .collect();
+                let remapped =
+                    disks_rx.borrow_and_update().iter().cloned().collect();
                 if mapped_tx.send(Arc::new(remapped)).is_err() {
                     break;
                 }
@@ -179,7 +152,7 @@ impl InternalDisksReceiver {
         base_log: &Logger,
         disk_adopter: T,
     ) -> Self {
-        let (disks_tx, disks_rx) = watch::channel(IdMap::default());
+        let (disks_tx, disks_rx) = watch::channel(IdOrdMap::default());
         let (errors_tx, errors_rx) = watch::channel(Arc::default());
 
         tokio::spawn(
@@ -264,7 +237,7 @@ impl InternalDisksReceiver {
     /// watch channel locked).
     pub(crate) fn borrow_and_update_raw_disks(
         &mut self,
-    ) -> watch::Ref<'_, IdMap<InternalDisk>> {
+    ) -> watch::Ref<'_, IdOrdMap<InternalDisk>> {
         match &mut self.inner {
             InternalDisksReceiverInner::Real(rx) => rx.borrow_and_update(),
             #[cfg(any(test, feature = "testing"))]
@@ -311,13 +284,16 @@ impl InternalDisksReceiver {
     /// Note that this error set is not atomically collected with the
     /// `current()` set of disks. It is only useful for inventory reporting
     /// purposes.
+    // TODO-correctness We should report these errors somehow!
+    // https://github.com/oxidecomputer/omicron/issues/8422
+    #[allow(dead_code)]
     pub(crate) fn errors(&self) -> Arc<BTreeMap<DiskIdentity, DiskError>> {
         Arc::clone(&*self.errors_rx.borrow())
     }
 }
 
 pub struct InternalDisks {
-    disks: Arc<IdMap<InternalDiskDetails>>,
+    disks: Arc<IdOrdMap<InternalDiskDetails>>,
     mount_config: Arc<MountConfig>,
 }
 
@@ -326,10 +302,16 @@ impl InternalDisks {
         &self.mount_config
     }
 
+    fn boot_disk(&self) -> Option<&InternalDiskDetails> {
+        self.disks.iter().find(|d| d.is_boot_disk())
+    }
+
+    pub(crate) fn boot_disk_slot(&self) -> Option<M2Slot> {
+        self.boot_disk().and_then(|d| d.slot)
+    }
+
     pub fn boot_disk_zpool_id(&self) -> Option<InternalZpoolUuid> {
-        self.disks.iter().find_map(|d| {
-            if d.is_boot_disk() { Some(d.zpool_id) } else { None }
-        })
+        self.boot_disk().map(|d| d.zpool_id)
     }
 
     pub fn boot_disk_zpool_name(&self) -> Option<ZpoolName> {
@@ -342,13 +324,21 @@ impl InternalDisks {
         })
     }
 
-    pub fn image_raw_devfs_path(
+    pub fn non_boot_disk_zpool_ids(
+        &self,
+    ) -> impl Iterator<Item = InternalZpoolUuid> + '_ {
+        self.disks
+            .iter()
+            .filter_map(|disk| (!disk.is_boot_disk()).then_some(disk.zpool_id))
+    }
+
+    pub(crate) fn boot_image_raw_devfs_path(
         &self,
         slot: M2Slot,
     ) -> Option<Result<Utf8PathBuf, Arc<PooledDiskError>>> {
         self.disks.iter().find_map(|disk| {
             if disk.slot == Some(slot) {
-                disk.raw_devfs_path.clone()
+                disk.boot_image_raw_devfs_path.clone()
             } else {
                 None
             }
@@ -419,7 +409,7 @@ impl InternalDisksWithBootDisk {
         let boot_disk = inner
             .disks
             .iter()
-            .find_map(|d| if d.is_boot_disk() { Some(d.id()) } else { None })?;
+            .find_map(|d| d.is_boot_disk().then(|| d.id.clone()))?;
         Some(Self { inner, boot_disk })
     }
 
@@ -428,6 +418,10 @@ impl InternalDisksWithBootDisk {
             Some(details) => details,
             None => unreachable!("boot disk present by construction"),
         }
+    }
+
+    pub fn as_inner(&self) -> &InternalDisks {
+        &self.inner
     }
 
     pub fn boot_disk_id(&self) -> &Arc<DiskIdentity> {
@@ -449,42 +443,88 @@ impl InternalDisksWithBootDisk {
         )
     }
 
+    pub fn non_boot_disk_zpool_ids(
+        &self,
+    ) -> impl Iterator<Item = InternalZpoolUuid> + '_ {
+        self.inner.non_boot_disk_zpool_ids()
+    }
+
     pub fn non_boot_disk_install_datasets(
         &self,
     ) -> impl Iterator<Item = (InternalZpoolUuid, Utf8PathBuf)> + '_ {
-        self.inner.disks.iter().filter(|disk| disk.id != self.boot_disk).map(
-            |disk| {
-                let dataset = ZpoolName::Internal(disk.zpool_id)
-                    .dataset_mountpoint(
-                        &self.inner.mount_config.root,
-                        INSTALL_DATASET,
-                    );
-                (disk.zpool_id, dataset)
-            },
-        )
+        self.non_boot_disk_zpool_ids().map(|zpool_id| {
+            let dataset = ZpoolName::Internal(zpool_id).dataset_mountpoint(
+                &self.inner.mount_config.root,
+                INSTALL_DATASET,
+            );
+            (zpool_id, dataset)
+        })
     }
 }
 
-// A subset of `Disk` properties. We store this in `InternalDisks` instead of
-// `Disk`s both to avoid exposing raw `Disk`s outside this crate and to support
-// easier faking for tests.
-#[derive(Debug, Clone)]
-struct InternalDiskDetails {
-    id: InternalDiskDetailsId,
-    zpool_id: InternalZpoolUuid,
+mod internal_disk_details {
+    use super::*;
 
-    // These two fields are optional because they don't exist for synthetic
-    // disks.
-    slot: Option<M2Slot>,
-    raw_devfs_path: Option<Result<Utf8PathBuf, Arc<PooledDiskError>>>,
+    // A subset of `Disk` properties. We store this in `InternalDisks` instead
+    // of `Disk`s both to avoid exposing raw `Disk`s outside this crate and to
+    // support easier faking for tests.
+    #[derive(Debug, Clone)]
+    pub struct InternalDiskDetails {
+        pub(super) id: InternalDiskDetailsId,
+        pub(super) zpool_id: InternalZpoolUuid,
+
+        // These two fields are optional because they don't exist for synthetic
+        // disks.
+        pub(super) slot: Option<M2Slot>,
+        pub(super) boot_image_raw_devfs_path:
+            Option<Result<Utf8PathBuf, Arc<PooledDiskError>>>,
+    }
+
+    // Special ID type for `InternalDiskDetails` that lets us guarantee we sort
+    // boot disks ahead of non-boot disks. There's a whole set of thorny
+    // problems here about what to do if we think both internal disks should
+    // have the same contents but they disagree; we'll at least try to have
+    // callers prefer the boot disk if they're performing a "check the first
+    // disk that succeeds" kind of operation.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct InternalDiskDetailsId {
+        pub(super) is_boot_disk: bool,
+        pub(super) identity: Arc<DiskIdentity>,
+    }
+
+    impl cmp::Ord for InternalDiskDetailsId {
+        fn cmp(&self, other: &Self) -> cmp::Ordering {
+            match self.is_boot_disk.cmp(&other.is_boot_disk) {
+                cmp::Ordering::Equal => {}
+                // `false` normally sorts before `true`, so intentionally
+                // reverse this so that we sort boot disks ahead of non-boot
+                // disks.
+                ord => return ord.reverse(),
+            }
+            self.identity.cmp(&other.identity)
+        }
+    }
+
+    impl cmp::PartialOrd for InternalDiskDetailsId {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
 }
 
-impl IdMappable for InternalDiskDetails {
-    type Id = InternalDiskDetailsId;
+#[cfg(any(test, feature = "testing"))]
+pub use internal_disk_details::{InternalDiskDetails, InternalDiskDetailsId};
+#[cfg(not(any(test, feature = "testing")))]
+use internal_disk_details::{InternalDiskDetails, InternalDiskDetailsId};
 
-    fn id(&self) -> Self::Id {
-        self.id.clone()
+impl IdOrdItem for InternalDiskDetails {
+    type Key<'a> = &'a InternalDiskDetailsId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
     }
+
+    id_upcast!();
 }
 
 impl From<&'_ Disk> for InternalDiskDetails {
@@ -519,7 +559,7 @@ impl From<&'_ Disk> for InternalDiskDetails {
             },
             zpool_id,
             slot,
-            raw_devfs_path,
+            boot_image_raw_devfs_path: raw_devfs_path,
         }
     }
 }
@@ -532,10 +572,12 @@ impl From<&'_ InternalDisk> for InternalDiskDetails {
 
 impl InternalDiskDetails {
     #[cfg(any(test, feature = "testing"))]
-    fn fake_details(
+    pub fn fake_details(
         identity: DiskIdentity,
         zpool_id: InternalZpoolUuid,
         is_boot_disk: bool,
+        slot: Option<M2Slot>,
+        boot_image_raw_devfs_path: Option<Utf8PathBuf>,
     ) -> Self {
         Self {
             id: InternalDiskDetailsId {
@@ -543,10 +585,8 @@ impl InternalDiskDetails {
                 is_boot_disk,
             },
             zpool_id,
-            // We can expand the interface for fake disks if we need to be able
-            // to specify more of these properties in future tests.
-            slot: None,
-            raw_devfs_path: None,
+            slot,
+            boot_image_raw_devfs_path: boot_image_raw_devfs_path.map(|p| Ok(p)),
         }
     }
 
@@ -556,36 +596,6 @@ impl InternalDiskDetails {
 
     fn is_boot_disk(&self) -> bool {
         self.id.is_boot_disk
-    }
-}
-
-// Special ID type for `InternalDiskDetails` that lets us guarantee we sort boot
-// disks ahead of non-boot disks. There's a whole set of thorny problems here
-// about what to do if we think both internal disks should have the same
-// contents but they disagree; we'll at least try to have callers prefer the
-// boot disk if they're performing a "check the first disk that succeeds" kind
-// of operation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct InternalDiskDetailsId {
-    is_boot_disk: bool,
-    identity: Arc<DiskIdentity>,
-}
-
-impl cmp::Ord for InternalDiskDetailsId {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        match self.is_boot_disk.cmp(&other.is_boot_disk) {
-            cmp::Ordering::Equal => {}
-            // `false` normally sorts before `true`, so intentionally reverse
-            // this so that we sort boot disks ahead of non-boot disks.
-            ord => return ord.reverse(),
-        }
-        self.identity.cmp(&other.identity)
-    }
-}
-
-impl cmp::PartialOrd for InternalDiskDetailsId {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
     }
 }
 
@@ -616,12 +626,14 @@ impl Deref for InternalDisk {
     }
 }
 
-impl IdMappable for InternalDisk {
-    type Id = Arc<DiskIdentity>;
+impl IdOrdItem for InternalDisk {
+    type Key<'a> = &'a DiskIdentity;
 
-    fn id(&self) -> Self::Id {
-        Arc::clone(&self.identity)
+    fn key(&self) -> Self::Key<'_> {
+        &self.identity
     }
+
+    id_upcast!();
 }
 
 struct InternalDisksTask {
@@ -629,7 +641,7 @@ struct InternalDisksTask {
     raw_disks_rx: RawDisksReceiver,
 
     // The set of disks we've successfully started managing.
-    disks_tx: watch::Sender<IdMap<InternalDisk>>,
+    disks_tx: watch::Sender<IdOrdMap<InternalDisk>>,
 
     // Output channel summarizing any adoption errors.
     //
@@ -681,7 +693,7 @@ impl InternalDisksTask {
                     DiskVariant::M2 => true,
                 })
                 .cloned()
-                .collect::<IdMap<_>>();
+                .collect::<IdOrdMap<_>>();
 
             // Perform actual reconciliation, updating our output watch
             // channels.
@@ -736,7 +748,7 @@ impl InternalDisksTask {
 
     async fn reconcile_internal_disks<T: DiskAdopter>(
         &mut self,
-        internal_raw_disks: IdMap<RawDiskWithId>,
+        internal_raw_disks: IdOrdMap<RawDisk>,
         disk_adopter: &T,
     ) {
         info!(
@@ -747,8 +759,12 @@ impl InternalDisksTask {
 
         // We don't want to hold the `disks_tx` lock while we adopt disks, so
         // first capture a snapshot of which disks we have.
-        let current_disks =
-            self.disks_tx.borrow().keys().cloned().collect::<BTreeSet<_>>();
+        let current_disks = self
+            .disks_tx
+            .borrow()
+            .iter()
+            .map(|d| d.key().clone())
+            .collect::<BTreeSet<_>>();
 
         // Built the list of disks that are gone.
         let mut disks_to_remove = Vec::new();
@@ -779,7 +795,7 @@ impl InternalDisksTask {
             // This is a new disk: attempt to adopt it.
             let identity = raw_disk.identity().clone();
             let adopt_result = disk_adopter
-                .adopt_disk(raw_disk.into(), &self.mount_config, &self.log)
+                .adopt_disk(raw_disk, &self.mount_config, &self.log)
                 .await;
 
             match adopt_result {
@@ -811,7 +827,7 @@ impl InternalDisksTask {
                 changed = true;
             }
             for new_disk in disks_to_insert {
-                disks.insert(new_disk.into());
+                disks.insert_overwrite(new_disk.into());
                 changed = true;
             }
 
@@ -829,7 +845,7 @@ impl InternalDisksTask {
                     &self.log,
                 ) {
                     MaybeUpdatedDisk::Updated(new_disk) => {
-                        disks.insert(InternalDisk::from(new_disk));
+                        disks.insert_overwrite(InternalDisk::from(new_disk));
                         changed = true;
                     }
                     MaybeUpdatedDisk::Unchanged => (),
@@ -885,6 +901,7 @@ impl DiskAdopter for RealDiskAdopter {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+    use iddqd::id_ord_map;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
@@ -925,13 +942,13 @@ mod tests {
             ArbitraryInternalDiskDetailsId,
         >,
     ) {
-        let disk_map: IdMap<_> = values
+        let disk_map: IdOrdMap<_> = values
             .into_iter()
             .map(|id| InternalDiskDetails {
                 id: id.into(),
                 zpool_id: InternalZpoolUuid::new_v4(),
                 slot: None,
-                raw_devfs_path: None,
+                boot_image_raw_devfs_path: None,
             })
             .collect();
 
@@ -1044,7 +1061,7 @@ mod tests {
                 new_raw_test_disk(DiskVariant::M2, "m2-1"),
                 new_raw_test_disk(DiskVariant::U2, "u2-1"),
             ] {
-                disks.insert(disk.into());
+                disks.insert_overwrite(disk);
             }
         });
 
@@ -1084,9 +1101,8 @@ mod tests {
 
         // Setup: one disk.
         let mut raw_disk = new_raw_test_disk(DiskVariant::M2, "test-m2");
-        let (raw_disks_tx, raw_disks_rx) = watch::channel(Arc::new(
-            [raw_disk.clone().into()].into_iter().collect(),
-        ));
+        let (raw_disks_tx, raw_disks_rx) =
+            watch::channel(Arc::new(id_ord_map! { raw_disk.clone() }));
         let disk_adopter = Arc::new(TestDiskAdopter::default());
         let mut disks_rx = InternalDisksReceiver::spawn_with_disk_adopter(
             Arc::new(any_mount_config()),
@@ -1112,7 +1128,7 @@ mod tests {
         );
         *raw_disk.firmware_mut() = new_firmware;
         raw_disks_tx.send_modify(|disks| {
-            Arc::make_mut(disks).insert(raw_disk.clone().into());
+            Arc::make_mut(disks).insert_overwrite(raw_disk.clone());
         });
 
         // Wait for the change to be noticed.
@@ -1142,13 +1158,11 @@ mod tests {
         // Setup: two disks.
         let raw_disk1 = new_raw_test_disk(DiskVariant::M2, "m2-1");
         let raw_disk2 = new_raw_test_disk(DiskVariant::M2, "m2-2");
-        let (raw_disks_tx, raw_disks_rx) = watch::channel(Arc::new(
-            [&raw_disk1, &raw_disk2]
-                .into_iter()
-                .cloned()
-                .map(From::from)
-                .collect(),
-        ));
+        let (raw_disks_tx, raw_disks_rx) =
+            watch::channel(Arc::new(id_ord_map! {
+                raw_disk1.clone(),
+                raw_disk2.clone(),
+            }));
         let disk_adopter = Arc::new(TestDiskAdopter::default());
         let mut disks_rx = InternalDisksReceiver::spawn_with_disk_adopter(
             Arc::new(any_mount_config()),
@@ -1192,7 +1206,7 @@ mod tests {
         // Setup: one disk, and configure the disk adopter to fail.
         let raw_disk = new_raw_test_disk(DiskVariant::M2, "test-m2");
         let (_raw_disks_tx, raw_disks_rx) = watch::channel(Arc::new(
-            [&raw_disk].into_iter().cloned().map(From::from).collect(),
+            [&raw_disk].into_iter().cloned().collect(),
         ));
         let disk_adopter = Arc::new(TestDiskAdopter::default());
         disk_adopter.inner.lock().unwrap().should_fail_requests.insert(

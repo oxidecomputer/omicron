@@ -1,0 +1,12 @@
+# Load example system
+load-example --nsleds 3 --ndisks-per-sled 3
+blueprint-list
+blueprint-show dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+
+# Expunge one zone.
+blueprint-edit dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 expunge-zones 694bd14f-cb24-4be4-bb19-876e79cda2c8
+blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+
+# Expunge multiple zones.
+blueprint-edit 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 expunge-zones 7c252b64-c5af-4ec1-989e-9a03f3b0f111 dfac80b4-a887-430a-ae87-a4e065dba787
+blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4

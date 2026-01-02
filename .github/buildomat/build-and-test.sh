@@ -18,7 +18,7 @@ target_os=$1
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.98'
+NEXTEST_VERSION='0.9.117'
 
 cargo --version
 rustc --version
@@ -92,7 +92,7 @@ banner ls-apis
 # from end-to-end-tests.
 #
 banner build
-export RUSTFLAGS="-D warnings"
+export RUSTFLAGS="--cfg tokio_unstable -D warnings"
 export RUSTDOCFLAGS="--document-private-items -D warnings"
 # When running on illumos we need to pass an additional runpath that is
 # usually configured via ".cargo/config" but the `RUSTFLAGS` env variable
@@ -128,9 +128,13 @@ ptime -m cargo build -Z unstable-options --timings=json \
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout
 # rather than a buildomat timeout.  See oxidecomputer/buildomat#8.
-#
+# To avoid too many tests running at the same time, we choose a test threads
+# 2 less (negative 2) than the default.  This avoids many test flakes where
+# the test would have worked but the system was too overloaded and tests
+# take longer than their default timeouts.
 banner test
-ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose
+ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose \
+    --test-threads -2
 
 #
 # https://github.com/nextest-rs/nextest/issues/16

@@ -23,31 +23,47 @@ use dropshot::WebsocketEndpointResult;
 use dropshot::WebsocketUpgrade;
 use futures::TryFutureExt;
 use gateway_api::*;
+use gateway_messages::HfError;
 use gateway_messages::RotBootInfo;
 use gateway_messages::SpComponent;
+use gateway_messages::SpError;
 use gateway_sp_comms::HostPhase2Provider;
 use gateway_sp_comms::VersionedSpState;
 use gateway_sp_comms::error::CommunicationError;
+use gateway_types::caboose::ComponentCabooseSlot;
 use gateway_types::caboose::SpComponentCaboose;
+use gateway_types::component::PathSp;
+use gateway_types::component::PathSpComponent;
+use gateway_types::component::PathSpComponentFirmwareSlot;
 use gateway_types::component::PowerState;
+use gateway_types::component::SetComponentActiveSlotParams;
 use gateway_types::component::SpComponentFirmwareSlot;
 use gateway_types::component::SpComponentInfo;
 use gateway_types::component::SpComponentList;
 use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpState;
 use gateway_types::component_details::SpComponentDetails;
+use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
+use gateway_types::ignition::PathSpIgnitionCommand;
 use gateway_types::ignition::SpIgnitionInfo;
+use gateway_types::rot::GetCfpaParams;
+use gateway_types::rot::GetRotBootInfoParams;
 use gateway_types::rot::RotCfpa;
 use gateway_types::rot::RotCfpaSlot;
 use gateway_types::rot::RotCmpa;
 use gateway_types::rot::RotState;
+use gateway_types::sensor::PathSpSensorId;
 use gateway_types::sensor::SpSensorReading;
+use gateway_types::task_dump::PathSpTaskDumpIndex;
 use gateway_types::task_dump::TaskDump;
+use gateway_types::update::ComponentUpdateIdSlot;
 use gateway_types::update::HostPhase2Progress;
 use gateway_types::update::HostPhase2RecoveryImageId;
 use gateway_types::update::InstallinatorImageId;
+use gateway_types::update::SpComponentResetError;
 use gateway_types::update::SpUpdateStatus;
+use gateway_types::update::UpdateAbortBody;
 use omicron_uuid_kinds::GenericUuid;
 use std::io::Cursor;
 use std::num::NonZeroU8;
@@ -196,7 +212,11 @@ impl GatewayApi for GatewayImpl {
                 })?;
 
             Ok(HttpResponseOk(
-                details.entries.into_iter().map(Into::into).collect(),
+                details
+                    .entries
+                    .into_iter()
+                    .map(SpComponentDetails::try_from)
+                    .collect::<Result<Vec<_>, _>>()?,
             ))
         };
 
@@ -464,23 +484,43 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_reset(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, SpComponentResetError> {
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
         let handler = async {
-            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let sp = apictx.mgmt_switch.sp(sp_id).map_err(HttpError::from)?;
             let component = component_from_str(&component)?;
+
+            // Our config may specifically disallow resetting the SP of our
+            // local sled. This is because resetting our local SP after an
+            // update doesn't work: `reset_component_trigger` below will issue a
+            // "reset with watchdog", wait for the SP to come back, then send a
+            // "disarm the watchdog" message. But if we've reset our own local
+            // sled, we won't be alive to disarm the watchdog, which will result
+            // in the SP (erroneously) rolling back the update. (In production
+            // we always disallow this; it's a config option to support dev/test
+            // environments that don't need this.)
+            if component == SpComponent::SP_ITSELF
+                && !apictx
+                    .mgmt_switch
+                    .allowed_to_reset_sp(sp_id)
+                    .map_err(HttpError::from)?
+            {
+                return Err(SpComponentResetError::ResetSpOfLocalSled);
+            }
 
             sp.reset_component_prepare(component)
                 // We always want to run with the watchdog when resetting as
-                // disabling the watchdog should be considered a debug only feature
+                // disabling the watchdog should be considered a debug only
+                // feature
                 .and_then(|()| sp.reset_component_trigger(component, false))
                 .await
                 .map_err(|err| SpCommsError::SpCommunicationFailed {
                     sp: sp_id,
                     err,
-                })?;
+                })
+                .map_err(HttpError::from)?;
 
             Ok(HttpResponseUpdatedNoContent {})
         };
@@ -532,6 +572,93 @@ impl GatewayApi for GatewayImpl {
             })?;
 
             Ok(HttpResponseOk(status.into()))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn sp_component_hash_firmware_start(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+
+        let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
+            path.into_inner();
+        let sp_id = sp.into();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+
+            if component != SpComponent::HOST_CPU_BOOT_FLASH {
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the host boot flash can be hashed".into(),
+                ));
+            }
+
+            // The SP (reasonably!) returns a `HashInProgress` error if we try
+            // to start hashing while hashing is being calculated, but we're
+            // presenting an idempotent "start hashing if it isn't started"
+            // endpoint instead. Swallow that error.
+            match sp.start_host_flash_hash(firmware_slot).await {
+                Ok(())
+                | Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashInProgress,
+                ))) => Ok(HttpResponseUpdatedNoContent()),
+                Err(err) => {
+                    Err(SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                        .into())
+                }
+            }
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn sp_component_hash_firmware_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseOk<ComponentFirmwareHashStatus>, HttpError> {
+        let apictx = rqctx.context();
+
+        let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
+            path.into_inner();
+        let sp_id = sp.into();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+
+            if component != SpComponent::HOST_CPU_BOOT_FLASH {
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the host boot flash can be hashed".into(),
+                ));
+            }
+
+            let status = match sp.get_host_flash_hash(firmware_slot).await {
+                // success
+                Ok(sha256) => ComponentFirmwareHashStatus::Hashed { sha256 },
+
+                // expected failure: hash needs to be calculated (or
+                // recalculated; either way the client operation is the same)
+                Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashUncalculated | HfError::RecalculateHash,
+                ))) => ComponentFirmwareHashStatus::HashNotCalculated,
+
+                // expected failure: hashing is currently in progress; client
+                // needs to wait and try again later
+                Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashInProgress,
+                ))) => ComponentFirmwareHashStatus::HashInProgress,
+
+                // other errors are failures
+                Err(err) => {
+                    return Err(HttpError::from(
+                        SpCommsError::SpCommunicationFailed { sp: sp_id, err },
+                    ));
+                }
+            };
+
+            Ok(HttpResponseOk(status))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
@@ -852,7 +979,7 @@ impl GatewayApi for GatewayImpl {
         let handler = async {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
 
-            let image_id = ipcc::InstallinatorImageId::from(body.into_inner());
+            let image_id = to_ipcc_installinator_image_id(body.into_inner());
 
             sp.set_ipcc_key_lookup_value(
                 Key::InstallinatorImageId as u8,
@@ -1081,6 +1208,16 @@ fn component_from_str(s: &str) -> Result<SpComponent, HttpError> {
             "invalid SP component name".to_string(),
         )
     })
+}
+
+fn to_ipcc_installinator_image_id(
+    image_id: InstallinatorImageId,
+) -> ipcc::InstallinatorImageId {
+    ipcc::InstallinatorImageId {
+        update_id: image_id.update_id,
+        host_phase_2: image_id.host_phase_2,
+        control_plane: image_id.control_plane,
+    }
 }
 
 // The _from_comms functions are here rather than `From` impls in gateway-types

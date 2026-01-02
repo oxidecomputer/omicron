@@ -14,6 +14,7 @@ use dropshot::HttpError;
 use http::HeaderValue;
 use nexus_types::authn::cookies::parse_cookies;
 use omicron_uuid_kinds::ConsoleSessionUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use slog::debug;
 use uuid::Uuid;
 
@@ -22,7 +23,7 @@ use uuid::Uuid;
 
 pub trait Session {
     fn id(&self) -> ConsoleSessionUuid;
-    fn silo_user_id(&self) -> Uuid;
+    fn silo_user_id(&self) -> SiloUserUuid;
     fn silo_id(&self) -> Uuid;
     fn time_last_used(&self) -> DateTime<Utc>;
     fn time_created(&self) -> DateTime<Utc>;
@@ -179,7 +180,10 @@ where
             debug!(log, "failed to extend session")
         }
 
-        SchemeResult::Authenticated(Details { actor })
+        SchemeResult::Authenticated(Details {
+            actor,
+            device_token_expiration: None,
+        })
     }
 }
 
@@ -202,6 +206,7 @@ mod test {
     use chrono::{DateTime, Duration, Utc};
     use http;
     use omicron_uuid_kinds::ConsoleSessionUuid;
+    use omicron_uuid_kinds::SiloUserUuid;
     use slog;
     use std::sync::Mutex;
     use uuid::Uuid;
@@ -216,7 +221,7 @@ mod test {
     struct FakeSession {
         id: ConsoleSessionUuid,
         token: String,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
         silo_id: Uuid,
         time_created: DateTime<Utc>,
         time_last_used: DateTime<Utc>,
@@ -226,7 +231,7 @@ mod test {
         fn id(&self) -> ConsoleSessionUuid {
             self.id
         }
-        fn silo_user_id(&self) -> Uuid {
+        fn silo_user_id(&self) -> SiloUserUuid {
             self.silo_user_id
         }
         fn silo_id(&self) -> Uuid {
@@ -331,7 +336,7 @@ mod test {
             sessions: Mutex::new(vec![FakeSession {
                 id: ConsoleSessionUuid::new_v4(),
                 token: "abc".to_string(),
-                silo_user_id: Uuid::new_v4(),
+                silo_user_id: SiloUserUuid::new_v4(),
                 silo_id: Uuid::new_v4(),
                 time_last_used: Utc::now() - Duration::hours(2),
                 time_created: Utc::now() - Duration::hours(2),
@@ -357,7 +362,7 @@ mod test {
             sessions: Mutex::new(vec![FakeSession {
                 id: ConsoleSessionUuid::new_v4(),
                 token: "abc".to_string(),
-                silo_user_id: Uuid::new_v4(),
+                silo_user_id: SiloUserUuid::new_v4(),
                 silo_id: Uuid::new_v4(),
                 time_last_used: Utc::now(),
                 time_created: Utc::now() - Duration::hours(20),
@@ -384,17 +389,14 @@ mod test {
             sessions: Mutex::new(vec![FakeSession {
                 id: ConsoleSessionUuid::new_v4(),
                 token: "abc".to_string(),
-                silo_user_id: Uuid::new_v4(),
+                silo_user_id: SiloUserUuid::new_v4(),
                 silo_id: Uuid::new_v4(),
                 time_last_used,
                 time_created: Utc::now(),
             }]),
         };
         let result = authn_with_cookie(&context, Some("session=abc")).await;
-        assert!(matches!(
-            result,
-            SchemeResult::Authenticated(Details { actor: _ })
-        ));
+        assert!(matches!(result, SchemeResult::Authenticated(Details { .. })));
 
         // valid cookie should have updated time_last_used
         let sessions = context.sessions.lock().unwrap();

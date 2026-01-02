@@ -272,6 +272,15 @@ impl Zones {
                     paths.extra.push(("cockroachdb", dir));
                 }
 
+                // Grab the chrony logs that are not apart of the standard SMF
+                // logs.
+                if zone.starts_with("oxz_ntp") {
+                    let mut dir = zones_path.clone();
+                    dir.push(zone);
+                    dir.push("root/var/log/chrony");
+                    paths.extra.push(("ntp", dir));
+                }
+
                 zones.insert(zone.to_string(), paths);
             }
         }

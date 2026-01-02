@@ -5,25 +5,23 @@
 use camino::Utf8PathBuf;
 use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::InventoryDataset;
-use nexus_sled_agent_shared::inventory::InventoryDisk;
-use nexus_sled_agent_shared::inventory::InventoryZpool;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::disk::DatasetName;
-use sled_agent_api::ArtifactConfig;
+use sled_agent_types::artifact::ArtifactConfig;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::InventoryDataset;
+use sled_agent_types::inventory::InventoryDisk;
+use sled_agent_types::inventory::InventoryZpool;
+use sled_agent_types::inventory::OmicronSledConfig;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
-use sled_storage::manager::NestedDatasetConfig;
-use sled_storage::manager::NestedDatasetListOptions;
-use sled_storage::manager::NestedDatasetLocation;
+use sled_storage::nested_dataset::NestedDatasetConfig;
+use sled_storage::nested_dataset::NestedDatasetListOptions;
+use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use tokio::sync::watch;
 
 #[cfg(feature = "testing")]
@@ -32,6 +30,8 @@ use camino_tempfile::Utf8TempDir;
 use illumos_utils::zpool::ZpoolName;
 #[cfg(feature = "testing")]
 use illumos_utils::zpool::ZpoolOrRamdisk;
+#[cfg(feature = "testing")]
+use omicron_common::api::internal::shared::DatasetKind;
 #[cfg(feature = "testing")]
 use sled_storage::dataset::U2_DEBUG_DATASET;
 #[cfg(feature = "testing")]
@@ -50,7 +50,8 @@ use crate::SledAgentFacilities;
 use crate::TimeSyncStatus;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::NestedDatasetMountError;
-use crate::dump_setup_task;
+use crate::debug_collector;
+use crate::debug_collector::FormerZoneRootArchiver;
 use crate::internal_disks::InternalDisksReceiver;
 use crate::ledger::CurrentSledConfig;
 use crate::ledger::LedgerTaskHandle;
@@ -87,6 +88,7 @@ pub struct ConfigReconcilerSpawnToken {
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
     external_disks_tx: watch::Sender<HashSet<Disk>>,
+    former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
     ledger_task_log: Logger,
     reconciler_task_log: Logger,
@@ -99,7 +101,6 @@ pub struct ConfigReconcilerHandle {
     dataset_task: DatasetTaskHandle,
     reconciler_result_rx: watch::Receiver<ReconcilerResult>,
     currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
-    destroy_orphans: Arc<AtomicBool>,
 
     // Empty until `spawn_reconciliation_task()` is called.
     ledger_task: OnceLock<LedgerTaskHandle>,
@@ -135,7 +136,7 @@ impl ConfigReconcilerHandle {
         // Spawn the task that manages dump devices.
         let (external_disks_tx, external_disks_rx) =
             watch::channel(HashSet::new());
-        dump_setup_task::spawn(
+        let former_zone_root_archiver = debug_collector::spawn(
             internal_disks_rx.clone(),
             external_disks_rx,
             Arc::clone(&mount_config),
@@ -163,10 +164,6 @@ impl ConfigReconcilerHandle {
                 ledger_task: OnceLock::new(),
                 reconciler_result_rx,
                 currently_managed_zpools_rx,
-                // By default, we only report (and don't destroy) orphans.
-                // Destruction can be turned on by sled-agent. This will go away
-                // with omicron#6177.
-                destroy_orphans: Arc::new(AtomicBool::new(false)),
             },
             // Stash the dependencies the reconciler task will need in
             // `spawn_reconciliation_task()` inside this token that the caller
@@ -177,6 +174,7 @@ impl ConfigReconcilerHandle {
                 reconciler_result_tx,
                 currently_managed_zpools_tx,
                 external_disks_tx,
+                former_zone_root_archiver,
                 raw_disks_rx,
                 ledger_task_log: base_log
                     .new(slog::o!("component" => "SledConfigLedgerTask")),
@@ -197,7 +195,7 @@ impl ConfigReconcilerHandle {
     /// shenanigans to get a second [`ConfigReconcilerSpawnToken`].
     pub fn spawn_reconciliation_task<
         T: SledAgentFacilities,
-        U: SledAgentArtifactStore,
+        U: SledAgentArtifactStore + Clone,
     >(
         &self,
         sled_agent_facilities: T,
@@ -210,6 +208,7 @@ impl ConfigReconcilerHandle {
             reconciler_result_tx,
             currently_managed_zpools_tx,
             external_disks_tx,
+            former_zone_root_archiver,
             raw_disks_rx,
             ledger_task_log,
             reconciler_task_log,
@@ -219,7 +218,7 @@ impl ConfigReconcilerHandle {
         let (ledger_task, current_config_rx) =
             LedgerTaskHandle::spawn_ledger_task(
                 self.internal_disks_rx.clone(),
-                sled_agent_artifact_store,
+                sled_agent_artifact_store.clone(),
                 ledger_task_log,
             );
         match self.ledger_task.set(ledger_task) {
@@ -242,22 +241,14 @@ impl ConfigReconcilerHandle {
             current_config_rx,
             reconciler_result_tx,
             currently_managed_zpools_tx,
+            self.internal_disks_rx.clone(),
             external_disks_tx,
+            former_zone_root_archiver,
             raw_disks_rx,
-            Arc::clone(&self.destroy_orphans),
             sled_agent_facilities,
+            sled_agent_artifact_store,
             reconciler_task_log,
         );
-    }
-
-    /// Read whether or not we try to destroy orphaned datasets.
-    pub fn will_destroy_orphans(&self) -> bool {
-        self.destroy_orphans.load(Ordering::Relaxed)
-    }
-
-    /// Control whether or not we try to destroy orphaned datasets.
-    pub fn set_destroy_orphans(&self, destroy_orphans: bool) {
-        self.destroy_orphans.store(destroy_orphans, Ordering::Relaxed);
     }
 
     /// Get the current timesync status.
@@ -383,7 +374,7 @@ impl ConfigReconcilerHandle {
                 Err(InventoryError::LedgerContentsNotAvailable)
             }
             Some(CurrentSledConfig::WaitingForInitialConfig) => Ok(None),
-            Some(CurrentSledConfig::Ledgered(config)) => Ok(Some(config)),
+            Some(CurrentSledConfig::Ledgered(config)) => Ok(Some(*config)),
         }
     }
 
@@ -418,16 +409,6 @@ impl ConfigReconcilerHandle {
             last_reconciliation,
         })
     }
-}
-
-#[derive(Debug)]
-struct ReconcilerTaskDependencies {
-    key_requester: StorageKeyRequester,
-    time_sync_config: TimeSyncConfig,
-    reconciler_result_tx: watch::Sender<ReconcilerResult>,
-    currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
-    ledger_task_log: Logger,
-    reconciler_task_log: Logger,
 }
 
 /// Fields of sled-agent inventory reported by the config reconciler subsystem.
@@ -517,6 +498,31 @@ impl AvailableDatasetsReceiver {
                 .map(|(pool, path)| PathInPool {
                     pool: ZpoolOrRamdisk::Zpool(*pool),
                     path: path.join(ZONE_DATASET),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn all_mounted_local_storage_datasets(&self) -> Vec<PathInPool> {
+        match &self.inner {
+            AvailableDatasetsReceiverInner::Real(receiver) => {
+                receiver.borrow().all_mounted_local_storage_datasets().collect()
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
+                vec![PathInPool {
+                    pool: zpool.clone(),
+                    path: tempdir
+                        .path()
+                        .join(DatasetKind::LocalStorage.to_string()),
+                }]
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
+                .iter()
+                .map(|(pool, path)| PathInPool {
+                    pool: ZpoolOrRamdisk::Zpool(*pool),
+                    path: path.join(DatasetKind::LocalStorage.to_string()),
                 })
                 .collect(),
         }

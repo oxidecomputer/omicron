@@ -11,8 +11,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use wicket_dbg::{Cmd, Runner, RunnerHandle};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<()> {
     let log = setup_log()?;
     let (mut runner, handle) = Runner::new(log.clone());
 
@@ -111,7 +114,9 @@ fn log_path() -> Result<Utf8PathBuf> {
     }
 }
 
-fn stderr_env_drain(env_var: &str) -> impl Drain<Ok = (), Err = slog::Never> {
+fn stderr_env_drain(
+    env_var: &str,
+) -> impl Drain<Ok = (), Err = slog::Never> + use<> {
     let stderr_decorator = slog_term::TermDecorator::new().build();
     let stderr_drain =
         slog_term::FullFormat::new(stderr_decorator).build().fuse();

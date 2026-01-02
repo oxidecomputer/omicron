@@ -59,6 +59,7 @@ use futures::future::BoxFuture;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::internal_api::views::DemoSaga;
+use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResult;
@@ -66,6 +67,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::DemoSagaUuid;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use steno::SagaDag;
@@ -158,6 +160,7 @@ pub(crate) struct SagaExecutor {
     log: slog::Logger,
     nexus: OnceLock<Arc<Nexus>>,
     saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
+    quiesce: SagaQuiesceHandle,
 }
 
 impl SagaExecutor {
@@ -165,8 +168,15 @@ impl SagaExecutor {
         sec_client: Arc<steno::SecClient>,
         log: slog::Logger,
         saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
+        quiesce: SagaQuiesceHandle,
     ) -> SagaExecutor {
-        SagaExecutor { sec_client, log, nexus: OnceLock::new(), saga_create_tx }
+        SagaExecutor {
+            sec_client,
+            log,
+            nexus: OnceLock::new(),
+            saga_create_tx,
+            quiesce,
+        }
     }
 
     // This is a little gross.  We want to hang the SagaExecutor off of Nexus,
@@ -226,11 +236,29 @@ impl SagaExecutor {
         &self,
         dag: SagaDag,
     ) -> Result<RunnableSaga, Error> {
+        let saga_id = SagaId(Uuid::new_v4());
+        let saga_name = dag.saga_name();
+
+        // Record this new saga in the quiesce state.  This will fail if saga
+        // creation is disallowed (e.g., because Nexus is quiescing).
+        // This check should happen before we start the saga running.
+        let qsaga = match self.quiesce.saga_create(saga_id, &saga_name) {
+            Ok(qsaga) => qsaga,
+            Err(error) => {
+                warn!(
+                    &self.log,
+                    "error creating new saga";
+                    "saga_name" => saga_name.to_string(),
+                    InlineErrorChain::new(&error)
+                );
+                return Err(Error::from(error));
+            }
+        };
+
         // Construct the context necessary to execute this saga.
         let nexus = self.nexus()?;
-        let saga_id = SagaId(Uuid::new_v4());
         let saga_logger = self.log.new(o!(
-            "saga_name" => dag.saga_name().to_string(),
+            "saga_name" => saga_name.to_string(),
             "saga_id" => saga_id.to_string()
         ));
         let saga_context = Arc::new(Arc::new(SagaContext::new(
@@ -269,6 +297,8 @@ impl SagaExecutor {
                 // Steno.
                 Error::internal_error(&format!("{:#}", error))
             })?;
+        let saga_completion_future =
+            qsaga.saga_completion_future(saga_completion_future);
         Ok(RunnableSaga {
             id: saga_id,
             saga_completion_future,
@@ -356,7 +386,6 @@ impl RunnableSaga {
             .await
             .context("starting saga")
             .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
-
         Ok(RunningSaga {
             id: self.id,
             saga_completion_future: self.saga_completion_future,

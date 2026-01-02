@@ -6,18 +6,21 @@
 
 use crate::external_api::shared::{
     self, Baseboard, IpKind, IpRange, ServiceUsingCertificate,
+    TufSignedRootRole,
 };
 use crate::identity::AssetIdentityMetadata;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use daft::Diffable;
+pub use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::{
     AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
-    ObjectIdentity, RoleName, SimpleIdentity, SimpleIdentityOrName,
+    Nullable, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
-use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid};
+use omicron_common::vlan::VlanID;
+use omicron_uuid_kinds::*;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
@@ -28,6 +31,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::sync::LazyLock;
 use strum::{EnumIter, IntoEnumIterator};
+use tufaceous_artifact::ArtifactHash;
 use url::Url;
 use uuid::Uuid;
 
@@ -56,6 +60,10 @@ pub struct Silo {
     /// unless there's a corresponding entry in this map.
     pub mapped_fleet_roles:
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
+
+    /// Optionally, silos can have a group name that is automatically granted
+    /// the silo admin role.
+    pub admin_group_name: Option<String>,
 }
 
 /// A collection of resource counts used to describe capacity and utilization
@@ -386,82 +394,26 @@ pub struct InternetGatewayIpAddress {
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    /// The IP version for the pool.
+    pub ip_version: IpVersion,
+    /// Type of IP pool (unicast or multicast).
+    pub pool_type: shared::IpPoolType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct Ipv4Utilization {
-    /// The number of IPv4 addresses allocated from this pool
-    pub allocated: u32,
-    /// The total number of IPv4 addresses in the pool, i.e., the sum of the
-    /// lengths of the IPv4 ranges. Unlike IPv6 capacity, can be a 32-bit
-    /// integer because there are only 2^32 IPv4 addresses.
-    pub capacity: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct Ipv6Utilization {
-    /// The number of IPv6 addresses allocated from this pool. A 128-bit integer
-    /// string to match the capacity field.
-    #[serde(with = "U128String")]
-    pub allocated: u128,
-
-    /// The total number of IPv6 addresses in the pool, i.e., the sum of the
-    /// lengths of the IPv6 ranges. An IPv6 range can contain up to 2^128
-    /// addresses, so we represent this value in JSON as a numeric string with a
-    /// custom "uint128" format.
-    #[serde(with = "U128String")]
-    pub capacity: u128,
-}
-
+/// The utilization of IP addresses in a pool.
+///
+/// Note that both the count of remaining addresses and the total capacity are
+/// integers, reported as floating point numbers. This accommodates allocations
+/// larger than a 64-bit integer, which is common with IPv6 address spaces. With
+/// very large IP Pools (> 2**53 addresses), integer precision will be lost, in
+/// exchange for representing the entire range. In such a case the pool still
+/// has many available addresses.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolUtilization {
-    /// Number of allocated and total available IPv4 addresses in pool
-    pub ipv4: Ipv4Utilization,
-    /// Number of allocated and total available IPv6 addresses in pool
-    pub ipv6: Ipv6Utilization,
-}
-
-// Custom struct for serializing/deserializing u128 as a string. The serde
-// docs will suggest using a module (or serialize_with and deserialize_with
-// functions), but as discussed in the comments on the UserData de/serializer,
-// schemars wants this to be a type, so it has to be a struct.
-struct U128String;
-impl U128String {
-    pub fn serialize<S>(value: &u128, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&value.to_string())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<u128, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-impl JsonSchema for U128String {
-    fn schema_name() -> String {
-        "String".to_string()
-    }
-
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            format: Some("uint128".to_string()),
-            ..Default::default()
-        }
-        .into()
-    }
-
-    fn is_referenceable() -> bool {
-        false
-    }
+    /// The number of remaining addresses in the pool.
+    pub remaining: f64,
+    /// The total number of addresses in the pool.
+    pub capacity: f64,
 }
 
 /// An IP pool in the context of a silo
@@ -472,8 +424,17 @@ pub struct SiloIpPool {
 
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
+
+    /// The IP version for the pool.
+    pub ip_version: IpVersion,
+
+    /// Type of IP pool (unicast or multicast).
+    pub pool_type: shared::IpPoolType,
 }
 
 /// A link between an IP pool and a silo that allows one to allocate IPs from
@@ -484,7 +445,10 @@ pub struct IpPoolSiloLink {
     pub silo_id: Uuid,
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
 }
 
@@ -501,24 +465,46 @@ pub struct IpPoolRange {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExternalIp {
-    Ephemeral { ip: IpAddr },
+    #[serde(rename = "snat")]
+    SNat(SNatIp),
+    Ephemeral {
+        ip: IpAddr,
+        ip_pool_id: Uuid,
+    },
     Floating(FloatingIp),
 }
 
 impl ExternalIp {
     pub fn ip(&self) -> IpAddr {
         match self {
-            Self::Ephemeral { ip } => *ip,
+            Self::SNat(snat) => snat.ip,
+            Self::Ephemeral { ip, .. } => *ip,
             Self::Floating(float) => float.ip,
         }
     }
 
     pub fn kind(&self) -> IpKind {
         match self {
+            Self::SNat(_) => IpKind::SNat,
             Self::Ephemeral { .. } => IpKind::Ephemeral,
             Self::Floating(_) => IpKind::Floating,
         }
     }
+}
+
+/// A source NAT IP address.
+///
+/// SNAT addresses are ephemeral addresses used only for outbound connectivity.
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
+pub struct SNatIp {
+    /// The IP address.
+    pub ip: IpAddr,
+    /// The first usable port within the IP address.
+    pub first_port: u16,
+    /// The last usable port within the IP address.
+    pub last_port: u16,
+    /// ID of the IP Pool from which the address is taken.
+    pub ip_pool_id: Uuid,
 }
 
 /// A Floating IP is a well-known IP address which can be attached
@@ -552,12 +538,52 @@ impl TryFrom<ExternalIp> for FloatingIp {
 
     fn try_from(value: ExternalIp) -> Result<Self, Self::Error> {
         match value {
-            ExternalIp::Ephemeral { .. } => Err(Error::internal_error(
-                "tried to convert an ephemeral IP into a floating IP",
-            )),
+            ExternalIp::SNat(_) | ExternalIp::Ephemeral { .. } => {
+                Err(Error::internal_error(
+                    "tried to convert an SNAT or ephemeral IP into a floating IP",
+                ))
+            }
             ExternalIp::Floating(v) => Ok(v),
         }
     }
+}
+
+// MULTICAST GROUPS
+
+/// View of a Multicast Group
+#[derive(
+    ObjectIdentity, Debug, PartialEq, Clone, Deserialize, Serialize, JsonSchema,
+)]
+pub struct MulticastGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The multicast IP address held by this resource.
+    pub multicast_ip: IpAddr,
+    /// Source IP addresses for Source-Specific Multicast (SSM).
+    /// Empty array means any source is allowed.
+    pub source_ips: Vec<IpAddr>,
+    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// None means no VLAN tagging on egress.
+    pub mvlan: Option<VlanID>,
+    /// The ID of the IP pool this resource belongs to.
+    pub ip_pool_id: Uuid,
+    /// Current state of the multicast group.
+    pub state: String,
+}
+
+/// View of a Multicast Group Member (instance belonging to a multicast group)
+#[derive(
+    ObjectIdentity, Debug, PartialEq, Clone, Deserialize, Serialize, JsonSchema,
+)]
+pub struct MulticastGroupMember {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the multicast group this member belongs to.
+    pub multicast_group_id: Uuid,
+    /// The ID of the instance that is a member of this group.
+    pub instance_id: Uuid,
+    /// Current state of the multicast group membership.
+    pub state: String,
 }
 
 // RACKS
@@ -576,7 +602,8 @@ pub struct Rack {
 /// The unique ID of a sled.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct SledId {
-    pub id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub id: SledUuid,
 }
 
 /// An operator's view of a Sled.
@@ -808,7 +835,8 @@ pub struct PhysicalDisk {
     pub state: PhysicalDiskState,
 
     /// The sled to which this disk is attached, if any.
-    pub sled_id: Option<Uuid>,
+    #[schemars(with = "Option<Uuid>")]
+    pub sled_id: Option<SledUuid>,
 
     pub vendor: String,
     pub serial: String,
@@ -914,7 +942,9 @@ impl fmt::Display for PhysicalDiskState {
 /// View of a User
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct User {
-    pub id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub id: SiloUserUuid,
+
     /** Human-readable name that can identify the user */
     pub display_name: String,
 
@@ -930,9 +960,18 @@ pub struct User {
 pub struct CurrentUser {
     #[serde(flatten)]
     pub user: User,
-
     /** Name of the silo to which this user belongs. */
     pub silo_name: Name,
+    /**
+     * Whether this user has the viewer role on the fleet. Used by the web
+     * console to determine whether to show system-level UI.
+     */
+    pub fleet_viewer: bool,
+    /**
+     * Whether this user has the admin role on their silo. Used by the web
+     * console to determine whether to show admin-only UI elements.
+     */
+    pub silo_admin: bool,
 }
 
 // SILO GROUPS
@@ -940,7 +979,8 @@ pub struct CurrentUser {
 /// View of a Group
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Group {
-    pub id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub id: SiloGroupUuid,
 
     /// Human-readable name that can identify the group
     pub display_name: String,
@@ -963,15 +1003,6 @@ pub struct UserBuiltin {
     pub identity: IdentityMetadata,
 }
 
-// ROLES
-
-/// View of a Role
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct Role {
-    pub name: RoleName,
-    pub description: String,
-}
-
 // SSH KEYS
 
 /// View of an SSH Key
@@ -983,7 +1014,8 @@ pub struct SshKey {
     pub identity: IdentityMetadata,
 
     /// The user to whom this key belongs
-    pub silo_user_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub silo_user_id: SiloUserUuid,
 
     /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
     pub public_key: String,
@@ -1003,6 +1035,21 @@ pub struct DeviceAccessToken {
 }
 
 impl SimpleIdentity for DeviceAccessToken {
+    fn id(&self) -> Uuid {
+        self.id
+    }
+}
+
+/// View of a console session
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct ConsoleSession {
+    /// A unique, immutable, system-controlled identifier for the session
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_last_used: DateTime<Utc>,
+}
+
+impl SimpleIdentity for ConsoleSession {
     fn id(&self) -> Uuid {
         self.id
     }
@@ -1082,11 +1129,88 @@ pub struct AllowList {
 
 // OxQL QUERIES
 
+/// A table represents one or more timeseries with the same schema.
+///
+/// A table is the result of an OxQL query. It contains a name, usually the name
+/// of the timeseries schema from which the data is derived, and any number of
+/// timeseries, which contain the actual data.
+//
+// # Motivation
+//
+// This struct is derived from [`oxql_types::Table`] but presents timeseries data as a `Vec`
+// rather than a map keyed by [`TimeseriesKey`]. This provides a cleaner JSON
+// representation for external consumers, as these numeric keys are ephemeral
+// identifiers that have no meaning to API consumers. Key ordering is retained
+// as this is contructed from the already sorted values present in [`Table`].
+//
+// When serializing a [`Table`] to JSON, the `BTreeMap<TimeseriesKey, Timeseries>`
+// structure produces output with numeric keys like:
+// ```json
+// {
+//   "timeseries": {
+//     "2352746367989923131": { ... },
+//     "3940108470521992408": { ... }
+//   }
+// }
+// ```
+//
+// The `Table` view instead serializes timeseries as an array:
+// ```json
+// {
+//   "timeseries": [ { ... }, { ... } ]
+// }
+// ```
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct OxqlTable {
+    /// The name of the table.
+    pub name: String,
+    /// The set of timeseries in the table, ordered by key.
+    pub timeseries: Vec<oxql_types::Timeseries>,
+}
+
+impl From<oxql_types::Table> for OxqlTable {
+    fn from(table: oxql_types::Table) -> Self {
+        OxqlTable {
+            name: table.name.clone(),
+            timeseries: table.into_iter().collect(),
+        }
+    }
+}
+
+/// Basic metadata about the resource usage of a query.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct OxqlQuerySummary {
+    /// The database-assigned query ID.
+    pub id: Uuid,
+    /// The raw query.
+    pub query: String,
+    /// The total duration of the query (network plus execution).
+    pub elapsed_ms: usize,
+    /// Summary of the data read and written.
+    pub io_summary: oxql_types::IoSummary,
+}
+
+impl From<oxql_types::QuerySummary> for OxqlQuerySummary {
+    fn from(query_summary: oxql_types::QuerySummary) -> Self {
+        OxqlQuerySummary {
+            id: query_summary.id,
+            query: query_summary.query,
+            elapsed_ms: query_summary.elapsed.as_millis() as usize,
+            io_summary: query_summary.io_summary,
+        }
+    }
+}
+
 /// The result of a successful OxQL query.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct OxqlQueryResult {
     /// Tables resulting from the query, each containing timeseries.
-    pub tables: Vec<oxql_types::Table>,
+    pub tables: Vec<OxqlTable>,
+    /// Summaries of queries run against ClickHouse. Note: we omit this field
+    /// from the generated docs, since it is not intended for consumption by
+    /// customers.
+    #[schemars(skip)]
+    pub query_summaries: Option<Vec<OxqlQuerySummary>>,
 }
 
 // ALERTS
@@ -1219,12 +1343,14 @@ pub struct AlertDelivery {
     pub id: Uuid,
 
     /// The UUID of the alert receiver that this event was delivered to.
+    #[schemars(with = "Uuid")]
     pub receiver_id: AlertReceiverUuid,
 
     /// The event class.
     pub alert_class: String,
 
     /// The UUID of the event.
+    #[schemars(with = "Uuid")]
     pub alert_id: AlertUuid,
 
     /// The state of this delivery.
@@ -1466,28 +1592,114 @@ pub struct AlertProbeResult {
 
 // UPDATE
 
-/// Source of a system software target release.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, JsonSchema, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TargetReleaseSource {
-    /// Unspecified or unknown source (probably MUPdate).
-    Unspecified,
-
-    /// The specified release of the rack's system software.
-    SystemVersion { version: Version },
-}
-
-/// View of a system software target release.
+/// View of a system software target release
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct TargetRelease {
-    /// The target-release generation number.
-    pub generation: i64,
-
-    /// The time it was set as the target release.
+    /// Time this was set as the target release
     pub time_requested: DateTime<Utc>,
 
-    /// The source of the target release.
-    pub release_source: TargetReleaseSource,
+    /// The specified release of the rack's system software
+    pub version: Version,
+}
+
+/// Trusted root role used by the update system to verify update repositories.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct UpdatesTrustRoot {
+    /// The UUID of this trusted root role.
+    pub id: Uuid,
+    /// Time the trusted root role was added.
+    pub time_created: DateTime<Utc>,
+    /// The trusted root role itself, a JSON document as described by The Update
+    /// Framework.
+    pub root_role: TufSignedRootRole,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdateStatus {
+    /// Current target release of the system software
+    ///
+    /// This may not correspond to the actual system software running
+    /// at the time of request; it is instead the release that the system
+    /// should be moving towards as a goal state. The system asynchronously
+    /// updates software to match this target release.
+    ///
+    /// Will only be null if a target release has never been set. In that case,
+    /// the system is not automatically attempting to manage software versions.
+    pub target_release: Nullable<TargetRelease>,
+
+    /// Count of components running each release version
+    ///
+    /// Keys will be either:
+    ///
+    /// * Semver-like release version strings
+    /// * "install dataset", representing the initial rack software before
+    ///   any updates
+    /// * "unknown", which means there is no TUF repo uploaded that matches
+    ///   the software running on the component)
+    pub components_by_release_version: BTreeMap<String, usize>,
+
+    /// Time of most recent update planning activity
+    ///
+    /// This is intended as a rough indicator of the last time something
+    /// happened in the update planner.
+    pub time_last_step_planned: DateTime<Utc>,
+
+    /// Whether automatic update is suspended due to manual update activity
+    ///
+    /// After a manual support procedure that changes the system software,
+    /// automatic update activity is suspended to avoid undoing the change. To
+    /// resume automatic update, first upload the TUF repository matching the
+    /// manually applied update, then set that as the target release.
+    pub suspended: bool,
+}
+
+/// Metadata about a TUF repository
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepo {
+    /// The hash of the repository
+    // This is a slight abuse of `ArtifactHash`, since that's the hash of
+    // individual artifacts within the repository. However, we use it here for
+    // convenience.
+    pub hash: ArtifactHash,
+
+    /// The system version for this repository
+    ///
+    /// The system version is a top-level version number applied to all the
+    /// software in the repository.
+    pub system_version: Version,
+
+    /// The file name of the repository, as reported by the client that uploaded
+    /// it
+    ///
+    /// This is intended for debugging. The file name may not match any
+    /// particular pattern, and even if it does, it may not be accurate since
+    /// it's just what the client reported.
+    // (e.g., with wicket, we read the file contents from stdin so we don't know
+    // the correct file name).
+    pub file_name: String,
+
+    /// Time the repository was uploaded
+    pub time_created: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepoUpload {
+    pub repo: TufRepo,
+    pub status: TufRepoUploadStatus,
+}
+
+/// Whether the uploaded TUF repo already existed or was new and had to be
+/// inserted. Part of `TufRepoUpload`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TufRepoUploadStatus {
+    /// The repository already existed in the database
+    AlreadyExists,
+
+    /// The repository did not exist, and was inserted into the database
+    Inserted,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
@@ -1502,6 +1714,25 @@ fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
         }
     }
     msg
+}
+
+// SCIM
+
+/// The POST response is the only time the generated bearer token is returned to
+/// the client.
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct ScimClientBearerTokenValue {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_expires: Option<DateTime<Utc>>,
+    pub bearer_token: String,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct ScimClientBearerToken {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_expires: Option<DateTime<Utc>>,
 }
 
 #[cfg(test)]
@@ -1531,4 +1762,91 @@ mod test {
             "expected one of: 'Foo', 'Bar', or 'Baz'"
         );
     }
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AuditLogEntryActor {
+    UserBuiltin {
+        #[schemars(with = "Uuid")]
+        user_builtin_id: BuiltInUserUuid,
+    },
+
+    SiloUser {
+        #[schemars(with = "Uuid")]
+        silo_user_id: SiloUserUuid,
+
+        silo_id: Uuid,
+    },
+
+    Scim {
+        silo_id: Uuid,
+    },
+
+    Unauthenticated,
+}
+
+/// Result of an audit log entry
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AuditLogEntryResult {
+    /// The operation completed successfully
+    Success {
+        /// HTTP status code
+        http_status_code: u16,
+    },
+    /// The operation failed
+    Error {
+        /// HTTP status code
+        http_status_code: u16,
+        error_code: Option<String>,
+        error_message: String,
+    },
+    // Note that the DB model result kind analogous to Unknown is called Timeout
+    // -- The name "Timeout" feels useful to write down for the DB but also
+    // feels like too much of an implementation detail to expose to the user --
+    // it makes it sounds like the operation timed out rather than the audit log
+    // entry itself.
+    /// After the logged operation completed, our attempt to write the result
+    /// to the audit log failed, so it was automatically marked completed later
+    /// by a background job. This does not imply that the operation itself timed
+    /// out or failed, only our attempts to log its result.
+    Unknown,
+}
+
+/// Audit log entry
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AuditLogEntry {
+    /// Unique identifier for the audit log entry
+    pub id: Uuid,
+
+    /// When the request was received
+    pub time_started: DateTime<Utc>,
+
+    /// Request ID for tracing requests through the system
+    pub request_id: String,
+    /// URI of the request, truncated to 512 characters. Will only include host
+    /// and scheme for HTTP/2 requests. For HTTP/1.1, the URI will consist of
+    /// only the path and query.
+    pub request_uri: String,
+    /// API endpoint ID, e.g., `project_create`
+    pub operation_id: String,
+    /// IP address that made the request
+    pub source_ip: IpAddr,
+    /// User agent string from the request, truncated to 256 characters.
+    pub user_agent: Option<String>,
+
+    pub actor: AuditLogEntryActor,
+
+    /// How the user authenticated the request. Possible values are
+    /// "session_cookie" and "access_token". Optional because it will not be
+    /// defined on unauthenticated requests like login attempts.
+    pub auth_method: Option<String>,
+
+    // Fields that are optional because they get filled in after the action completes
+    /// Time operation completed
+    pub time_completed: DateTime<Utc>,
+
+    /// Result of the operation
+    pub result: AuditLogEntryResult,
 }

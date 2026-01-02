@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Args;
 use futures::StreamExt;
 use installinator_client::ClientError;
@@ -12,14 +12,19 @@ use installinator_common::EventReport;
 use ipcc::{InstallinatorImageId, Ipcc};
 use omicron_uuid_kinds::MupdateUuid;
 use tokio::sync::mpsc;
-use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
+use tufaceous_artifact::{
+    ArtifactHash, ArtifactHashId, ArtifactKind, KnownArtifactKind,
+};
 
 use crate::{errors::HttpError, fetch::FetchReceiver};
 
 #[derive(Clone, Debug, Eq, PartialEq, Args)]
 pub(crate) struct ArtifactIdOpts {
     /// Retrieve artifact ID from IPCC
-    #[clap(long, required_unless_present_any = ["update_id", "host_phase_2", "control_plane"])]
+    #[clap(
+        long,
+        required_unless_present_any = ["update_id", "installinator_doc"]
+    )]
     from_ipcc: bool,
 
     #[clap(
@@ -31,32 +36,99 @@ pub(crate) struct ArtifactIdOpts {
 
     #[clap(
         long,
-        conflicts_with = "from_ipcc",
-        required_unless_present = "from_ipcc"
+        conflicts_with_all = ["from_ipcc"],
+        required_unless_present_any = ["from_ipcc"],
     )]
-    host_phase_2: Option<ArtifactHash>,
-
-    #[clap(
-        long,
-        conflicts_with = "from_ipcc",
-        required_unless_present = "from_ipcc"
-    )]
-    control_plane: Option<ArtifactHash>,
+    installinator_doc: Option<ArtifactHash>,
 }
 
 impl ArtifactIdOpts {
-    pub(crate) fn resolve(&self) -> Result<InstallinatorImageId> {
+    pub(crate) fn resolve(&self) -> Result<LookupId> {
         if self.from_ipcc {
             let ipcc = Ipcc::new().context("error opening IPCC")?;
-            ipcc.installinator_image_id()
-                .context("error retrieving installinator image ID")
+            let image_id = ipcc
+                .installinator_image_id()
+                .context("error retrieving installinator image ID")?;
+            LookupId::from_image_id(&image_id)
         } else {
             let update_id = self.update_id.unwrap();
-            let host_phase_2 = self.host_phase_2.unwrap();
-            let control_plane = self.control_plane.unwrap();
+            let document = self
+                .installinator_doc
+                .context("error retrieving installinator doc hash")?;
 
-            Ok(InstallinatorImageId { update_id, host_phase_2, control_plane })
+            Ok(LookupId { update_id, document })
         }
+    }
+}
+
+/// Identifiers used by installinator to retrieve artifacts.
+pub(crate) struct LookupId {
+    pub(crate) update_id: MupdateUuid,
+    pub(crate) document: ArtifactHash,
+}
+
+impl LookupId {
+    fn from_image_id(image_id: &InstallinatorImageId) -> Result<Self> {
+        // This sentinel hash is used to indicate that the host phase 2 hash is
+        // actually the hash to the installinator document.
+
+        if image_id.control_plane != ArtifactHash([0; 32]) {
+            bail!("non-zero control plane hash, this isn't using doc format");
+        }
+
+        Ok(Self {
+            update_id: image_id.update_id,
+            document: image_id.host_phase_2,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MeasurementArtifact {
+    pub(crate) hash: ArtifactHash,
+    pub(crate) name: String,
+}
+
+pub(crate) struct MeasurementArtifactHashId {
+    pub(crate) hash: ArtifactHashId,
+    pub(crate) name: String,
+}
+
+/// The host phase 2 and control plane hashes to download.
+#[derive(Clone, Debug)]
+pub(crate) struct ArtifactsToDownload {
+    pub(crate) host_phase_2: ArtifactHash,
+    pub(crate) control_plane: ArtifactHash,
+    pub(crate) measurement_corpus: Vec<MeasurementArtifact>,
+}
+
+impl ArtifactsToDownload {
+    pub(crate) fn host_phase_2_id(&self) -> ArtifactHashId {
+        ArtifactHashId {
+            kind: ArtifactKind::HOST_PHASE_2,
+            hash: self.host_phase_2,
+        }
+    }
+
+    pub(crate) fn control_plane_id(&self) -> ArtifactHashId {
+        ArtifactHashId {
+            kind: KnownArtifactKind::ControlPlane.into(),
+            hash: self.control_plane,
+        }
+    }
+
+    pub(crate) fn measurement_corpus(&self) -> Vec<MeasurementArtifactHashId> {
+        self.measurement_corpus
+            .clone()
+            .into_iter()
+            .map(|x| MeasurementArtifactHashId {
+                name: x.name,
+                hash: ArtifactHashId {
+                    kind: KnownArtifactKind::MeasurementCorpus.into(),
+                    hash: x.hash,
+                },
+            })
+            .collect()
     }
 }
 
@@ -81,7 +153,29 @@ impl ArtifactClient {
         let log = log.new(
             slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
         );
-        let client = installinator_client::Client::new(&endpoint, log.clone());
+
+        // Set a connect timeout of 15 seconds (the progenitor default), and a
+        // total timeout of 5 minutes. The progenitor default for the total
+        // timeout is 15 seconds, which can easily be exceeded for large
+        // downloads. (Don't set the total timeout to be too long, though,
+        // because we're fetching ~2GiB artifacts over a LAN which really should
+        // take less than 5 minutes.)
+        //
+        // Do not set a read timeout here -- instead, read timeouts are handled
+        // by the fetch loop. (Why is the read timeout handled by the fetch
+        // loop? So that it can also apply to the mock peer backend, and logic
+        // shared across both.)
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(5 * 60))
+            .build()
+            .expect("installinator artifact client created");
+        let client = installinator_client::Client::new_with_client(
+            &endpoint,
+            client,
+            log.clone(),
+        );
+
         Self { log, client }
     }
 
@@ -138,7 +232,7 @@ impl ArtifactClient {
         report: EventReport,
     ) -> Result<(), ClientError> {
         self.client
-            .report_progress(&update_id, &report)
+            .report_progress(&update_id, &report.into_generic())
             .await
             .map(|resp| resp.into_inner())
     }

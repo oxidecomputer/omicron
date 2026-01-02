@@ -5,7 +5,7 @@
 //! Interface for Sled Agent's Repo Depot to make API requests.
 
 progenitor::generate_api!(
-    spec = "../../openapi/repo-depot.json",
+    spec = "../../openapi/repo-depot/repo-depot-1.0.0-65083f.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {

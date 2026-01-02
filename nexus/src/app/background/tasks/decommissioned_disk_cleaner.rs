@@ -20,7 +20,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -52,7 +51,8 @@ impl DecommissionedDiskCleaner {
     ) -> Result<(), anyhow::Error> {
         slog::info!(opctx.log, "Decommissioned disk cleaner running");
 
-        let mut paginator = Paginator::new(MAX_BATCH);
+        let mut paginator =
+            Paginator::new(MAX_BATCH, dropshot::PaginationOrder::Ascending);
         let mut last_err = Ok(());
         while let Some(p) = paginator.next() {
             let zpools = self
@@ -63,7 +63,7 @@ impl DecommissionedDiskCleaner {
                 )
                 .await
                 .context("failed to list zpools on decommissioned disks")?;
-            paginator = p.found_batch(&zpools, &|zpool| zpool.id());
+            paginator = p.found_batch(&zpools, &|zpool| zpool.id().into());
             self.clean_batch(results, &mut last_err, opctx, &zpools).await;
         }
 
@@ -81,7 +81,7 @@ impl DecommissionedDiskCleaner {
         slog::debug!(opctx.log, "Found zpools on decommissioned disks"; "count" => zpools.len());
 
         for zpool in zpools {
-            let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
+            let zpool_id = zpool.id();
             slog::trace!(opctx.log, "Deleting Zpool"; "zpool" => %zpool_id);
 
             match self
@@ -184,10 +184,10 @@ mod tests {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
     use omicron_uuid_kinds::{
-        DatasetUuid, PhysicalDiskUuid, RegionUuid, SledUuid, VolumeUuid,
+        DatasetUuid, GenericUuid, PhysicalDiskUuid, RegionUuid, SledUuid,
+        VolumeUuid, ZpoolUuid,
     };
     use std::str::FromStr;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -205,7 +205,7 @@ mod tests {
             format!("s-{i})"),
             "m".into(),
             PhysicalDiskKind::U2,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
         datastore
             .physical_disk_insert(&opctx, physical_disk.clone())
@@ -224,8 +224,8 @@ mod tests {
             .zpool_insert(
                 opctx,
                 Zpool::new(
-                    Uuid::new_v4(),
-                    sled_id.into_untyped_uuid(),
+                    ZpoolUuid::new_v4(),
+                    sled_id,
                     id,
                     ByteCount::from(0).into(),
                 ),
@@ -233,7 +233,7 @@ mod tests {
             .await
             .unwrap();
 
-        let dataset = datastore
+        let crucible_dataset = datastore
             .crucible_dataset_upsert(CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 zpool.id(),
@@ -252,7 +252,7 @@ mod tests {
         let region = {
             let volume_id = VolumeUuid::new_v4();
             Region::new(
-                dataset.id(),
+                crucible_dataset.id(),
                 volume_id,
                 512_i64.try_into().unwrap(),
                 10,
@@ -271,31 +271,31 @@ mod tests {
             .unwrap();
 
         (
-            ZpoolUuid::from_untyped_uuid(zpool.id()),
-            dataset.id(),
+            zpool.id(),
+            crucible_dataset.id(),
             RegionUuid::from_untyped_uuid(region_id),
         )
     }
 
     struct TestFixture {
         zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
+        crucible_dataset_id: DatasetUuid,
         region_id: RegionUuid,
         disk_id: PhysicalDiskUuid,
     }
 
     impl TestFixture {
         async fn setup(datastore: &Arc<DataStore>, opctx: &OpContext) -> Self {
-            let sled_id = SledUuid::from_untyped_uuid(
-                Uuid::from_str(&SLED_AGENT_UUID).unwrap(),
-            );
+            let sled_id = SledUuid::from_str(&SLED_AGENT_UUID).unwrap();
 
             let disk_id = make_disk_in_db(datastore, opctx, 0, sled_id).await;
-            let (zpool_id, dataset_id, region_id) =
+
+            let (zpool_id, crucible_dataset_id, region_id) =
                 add_zpool_dataset_and_region(
                     &datastore, &opctx, disk_id, sled_id,
                 )
                 .await;
+
             datastore
                 .physical_disk_update_policy(
                     &opctx,
@@ -305,7 +305,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            Self { zpool_id, dataset_id, region_id, disk_id }
+            Self { zpool_id, crucible_dataset_id, region_id, disk_id }
         }
 
         async fn delete_region(&self, datastore: &DataStore) {
@@ -340,8 +340,11 @@ mod tests {
                 .expect("Zpool query should succeed");
 
             use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
-            let fetched_dataset = dataset_dsl::crucible_dataset
-                .filter(dataset_dsl::id.eq(self.dataset_id.into_untyped_uuid()))
+            let fetched_crucible_dataset = dataset_dsl::crucible_dataset
+                .filter(
+                    dataset_dsl::id
+                        .eq(self.crucible_dataset_id.into_untyped_uuid()),
+                )
                 .filter(dataset_dsl::time_deleted.is_null())
                 .select(CrucibleDataset::as_select())
                 .first_async(&*conn)
@@ -349,11 +352,12 @@ mod tests {
                 .optional()
                 .expect("Dataset query should succeed");
 
-            match (fetched_zpool, fetched_dataset) {
+            match (fetched_zpool, fetched_crucible_dataset) {
                 (Some(_), Some(_)) => false,
                 (None, None) => true,
                 _ => panic!(
-                    "If zpool and dataset were cleaned, they should be cleaned together"
+                    "If zpool and datasets were cleaned, they should be \
+                    cleaned together"
                 ),
             }
         }

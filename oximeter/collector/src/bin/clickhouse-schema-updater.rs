@@ -84,8 +84,11 @@ fn build_logger(level: Level) -> Logger {
     Logger::root(drain, slog::o!("unit" => "clickhouse_schema_updater"))
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> anyhow::Result<()> {
     let args = Args::parse();
     let log = build_logger(args.log_level);
     let client = Client::new(args.host, &log);

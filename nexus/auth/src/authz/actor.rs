@@ -38,8 +38,7 @@ impl oso::PolarClass for AnyActor {
             })
             .add_attribute_getter("authn_actor", |a: &AnyActor| {
                 a.actor.map(|actor| AuthenticatedActor {
-                    actor_id: actor.actor_id(),
-                    silo_id: actor.silo_id(),
+                    actor,
                     roles: a.roles.clone(),
                     silo_policy: a.silo_policy.clone(),
                 })
@@ -50,8 +49,7 @@ impl oso::PolarClass for AnyActor {
 /// Represents an authenticated [`authn::Context`] for Polar
 #[derive(Clone, Debug)]
 pub struct AuthenticatedActor {
-    actor_id: Uuid,
-    silo_id: Option<Uuid>,
+    actor: authn::Actor,
     roles: RoleSet,
     silo_policy: Option<authn::SiloAuthnPolicy>,
 }
@@ -94,7 +92,7 @@ impl AuthenticatedActor {
 
 impl PartialEq for AuthenticatedActor {
     fn eq(&self, other: &Self) -> bool {
-        self.actor_id == other.actor_id
+        self.actor == other.actor
     }
 }
 
@@ -106,8 +104,9 @@ impl oso::PolarClass for AuthenticatedActor {
             .with_equality_check()
             .add_constant(
                 AuthenticatedActor {
-                    actor_id: authn::USER_DB_INIT.id,
-                    silo_id: None,
+                    actor: authn::Actor::UserBuiltin {
+                        user_builtin_id: authn::USER_DB_INIT.id,
+                    },
                     roles: RoleSet::new(),
                     silo_policy: None,
                 },
@@ -115,21 +114,49 @@ impl oso::PolarClass for AuthenticatedActor {
             )
             .add_constant(
                 AuthenticatedActor {
-                    actor_id: authn::USER_INTERNAL_API.id,
-                    silo_id: None,
+                    actor: authn::Actor::UserBuiltin {
+                        user_builtin_id: authn::USER_INTERNAL_API.id,
+                    },
                     roles: RoleSet::new(),
                     silo_policy: None,
                 },
                 "USER_INTERNAL_API",
             )
+            // This is meant to guard against the SCIM actor being able to see
+            // the full resource hierarchy due to implicit grants in the Polar
+            // file. There are "if actor.is_user" guards to prevent this.
+            .add_attribute_getter("is_user", |a: &AuthenticatedActor| {
+                match a.actor {
+                    authn::Actor::SiloUser { .. } => true,
+
+                    authn::Actor::UserBuiltin { .. } => true,
+
+                    authn::Actor::Scim { .. } => false,
+                }
+            })
+            // Like the "is_user" guard above but reversed, this guard is used
+            // in the Polar file to grant permissions to a SCIM IdP actor
+            // without the need for a role.
+            .add_attribute_getter("is_scim_idp", |a: &AuthenticatedActor| {
+                match a.actor {
+                    authn::Actor::SiloUser { .. } => false,
+
+                    authn::Actor::UserBuiltin { .. } => false,
+
+                    authn::Actor::Scim { .. } => true,
+                }
+            })
             .add_attribute_getter("silo", |a: &AuthenticatedActor| {
-                a.silo_id.map(|silo_id| {
-                    super::Silo::new(
+                match a.actor {
+                    authn::Actor::SiloUser { silo_id, .. }
+                    | authn::Actor::Scim { silo_id } => Some(super::Silo::new(
                         super::FLEET,
                         silo_id,
                         LookupType::ById(silo_id),
-                    )
-                })
+                    )),
+
+                    authn::Actor::UserBuiltin { .. } => None,
+                }
             })
             .add_method(
                 "confers_fleet_role",
@@ -139,7 +166,15 @@ impl oso::PolarClass for AuthenticatedActor {
             )
             .add_method(
                 "equals_silo_user",
-                |a: &AuthenticatedActor, u: SiloUser| a.actor_id == u.id(),
+                |a: &AuthenticatedActor, u: SiloUser| match a.actor {
+                    authn::Actor::SiloUser { silo_user_id, .. } => {
+                        silo_user_id == u.id()
+                    }
+
+                    authn::Actor::UserBuiltin { .. } => false,
+
+                    authn::Actor::Scim { .. } => false,
+                },
             )
     }
 }

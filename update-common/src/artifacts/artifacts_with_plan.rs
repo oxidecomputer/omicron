@@ -76,6 +76,7 @@ impl ArtifactsWithPlan {
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send,
         file_name: Option<String>,
         zone_mode: ControlPlaneZonesMode,
+        verification_mode: VerificationMode<'_>,
         log: &Logger,
     ) -> Result<Self, RepositoryError> {
         // Create a temporary file to store the incoming archive.``
@@ -117,6 +118,7 @@ impl ArtifactsWithPlan {
             file_name,
             repo_hash,
             zone_mode,
+            verification_mode,
             log,
         )
         .await?;
@@ -129,6 +131,7 @@ impl ArtifactsWithPlan {
         file_name: Option<String>,
         repo_hash: ArtifactHash,
         zone_mode: ControlPlaneZonesMode,
+        verification_mode: VerificationMode<'_>,
         log: &Logger,
     ) -> Result<Self, RepositoryError>
     where
@@ -156,16 +159,26 @@ impl ArtifactsWithPlan {
             })??
         };
 
-        // Time is unavailable during initial setup, so ignore expiration. Even
-        // if time were available, we might want to be able to load older
-        // versions of artifacts over the technician port in an emergency.
-        //
-        // XXX we aren't checking against a root of trust at this point --
-        // anyone can sign the repositories and this code will accept that.
-        let repository =
-            OmicronRepo::load_untrusted_ignore_expiration(log, dir.path())
+        // We want validly-signed zip archives to always work even if the
+        // signatures are expired, even when the system time is correct. (If we
+        // eventually load TUF repositories over HTTP, the system should enforce
+        // signature expiration.)
+        let repository = match verification_mode {
+            VerificationMode::TrustStore(trusted_roots) => {
+                OmicronRepo::load_ignore_expiration(
+                    log,
+                    dir.path(),
+                    trusted_roots,
+                )
                 .await
-                .map_err(RepositoryError::LoadRepository)?;
+                .map_err(RepositoryError::LoadRepository)?
+            }
+            VerificationMode::BlindlyTrustAnything => {
+                OmicronRepo::load_untrusted_ignore_expiration(log, dir.path())
+                    .await
+                    .map_err(RepositoryError::LoadRepository)?
+            }
+        };
 
         let artifacts = repository
             .read_artifacts()
@@ -210,26 +223,8 @@ impl ArtifactsWithPlan {
                     error: Box::new(error),
                 })?;
 
-            let target_hash = repository
-                .repo()
-                .targets()
-                .signed
-                .find_target(&target_name, false)
-                .map_err(|error| RepositoryError::TargetHashRead {
-                    target: artifact.target.clone(),
-                    error: Box::new(error),
-                })?
-                .hashes
-                .sha256
-                .clone()
-                .into_vec();
-
-            // The target hash is SHA-256, which is 32 bytes long.
-            let artifact_hash = ArtifactHash(
-                target_hash
-                    .try_into()
-                    .map_err(RepositoryError::TargetHashLength)?,
-            );
+            let artifact_hash =
+                lookup_artifact_hash(&repository, artifact, &target_name)?;
 
             let stream = repository
                 .repo()
@@ -322,6 +317,30 @@ impl ArtifactsWithPlan {
     }
 }
 
+fn lookup_artifact_hash(
+    repository: &OmicronRepo,
+    artifact: &tufaceous_artifact::Artifact,
+    target_name: &TargetName,
+) -> Result<ArtifactHash, RepositoryError> {
+    let target_hash = repository
+        .repo()
+        .targets()
+        .signed
+        .find_target(target_name, false)
+        .map_err(|error| RepositoryError::TargetHashRead {
+            target: artifact.target.clone(),
+            error: Box::new(error),
+        })?
+        .hashes
+        .sha256
+        .clone()
+        .into_vec();
+    let artifact_hash = ArtifactHash(
+        target_hash.try_into().map_err(RepositoryError::TargetHashLength)?,
+    );
+    Ok(artifact_hash)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum ControlPlaneZonesMode {
     /// Ensure the control plane zones are combined into a single composite
@@ -330,6 +349,16 @@ pub enum ControlPlaneZonesMode {
     /// Ensure the control plane zones are individual `Zone` artifacts, used
     /// by Nexus.
     Split,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum VerificationMode<'a> {
+    /// Verify the uploaded repository is accepted by one of these trusted root
+    /// roles.
+    TrustStore(&'a [Vec<u8>]),
+    /// Blindly trust the root role present in the repository (but still perform
+    /// signature checks using that root role).
+    BlindlyTrustAnything,
 }
 
 fn unzip_into_tempdir<T>(
@@ -399,7 +428,7 @@ mod tests {
             .collect();
 
         // `by_id` should contain one entry for every `KnownArtifactKind`
-        // (except `Zone`)...
+        // (except `Zone`).
         let mut expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
             .filter(|k| !matches!(k, KnownArtifactKind::Zone))
             .map(ArtifactKind::from)
@@ -422,9 +451,11 @@ mod tests {
             assert!(expected_kinds.remove(&remove.into()));
         }
         for add in [
-            ArtifactKind::HOST_PHASE_1,
+            ArtifactKind::GIMLET_HOST_PHASE_1,
+            ArtifactKind::COSMO_HOST_PHASE_1,
             ArtifactKind::HOST_PHASE_2,
-            ArtifactKind::TRAMPOLINE_PHASE_1,
+            ArtifactKind::GIMLET_TRAMPOLINE_PHASE_1,
+            ArtifactKind::COSMO_TRAMPOLINE_PHASE_1,
             ArtifactKind::TRAMPOLINE_PHASE_2,
             ArtifactKind::GIMLET_ROT_IMAGE_A,
             ArtifactKind::GIMLET_ROT_IMAGE_B,
@@ -480,7 +511,7 @@ mod tests {
         .await?;
 
         // `by_id` should contain one entry for every `KnownArtifactKind`
-        // (except `ControlPlane`).
+        // (except `ControlPlane`), as well as `installinator_document`.
         let by_id_kinds: BTreeSet<_> =
             plan.by_id().keys().map(|id| id.kind.clone()).collect();
         let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
@@ -571,7 +602,12 @@ mod tests {
         // doesn't matter for the test.
         let repo_hash = ArtifactHash([0u8; 32]);
         let plan = ArtifactsWithPlan::from_zip(
-            zip_bytes, None, repo_hash, zone_mode, log,
+            zip_bytes,
+            None,
+            repo_hash,
+            zone_mode,
+            VerificationMode::BlindlyTrustAnything,
+            log,
         )
         .await
         .with_context(|| format!("error reading {archive_path}"))?;

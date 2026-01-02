@@ -7,6 +7,7 @@
 //! See `nexus_reconfigurator_planning` crate-level docs for background.
 
 use anyhow::{Context, anyhow};
+use iddqd::IdOrdMap;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -20,10 +21,9 @@ use nexus_types::deployment::execution::{
     Overridables, ReconfiguratorExecutionSpec, SharedStepHandle, Sled,
     StepHandle, StepResult, UpdateEngine,
 };
-use nexus_types::identity::Asset;
-use omicron_uuid_kinds::GenericUuid;
+use nexus_types::quiesce::SagaQuiesceHandle;
+use nexus_types::quiesce::SagaReassignmentDone;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -33,8 +33,10 @@ use tokio::sync::watch;
 use update_engine::StepSuccess;
 use update_engine::StepWarning;
 use update_engine::merge_anyhow_list;
+
 mod clickhouse;
 mod cockroachdb;
+mod database;
 mod dns;
 mod omicron_physical_disks;
 mod omicron_sled_config;
@@ -58,6 +60,7 @@ pub struct RealizeArgs<'a> {
     pub sender: mpsc::Sender<Event>,
     pub overrides: Option<&'a Overridables>,
     pub mgs_updates: watch::Sender<PendingMgsUpdates>,
+    pub saga_quiesce: SagaQuiesceHandle,
 }
 
 impl<'a> RealizeArgs<'a> {
@@ -105,6 +108,7 @@ pub struct RequiredRealizeArgs<'a> {
     pub blueprint: &'a Blueprint,
     pub sender: mpsc::Sender<Event>,
     pub mgs_updates: watch::Sender<PendingMgsUpdates>,
+    pub saga_quiesce: SagaQuiesceHandle,
 }
 
 impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
@@ -119,6 +123,7 @@ impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
             sender: value.sender,
             overrides: None,
             mgs_updates: value.mgs_updates,
+            saga_quiesce: value.saga_quiesce,
         }
     }
 }
@@ -164,6 +169,7 @@ pub async fn realize_blueprint(
         sender,
         overrides,
         mgs_updates,
+        saga_quiesce,
     } = exec_ctx;
 
     let opctx = opctx.child(BTreeMap::from([(
@@ -193,6 +199,14 @@ pub async fn realize_blueprint(
     )
     .into_shared();
 
+    register_deploy_db_metadata_nexus_records_step(
+        &engine.for_component(ExecutionComponent::DeployNexusRecords),
+        &opctx,
+        datastore,
+        blueprint,
+        nexus_id,
+    );
+
     register_deploy_sled_configs_step(
         &engine.for_component(ExecutionComponent::SledAgent),
         &opctx,
@@ -214,6 +228,7 @@ pub async fn realize_blueprint(
         creator,
         overrides.unwrap_or(&*overridables::DEFAULT),
         sled_list.clone(),
+        nexus_id,
     );
 
     register_cleanup_expunged_zones_step(
@@ -264,6 +279,7 @@ pub async fn realize_blueprint(
         datastore,
         blueprint,
         nexus_id,
+        saga_quiesce,
     );
 
     register_cockroachdb_settings_step(
@@ -370,17 +386,15 @@ fn register_sled_list_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
     datastore: &'a DataStore,
-) -> StepHandle<Arc<BTreeMap<SledUuid, Sled>>> {
+) -> StepHandle<Arc<IdOrdMap<Sled>>> {
     registrar
         .new_step(ExecutionStepId::Fetch, "Fetch sled list", async move |_cx| {
-            let sleds_by_id: BTreeMap<SledUuid, _> = datastore
+            let sleds_by_id: IdOrdMap<_> = datastore
                 .sled_list_all_batched(opctx, SledFilter::InService)
                 .await
                 .context("listing all sleds")?
                 .into_iter()
-                .map(|db_sled| {
-                    (SledUuid::from_untyped_uuid(db_sled.id()), db_sled.into())
-                })
+                .map(|db_sled| db_sled.into())
                 .collect();
 
             StepSuccess::new(Arc::new(sleds_by_id)).into()
@@ -388,11 +402,45 @@ fn register_sled_list_step<'a>(
         .register()
 }
 
+fn register_deploy_db_metadata_nexus_records_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    datastore: &'a DataStore,
+    blueprint: &'a Blueprint,
+    nexus_id: Option<OmicronZoneUuid>,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Ensure db_metadata_nexus_state records exist",
+            async move |_cx| {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new((), "not running as Nexus").into();
+                };
+
+                match database::deploy_db_metadata_nexus_records(
+                    opctx, &datastore, &blueprint, nexus_id,
+                )
+                .await
+                {
+                    Ok(()) => StepSuccess::new(()).into(),
+                    Err(err) => StepWarning::new(
+                        (),
+                        err.context("ensuring db_metadata_nexus_state")
+                            .to_string(),
+                    )
+                    .into(),
+                }
+            },
+        )
+        .register();
+}
+
 fn register_deploy_sled_configs_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
     blueprint: &'a Blueprint,
-    sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
+    sleds: SharedStepHandle<Arc<IdOrdMap<Sled>>>,
 ) {
     registrar
         .new_step(
@@ -445,6 +493,7 @@ fn register_plumb_firewall_rules_step<'a>(
         .register();
 }
 
+#[allow(clippy::too_many_arguments)]
 fn register_dns_records_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
@@ -452,13 +501,18 @@ fn register_dns_records_step<'a>(
     blueprint: &'a Blueprint,
     creator: OmicronZoneUuid,
     overrides: &'a Overridables,
-    sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
+    sleds: SharedStepHandle<Arc<IdOrdMap<Sled>>>,
+    nexus_id: Option<OmicronZoneUuid>,
 ) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy DNS records",
             async move |cx| {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new((), "not running as Nexus").into();
+                };
+
                 let sleds_by_id = sleds.into_value(cx.token()).await;
 
                 let res = dns::deploy_dns(
@@ -468,6 +522,7 @@ fn register_dns_records_step<'a>(
                     blueprint,
                     &sleds_by_id,
                     overrides,
+                    nexus_id,
                 )
                 .await
                 .map_err(|e| anyhow!("{}", InlineErrorChain::new(&e)));
@@ -597,6 +652,7 @@ fn register_reassign_sagas_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
     nexus_id: Option<OmicronZoneUuid>,
+    saga_quiesce: SagaQuiesceHandle,
 ) -> StepHandle<bool> {
     registrar
         .new_step(
@@ -608,23 +664,35 @@ fn register_reassign_sagas_step<'a>(
                         .into();
                 };
 
-                // For any expunged Nexus zones, re-assign in-progress sagas to
-                // some other Nexus.  If this fails for some reason, it doesn't
-                // affect anything else.
-                let sec_id = nexus_db_model::SecId::from(nexus_id);
-                let reassigned = sagas::reassign_sagas_from_expunged(
-                    opctx, datastore, blueprint, sec_id,
-                )
-                .await
-                .context("failed to re-assign sagas");
-                match reassigned {
-                    Ok(needs_saga_recovery) => {
-                        Ok(StepSuccess::new(needs_saga_recovery).build())
-                    }
-                    Err(error) => {
-                        Ok(StepWarning::new(false, error.to_string()).build())
-                    }
-                }
+                // Re-assign sagas.
+                Ok(saga_quiesce
+                    .reassign_sagas(async || {
+                        // For any expunged Nexus zones, re-assign in-progress
+                        // sagas to `nexus_id` (which, in practice, is
+                        // ourselves).  If this fails for some reason, it
+                        // doesn't affect anything else.
+                        let sec_id = nexus_db_model::SecId::from(nexus_id);
+                        let reassigned = sagas::reassign_sagas_from_expunged(
+                            opctx, datastore, blueprint, sec_id,
+                        )
+                        .await
+                        .context("failed to re-assign sagas");
+                        match reassigned {
+                            Ok(needs_saga_recovery) => (
+                                StepSuccess::new(needs_saga_recovery).build(),
+                                SagaReassignmentDone::ReassignedAllAsOf(
+                                    blueprint.id,
+                                    needs_saga_recovery,
+                                ),
+                            ),
+                            Err(error) => (
+                                StepWarning::new(false, error.to_string())
+                                    .build(),
+                                SagaReassignmentDone::Indeterminate,
+                            ),
+                        }
+                    })
+                    .await)
             },
         )
         .register()

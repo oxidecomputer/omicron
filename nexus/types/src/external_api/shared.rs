@@ -11,7 +11,11 @@ use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Name;
-use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface as NetworkInterfaceV1;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use parse_display::FromStr;
 use schemars::JsonSchema;
@@ -19,10 +23,12 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::de::Error as _;
+use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
 use strum::EnumIter;
 use uuid::Uuid;
 
-pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
+pub use omicron_common::address::{IpRange, IpVersion, Ipv4Range, Ipv6Range};
 pub use omicron_common::api::external::BfdMode;
 
 /// Maximum number of role assignments allowed on any one resource
@@ -87,6 +93,30 @@ pub struct RoleAssignment<AllowedRoles> {
     pub role_name: AllowedRoles,
 }
 
+impl<AllowedRoles> RoleAssignment<AllowedRoles> {
+    pub fn for_silo_user(
+        silo_user_id: SiloUserUuid,
+        role_name: AllowedRoles,
+    ) -> Self {
+        Self {
+            identity_type: IdentityType::SiloUser,
+            identity_id: silo_user_id.into_untyped_uuid(),
+            role_name,
+        }
+    }
+
+    pub fn for_silo_group(
+        silo_group_id: SiloGroupUuid,
+        role_name: AllowedRoles,
+    ) -> Self {
+        Self {
+            identity_type: IdentityType::SiloGroup,
+            identity_id: silo_group_id.into_untyped_uuid(),
+            role_name,
+        }
+    }
+}
+
 #[derive(
     Clone,
     Copy,
@@ -127,6 +157,7 @@ pub enum FleetRole {
 pub enum SiloRole {
     Admin,
     Collaborator,
+    LimitedCollaborator,
     Viewer,
 }
 
@@ -146,6 +177,7 @@ pub enum SiloRole {
 pub enum ProjectRole {
     Admin,
     Collaborator,
+    LimitedCollaborator,
     Viewer,
 }
 
@@ -179,6 +211,11 @@ pub enum SiloIdentityMode {
     // NOTE: authentication for these users is not supported yet at all.  It
     // will eventually be password-based.
     LocalOnly,
+
+    /// Users are authenticated with SAML using an external authentication
+    /// provider. Users and groups are managed with SCIM API calls, likely from
+    /// the same authentication provider.
+    SamlScim,
 }
 
 impl SiloIdentityMode {
@@ -186,6 +223,7 @@ impl SiloIdentityMode {
         match self {
             SiloIdentityMode::LocalOnly => AuthenticationMode::Local,
             SiloIdentityMode::SamlJit => AuthenticationMode::Saml,
+            SiloIdentityMode::SamlScim => AuthenticationMode::Saml,
         }
     }
 
@@ -193,6 +231,7 @@ impl SiloIdentityMode {
         match self {
             SiloIdentityMode::LocalOnly => UserProvisionType::ApiOnly,
             SiloIdentityMode::SamlJit => UserProvisionType::Jit,
+            SiloIdentityMode::SamlScim => UserProvisionType::Scim,
         }
     }
 }
@@ -220,6 +259,9 @@ pub enum UserProvisionType {
     /// Users and groups are created or updated during authentication using
     /// information provided by the authentication provider
     Jit,
+
+    /// Users and groups are managed by SCIM
+    Scim,
 }
 
 /// The service intended to use this certificate.
@@ -236,6 +278,7 @@ pub enum ServiceUsingCertificate {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum IpKind {
+    SNat,
     Ephemeral,
     Floating,
 }
@@ -257,6 +300,45 @@ pub enum UpdateableComponentType {
     HostOmicron,
 }
 
+/// Wrapper type for TUF root roles to prevent misuse.
+///
+/// The format of TUF root roles is an implementation detail and Nexus should
+/// generally treat them as opaque JSON blobs without inspecting any fields
+/// or, especially, adding any data to them. This value should be created only
+/// through Serde deserialization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(transparent)]
+pub struct TufSignedRootRole(serde_json::Value);
+
+impl TufSignedRootRole {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.0.to_string().into_bytes()
+    }
+}
+
+// We'd like to use `#[serde(try_from = ..)]` here but it conflicts with
+// `#[serde(transparent)]`, which we're using for the Serialize derive.
+impl<'de> Deserialize<'de> for TufSignedRootRole {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use tough::schema::{Root, Signed};
+
+        let value = serde_json::Value::deserialize(deserializer)?;
+        // Verify that this appears to be a valid, self-signed TUF root role.
+        let root =
+            <Signed<Root>>::deserialize(&value).map_err(D::Error::custom)?;
+        match root.signed.verify_role(&root) {
+            Ok(()) => Ok(Self(value)),
+            Err(err) => Err(D::Error::custom(format!(
+                "Unable to verify root role: {}",
+                InlineErrorChain::new(&err)
+            ))),
+        }
+    }
+}
+
 /// Properties that uniquely identify an Oxide hardware component
 #[derive(
     Clone,
@@ -273,6 +355,12 @@ pub struct Baseboard {
     pub serial: String,
     pub part: String,
     pub revision: u32,
+}
+
+impl From<Baseboard> for BaseboardId {
+    fn from(value: crate::external_api::shared::Baseboard) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
 }
 
 /// A sled that has not been added to an initialized rack yet
@@ -360,12 +448,12 @@ impl SwitchLinkState {
 
 impl JsonSchema for SwitchLinkState {
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         let obj = schemars::schema::Schema::Object(
             schemars::schema::SchemaObject::default(),
         );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        r#gen.definitions_mut().insert(Self::schema_name(), obj.clone());
         obj
     }
 
@@ -440,7 +528,7 @@ impl JsonSchema for AlertSubscription {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -601,10 +689,12 @@ pub enum SupportBundleState {
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 pub struct SupportBundleInfo {
+    #[schemars(with = "Uuid")]
     pub id: SupportBundleUuid,
     pub time_created: DateTime<Utc>,
     pub reason_for_creation: String,
     pub reason_for_failure: Option<String>,
+    pub user_comment: Option<String>,
     pub state: SupportBundleState,
 }
 
@@ -612,9 +702,15 @@ pub struct SupportBundleInfo {
 pub struct ProbeInfo {
     pub id: Uuid,
     pub name: Name,
-    pub sled: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
     pub external_ips: Vec<ProbeExternalIp>,
-    pub interface: NetworkInterface,
+    // NOTE: This type currently appears in both the external and internal APIs.
+    // It's not used in the internal API anymore, and we've not yet expanded the
+    // external API to support dual-stack NICs. When we do, this whole type
+    // needs a new version in the external API, and the internal API needs to
+    // continue to refer to this original version.
+    pub interface: NetworkInterfaceV1,
 }
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
@@ -659,4 +755,18 @@ impl RelayState {
         )
         .context("json from relay state string")
     }
+}
+
+/// Type of IP pool.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+#[derive(Default)]
+pub enum IpPoolType {
+    /// Unicast IP pool for standard IP allocations.
+    #[default]
+    Unicast,
+    /// Multicast IP pool for multicast group allocations.
+    ///
+    /// All ranges in a multicast pool must be either ASM or SSM (not mixed).
+    Multicast,
 }

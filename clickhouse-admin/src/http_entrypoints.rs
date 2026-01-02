@@ -4,11 +4,14 @@
 
 use crate::context::{KeeperServerContext, ServerContext};
 use clickhouse_admin_api::*;
-use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, DistributedDdlQueue,
-    GenerateConfigResult, KeeperConf, KeeperConfigurableSettings, Lgif,
-    MetricInfoPath, RaftConfig, ServerConfigurableSettings, SystemTimeSeries,
-    SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
+use clickhouse_admin_types::config::GenerateConfigResult;
+use clickhouse_admin_types::keeper::{
+    ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfigurableSettings,
+    Lgif, RaftConfig,
+};
+use clickhouse_admin_types::server::{
+    DistributedDdlQueue, MetricInfoPath, ServerConfigurableSettings,
+    SystemTimeSeries, SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
 };
 use dropshot::{
     ApiDescription, ClientErrorStatusCode, HttpError, HttpResponseCreated,
@@ -54,7 +57,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match ctx.generation() {
+        let generation = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
@@ -64,7 +67,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
                 ));
             }
         };
-        Ok(HttpResponseOk(gen))
+        Ok(HttpResponseOk(generation))
     }
 
     async fn distributed_ddl_queue(
@@ -120,7 +123,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match ctx.generation() {
+        let generation = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
@@ -130,7 +133,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
                 ));
             }
         };
-        Ok(HttpResponseOk(gen))
+        Ok(HttpResponseOk(generation))
     }
 
     async fn lgif(

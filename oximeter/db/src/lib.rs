@@ -52,7 +52,6 @@ pub use client::DbWrite;
 pub use client::TestDbWrite;
 #[cfg(any(feature = "oxql", test))]
 pub use client::oxql::OxqlResult;
-pub use client::query_summary::QuerySummary;
 pub use model::OXIMETER_VERSION;
 
 #[derive(Debug, Error)]

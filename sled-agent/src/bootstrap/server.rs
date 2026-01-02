@@ -41,7 +41,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
@@ -215,11 +215,12 @@ impl Server {
             updates: config.updates.clone(),
             sled_reset_tx,
             sprockets: config.sprockets.clone(),
+            trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
         };
         let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
 
-        // Start the currently-misnamed sprockets server, which listens for raw
-        // TCP connections (which should ultimately be secured via sprockets).
+        // Create a channel for proxying sled-initialization requests that land
+        // in the sprockets server to our bootstrap agent `Inner` task.
         let (sled_init_tx, sled_init_rx) = mpsc::channel(1);
 
         // We don't bother to wrap this bind in a
@@ -290,7 +291,7 @@ impl Server {
 
     pub fn start_rack_initialize(
         &self,
-        request: RackInitializeRequest,
+        request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
         self.bootstrap_http_server.app_private().start_rack_initialize(request)
     }
@@ -454,6 +455,12 @@ fn start_dropshot_server(
         dropshot_log,
     )
     .config(dropshot_config)
+    .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+        dropshot::ClientSpecifiesVersionInHeader::new(
+            omicron_common::api::VERSION_HEADER,
+            bootstrap_agent_api::latest_version(),
+        ),
+    )))
     .start()
     .map_err(|error| {
         StartError::InitBootstrapDropshotServer(error.to_string())
@@ -594,8 +601,8 @@ impl Inner {
                 let initial = server.sled_agent().start_request();
                 let response = if initial != &request {
                     Err(format!(
-                        "Sled Agent already running: 
-                        initital request = {:?}, 
+                        "Sled Agent already running:
+                        initital request = {:?},
                         current request: {:?}",
                         initial, request
                     ))

@@ -24,7 +24,9 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_init::{
+    RackInitializeRequest, RackInitializeRequestParams,
+};
 use sled_agent_types::rack_ops::RackOperationStatus;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
@@ -45,12 +47,13 @@ pub(crate) struct BootstrapServerContext {
     pub(crate) sled_reset_tx:
         mpsc::Sender<oneshot::Sender<Result<(), BootstrapError>>>,
     pub(crate) sprockets: SprocketsConfig,
+    pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
 }
 
 impl BootstrapServerContext {
     pub(super) fn start_rack_initialize(
         &self,
-        request: RackInitializeRequest,
+        request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
         self.rss_access.start_initializing(
             &self.base_log,
@@ -58,6 +61,7 @@ impl BootstrapServerContext {
             self.global_zone_bootstrap_ip,
             &self.internal_disks_rx,
             &self.bootstore_node_handle,
+            &self.trust_quorum_handle,
             request,
         )
     }
@@ -106,8 +110,13 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<RackInitializeRequest>,
     ) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
+        // Note that if we are performing rack initialization in
+        // response to an external request, we assume we are not
+        // skipping timesync.
+        const SKIP_TIMESYNC: bool = false;
         let ctx = rqctx.context();
-        let request = body.into_inner();
+        let request =
+            RackInitializeRequestParams::new(body.into_inner(), SKIP_TIMESYNC);
         let id = ctx
             .start_rack_initialize(request)
             .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;

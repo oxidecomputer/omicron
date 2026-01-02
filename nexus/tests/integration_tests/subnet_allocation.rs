@@ -47,6 +47,7 @@ async fn create_instance_expect_failure(
                 vpc_name: "default".parse().unwrap(),
                 subnet_name: subnet_name.parse().unwrap(),
                 ip: None,
+                transit_ips: vec![],
             },
         ]);
     let new_instance = params::InstanceCreate {
@@ -63,9 +64,11 @@ async fn create_instance_expect_failure(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
     };
 
     NexusRequest::new(
@@ -134,6 +137,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             vpc_name: "default".parse().unwrap(),
             subnet_name: SUBNET_NAME.parse().unwrap(),
             ip: None,
+            transit_ips: vec![],
         },
     ]);
 
@@ -156,6 +160,8 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             Vec::<params::ExternalIpCreate>::new(),
             true,
             Default::default(),
+            None,
+            Vec::new(),
         )
         .await;
     }

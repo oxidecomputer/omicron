@@ -21,7 +21,7 @@ use omicron_sled_agent::sim::{
     run_standalone_server,
 };
 use omicron_uuid_kinds::SledUuid;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::{Baseboard, SledCpuFamily};
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
@@ -52,6 +52,9 @@ struct Args {
 
     #[clap(name = "NEXUS_IP:PORT", action)]
     nexus_addr: SocketAddr,
+
+    #[clap(action)]
+    nexus_lockstep_port: u16,
 
     #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
@@ -85,9 +88,8 @@ struct Args {
     rss_tls_key: Option<Utf8PathBuf>,
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(message) = do_run().await {
+fn main() {
+    if let Err(message) = oxide_tokio_rt::run(do_run()) {
         fatal(message);
     }
 }
@@ -111,9 +113,10 @@ async fn do_run() -> Result<(), CmdError> {
             hardware_threads: 32,
             physical_ram: 64 * (1 << 30),
             reservoir_ram: 32 * (1 << 30),
+            cpu_family: SledCpuFamily::AmdMilan,
             baseboard: Baseboard::Gimlet {
                 identifier: format!("sim-{}", args.uuid),
-                model: String::from("sim-gimlet"),
+                model: String::from(sp_sim::FAKE_GIMLET_MODEL),
                 revision: 3,
             },
         },
@@ -123,6 +126,7 @@ async fn do_run() -> Result<(), CmdError> {
             Some(args.nexus_addr),
             Some(tmp.path()),
             ZpoolConfig::TenVirtualU2s,
+            SledCpuFamily::AmdMilan,
         )
     };
 
@@ -153,7 +157,12 @@ async fn do_run() -> Result<(), CmdError> {
 
     let config_logging =
         ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info };
-    run_standalone_server(&config, &config_logging, &rss_args)
-        .await
-        .map_err(CmdError::Failure)
+    run_standalone_server(
+        &config,
+        args.nexus_lockstep_port,
+        &config_logging,
+        &rss_args,
+    )
+    .await
+    .map_err(CmdError::Failure)
 }

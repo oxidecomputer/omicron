@@ -11,6 +11,7 @@ use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -75,6 +76,7 @@ impl DataStore {
         opctx: &OpContext,
         reason_for_creation: &'static str,
         this_nexus_id: OmicronZoneUuid,
+        user_comment: Option<String>,
     ) -> CreateResult<SupportBundle> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -88,6 +90,7 @@ impl DataStore {
         self.transaction_retry_wrapper("support_bundle_create")
             .transaction(&conn, |conn| {
                 let err = err.clone();
+                let user_comment = user_comment.clone();
 
                 async move {
                     use nexus_db_schema::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
@@ -128,6 +131,7 @@ impl DataStore {
                         dataset.pool_id(),
                         dataset.id(),
                         this_nexus_id,
+                        user_comment,
                     );
 
                     diesel::insert_into(support_bundle_dsl::support_bundle)
@@ -166,21 +170,25 @@ impl DataStore {
         Ok(db_bundle)
     }
 
-    /// Lists one page of support bundles
+    /// Lists one page of support bundles ordered by creation time
     pub async fn support_bundle_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
     ) -> ListResultVec<SupportBundle> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        paginated(dsl::support_bundle, dsl::id, pagparams)
-            .select(SupportBundle::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        paginated_multicolumn(
+            dsl::support_bundle,
+            (dsl::time_created, dsl::id),
+            pagparams,
+        )
+        .select(SupportBundle::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Lists one page of support bundles in a particular state, assigned to
@@ -316,7 +324,7 @@ impl DataStore {
                             .execute_async(conn)
                             .await?;
 
-                    // Find all bundles on nexuses that no longer exist.
+                    // Find all bundles managed by nexuses that no longer exist.
                     let bundles_with_bad_nexuses = dsl::support_bundle
                         .filter(dsl::assigned_nexus.eq_any(invalid_nexus_zones))
                         .select(SupportBundle::as_select())
@@ -325,15 +333,46 @@ impl DataStore {
 
                     let bundles_to_mark_failing = bundles_with_bad_nexuses
                         .iter()
-                        .map(|b| b.id)
+                        .filter_map(|bundle| {
+                            match bundle.state {
+                                // If the Nexus died mid-collection, we'll mark
+                                // this bundle failing. This should ensure that
+                                // any storage it might have been using is
+                                // cleaned up.
+                                SupportBundleState::Collecting => {
+                                    Some(bundle.id)
+                                }
+                                // If the bundle was marked "active", we need to
+                                // re-assign the "owning Nexus" so it can later
+                                // be deleted, but the bundle itself has already
+                                // been stored on a sled.
+                                //
+                                // There's no need to fail it.
+                                SupportBundleState::Active => None,
+                                // If the bundle has already been marked
+                                // "Destroying/Failing/Failed", it's already
+                                // irreversibly marked for deletion.
+                                SupportBundleState::Destroying
+                                | SupportBundleState::Failing
+                                | SupportBundleState::Failed => None,
+                            }
+                        })
                         .collect::<Vec<_>>();
+
                     let bundles_to_reassign = bundles_with_bad_nexuses
                         .iter()
                         .filter_map(|bundle| {
-                            if bundle.state != SupportBundleState::Failed {
-                                Some(bundle.id)
-                            } else {
-                                None
+                            match bundle.state {
+                                // If the bundle might be using any storage on
+                                // the provisioned sled, it gets assigned to a
+                                // new Nexus.
+                                SupportBundleState::Collecting
+                                | SupportBundleState::Active
+                                | SupportBundleState::Destroying
+                                | SupportBundleState::Failing => {
+                                    Some(bundle.id)
+                                }
+                                SupportBundleState::Failed => None,
                             }
                         })
                         .collect::<Vec<_>>();
@@ -363,29 +402,20 @@ impl DataStore {
                         bundles_reassigned: 0,
                     };
 
-                    // Exit a little early if there are no bundles to re-assign.
-                    //
-                    // This is a tiny optimization, but really, it means that
-                    // tests without Nexuses in their blueprints can succeed if
-                    // they also have no support bundles. In practice, this is
-                    // rare, but in our existing test framework, it's fairly
-                    // common.
-                    if bundles_to_reassign.is_empty() {
-                        return Ok(report);
+                    if !bundles_to_reassign.is_empty() {
+                        // Reassign bundles that haven't been marked "fully failed"
+                        // to ourselves, so we can free their storage if they have
+                        // been provisioned on a sled.
+                        report.bundles_reassigned =
+                            diesel::update(dsl::support_bundle)
+                                .filter(dsl::id.eq_any(bundles_to_reassign))
+                                .set(
+                                    dsl::assigned_nexus
+                                        .eq(our_nexus_id.into_untyped_uuid()),
+                                )
+                                .execute_async(conn)
+                                .await?;
                     }
-
-                    // Reassign bundles that haven't been marked "fully failed"
-                    // to ourselves, so we can free their storage if they have
-                    // been provisioned on a sled.
-                    report.bundles_reassigned =
-                        diesel::update(dsl::support_bundle)
-                            .filter(dsl::id.eq_any(bundles_to_reassign))
-                            .set(
-                                dsl::assigned_nexus
-                                    .eq(our_nexus_id.into_untyped_uuid()),
-                            )
-                            .execute_async(conn)
-                            .await?;
 
                     Ok(report)
                 }
@@ -433,6 +463,42 @@ impl DataStore {
         }
     }
 
+    /// Updates the user comment of a support bundle.
+    ///
+    /// Returns:
+    /// - "Ok" if the bundle was updated successfully.
+    /// - "Err::InvalidRequest" if the comment exceeds the maximum length.
+    pub async fn support_bundle_update_user_comment(
+        &self,
+        opctx: &OpContext,
+        authz_bundle: &authz::SupportBundle,
+        user_comment: Option<String>,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_bundle).await?;
+
+        if let Some(ref comment) = user_comment {
+            if comment.len() > 4096 {
+                return Err(Error::invalid_request(
+                    "User comment cannot exceed 4096 bytes",
+                ));
+            }
+        }
+
+        use nexus_db_schema::schema::support_bundle::dsl;
+
+        let id = authz_bundle.id().into_untyped_uuid();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        diesel::update(dsl::support_bundle)
+            .filter(dsl::id.eq(id))
+            .set(dsl::user_comment.eq(user_comment))
+            .execute_async(&*conn)
+            .await
+            .map(|_rows_modified| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
     /// Deletes a support bundle.
     ///
     /// This should only be invoked after all storage for the support bundle has
@@ -471,6 +537,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
@@ -557,13 +624,13 @@ mod test {
             let rack_id = Uuid::new_v4();
             let blueprint_id = BlueprintUuid::new_v4();
             let sled = SledUpdate::new(
-                *self.sled.as_untyped_uuid(),
+                self.sled,
                 "[::1]:0".parse().unwrap(),
                 0,
                 SledBaseboard {
                     serial_number: format!(
                         "test-{}",
-                        rand::thread_rng().gen::<u64>()
+                        rand::rng().random::<u64>()
                     ),
                     part_number: "test-pn".to_string(),
                     revision: 0,
@@ -573,6 +640,7 @@ mod test {
                     usable_hardware_threads: 128,
                     usable_physical_ram: (64 << 30).try_into().unwrap(),
                     reservoir_size: (16 << 30).try_into().unwrap(),
+                    cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
                 Generation::new(),
@@ -582,8 +650,8 @@ mod test {
             // Create fake zpools that back our fake datasets.
             for pool in &self.pools {
                 let zpool = Zpool::new(
-                    *pool.pool.as_untyped_uuid(),
-                    *self.sled.as_untyped_uuid(),
+                    pool.pool,
+                    self.sled,
                     PhysicalDiskUuid::new_v4(),
                     ByteCount::from(0).into(),
                 );
@@ -623,7 +691,7 @@ mod test {
         this_nexus_id: OmicronZoneUuid,
     ) {
         let err = datastore
-            .support_bundle_create(&opctx, "for tests", this_nexus_id)
+            .support_bundle_create(&opctx, "for tests", this_nexus_id, None)
             .await
             .expect_err("Shouldn't provision bundle without datasets");
         let Error::InsufficientCapacity { message } = err else {
@@ -669,15 +737,15 @@ mod test {
         // Create two bundles on "nexus A", one bundle on "nexus B"
 
         let bundle_a1 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_a)
+            .support_bundle_create(&opctx, "for the test", nexus_a, None)
             .await
             .expect("Should be able to create bundle");
         let bundle_a2 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_a)
+            .support_bundle_create(&opctx, "for the test", nexus_a, None)
             .await
             .expect("Should be able to create bundle");
         let bundle_b1 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_b)
+            .support_bundle_create(&opctx, "for the test", nexus_b, None)
             .await
             .expect("Should be able to create bundle");
 
@@ -795,6 +863,7 @@ mod test {
                         &opctx,
                         "for the test",
                         this_nexus_id,
+                        None,
                     )
                     .await
                     .expect("Should be able to create bundle"),
@@ -841,7 +910,7 @@ mod test {
             .await
             .expect("Should be able to destroy this bundle");
         datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id)
+            .support_bundle_create(&opctx, "for the test", this_nexus_id, None)
             .await
             .expect("Should be able to create bundle");
 
@@ -862,7 +931,7 @@ mod test {
         // Create the bundle, then observe it through the "getter" APIs
 
         let mut bundle = datastore
-            .support_bundle_create(&opctx, reason, this_nexus_id)
+            .support_bundle_create(&opctx, reason, this_nexus_id, None)
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.reason_for_creation, reason);
@@ -1026,7 +1095,7 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id)
+            .support_bundle_create(&opctx, "for the test", this_nexus_id, None)
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
@@ -1131,7 +1200,7 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id)
+            .support_bundle_create(&opctx, "for the test", this_nexus_id, None)
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
@@ -1232,7 +1301,7 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_ids[0])
+            .support_bundle_create(&opctx, "for the test", nexus_ids[0], None)
             .await
             .expect("Should be able to create bundle");
 
@@ -1353,7 +1422,7 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_ids[0])
+            .support_bundle_create(&opctx, "for the test", nexus_ids[0], None)
             .await
             .expect("Should be able to create bundle");
 
@@ -1395,7 +1464,7 @@ mod test {
 
         assert_eq!(
             SupportBundleExpungementReport {
-                bundles_failing_missing_nexus: 1,
+                bundles_failing_missing_nexus: 0,
                 bundles_reassigned: 1,
                 ..Default::default()
             },
@@ -1405,14 +1474,79 @@ mod test {
         let observed_bundle = datastore
             .support_bundle_get(&opctx, bundle.id.into())
             .await
-            .expect("Should be able to get bundle we just failed");
-        assert_eq!(SupportBundleState::Failing, observed_bundle.state);
-        assert!(
-            observed_bundle
-                .reason_for_failure
-                .unwrap()
-                .contains(FAILURE_REASON_NO_NEXUS)
+            .expect("Should be able to get bundle we reassigned");
+        assert_eq!(SupportBundleState::Active, observed_bundle.state);
+        assert_eq!(
+            observed_bundle.assigned_nexus.unwrap(),
+            nexus_ids[1].into(),
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bundle_list_time_ordering() {
+        let logctx = dev::test_setup_log("test_bundle_list_time_ordering");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 3).await;
+        let this_nexus_id = OmicronZoneUuid::new_v4();
+
+        // Create multiple bundles with slight time delays to ensure different creation times
+        let mut bundle_ids = Vec::new();
+        let mut bundle_times = Vec::new();
+
+        for _i in 0..3 {
+            let bundle = datastore
+                .support_bundle_create(
+                    &opctx,
+                    "Bundle for time ordering test",
+                    this_nexus_id,
+                    None,
+                )
+                .await
+                .expect("Should be able to create bundle");
+            bundle_ids.push(bundle.id);
+            bundle_times.push(bundle.time_created);
+
+            // Small delay to ensure different creation times
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        // List bundles using time-based pagination
+        let pagparams = DataPageParams::max_page();
+        let observed_bundles = datastore
+            .support_bundle_list(&opctx, &pagparams)
+            .await
+            .expect("Should be able to list bundles");
+
+        assert_eq!(3, observed_bundles.len());
+
+        // Verify bundles are ordered by creation time (ascending)
+        for i in 0..observed_bundles.len() - 1 {
+            assert!(
+                observed_bundles[i].time_created
+                    <= observed_bundles[i + 1].time_created,
+                "Bundles should be ordered by creation time (ascending). Bundle at index {} has time {:?}, but bundle at index {} has time {:?}",
+                i,
+                observed_bundles[i].time_created,
+                i + 1,
+                observed_bundles[i + 1].time_created
+            );
+        }
+
+        // Verify that the bundles are our created bundles
+        let returned_ids: Vec<_> =
+            observed_bundles.iter().map(|b| b.id).collect();
+        for bundle_id in &bundle_ids {
+            assert!(
+                returned_ids.contains(bundle_id),
+                "Bundle ID {:?} should be in the returned list",
+                bundle_id
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();

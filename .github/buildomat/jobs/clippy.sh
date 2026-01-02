@@ -34,4 +34,4 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 banner clippy
 export CARGO_INCREMENTAL=0
 ptime -m cargo xtask clippy
-RUSTDOCFLAGS="--document-private-items -D warnings" ptime -m cargo doc --workspace --no-deps
+RUSTDOCFLAGS="--document-private-items -D warnings --cfg tokio" ptime -m cargo doc --workspace --no-deps

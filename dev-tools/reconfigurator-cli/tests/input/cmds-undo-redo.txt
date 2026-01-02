@@ -1,0 +1,60 @@
+# Test undo/redo functionality for the operation log
+
+load-example --seed test-undo-redo --nsleds 2 --ndisks-per-sled 3
+
+op log
+
+# Make some changes to create an operation history.
+sled-add
+sled-add
+silo-add test-silo
+log
+op log
+
+# First, undo the silo-add.
+undo
+log
+op log
+
+# Verify we can undo multiple times: undo the sled-add.
+undo
+op log
+
+# Redo the sled-add we just undid.
+redo
+op log
+
+# Redo again to restore the silo-add.
+redo
+op log
+
+# Make a new change.
+silo-add another-silo
+op log
+
+# Try to undo when we're already at the root. This should fail.
+op wipe
+op log
+undo
+
+# Try to undo twice with one operation available.
+load-example --seed test-undo-redo --nsleds 1
+op log
+undo
+undo
+
+# This redo should work.
+redo
+op log
+
+# We're out of undos, so this redo should fail.
+redo
+
+# Do another undo and redo.
+undo
+redo
+op log
+
+# Test op log with the --verbose flag.
+op log -n 5 --verbose
+log

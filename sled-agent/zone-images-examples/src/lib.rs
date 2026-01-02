@@ -16,14 +16,15 @@ use camino_tempfile_ext::{
 };
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_common::update::{
-    MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
-    OmicronZoneManifestSource,
+    MupdateOverrideInfo, OmicronInstallManifest, OmicronInstallManifestSource,
+    OmicronInstallMetadata,
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
+use sled_agent_types::inventory::ZoneKind;
 use sled_agent_types::zone_images::{
     ArcIoError, ArcSerdeJsonError, ArtifactReadResult,
-    InstallMetadataReadError, ZoneManifestArtifactResult,
+    InstallMetadataReadError, ManifestHashError, ZoneManifestArtifactResult,
     ZoneManifestArtifactsResult,
 };
 use tufaceous_artifact::ArtifactHash;
@@ -31,6 +32,7 @@ use tufaceous_artifact::ArtifactHash;
 pub struct OverridePaths {
     pub install_dataset: Utf8PathBuf,
     pub zones_json: Utf8PathBuf,
+    pub measurements_json: Utf8PathBuf,
     pub mupdate_override_json: Utf8PathBuf,
 }
 
@@ -38,10 +40,18 @@ impl OverridePaths {
     fn for_uuid(uuid: InternalZpoolUuid) -> Self {
         let install_dataset =
             Utf8PathBuf::from(format!("pool/int/{uuid}/install"));
-        let zones_json = install_dataset.join(OmicronZoneManifest::FILE_NAME);
+        let zones_json =
+            install_dataset.join(OmicronInstallManifest::ZONES_FILE_NAME);
+        let measurements_json =
+            install_dataset.join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
         let mupdate_override_json =
             install_dataset.join(MupdateOverrideInfo::FILE_NAME);
-        Self { install_dataset, zones_json, mupdate_override_json }
+        Self {
+            install_dataset,
+            zones_json,
+            measurements_json,
+            mupdate_override_json,
+        }
     }
 }
 
@@ -82,12 +92,13 @@ impl WriteInstallDatasetContext {
     /// errors.
     pub fn new_basic() -> Self {
         Self {
+            // The zones are picked arbitrarily for our unit tests.
             zones: [
-                ZoneContents::new("zone1.tar.gz", b"zone1"),
-                ZoneContents::new("zone2.tar.gz", b"zone2"),
-                ZoneContents::new("zone3.tar.gz", b"zone3"),
-                ZoneContents::new("zone4.tar.gz", b"zone4"),
-                ZoneContents::new("zone5.tar.gz", b"zone5"),
+                ZoneContents::new(ZoneKind::CockroachDb, b"fake cockroachdb"),
+                ZoneContents::new(ZoneKind::Clickhouse, b"fake clickhouse"),
+                ZoneContents::new(ZoneKind::Crucible, b"fake crucible"),
+                ZoneContents::new(ZoneKind::InternalDns, b"fake internal_dns"),
+                ZoneContents::new(ZoneKind::Nexus, b"fake nexus"),
             ]
             .into_iter()
             .collect(),
@@ -98,17 +109,70 @@ impl WriteInstallDatasetContext {
     }
 
     /// Makes a number of error cases for testing.
-    pub fn make_error_cases(&mut self) {
-        // zone1.tar.gz is valid.
-        // For zone2.tar.gz, change the size.
-        self.zones.get_mut("zone2.tar.gz").unwrap().json_size = 1024;
-        // For zone3.tar.gz, change the hash.
-        self.zones.get_mut("zone3.tar.gz").unwrap().json_hash =
-            ArtifactHash([0; 32]);
-        // Don't write out zone4 but include it in the JSON.
-        self.zones.get_mut("zone4.tar.gz").unwrap().write_to_disk = false;
-        // Write out zone5 but don't include it in the JSON.
-        self.zones.get_mut("zone5.tar.gz").unwrap().include_in_json = false;
+    pub fn make_error_cases(&mut self) -> IdOrdMap<ZoneContentError> {
+        let mut errors = IdOrdMap::new();
+
+        // cockroachdb.tar.gz is valid.
+
+        // For clickhouse, change the size.
+        {
+            let mut zone2 = self.zones.get_mut(&ZoneKind::Clickhouse).unwrap();
+            zone2.json_size = 1024;
+            errors
+                .insert_unique(ZoneContentError {
+                    zone_kind: ZoneKind::Clickhouse,
+                    error: ManifestHashError::SizeHashMismatch {
+                        expected_size: zone2.json_size,
+                        expected_hash: zone2.json_hash,
+                        actual_size: zone2.contents.len() as u64,
+                        actual_hash: zone2.json_hash,
+                    },
+                })
+                .unwrap();
+        }
+
+        // For crucible, change the hash.
+        {
+            let mut zone3 = self.zones.get_mut(&ZoneKind::Crucible).unwrap();
+            let replaced_hash =
+                std::mem::replace(&mut zone3.json_hash, ArtifactHash([0; 32]));
+            errors
+                .insert_unique(ZoneContentError {
+                    zone_kind: ZoneKind::Crucible,
+                    error: ManifestHashError::SizeHashMismatch {
+                        expected_size: zone3.json_size,
+                        expected_hash: zone3.json_hash,
+                        actual_size: zone3.json_size,
+                        actual_hash: replaced_hash,
+                    },
+                })
+                .unwrap();
+        }
+
+        // Don't write out internal DNS but include it in the JSON.
+        self.zones.get_mut(&ZoneKind::InternalDns).unwrap().write_to_disk =
+            false;
+        errors
+            .insert_unique(ZoneContentError {
+                zone_kind: ZoneKind::InternalDns,
+                error: ManifestHashError::ReadArtifact(ArcIoError::new(
+                    io::Error::from(io::ErrorKind::NotFound),
+                )),
+            })
+            .unwrap();
+
+        // Write out nexus but don't include it in the JSON.
+        self.zones.get_mut(&ZoneKind::Nexus).unwrap().include_in_json = false;
+        errors
+            .insert_unique(ZoneContentError {
+                zone_kind: ZoneKind::Nexus,
+                error: ManifestHashError::NoArtifactForZoneKind(
+                    ZoneKind::Nexus,
+                ),
+            })
+            .unwrap();
+
+        errors
     }
 
     /// Set to false to not write out the zone manifest to disk.
@@ -126,22 +190,25 @@ impl WriteInstallDatasetContext {
         }
     }
 
-    pub fn zone_manifest(&self) -> OmicronZoneManifest {
+    pub fn zone_manifest(&self) -> OmicronInstallManifest {
         let source = if self.write_zone_manifest_to_disk {
-            OmicronZoneManifestSource::Installinator {
+            OmicronInstallManifestSource::Installinator {
                 mupdate_id: self.mupdate_id,
             }
         } else {
-            OmicronZoneManifestSource::SledAgent
+            OmicronInstallManifestSource::SledAgent
         };
-        OmicronZoneManifest {
+        OmicronInstallManifest {
             source,
-            zones: self
+            files: self
                 .zones
                 .iter()
                 .filter_map(|zone| {
-                    zone.include_in_json.then(|| OmicronZoneFileMetadata {
-                        file_name: zone.file_name.clone(),
+                    zone.include_in_json.then(|| OmicronInstallMetadata {
+                        file_name: zone
+                            .zone_kind
+                            .artifact_in_install_dataset()
+                            .to_owned(),
                         file_size: zone.json_size,
                         hash: zone.json_hash,
                     })
@@ -176,7 +243,8 @@ impl WriteInstallDatasetContext {
     pub fn write_to(&self, dir: &ChildPath) -> Result<(), FixtureError> {
         for zone in &self.zones {
             if zone.write_to_disk {
-                dir.child(&zone.file_name).write_binary(&zone.contents)?;
+                dir.child(zone.zone_kind.artifact_in_install_dataset())
+                    .write_binary(&zone.contents)?;
             }
         }
 
@@ -187,7 +255,8 @@ impl WriteInstallDatasetContext {
             })?;
             // No need to create intermediate directories with
             // camino-tempfile-ext.
-            dir.child(OmicronZoneManifest::FILE_NAME).write_str(&json)?;
+            dir.child(OmicronInstallManifest::ZONES_FILE_NAME)
+                .write_str(&json)?;
         }
 
         let info = self.override_info();
@@ -202,7 +271,7 @@ impl WriteInstallDatasetContext {
 
 #[derive(Clone, Debug)]
 pub struct ZoneContents {
-    file_name: String,
+    zone_kind: ZoneKind,
     contents: Vec<u8>,
     // json_size and json_hash are stored separately, so tests can tweak
     // them before writing out the override info.
@@ -213,11 +282,11 @@ pub struct ZoneContents {
 }
 
 impl ZoneContents {
-    fn new(file_name: &str, contents: &[u8]) -> Self {
+    fn new(zone_kind: ZoneKind, contents: &[u8]) -> Self {
         let size = contents.len() as u64;
         let hash = compute_hash(contents);
         Self {
-            file_name: file_name.to_string(),
+            zone_kind,
             contents: contents.to_vec(),
             json_size: size,
             json_hash: hash,
@@ -243,9 +312,12 @@ impl ZoneContents {
             }
         };
 
+        let file_name = self.zone_kind.artifact_in_install_dataset().to_owned();
+        let path = dir.join(&file_name);
+
         ZoneManifestArtifactResult {
-            file_name: self.file_name.clone(),
-            path: dir.join(&self.file_name),
+            file_name,
+            path,
             expected_size: self.json_size,
             expected_hash: self.json_hash,
             status,
@@ -254,10 +326,27 @@ impl ZoneContents {
 }
 
 impl IdOrdItem for ZoneContents {
-    type Key<'a> = &'a str;
+    type Key<'a> = ZoneKind;
 
     fn key(&self) -> Self::Key<'_> {
-        &self.file_name
+        self.zone_kind
+    }
+
+    id_upcast!();
+}
+
+/// An error caused by [`WriteInstallDatasetContext::make_error_cases`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZoneContentError {
+    zone_kind: ZoneKind,
+    pub error: ManifestHashError,
+}
+
+impl IdOrdItem for ZoneContentError {
+    type Key<'a> = ZoneKind;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_kind
     }
 
     id_upcast!();

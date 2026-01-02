@@ -14,9 +14,12 @@ mod illumos {
     pub use std::env;
 }
 
+fn main() -> Result<(), anyhow::Error> {
+    oxide_tokio_rt::run(main_impl())
+}
+
 #[cfg(target_os = "illumos")]
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main_impl() -> Result<(), anyhow::Error> {
     use illumos::*;
     let args: Vec<_> = env::args().collect();
     let logctx = test_setup_log("falcon_test_runner");
@@ -99,5 +102,6 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 #[cfg(not(target_os = "illumos"))]
-#[tokio::main]
-async fn main() {}
+async fn main_impl() -> Result<(), anyhow::Error> {
+    Ok(())
+}

@@ -57,9 +57,8 @@ struct ConfigProperties {
     rack_id: Option<Uuid>,
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(cmd_error) = do_run().await {
+fn main() {
+    if let Err(cmd_error) = oxide_tokio_rt::run(do_run()) {
         fatal(cmd_error);
     }
 }

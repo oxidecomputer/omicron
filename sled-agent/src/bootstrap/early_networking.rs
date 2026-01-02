@@ -19,8 +19,8 @@ use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
 use mg_admin_client::types::BgpPeerConfig as MgBgpPeerConfig;
 use mg_admin_client::types::ImportExportPolicy as MgImportExportPolicy;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, CheckerSource, Prefix, Prefix4,
-    Prefix6, ShaperSource, StaticRoute4, StaticRoute4List,
+    AddStaticRoute4Request, ApplyRequest, CheckerSource, ShaperSource,
+    StaticRoute4, StaticRoute4List,
 };
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
@@ -32,11 +32,12 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_common::backoff::{
     BackoffError, ExponentialBackoff, ExponentialBackoffBuilder, retry_notify,
-    retry_policy_local,
 };
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
+use rdb_types::{Prefix, Prefix4, Prefix6};
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use std::time::{Duration, Instant};
@@ -376,25 +377,16 @@ impl<'a> EarlyNetworkSetup<'a> {
             &format!("http://[{}]:{}", switch_zone_underlay_ip, MGS_PORT),
             self.log.new(o!("component" => "MgsClient")),
         );
-        let switch_slot = retry_notify(
-            retry_policy_local(),
-            || async {
-                mgs_client
-                    .sp_local_switch_id()
-                    .await
-                    .map_err(BackoffError::transient)
-                    .map(|response| response.into_inner().slot)
-            },
-            |error, delay| {
-                warn!(
-                    self.log,
-                    "Failed to get switch ID from MGS (retrying in {delay:?})";
-                    "error" => ?error,
-                );
-            },
-        )
-        .await
-        .expect("Expected an infinite retry loop getting our switch ID");
+        let switch_slot = mgs_client
+            .sp_local_switch_id()
+            .await
+            .map_err(|err| {
+                EarlyNetworkSetupError::Mgs(format!(
+                    "failed to determine local switch ID via MGS: {}",
+                    InlineErrorChain::new(&err)
+                ))
+            })?
+            .slot;
 
         let switch_location = match switch_slot {
             0 => SwitchLocation::Switch0,

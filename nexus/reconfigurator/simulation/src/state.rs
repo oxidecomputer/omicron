@@ -8,14 +8,14 @@ use anyhow::{Context, anyhow, bail};
 use nexus_inventory::CollectionBuilder;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Generation;
-use omicron_uuid_kinds::{CollectionUuid, ReconfiguratorSimUuid};
+use omicron_uuid_kinds::{CollectionUuid, ReconfiguratorSimStateUuid};
 use sync_ptr::SyncConstPtr;
 
 use crate::{
-    LoadSerializedConfigResult, LoadSerializedSystemResult, SimConfigBuilder,
-    SimConfigLogEntry, SimRng, SimRngBuilder, SimRngLogEntry, SimSystem,
-    SimSystemBuilder, SimSystemLogEntry, Simulator, config::SimConfig,
-    errors::NonEmptySystemError,
+    BlueprintId, LoadSerializedConfigResult, LoadSerializedSystemResult,
+    SimConfigBuilder, SimConfigLogEntry, SimRng, SimRngBuilder, SimRngLogEntry,
+    SimSystem, SimSystemBuilder, SimSystemLogEntry, Simulator,
+    config::SimConfig, errors::NonEmptySystemError,
 };
 
 /// A top-level, versioned snapshot of reconfigurator state.
@@ -31,9 +31,9 @@ pub struct SimState {
     // is stored behind an `Arc`. This means that the address stays stable even
     // if the `Simulator` struct is cloned or moved in memory.
     root_state: SyncConstPtr<SimState>,
-    id: ReconfiguratorSimUuid,
+    id: ReconfiguratorSimStateUuid,
     // The parent state that this state was derived from.
-    parent: Option<ReconfiguratorSimUuid>,
+    parent: Option<ReconfiguratorSimStateUuid>,
     // The state's generation, starting from 0.
     //
     // TODO: Should this be its own type to avoid confusion with other
@@ -79,14 +79,20 @@ impl SimState {
 
     #[inline]
     #[must_use]
-    pub fn id(&self) -> ReconfiguratorSimUuid {
+    pub fn id(&self) -> ReconfiguratorSimStateUuid {
         self.id
     }
 
     #[inline]
     #[must_use]
-    pub fn parent(&self) -> Option<ReconfiguratorSimUuid> {
+    pub fn parent(&self) -> Option<ReconfiguratorSimStateUuid> {
         self.parent
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn generation(&self) -> Generation {
+        self.generation
     }
 
     #[inline]
@@ -126,10 +132,14 @@ impl SimState {
     pub fn to_serializable(
         &self,
     ) -> anyhow::Result<UnstableReconfiguratorState> {
+        let parent_blueprint = self
+            .system()
+            .resolve_and_get_blueprint(BlueprintId::Target)
+            .expect("target blueprint is always present");
         let planning_input = self
             .system()
             .description()
-            .to_planning_input_builder()
+            .to_planning_input_builder(Arc::clone(parent_blueprint))
             .context("creating planning input builder")?
             .build();
 
@@ -173,13 +183,13 @@ impl SimState {
 ///
 /// `SimStateBuilder` is ephemeral, so it can be freely mutated without
 /// affecting anything else about the system. To store it into a system, call
-/// [`Self::commit`].
+/// [`Self::commit_and_bump`].
 #[derive(Clone, Debug)]
 pub struct SimStateBuilder {
     // Used to check that the simulator is the same as the one that created
     // this state.
     root_state: SyncConstPtr<SimState>,
-    parent: ReconfiguratorSimUuid,
+    parent: ReconfiguratorSimStateUuid,
     parent_gen: Generation,
     system: SimSystemBuilder,
     config: SimConfigBuilder,
@@ -189,7 +199,7 @@ pub struct SimStateBuilder {
 impl SimStateBuilder {
     #[inline]
     #[must_use]
-    pub fn parent(&self) -> ReconfiguratorSimUuid {
+    pub fn parent(&self) -> ReconfiguratorSimStateUuid {
         self.parent
     }
 
@@ -236,6 +246,9 @@ impl SimStateBuilder {
         let config = self.config.load_serialized(
             state.external_dns_zone_names.clone(),
             state.silo_names.clone(),
+            state.planning_input.active_nexus_zones(),
+            &state.target_blueprint,
+            &state.blueprints,
             &mut res,
         );
         let system =
@@ -249,20 +262,15 @@ impl SimStateBuilder {
         })
     }
 
-    /// Commit the current state to the simulator, returning the new state's
-    /// UUID.
+    /// Commit the current state to the simulator, and update the current
+    /// pointer.
     ///
     /// # Panics
     ///
     /// Panics if `sim` is not the same simulator that created this state.
     /// This should ordinarily never happen and always indicates a
     /// programming error.
-    #[must_use = "callers should update their pointers with the returned UUID"]
-    pub fn commit(
-        self,
-        description: String,
-        sim: &mut Simulator,
-    ) -> ReconfiguratorSimUuid {
+    pub fn commit_and_bump(self, description: String, sim: &mut Simulator) {
         // Check for unrelated histories.
         if !std::ptr::eq(sim.root_state(), self.root_state.inner()) {
             panic!(
@@ -292,7 +300,6 @@ impl SimStateBuilder {
             log,
         };
         sim.add_state(Arc::new(state));
-        id
     }
 
     // TODO: should probably enforce that RNG is set, maybe by hiding the

@@ -12,10 +12,9 @@ use libc::SIGINT;
 use omicron_test_utils::dev;
 use signal_hook_tokio::Signals;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = DbDevApp::parse();
-    args.exec().await
+    oxide_tokio_rt::run(args.exec())
 }
 
 /// Tools for working with a CockroachDB database.

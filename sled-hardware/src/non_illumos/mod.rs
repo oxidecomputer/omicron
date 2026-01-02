@@ -6,7 +6,7 @@ use crate::SledMode;
 use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::ZpoolUuid;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::{Baseboard, SledCpuFamily};
 use slog::Logger;
 use std::collections::HashMap;
 use tokio::sync::broadcast;
@@ -32,12 +32,16 @@ impl HardwareManager {
     pub fn new(
         _log: &Logger,
         _sled_mode: SledMode,
-        _nongimlet_observed_disks: Vec<UnparsedDisk>,
+        _nonsled_observed_disks: Vec<UnparsedDisk>,
     ) -> Result<Self, String> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
     pub fn baseboard(&self) -> Baseboard {
+        unimplemented!("Accessing hardware unsupported on non-illumos");
+    }
+
+    pub fn cpu_family(&self) -> SledCpuFamily {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
@@ -61,7 +65,7 @@ impl HardwareManager {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
-    pub fn is_scrimlet_driver_loaded(&self) -> bool {
+    pub fn is_scrimlet_asic_available(&self) -> bool {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
@@ -80,7 +84,7 @@ pub async fn ensure_partition_layout(
     unimplemented!("Accessing hardware unsupported on non-illumos");
 }
 
-/// Return true if the host system is an Oxide Gimlet.
-pub fn is_gimlet() -> anyhow::Result<bool> {
+/// Return true if the host system is an Oxide sled.
+pub fn is_oxide_sled() -> anyhow::Result<bool> {
     Ok(false)
 }

@@ -11,6 +11,7 @@ use crate::db;
 use crate::db::identity::Resource;
 use crate::db::model::Name;
 use crate::db::model::SshKey;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -56,7 +57,7 @@ impl DataStore {
         use nexus_db_schema::schema::ssh_key::dsl;
         let result: Vec<(Uuid, Name)> = dsl::ssh_key
             .filter(dsl::id.eq_any(ids).or(dsl::name.eq_any(names)))
-            .filter(dsl::silo_user_id.eq(authz_user.id()))
+            .filter(dsl::silo_user_id.eq(to_db_typed_uuid(authz_user.id())))
             .filter(dsl::time_deleted.is_null())
             .select((dsl::id, dsl::name))
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
@@ -107,7 +108,7 @@ impl DataStore {
         use nexus_db_schema::schema::ssh_key::dsl;
         dsl::ssh_key
             .filter(dsl::id.eq_any(keys.to_owned()))
-            .filter(dsl::silo_user_id.eq(authz_user.id()))
+            .filter(dsl::silo_user_id.eq(to_db_typed_uuid(authz_user.id())))
             .filter(dsl::time_deleted.is_null())
             .select(SshKey::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
@@ -132,7 +133,9 @@ impl DataStore {
             None => {
                 use nexus_db_schema::schema::ssh_key::dsl;
                 dsl::ssh_key
-                    .filter(dsl::silo_user_id.eq(authz_user.id()))
+                    .filter(
+                        dsl::silo_user_id.eq(to_db_typed_uuid(authz_user.id())),
+                    )
                     .filter(dsl::time_deleted.is_null())
                     .select(dsl::id)
                     .get_results_async(
@@ -235,7 +238,7 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::silo_user_id.eq(authz_user.id()))
+        .filter(dsl::silo_user_id.eq(to_db_typed_uuid(authz_user.id())))
         .filter(dsl::time_deleted.is_null())
         .select(SshKey::as_select())
         .load_async(&*self.pool_connection_authorized(opctx).await?)
@@ -250,7 +253,7 @@ impl DataStore {
         authz_user: &authz::SiloUser,
         ssh_key: SshKey,
     ) -> CreateResult<SshKey> {
-        assert_eq!(authz_user.id(), ssh_key.silo_user_id);
+        assert_eq!(authz_user.id(), ssh_key.silo_user_id());
         opctx.authorize(authz::Action::CreateChild, authz_user).await?;
         let name = ssh_key.name().to_string();
 

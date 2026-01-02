@@ -363,7 +363,7 @@ mod test {
                 block_size: 0,
                 blocks_per_extent: 0,
                 extent_count: 0,
-                gen: 0,
+                generation: 0,
                 opts: CrucibleOpts {
                     id: Uuid::new_v4(),
                     target: vec![

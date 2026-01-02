@@ -62,24 +62,23 @@ use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use chrono::Utc;
 use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use http::StatusCode;
 use nexus_auth::context::OpContext;
-use nexus_db_queries::db::{
-    DataStore, datastore::SQL_BATCH_SIZE, pagination::Paginator,
-};
+use nexus_db_queries::db::DataStore;
 use nexus_networking::sled_client_from_address;
 use nexus_types::deployment::SledFilter;
+use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::{
     TufArtifactReplicationCounters, TufArtifactReplicationOperation,
     TufArtifactReplicationRequest, TufArtifactReplicationStatus,
 };
 use omicron_common::api::external::Generation;
-use omicron_uuid_kinds::{GenericUuid, SledUuid};
-use rand::seq::SliceRandom;
+use omicron_uuid_kinds::SledUuid;
+use rand::seq::{IndexedRandom, SliceRandom};
 use serde_json::json;
 use sled_agent_client::types::ArtifactConfig;
 use slog_error_chain::InlineErrorChain;
@@ -509,7 +508,7 @@ impl BackgroundTask for ArtifactReplication {
                 );
                 let requests = inventory.into_requests(
                     &sleds,
-                    &mut rand::thread_rng(),
+                    &mut rand::rng(),
                     self.min_sled_replication,
                 );
                 requests
@@ -573,9 +572,9 @@ impl ArtifactReplication {
             .await?
             .into_iter()
             .map(|sled| Sled {
-                id: SledUuid::from_untyped_uuid(sled.identity.id),
+                id: sled.id(),
                 client: sled_client_from_address(
-                    sled.identity.id,
+                    sled.id(),
                     sled.address(),
                     &opctx.log,
                 ),
@@ -592,15 +591,26 @@ impl ArtifactReplication {
         opctx: &OpContext,
     ) -> Result<(ArtifactConfig, Inventory)> {
         let generation = self.datastore.tuf_get_generation(opctx).await?;
+        let repos =
+            self.datastore.tuf_list_repos_unpruned_batched(opctx).await?;
+        // `tuf_list_repos_unpruned_batched` performs pagination internally,
+        // so check that the generation hasn't changed during our pagination to
+        // ensure we got a consistent read.
+        {
+            let generation_now =
+                self.datastore.tuf_get_generation(opctx).await?;
+            ensure!(
+                generation == generation_now,
+                "generation changed from {generation} \
+                to {generation_now}, bailing"
+            );
+        }
+
         let mut inventory = Inventory::default();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-        while let Some(p) = paginator.next() {
-            let batch = self
-                .datastore
-                .tuf_list_repos(opctx, generation, &p.current_pagparams())
-                .await?;
-            paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
-            for artifact in batch {
+        for repo in repos {
+            for artifact in
+                self.datastore.tuf_list_repo_artifacts(opctx, repo.id()).await?
+            {
                 inventory.0.entry(artifact.sha256.0).or_insert_with(|| {
                     ArtifactPresence { sleds: BTreeMap::new(), local: None }
                 });
@@ -781,6 +791,7 @@ mod tests {
     use std::fmt::Write;
 
     use expectorate::assert_contents;
+    use omicron_uuid_kinds::GenericUuid;
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
     use super::*;
@@ -794,7 +805,7 @@ mod tests {
         (0..n)
             .map(|_| Sled {
                 id: SledUuid::from_untyped_uuid(
-                    uuid::Builder::from_random_bytes(rng.gen()).into_uuid(),
+                    uuid::Builder::from_random_bytes(rng.random()).into_uuid(),
                 ),
                 client: sled_agent_client::Client::new(
                     "http://invalid.test",
@@ -892,7 +903,7 @@ mod tests {
         let mut inventory = BTreeMap::new();
         for _ in 0..2 {
             inventory.insert(
-                ArtifactHash(rng.gen()),
+                ArtifactHash(rng.random()),
                 ArtifactPresence {
                     sleds: BTreeMap::new(),
                     local: Some(ArtifactHandle::Fake),
@@ -928,7 +939,7 @@ mod tests {
         let mut inventory = BTreeMap::new();
         for _ in 0..10 {
             inventory.insert(
-                ArtifactHash(rng.gen()),
+                ArtifactHash(rng.random()),
                 ArtifactPresence { sleds: sled_presence.clone(), local: None },
             );
         }
@@ -955,7 +966,7 @@ mod tests {
         let sleds = fake_sleds(4, &mut rng);
         let mut inventory = BTreeMap::new();
         inventory.insert(
-            ArtifactHash(rng.gen()),
+            ArtifactHash(rng.random()),
             ArtifactPresence {
                 sleds: sleds
                     .iter()
@@ -988,7 +999,7 @@ mod tests {
         let sleds = fake_sleds(4, &mut rng);
         let mut inventory = BTreeMap::new();
         inventory.insert(
-            ArtifactHash(rng.gen()),
+            ArtifactHash(rng.random()),
             ArtifactPresence {
                 sleds: sleds.iter().map(|sled| (sled.id, 2)).collect(),
                 local: None,

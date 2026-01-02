@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(150, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(217, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -28,6 +28,73 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(217, "multiple-default-ip-pools-per-silo"),
+        KnownVersion::new(216, "add-trust-quorum"),
+        KnownVersion::new(215, "support-up-to-12-disks"),
+        KnownVersion::new(214, "separate-transit-ips-by-version"),
+        KnownVersion::new(213, "fm-cases"),
+        KnownVersion::new(212, "local-storage-disk-type"),
+        KnownVersion::new(211, "blueprint-sled-config-subnet"),
+        KnownVersion::new(210, "one-big-ereport-table"),
+        KnownVersion::new(209, "multicast-group-support"),
+        KnownVersion::new(208, "disable-tuf-repo-pruner"),
+        KnownVersion::new(207, "disk-types"),
+        KnownVersion::new(206, "fm-sitreps-by-parent-id-index"),
+        KnownVersion::new(205, "fm-sitrep"),
+        KnownVersion::new(204, "local-storage-dataset"),
+        KnownVersion::new(203, "scim-actor-audit-log"),
+        KnownVersion::new(202, "add-ip-to-external-ip-index"),
+        KnownVersion::new(201, "scim-client-bearer-token"),
+        KnownVersion::new(200, "dual-stack-network-interfaces"),
+        KnownVersion::new(199, "multicast-pool-support"),
+        KnownVersion::new(198, "add-ip-pool-reservation-type-column"),
+        KnownVersion::new(197, "scim-users-and-groups"),
+        KnownVersion::new(196, "user-provision-type-for-silo-user-and-group"),
+        KnownVersion::new(195, "tuf-pruned-index"),
+        KnownVersion::new(194, "tuf-pruned"),
+        KnownVersion::new(193, "nexus-lockstep-port"),
+        KnownVersion::new(192, "blueprint-source"),
+        KnownVersion::new(191, "debug-log-blueprint-planner"),
+        KnownVersion::new(190, "add-instance-cpu-platform"),
+        KnownVersion::new(189, "reconfigurator-chicken-switches-to-config"),
+        KnownVersion::new(188, "positive-quotas"),
+        KnownVersion::new(187, "no-default-pool-for-internal-silo"),
+        KnownVersion::new(186, "nexus-generation"),
+        KnownVersion::new(185, "populate-db-metadata-nexus"),
+        KnownVersion::new(184, "store-silo-admin-group-name"),
+        KnownVersion::new(183, "add-ip-version-to-pools"),
+        KnownVersion::new(182, "add-tuf-artifact-board"),
+        KnownVersion::new(181, "rename-nat-table"),
+        KnownVersion::new(180, "sled-cpu-family"),
+        KnownVersion::new(179, "add-pending-mgs-updates-host-phase-1"),
+        KnownVersion::new(178, "change-lldp-management-ip-to-inet"),
+        KnownVersion::new(177, "add-host-ereport-part-number"),
+        KnownVersion::new(176, "audit-log"),
+        KnownVersion::new(175, "inv-host-phase-1-active-slot"),
+        KnownVersion::new(174, "add-tuf-rot-by-sign"),
+        KnownVersion::new(173, "inv-internal-dns"),
+        KnownVersion::new(172, "add-zones-with-mupdate-override"),
+        KnownVersion::new(171, "inv-clear-mupdate-override"),
+        KnownVersion::new(170, "add-pending-mgs-updates-rot-bootloader"),
+        KnownVersion::new(169, "inv-ntp-timesync"),
+        KnownVersion::new(168, "add-inv-host-phase-1-flash-hash"),
+        KnownVersion::new(167, "add-pending-mgs-updates-rot"),
+        KnownVersion::new(166, "bundle-user-comment"),
+        KnownVersion::new(165, "route-config-rib-priority"),
+        KnownVersion::new(164, "fix-leaked-bp-oximeter-read-policy-rows"),
+        KnownVersion::new(163, "bp-desired-host-phase-2"),
+        KnownVersion::new(162, "bundle-by-creation"),
+        KnownVersion::new(161, "inv_cockroachdb_status"),
+        KnownVersion::new(160, "tuf-trust-root"),
+        KnownVersion::new(159, "sled-config-desired-host-phase-2"),
+        KnownVersion::new(158, "drop-builtin-roles"),
+        KnownVersion::new(157, "user-data-export"),
+        KnownVersion::new(156, "boot-partitions-inventory"),
+        KnownVersion::new(155, "vpc-firewall-icmp"),
+        KnownVersion::new(154, "add-pending-mgs-updates"),
+        KnownVersion::new(153, "chicken-switches"),
+        KnownVersion::new(152, "ereports"),
+        KnownVersion::new(151, "zone-image-resolver-inventory"),
         KnownVersion::new(150, "add-last-reconciliation-orphaned-datasets"),
         KnownVersion::new(149, "bp-add-target-release-min-gen"),
         KnownVersion::new(148, "clean-misplaced-m2s"),
@@ -193,6 +260,9 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
 
 /// The earliest supported schema version.
 pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(1, 0, 0);
+
+/// The version where "db_metadata_nexus" was added.
+pub const DB_METADATA_NEXUS_SCHEMA_VERSION: Version = Version::new(185, 0, 0);
 
 /// Describes one version of the database schema
 #[derive(Debug, Clone)]

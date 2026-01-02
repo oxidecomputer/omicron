@@ -7,6 +7,9 @@
 
 use super::endpoints::*;
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
+use crate::integration_tests::updates::TestTrustRoot;
+use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use headers::authorization::Credentials;
@@ -19,14 +22,11 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::TestDataset;
-use nexus_test_utils_macros::nexus_test;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::sync::LazyLock;
 
-type ControlPlaneTestContext =
-    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 type DiskTest<'a> =
     nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
 
@@ -57,9 +57,17 @@ type DiskTest<'a> =
 //   endpoint with a non-existent resource to ensure that we get the same result
 //   (so that we don't leak information about existence based on, say, 401 vs.
 //   403).
-#[nexus_test]
-async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
-    let mut disk_test = DiskTest::new(cptestctx).await;
+//
+// Uploading a TUF repository requires a multithreaded runtime with 2 worker
+// threads.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_unauthorized() {
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_unauthorized")
+            .start::<omicron_nexus::Server>()
+            .await;
+
+    let mut disk_test = DiskTest::new(&cptestctx).await;
     let sled_id = cptestctx.first_sled_id();
     disk_test
         .add_zpool_with_datasets_ext(
@@ -117,6 +125,54 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
         });
     }
 
+    // Special test data: upload a fake repository with the system release
+    // "1.0.0". The resources do not need to be added to `setup_results` as we
+    // have already added a separate trust root to verify that endpoint, and
+    // repositories are fetched by system release.
+    let trust_root = TestTrustRoot::generate().await.unwrap();
+    trust_root
+        .to_upload_request(client, StatusCode::CREATED)
+        .execute()
+        .await
+        .unwrap();
+    trust_root
+        .assemble_repo(&log, &[])
+        .await
+        .unwrap()
+        .into_upload_request(client, StatusCode::OK)
+        .execute()
+        .await
+        .unwrap();
+
+    // Insert a SCIM client bearer token with a known UUID - normally these are
+    // completely random.
+
+    {
+        use nexus_db_model::ScimClientBearerToken;
+        use nexus_types::silo::DEFAULT_SILO_ID;
+
+        let now = Utc::now();
+
+        let new_token = ScimClientBearerToken {
+            id: "7885144e-9c75-47f7-a97d-7dfc58e1186c".parse().unwrap(),
+            time_created: now,
+            time_deleted: None,
+            time_expires: Some(now),
+            silo_id: DEFAULT_SILO_ID,
+            bearer_token: String::from("testpost"),
+        };
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let conn = nexus.datastore().pool_connection_for_tests().await.unwrap();
+
+        use nexus_db_schema::schema::scim_client_bearer_token::dsl;
+        diesel::insert_into(dsl::scim_client_bearer_token)
+            .values(new_token.clone())
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+    }
+
     // Verify the hardcoded endpoints.
     info!(log, "verifying endpoints");
     print!("{}", VERIFY_HEADER);
@@ -124,6 +180,8 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
         let setup_response = setup_results.get(&endpoint.url);
         verify_endpoint(&log, client, endpoint, setup_response).await;
     }
+
+    cptestctx.teardown().await;
 }
 
 const VERIFY_HEADER: &str = r#"
@@ -224,6 +282,10 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
                 &*DEMO_SILO_USER_ID_GET_URL,
                 &*DEMO_SILO_USER_ID_DELETE_URL,
                 &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
+                &*DEMO_SILO_USER_ID_IN_SILO_URL,
+                &*DEMO_SILO_USER_TOKEN_LIST_URL,
+                &*DEMO_SILO_USER_SESSION_LIST_URL,
+                &*DEMO_SILO_USER_LOGOUT_URL,
             ],
         },
         // Create the default IP pool
@@ -298,6 +360,32 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             body: serde_json::to_value(&*DEMO_STOPPED_INSTANCE_CREATE).unwrap(),
             id_routes: vec!["/v1/instances/{id}"],
         },
+        // Create a multicast IP pool
+        SetupReq::Post {
+            url: &DEMO_IP_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_IP_POOL_CREATE)
+                .unwrap(),
+            id_routes: vec!["/v1/ip-pools/{id}"],
+        },
+        // Create a multicast IP pool range
+        SetupReq::Post {
+            url: &DEMO_MULTICAST_IP_POOL_RANGES_ADD_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_IP_POOL_RANGE).unwrap(),
+            id_routes: vec![],
+        },
+        // Link multicast pool to default silo
+        SetupReq::Post {
+            url: &DEMO_MULTICAST_IP_POOL_SILOS_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_IP_POOL_SILOS_BODY)
+                .unwrap(),
+            id_routes: vec![],
+        },
+        // Create a multicast group in the Project
+        SetupReq::Post {
+            url: &MULTICAST_GROUPS_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_GROUP_CREATE).unwrap(),
+            id_routes: vec!["/v1/multicast-groups/{id}"],
+        },
         // Create an affinity group in the Project
         SetupReq::Post {
             url: &DEMO_PROJECT_URL_AFFINITY_GROUPS,
@@ -367,8 +455,19 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         // Create a Support Bundle
         SetupReq::Post {
             url: &SUPPORT_BUNDLES_URL,
-            body: serde_json::to_value(()).unwrap(),
+            body: serde_json::to_value(
+                &nexus_types::external_api::params::SupportBundleCreate {
+                    user_comment: None,
+                },
+            )
+            .unwrap(),
             id_routes: vec!["/experimental/v1/system/support-bundles/{id}"],
+        },
+        // Create a trusted root for updates
+        SetupReq::Post {
+            url: &DEMO_UPDATE_TRUST_ROOTS_URL,
+            body: DEMO_UPDATE_TRUST_ROOT_CREATE.clone(),
+            id_routes: vec![&*DEMO_UPDATE_TRUST_ROOT_URL],
         },
         // Create a webhook receiver
         SetupReq::Post {

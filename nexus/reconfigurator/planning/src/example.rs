@@ -4,27 +4,55 @@
 
 //! Example blueprints
 
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::sync::Arc;
 
 use crate::blueprint_builder::BlueprintBuilder;
+use crate::blueprint_editor::ExternalNetworkingAllocator;
+use crate::planner::Planner;
 use crate::planner::rng::PlannerRng;
+use crate::system::RotStateOverrides;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
+use anyhow::Context;
+use anyhow::bail;
+use camino::Utf8Path;
+use camino_tempfile::Utf8TempDir;
+use clap::Parser;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintArtifactVersion;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintSource;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::Collection;
+use omicron_common::address::Ipv4Range;
+use omicron_common::api::external::TufRepoDescription;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
+use sled_agent_types::inventory::ZoneKind;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact::KnownArtifactKind;
 use typed_rng::TypedUuidRng;
+use update_common::artifacts::ArtifactsWithPlan;
+use update_common::artifacts::ControlPlaneZonesMode;
+use update_common::artifacts::VerificationMode;
 
 /// Stateful PRNG for generating simulated systems.
 ///
@@ -154,9 +182,8 @@ pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
     pub collection: Collection,
-    /// The initial blueprint that was used to describe the system. This
-    /// blueprint has sleds but no zones.
-    pub initial_blueprint: Blueprint,
+    /// The initial blueprint that was used to describe the system.
+    pub initial_blueprint: Arc<Blueprint>,
 }
 
 /// Returns a collection, planning input, and blueprint describing a pretty
@@ -177,9 +204,9 @@ pub fn example(
 pub struct ExampleSystemBuilder {
     log: slog::Logger,
     rng: ExampleSystemRng,
+    sled_settings: Vec<BuilderSledSettings>,
     // TODO: Store a Policy struct instead of these fields:
     // https://github.com/oxidecomputer/omicron/issues/6803
-    nsleds: usize,
     ndisks_per_sled: u8,
     // None means nsleds
     nexus_count: Option<ZoneCount>,
@@ -188,6 +215,7 @@ pub struct ExampleSystemBuilder {
     crucible_pantry_count: ZoneCount,
     create_zones: bool,
     create_disks_in_blueprint: bool,
+    target_release: TargetReleaseDescription,
 }
 
 impl ExampleSystemBuilder {
@@ -212,7 +240,10 @@ impl ExampleSystemBuilder {
                 "rng_seed" => rng.seed.clone(),
             )),
             rng,
-            nsleds: Self::DEFAULT_N_SLEDS,
+            sled_settings: vec![
+                BuilderSledSettings::default();
+                Self::DEFAULT_N_SLEDS
+            ],
             ndisks_per_sled: SledBuilder::DEFAULT_NPOOLS,
             nexus_count: None,
             internal_dns_count: ZoneCount(INTERNAL_DNS_REDUNDANCY),
@@ -220,6 +251,7 @@ impl ExampleSystemBuilder {
             crucible_pantry_count: ZoneCount(CRUCIBLE_PANTRY_REDUNDANCY),
             create_zones: true,
             create_disks_in_blueprint: true,
+            target_release: TargetReleaseDescription::Initial,
         }
     }
 
@@ -228,7 +260,7 @@ impl ExampleSystemBuilder {
     /// Currently, this value can be anywhere between 0 and 5. (More can be
     /// added in the future if necessary.)
     pub fn nsleds(mut self, nsleds: usize) -> Self {
-        self.nsleds = nsleds;
+        self.sled_settings.resize(nsleds, BuilderSledSettings::default());
         self
     }
 
@@ -281,7 +313,7 @@ impl ExampleSystemBuilder {
     /// anywhere between 0 and 30, inclusive, is permitted. (The limit of 30 is
     /// primarily to simplify the implementation.)
     ///
-    /// Each DNS server is assigned an address in the 10.x.x.x range.
+    /// Each DNS server is assigned an address in the 198.51.100.x range.
     pub fn external_dns_count(
         mut self,
         external_dns_count: usize,
@@ -326,8 +358,67 @@ impl ExampleSystemBuilder {
         self
     }
 
+    /// Set the policy for a sled in the example system by index.
+    ///
+    /// Returns an error if `index >= nsleds`.
+    pub fn with_sled_policy(
+        mut self,
+        index: usize,
+        policy: SledPolicy,
+    ) -> anyhow::Result<Self> {
+        let Some(settings) = self.sled_settings.get_mut(index) else {
+            bail!(
+                "sled index {} out of range (0..{})",
+                index,
+                self.sled_settings.len(),
+            );
+        };
+        settings.policy = policy;
+        Ok(self)
+    }
+
+    /// Set the target release to an initial `0.0.1` version, and image sources to
+    /// Artifact corresponding to the release.
+    pub fn with_target_release_0_0_1(self) -> anyhow::Result<Self> {
+        // Find the 0.0.1 release relative to this crate's root directory.
+        let root_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest_path = root_dir
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("update-common/manifests/fake-0.0.1.toml");
+        self.with_target_release_manifest(
+            &manifest_path,
+            // allow_non_semver is false because fake-0.0.1.toml doesn't contain
+            // non-semver artifacts.
+            false,
+        )
+    }
+
+    pub fn with_target_release_manifest(
+        mut self,
+        manifest_path: &Utf8Path,
+        allow_non_semver: bool,
+    ) -> anyhow::Result<Self> {
+        let dir = Utf8TempDir::with_prefix("reconfigurator-planning-example")
+            .context("failed to create temp dir")?;
+        let zip_path = dir.path().join("repo.zip");
+        tuf_assemble(&self.log, manifest_path, &zip_path, allow_non_semver)
+            .context("failed to assemble TUF repo")?;
+
+        let target_release = extract_tuf_repo_description(&self.log, &zip_path)
+            .context("failed to extract TUF repo description")?;
+
+        self.target_release = TargetReleaseDescription::TufRepo(target_release);
+
+        Ok(self)
+    }
+
     fn get_nexus_zones(&self) -> ZoneCount {
-        self.nexus_count.unwrap_or(ZoneCount(self.nsleds))
+        self.nexus_count.unwrap_or(ZoneCount(self.sled_settings.len()))
     }
 
     pub fn get_internal_dns_zones(&self) -> usize {
@@ -347,7 +438,7 @@ impl ExampleSystemBuilder {
         slog::debug!(
             &self.log,
             "Creating example system";
-            "nsleds" => self.nsleds,
+            "nsleds" => self.sled_settings.len(),
             "ndisks_per_sled" => self.ndisks_per_sled,
             "nexus_count" => nexus_count.0,
             "internal_dns_count" => self.internal_dns_count.0,
@@ -363,71 +454,120 @@ impl ExampleSystemBuilder {
         // Update the system's target counts with the counts. (Note that
         // there's no external DNS count.)
         system
-            .target_nexus_zone_count(nexus_count.0)
-            .target_internal_dns_zone_count(self.internal_dns_count.0)
-            .target_crucible_pantry_zone_count(self.crucible_pantry_count.0);
-        let sled_ids: Vec<_> =
-            (0..self.nsleds).map(|_| rng.sled_rng.next()).collect();
+            .set_target_nexus_zone_count(nexus_count.0)
+            .set_target_internal_dns_zone_count(self.internal_dns_count.0)
+            .set_target_crucible_pantry_zone_count(
+                self.crucible_pantry_count.0,
+            );
 
-        for sled_id in &sled_ids {
+        // Set the target release if one is available. We don't do this
+        // unconditionally because we don't want the target release generation
+        // number to be incremented if self.target_release is
+        // TargetReleaseDescription::Initial.
+        if let TargetReleaseDescription::TufRepo(_) = &self.target_release {
+            system.set_target_release(self.target_release.clone());
+        }
+
+        let sled_ids_with_settings: Vec<_> = self
+            .sled_settings
+            .iter()
+            .map(|settings| (rng.sled_rng.next(), settings))
+            .collect();
+
+        let artifacts_by_kind = if let TargetReleaseDescription::TufRepo(repo) =
+            &self.target_release
+        {
+            // Build a map of artifact versions by kind. For the artifacts we
+            // care about, we currently only expect a single version, so this
+            // map is expected to be unique.
+            //
+            // TODO-correctness Need to choose gimlet vs cosmo here! Can we use
+            // update-common's UpdatePlan instead of this jank?
+            // https://github.com/oxidecomputer/omicron/issues/8777
+            let mut artifacts_by_kind = HashMap::new();
+            for artifact in &repo.artifacts {
+                artifacts_by_kind.insert(&artifact.id.kind, artifact);
+            }
+            Some(artifacts_by_kind)
+        } else {
+            None
+        };
+
+        for (sled_id, settings) in &sled_ids_with_settings {
             let _ = system
                 .sled(
                     SledBuilder::new()
                         .id(*sled_id)
-                        .npools(self.ndisks_per_sled),
+                        .npools(self.ndisks_per_sled)
+                        .policy(settings.policy),
                 )
                 .unwrap();
         }
 
+        // Add as many external IPs as is necessary for external DNS zones. We
+        // pick addresses in the TEST-NET-2 (RFC 5737) range.
+        if self.external_dns_count.0 > 0 {
+            let mut builder =
+                system.external_ip_policy().clone().into_builder();
+            builder
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(
+                        "198.51.100.1".parse::<Ipv4Addr>().unwrap(),
+                        "198.51.100.30".parse::<Ipv4Addr>().unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            for i in 0..self.external_dns_count.0 {
+                let lo = (i + 1)
+                    .try_into()
+                    .expect("external_dns_count is always <= 30");
+                builder
+                    .add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
+                        198, 51, 100, lo,
+                    )))
+                    .expect("test IPs are valid service IPs");
+            }
+            system.set_external_ip_policy(builder.build());
+        }
+
         let mut input_builder = system
-            .to_planning_input_builder()
+            .to_planning_input_builder(Arc::new(
+                // Start with an empty blueprint.
+                BlueprintBuilder::build_empty_seeded(
+                    "test suite",
+                    rng.blueprint1_rng,
+                ),
+            ))
             .expect("failed to make planning input builder");
+
         let base_input = input_builder.clone().build();
-
-        // Start with an empty blueprint containing only our sleds, no zones.
-        let initial_blueprint = BlueprintBuilder::build_empty_with_sleds_seeded(
-            base_input.all_sled_ids(SledFilter::Commissioned),
-            "test suite",
-            rng.blueprint1_rng,
-        );
-
-        // Start with an empty collection
-        let collection = system
-            .to_collection_builder()
-            .expect("failed to build collection")
-            .build();
+        let initial_blueprint = Arc::clone(&base_input.parent_blueprint());
 
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(
             &self.log,
             &initial_blueprint,
-            &base_input,
-            &collection,
             "test suite",
+            rng.blueprint2_rng,
         )
         .unwrap();
-        builder.set_rng(rng.blueprint2_rng);
+        Planner::update_builder_from_planning_input(&mut builder, &base_input);
 
-        // Add as many external IPs as is necessary for external DNS zones. We
-        // pick addresses in the TEST-NET-2 (RFC 5737) range.
-        for i in 0..self.external_dns_count.0 {
-            builder
-                .inject_untracked_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
-                    198,
-                    51,
-                    100,
-                    (i + 1)
-                        .try_into()
-                        .expect("external_dns_count is always <= 30"),
-                )))
-                .expect(
-                    "this shouldn't error because provided external IPs \
-                     are all unique",
-                );
-        }
+        let discretionary_sled_count =
+            base_input.all_sled_ids(SledFilter::Discretionary).count();
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                base_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator");
 
-        for (i, (sled_id, sled_details)) in
-            base_input.all_sleds(SledFilter::Commissioned).enumerate()
+        // * Create disks and non-discretionary zones on all sleds.
+        // * Only create discretionary zones on discretionary sleds.
+        let mut discretionary_ix = 0;
+        for (sled_id, sled_details) in
+            base_input.all_sleds(SledFilter::Commissioned)
         {
             if self.create_disks_in_blueprint {
                 let _ = builder
@@ -435,36 +575,173 @@ impl ExampleSystemBuilder {
                     .unwrap();
             }
             if self.create_zones {
-                let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
-                for _ in 0..nexus_count.on(i, self.nsleds) {
-                    builder
-                        .sled_add_zone_nexus_with_config(sled_id, false, vec![])
-                        .unwrap();
+                let _ = builder
+                    .sled_ensure_zone_ntp(
+                        sled_id,
+                        self.target_release
+                            .zone_image_source(ZoneKind::BoundaryNtp)
+                            .expect("obtained BoundaryNtp image source"),
+                    )
+                    .unwrap();
+
+                // Create discretionary zones if allowed.
+                if sled_details.policy.matches(SledFilter::Discretionary) {
+                    for _ in 0..nexus_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        let external_ip = external_networking_alloc
+                            .for_new_nexus()
+                            .expect("should have an external IP for Nexus");
+                        builder
+                            .sled_add_zone_nexus_with_config(
+                                sled_id,
+                                false,
+                                vec![],
+                                self.target_release
+                                    .zone_image_source(ZoneKind::Nexus)
+                                    .expect("obtained Nexus image source"),
+                                external_ip,
+                                initial_blueprint.nexus_generation,
+                            )
+                            .unwrap();
+                    }
+                    if discretionary_ix == 0 {
+                        builder
+                            .sled_add_zone_clickhouse(
+                                sled_id,
+                                self.target_release
+                                    .zone_image_source(ZoneKind::Clickhouse)
+                                    .expect("obtained Clickhouse image source"),
+                            )
+                            .unwrap();
+                    }
+                    let mut internal_dns_subnets =
+                        builder.available_internal_dns_subnets().unwrap();
+                    for _ in 0..self
+                        .internal_dns_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        builder
+                            .sled_add_zone_internal_dns(
+                                sled_id,
+                                self.target_release
+                                    .zone_image_source(ZoneKind::InternalDns)
+                                    .expect(
+                                        "obtained InternalDNS image source",
+                                    ),
+                                internal_dns_subnets.next().expect(
+                                    "sufficient available internal DNS subnets",
+                                ),
+                            )
+                            .unwrap();
+                    }
+                    for _ in 0..self
+                        .external_dns_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        let external_ip = external_networking_alloc
+                            .for_new_external_dns()
+                            .expect(
+                                "should have an external IP for external DNS",
+                            );
+                        builder
+                            .sled_add_zone_external_dns(
+                                sled_id,
+                                self.target_release
+                                    .zone_image_source(ZoneKind::ExternalDns)
+                                    .expect(
+                                        "obtained ExternalDNS image source",
+                                    ),
+                                external_ip,
+                            )
+                            .unwrap();
+                    }
+                    for _ in 0..self
+                        .crucible_pantry_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        builder
+                            .sled_add_zone_crucible_pantry(
+                                sled_id,
+                                self.target_release
+                                    .zone_image_source(ZoneKind::CruciblePantry)
+                                    .expect(
+                                        "obtained CruciblePantry image source",
+                                    ),
+                            )
+                            .unwrap();
+                    }
+                    discretionary_ix += 1;
                 }
-                if i == 0 {
-                    builder.sled_add_zone_clickhouse(sled_id).unwrap();
-                }
-                for _ in 0..self.internal_dns_count.on(i, self.nsleds) {
-                    builder.sled_add_zone_internal_dns(sled_id).unwrap();
-                }
-                for _ in 0..self.external_dns_count.on(i, self.nsleds) {
-                    builder.sled_add_zone_external_dns(sled_id).unwrap();
-                }
-                for _ in 0..self.crucible_pantry_count.on(i, self.nsleds) {
-                    builder.sled_add_zone_crucible_pantry(sled_id).unwrap();
-                }
-            }
-            if self.create_zones {
+
                 for pool_name in sled_details.resources.zpools.keys() {
                     let _ = builder
-                        .sled_ensure_zone_crucible(sled_id, *pool_name)
+                        .sled_ensure_zone_crucible(
+                            sled_id,
+                            *pool_name,
+                            self.target_release
+                                .zone_image_source(ZoneKind::Crucible)
+                                .expect("obtained Crucible image source"),
+                        )
                         .unwrap();
                 }
             }
             builder.sled_ensure_zone_datasets(sled_id).unwrap();
+
+            if let Some(artifacts_by_kind) = &artifacts_by_kind {
+                // Set the host phase 2 artifact version to Artifact to avoid a
+                // noop conversion in the first planning run.
+                let host_phase_2_artifact =
+                    artifacts_by_kind.get(&ArtifactKind::HOST_PHASE_2).unwrap();
+
+                builder
+                    .sled_set_host_phase_2(
+                        sled_id,
+                        BlueprintHostPhase2DesiredSlots {
+                            slot_a:
+                                BlueprintHostPhase2DesiredContents::Artifact {
+                                    version:
+                                        BlueprintArtifactVersion::Available {
+                                            version: host_phase_2_artifact
+                                                .id
+                                                .version
+                                                .clone(),
+                                        },
+                                    hash: host_phase_2_artifact.hash,
+                                },
+                            slot_b:
+                                BlueprintHostPhase2DesiredContents::Artifact {
+                                    version:
+                                        BlueprintArtifactVersion::Available {
+                                            version: host_phase_2_artifact
+                                                .id
+                                                .version
+                                                .clone(),
+                                        },
+                                    hash: host_phase_2_artifact.hash,
+                                },
+                        },
+                    )
+                    .expect("sled is present in blueprint");
+            };
         }
 
-        let blueprint = builder.build();
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Find and set the set of active Nexuses
+        let active_nexus_zone_ids: BTreeSet<_> = blueprint
+            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .filter_map(|(_, zone, nexus_zone)| {
+                if nexus_zone.nexus_generation == blueprint.nexus_generation {
+                    Some(zone.id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        input_builder.set_active_nexus_zones(active_nexus_zone_ids.clone());
+        system.set_active_nexus_zones(active_nexus_zone_ids);
+
         for sled_cfg in blueprint.sleds.values() {
             for zone in sled_cfg.zones.iter() {
                 let service_id = zone.id;
@@ -474,6 +751,24 @@ impl ExampleSystemBuilder {
                     input_builder
                         .add_omicron_zone_external_ip(service_id, external_ip)
                         .expect("failed to add Omicron zone external IP");
+                    // TODO-completess: Support dual-stack Omicron zone NICs.
+                    // See https://github.com/oxidecomputer/omicron/issues/9314
+                    assert!(
+                        !nic.ip_config.is_dual_stack(),
+                        "Dual-stack OmicronZoneNics are not yet supported"
+                    );
+                    let ip = nic
+                        .ip_config
+                        .ipv4_addr()
+                        .copied()
+                        .map(IpAddr::V4)
+                        .unwrap_or_else(|| {
+                            nic.ip_config
+                                .ipv6_addr()
+                                .copied()
+                                .map(IpAddr::V6)
+                                .expect("must have at least one IP address")
+                        });
                     input_builder
                         .add_omicron_zone_nic(
                             service_id,
@@ -481,7 +776,7 @@ impl ExampleSystemBuilder {
                                 // TODO-cleanup use `TypedUuid` everywhere
                                 id: VnicUuid::from_untyped_uuid(nic.id),
                                 mac: nic.mac,
-                                ip: nic.ip,
+                                ip,
                                 slot: nic.slot,
                                 primary: nic.primary,
                             },
@@ -510,6 +805,90 @@ impl ExampleSystemBuilder {
             }
         }
 
+        if let Some(artifacts_by_kind) = &artifacts_by_kind {
+            // Set all MGS and host phase 2 versions out of the TUF repo to
+            // ensure that the planner is quiesced at the time the initial
+            // system is returned.
+            let sp_version = artifacts_by_kind
+                .get(&ArtifactKind::from(KnownArtifactKind::GimletSp))
+                .unwrap()
+                .id
+                .version
+                .clone();
+            let rot_a_version = artifacts_by_kind
+                .get(&ArtifactKind::GIMLET_ROT_IMAGE_A)
+                .unwrap()
+                .id
+                .version
+                .clone();
+            let rot_b_version = artifacts_by_kind
+                .get(&ArtifactKind::GIMLET_ROT_IMAGE_B)
+                .unwrap()
+                .id
+                .version
+                .clone();
+            let host_phase_1_hash = artifacts_by_kind
+                .get(&ArtifactKind::GIMLET_HOST_PHASE_1)
+                .unwrap()
+                .hash;
+            let host_phase_2_hash = artifacts_by_kind
+                .get(&ArtifactKind::HOST_PHASE_2)
+                .unwrap()
+                .hash;
+
+            for sled_id in blueprint.sleds.keys() {
+                system
+                    .sled_update_sp_versions(
+                        *sled_id,
+                        Some(sp_version.clone()),
+                        Some(ExpectedVersion::Version(sp_version.clone())),
+                    )
+                    .expect("sled was just added to the system");
+                system
+                    .sled_update_rot_versions(
+                        *sled_id,
+                        RotStateOverrides {
+                            active_slot_override: None,
+                            slot_a_version_override: Some(
+                                ExpectedVersion::Version(rot_a_version.clone()),
+                            ),
+                            slot_b_version_override: Some(
+                                ExpectedVersion::Version(rot_b_version.clone()),
+                            ),
+                            persistent_boot_preference_override: None,
+                            pending_persistent_boot_preference_override: None,
+                            transient_boot_preference_override: None,
+                        },
+                    )
+                    .expect("sled was just added to the system");
+
+                // TODO-correctness Need to choose gimlet vs cosmo here! Need help
+                // from tufaceous to tell us which is which.
+                // https://github.com/oxidecomputer/omicron/issues/8777
+                system
+                    .sled_update_host_phase_1_artifacts(
+                        *sled_id,
+                        None,
+                        Some(host_phase_1_hash),
+                        Some(host_phase_1_hash),
+                    )
+                    .expect("sled was just added to the system");
+
+                // We must set host phase 2 artifacts after sled_set_omicron_config
+                // is called, because sled_set_omicron_config resets
+                // last_reconciliation state and wipes away host phase 2 artifact
+                // hashes.
+                system
+                    .sled_update_host_phase_2_artifacts(
+                        *sled_id,
+                        None,
+                        Some(host_phase_2_hash),
+                        Some(host_phase_2_hash),
+                    )
+                    .expect("sled was just added to the system");
+            }
+        }
+
         let mut builder =
             system.to_collection_builder().expect("failed to build collection");
         builder.set_rng(rng.collection_rng);
@@ -523,6 +902,18 @@ impl ExampleSystemBuilder {
             initial_blueprint,
         };
         (example, blueprint)
+    }
+}
+
+/// Per-sled state.
+#[derive(Clone, Debug)]
+struct BuilderSledSettings {
+    policy: SledPolicy,
+}
+
+impl Default for BuilderSledSettings {
+    fn default() -> Self {
+        Self { policy: SledPolicy::provisionable() }
     }
 }
 
@@ -541,13 +932,102 @@ impl ZoneCount {
     }
 }
 
+/// The default key for TUF repository generation.
+///
+/// This was randomly generated through a tufaceous invocation.
+pub static DEFAULT_TUFACEOUS_KEY: &str = "ed25519:\
+MFECAQEwBQYDK2VwBCIEIJ9CnAhwk8PPt1x8icu\
+z9c12PdfCRHJpoUkuqJmIZ8GbgSEAbNGMpsHK5_w32\
+qwYdZH_BeVssmKzQlFsnPuaiHx2hy0=";
+
+/// Construct a TUF repository zip file from a manifest, writing the TUF zip
+/// file out to `output_path`.
+pub fn tuf_assemble(
+    log: &slog::Logger,
+    manifest_path: &Utf8Path,
+    output_path: &Utf8Path,
+    allow_non_semver: bool,
+) -> anyhow::Result<()> {
+    if output_path.exists() {
+        bail!("output path `{output_path}` already exists");
+    }
+
+    // Just use a fixed key for now.
+    //
+    // In the future we may want to test changing the TUF key.
+    let mut tufaceous_args = vec![
+        "tufaceous",
+        "--key",
+        DEFAULT_TUFACEOUS_KEY,
+        "assemble",
+        manifest_path.as_str(),
+        output_path.as_str(),
+    ];
+
+    if allow_non_semver {
+        tufaceous_args.push("--allow-non-semver");
+    }
+    let args = tufaceous::Args::try_parse_from(tufaceous_args)
+        .expect("args are valid so this shouldn't fail");
+    let rt =
+        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
+    rt.block_on(async move { args.exec(log).await })
+        .context("error executing tufaceous assemble")?;
+
+    Ok(())
+}
+
+pub fn extract_tuf_repo_description(
+    log: &slog::Logger,
+    zip_path: &Utf8Path,
+) -> anyhow::Result<TufRepoDescription> {
+    let file = std::fs::File::open(zip_path)
+        .with_context(|| format!("open {:?}", zip_path))?;
+    let buf = std::io::BufReader::new(file);
+    let rt =
+        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
+    let repo_hash = ArtifactHash([0; 32]);
+    let artifacts_with_plan = rt.block_on(async {
+        ArtifactsWithPlan::from_zip(
+            buf,
+            None,
+            repo_hash,
+            ControlPlaneZonesMode::Split,
+            VerificationMode::BlindlyTrustAnything,
+            log,
+        )
+        .await
+        .with_context(|| format!("unpacking {:?}", zip_path))
+    })?;
+    let description = artifacts_with_plan.description().clone();
+    Ok(description)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    use anyhow::anyhow;
     use chrono::{DateTime, Utc};
-    use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
+    use hickory_resolver::ResolveErrorKind;
+    use hickory_resolver::proto::ProtoErrorKind;
+    use iddqd::IdOrdMap;
+    use internal_dns_resolver::QorbResolver;
+    use internal_dns_resolver::ResolveError;
+    use internal_dns_resolver::Resolver;
+    use internal_dns_types::names::ServiceName;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::execution::blueprint_internal_dns_config;
+    use nexus_types::deployment::execution::overridables;
+    use nexus_types::internal_api::params::DnsConfigParams;
+    use omicron_common::address::REPO_DEPOT_PORT;
+    use omicron_common::address::get_sled_address;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
+    use slog_error_chain::InlineErrorChain;
 
     use super::*;
 
@@ -597,9 +1077,9 @@ mod tests {
         );
 
         // Check that the system's target counts are set correctly.
-        assert_eq!(example.system.get_target_nexus_zone_count(), 6);
-        assert_eq!(example.system.get_target_internal_dns_zone_count(), 2);
-        assert_eq!(example.system.get_target_crucible_pantry_zone_count(), 5);
+        assert_eq!(example.system.target_nexus_zone_count(), 6);
+        assert_eq!(example.system.target_internal_dns_zone_count(), 2);
+        assert_eq!(example.system.target_crucible_pantry_zone_count(), 5);
 
         // Check that the right number of zones are present in both the
         // blueprint and in the collection.
@@ -687,6 +1167,303 @@ mod tests {
         );
 
         logctx.cleanup_successful();
+    }
+
+    /// Test that services set up by the example system are reachable via DNS.
+    ///
+    /// This test catches issues like #9176, where a too-large DNS response can
+    /// cause packet fragmentation and queries to be lost.
+    #[tokio::test]
+    async fn dns_resolution_works() {
+        static TEST_NAME: &str = "dns_resolution_works";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Build a somewhat exaggerated, fully populated system with twice the
+        // number of Nexuses as a system in typical use.
+        let (example, blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(32)
+                .nexus_count(6)
+                .build();
+        let sleds_by_id = blueprint
+            .sleds
+            .keys()
+            .map(|sled_id| {
+                let sled_details = example
+                    .input
+                    .sled_lookup(SledFilter::Commissioned, *sled_id)
+                    .unwrap();
+                let sled_agent =
+                    example.collection.sled_agents.get(sled_id).unwrap_or_else(
+                        || panic!("sled {} not found in collection", sled_id),
+                    );
+                nexus_types::deployment::execution::Sled::new(
+                    *sled_id,
+                    sled_details.policy,
+                    get_sled_address(sled_details.resources.subnet),
+                    REPO_DEPOT_PORT,
+                    sled_agent.sled_role,
+                )
+            })
+            .collect::<IdOrdMap<_>>();
+
+        let dns_config = blueprint_internal_dns_config(
+            &blueprint,
+            &sleds_by_id,
+            Generation::new(),
+            &overridables::DEFAULT,
+        )
+        .expect("built DNS configuration");
+        eprintln!("DNS config: {dns_config:#?}");
+        let params = DnsConfigParams {
+            generation: Generation::new().next(),
+            serial: 0,
+            time_created: Utc::now(),
+            zones: vec![dns_config],
+        };
+
+        // Initialize a DNS server.
+        let dns = dns_server::TransientServer::new(&logctx.log)
+            .await
+            .expect("created DNS server");
+        dns.initialize_with_config(&logctx.log, &params)
+            .await
+            .expect("initialized DNS server");
+
+        // Query with the simple DNS resolver.
+        {
+            let resolver = Resolver::new_from_addrs(
+                logctx.log.clone(),
+                &[dns.dns_server.local_address()],
+            )
+            .expect("created DNS resolver");
+
+            let mut mismatched = BTreeMap::new();
+            for (service, expected_result) in service_names_to_query(&blueprint)
+            {
+                // Large packets can be fragmented which would cause lookups to
+                // timeout. Don't query services that we expect to have
+                // fragmented packets.
+                if expected_result == Err(QueryError::PacketFragmented) {
+                    continue;
+                }
+
+                eprintln!(
+                    "** looking up DNS for {:?} (expected: {:?})",
+                    service, expected_result
+                );
+
+                let lookup_result =
+                    resolver.lookup_all_socket_v6(service).await;
+                match (lookup_result, expected_result) {
+                    (Ok(addrs), Ok(())) => {
+                        if addrs.is_empty() {
+                            mismatched.insert(
+                                service,
+                                anyhow!("no addresses returned"),
+                            );
+                        }
+
+                        eprintln!("*** lookup successful: {addrs:?}");
+                    }
+                    (Ok(addrs), Err(e)) => {
+                        mismatched.insert(
+                            service,
+                            anyhow!(
+                                "expected Err({e:?}), but got Ok({addrs:?})"
+                            ),
+                        );
+                    }
+                    (Err(e), Ok(())) => {
+                        mismatched.insert(
+                            service,
+                            anyhow!(e)
+                                .context("expected Ok(()), but got an error"),
+                        );
+                    }
+                    (Err(e), Err(QueryError::NoRecordsFound)) => {
+                        // "No records found" is returned as a hickory ProtoError.
+                        if let ResolveError::Resolve(resolve_error) = &e {
+                            if let ResolveErrorKind::Proto(proto_error) =
+                                resolve_error.kind()
+                            {
+                                if let ProtoErrorKind::NoRecordsFound {
+                                    ..
+                                } = proto_error.kind()
+                                {
+                                    // This is the expected error case.
+                                    eprintln!(
+                                        "*** no records found as expected"
+                                    )
+                                } else {
+                                    mismatched.insert(
+                                        service,
+                                        anyhow!(
+                                            "expected NoRecordsFound error, \
+                                             but got a different proto error: {e:?}"
+                                        ),
+                                    );
+                                }
+                            } else {
+                                mismatched.insert(
+                                    service,
+                                    anyhow!(
+                                        "expected Proto error with NoRecordsFound, \
+                                        but got a different resolve error: {e:?}"
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    (_, Err(QueryError::PacketFragmented)) => {
+                        unreachable!("we don't query PacketFragmented")
+                    }
+                }
+            }
+
+            if !mismatched.is_empty() {
+                let mut errors = Vec::new();
+                for (service, error) in mismatched {
+                    errors.push(format!(
+                        "{:?}: {}",
+                        service,
+                        InlineErrorChain::new(error.as_ref())
+                    ));
+                }
+                panic!(
+                    "unexpected DNS lookup results for some services:\n{}",
+                    errors.join("\n"),
+                );
+            }
+        }
+
+        // Query with the qorb DNS resolver.
+        {
+            let resolver =
+                QorbResolver::new(vec![dns.dns_server.local_address()]);
+
+            // Ensure that service names can be looked up via the qorb resolver.
+            let mut services_with_errors = BTreeMap::new();
+            for (service, expected_result) in service_names_to_query(&blueprint)
+            {
+                // We can't really use qorb to query error cases, since those
+                // are handled internally by the resolver. Just query the
+                // success cases.
+                if expected_result.is_err() {
+                    continue;
+                }
+
+                eprintln!("*** using qorb to look up DNS for {:?}", service);
+                let mut srv_resolver = resolver.for_service(service);
+                let mut monitor_rx = srv_resolver.monitor();
+
+                // Wait for at least one result to be returned. We don't want to
+                // wait forever, so set a reasonable timeout. (15s matches the
+                // internal timeout within the simple DNS resolver.)
+                let backends = match tokio::time::timeout(
+                    Duration::from_secs(15),
+                    monitor_rx.wait_for(|backends| !backends.is_empty()),
+                )
+                .await
+                {
+                    Ok(Ok(backends)) => backends,
+                    Ok(Err(e)) => {
+                        services_with_errors.insert(service, anyhow!(e));
+                        continue;
+                    }
+                    Err(e) => {
+                        services_with_errors.insert(service, anyhow!(e));
+                        continue;
+                    }
+                };
+
+                eprintln!("*** qorb lookup successful: {:?}", &**backends);
+            }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Returns the list of potential DNS service names in an example system,
+    /// along with whether we expect a successful or error response for each of
+    /// them.
+    fn service_names_to_query(
+        blueprint: &Blueprint,
+    ) -> BTreeMap<ServiceName, Result<(), QueryError>> {
+        let mut out = BTreeMap::new();
+
+        for service in ServiceName::iter() {
+            match service {
+                // Services that exist in the example system.
+                ServiceName::Clickhouse
+                | ServiceName::ClickhouseAdminSingleServer
+                | ServiceName::ClickhouseNative
+                | ServiceName::InternalDns
+                | ServiceName::Nexus
+                | ServiceName::NexusLockstep
+                | ServiceName::OximeterReader
+                | ServiceName::RepoDepot
+                | ServiceName::CruciblePantry => {
+                    out.insert(service, Ok(()));
+                }
+                // Services that are not currently part of the example system.
+                //
+                // TODO: They really should be part of the example system (at
+                // least in an optional mode). See
+                // https://github.com/oxidecomputer/omicron/issues/9349.
+                ServiceName::ClickhouseAdminKeeper
+                | ServiceName::ClickhouseAdminServer
+                | ServiceName::ClickhouseClusterNative
+                | ServiceName::ClickhouseKeeper
+                | ServiceName::ClickhouseServer
+                | ServiceName::Cockroach
+                | ServiceName::ExternalDns
+                | ServiceName::Oximeter
+                | ServiceName::ManagementGatewayService
+                | ServiceName::Wicketd
+                | ServiceName::Dendrite
+                | ServiceName::Tfport
+                | ServiceName::BoundaryNtp
+                | ServiceName::Maghemite
+                | ServiceName::Mgd => {
+                    out.insert(service, Err(QueryError::NoRecordsFound));
+                }
+                // InternalNtp is too large to fit in a single DNS packet and
+                // therefore times out, but DNS lookups for it aren't used
+                // anywhere. See #9178.
+                ServiceName::InternalNtp => {
+                    out.insert(service, Err(QueryError::PacketFragmented));
+                }
+                ServiceName::SledAgent(_) => {
+                    // Sled Agent DNS records don't currently exist. (Maybe they
+                    // should?)
+                    for sled_id in blueprint.sleds() {
+                        out.insert(
+                            ServiceName::SledAgent(sled_id),
+                            Err(QueryError::NoRecordsFound),
+                        );
+                    }
+                }
+                ServiceName::Crucible(_) => {
+                    // Each Crucible zone should be queryable.
+                    for (_, zone) in blueprint.all_omicron_zones(
+                        BlueprintZoneDisposition::is_in_service,
+                    ) {
+                        if zone.kind() == ZoneKind::Crucible {
+                            out.insert(ServiceName::Crucible(zone.id), Ok(()));
+                        }
+                    }
+                }
+            }
+        }
+
+        out
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum QueryError {
+        NoRecordsFound,
+        PacketFragmented,
     }
 
     fn blueprint_zones_of_kind(

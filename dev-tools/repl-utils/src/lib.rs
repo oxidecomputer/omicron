@@ -9,11 +9,14 @@ use anyhow::anyhow;
 use anyhow::bail;
 use camino::Utf8Path;
 use clap::Parser;
+use reedline::Prompt;
 use reedline::Reedline;
 use reedline::Signal;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::Write;
+use subprocess::Exec;
 
 /// Runs the same kind of REPL as `run_repl_on_stdin()`, but reads commands from
 /// a file
@@ -108,13 +111,24 @@ pub fn run_repl_from_file<C: Parser>(
 pub fn run_repl_on_stdin<C: Parser>(
     run_one: &mut dyn FnMut(C) -> anyhow::Result<Option<String>>,
 ) -> anyhow::Result<()> {
-    let mut ed = Reedline::create();
+    let ed = Reedline::create();
     let prompt = reedline::DefaultPrompt::new(
         reedline::DefaultPromptSegment::Empty,
         reedline::DefaultPromptSegment::Empty,
     );
+    run_repl_on_stdin_customized(ed, &prompt, run_one)
+}
+
+/// Runs a REPL using stdin/stdout with a customized `Reedline` and `Prompt`
+///
+/// See docs for [`run_repl_on_stdin`]
+pub fn run_repl_on_stdin_customized<C: Parser>(
+    mut ed: Reedline,
+    prompt: &dyn Prompt,
+    run_one: &mut dyn FnMut(C) -> anyhow::Result<Option<String>>,
+) -> anyhow::Result<()> {
     loop {
-        match ed.read_line(&prompt) {
+        match ed.read_line(prompt) {
             Ok(Signal::Success(buffer)) => {
                 // Strip everything after '#' as a comment.
                 let entry = match buffer.split_once('#') {
@@ -148,12 +162,21 @@ fn process_entry<C: Parser>(
         return LoopResult::Continue;
     }
 
-    // Parse the line of input as a REPL command.
+    // Split on the first `!` character if it exists. Use the first
+    // element of the iterator as the REPL command to parse via clap. Use the
+    // second element, if it exists, as the shell command to pipe the output of
+    // the REPL command into.
+    let mut split = entry.splitn(2, '!');
+
+    // Parse the line of input before any `!` as a REPL command.
     //
     // Using `split_whitespace()` like this is going to be a problem if we ever
     // want to support arguments with whitespace in them (using quotes).  But
     // it's good enough for now.
-    let parts = entry.split_whitespace();
+    //
+    // SAFETY: There is always at least one element in the iterator.
+    let parts = split.next().expect("element exists").split_whitespace();
+
     let parsed_command = C::command()
         .multicall(true)
         .try_get_matches_from(parts)
@@ -176,7 +199,35 @@ fn process_entry<C: Parser>(
 
     match run_one(command) {
         Err(error) => println!("error: {:#}", error),
-        Ok(Some(s)) => println!("{}", s),
+        Ok(Some(repl_cmd_output)) => {
+            if let Some(shell_cmd) = split.next() {
+                let mut child_stdin = Exec::shell(shell_cmd)
+                    .stream_stdin()
+                    .expect("stdin opened");
+
+                // Using `write_all` doesn't play nicely with the shell group
+                // leader, likely due to blocking/signal behavior. We therefore
+                // manually loop over calls to `write`.
+                let mut written_bytes = 0;
+                let to_write = repl_cmd_output.len();
+                while written_bytes < to_write {
+                    match child_stdin
+                        .write(&repl_cmd_output.as_bytes()[written_bytes..])
+                    {
+                        Ok(0) => break,
+                        Ok(n) => written_bytes += n,
+                        Err(_) => {
+                            // Broken pipe is a normal condition reflecting
+                            // that the child process exited early (e.g., as
+                            // `head(1)` does).
+                            break;
+                        }
+                    }
+                }
+            } else {
+                println!("{repl_cmd_output}");
+            }
+        }
         Ok(None) => (),
     }
 

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 //! Types for working with actual blocks and columns of data.
 
@@ -45,7 +45,7 @@ use uuid::Uuid;
 /// results of a query. It is not necessarily the entire set of data -- most
 /// queries result in sending more than one block. But every query (and some of
 /// the management or status commands) sends data as one or more block.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Block {
     /// A name for the block.
     ///
@@ -282,7 +282,7 @@ impl Block {
 ///
 /// This is only used for a few special kinds of queries. See the fields for
 /// details.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct BlockInfo {
     /// True if this is an "overflow" block, which is the case if:
     ///
@@ -325,7 +325,7 @@ impl Default for BlockInfo {
 ///
 /// This represents a single column of data fetched in a query or sent in an
 /// insert. It includes the type implicitly, in the value array it contains.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Column {
     /// The data values for this column.
     pub values: ValueArray,
@@ -370,7 +370,7 @@ impl Column {
 }
 
 /// An array of singly-typed data values from the server.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub enum ValueArray {
     Bool(Vec<bool>),
     UInt8(Vec<u8>),
@@ -689,7 +689,8 @@ impl From<Vec<IpAddr>> for ValueArray {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
 pub struct Precision(u8);
 
 impl TryFrom<u8> for Precision {
@@ -792,7 +793,7 @@ impl fmt::Display for Precision {
 }
 
 /// A type of a column of data.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub enum DataType {
     Bool,
     UInt8,

@@ -33,6 +33,7 @@
 
 use async_trait::async_trait;
 use nexus_config::NexusConfig;
+use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
@@ -43,15 +44,17 @@ use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
+use std::sync::Arc;
+use tokio::sync::watch;
 
 #[async_trait]
 pub trait NexusServer: Send + Sync + 'static {
-    type InternalServer: Send + Sync + 'static;
+    type InternalServer: InternalServer;
 
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-    ) -> Result<(Self::InternalServer, SocketAddr), String>;
+    ) -> Result<Self::InternalServer, String>;
 
     /// Stops the execution of a `Self::InternalServer`.
     ///
@@ -75,15 +78,20 @@ pub trait NexusServer: Send + Sync + 'static {
         >,
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
+        recovery_silo: sled_agent_types::rack_init::RecoverySiloConfig,
         tls_certificates: Vec<
             omicron_common::api::internal::nexus::Certificate,
         >,
     ) -> Self;
 
-    async fn get_http_server_external_address(&self) -> SocketAddr;
-    async fn get_http_server_techport_address(&self) -> SocketAddr;
-    async fn get_http_server_internal_address(&self) -> SocketAddr;
+    fn datastore(&self) -> &Arc<db::DataStore>;
+
+    fn inventory_load_rx(&self) -> watch::Receiver<Option<Arc<Collection>>>;
+
+    fn get_http_server_external_address(&self) -> SocketAddr;
+    fn get_http_server_techport_address(&self) -> SocketAddr;
+    fn get_http_server_internal_address(&self) -> SocketAddr;
+    fn get_http_server_lockstep_address(&self) -> SocketAddr;
 
     // Previously, as a dataset was created (within the sled agent),
     // we'd use an internal API from Nexus to record that the dataset
@@ -123,4 +131,9 @@ pub trait NexusServer: Send + Sync + 'static {
     ) -> Result<Option<Collection>, Error>;
 
     async fn close(self);
+}
+
+pub trait InternalServer: Send + Sync + 'static {
+    fn get_http_server_internal_address(&self) -> SocketAddr;
+    fn get_http_server_lockstep_address(&self) -> SocketAddr;
 }

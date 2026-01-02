@@ -54,7 +54,7 @@ fn password_benchmark(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("Password verify");
     for c in &configs {
-        let mut hasher = Hasher::new(c.params.clone(), rand::thread_rng());
+        let mut hasher = Hasher::new(c.params.clone(), rand::rng());
         let hash_str = hasher.create_password(&password).unwrap();
         group.bench_function(c.name, |b| {
             b.iter(|| {
@@ -66,7 +66,7 @@ fn password_benchmark(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("Password create");
     for c in configs {
-        let mut hasher = Hasher::new(c.params, rand::thread_rng());
+        let mut hasher = Hasher::new(c.params, rand::rng());
         group.bench_function(c.name, |b| {
             b.iter(|| {
                 hasher.create_password(&password).unwrap();

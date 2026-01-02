@@ -9,12 +9,15 @@ use crate::Nexus;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::internal_api::views::BackgroundTask;
+use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::sync::Arc;
+use tokio::sync::watch;
 
 impl Nexus {
     pub(crate) async fn bgtasks_list(
@@ -88,6 +91,12 @@ impl Nexus {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn inventory_load_rx(
+        &self,
+    ) -> watch::Receiver<Option<Arc<Collection>>> {
+        self.background_tasks_internal.inventory_load_rx()
     }
 
     fn driver(&self) -> Result<&Driver, Error> {

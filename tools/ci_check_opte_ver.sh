@@ -33,7 +33,26 @@ API_VER=$(curl -s https://raw.githubusercontent.com/oxidecomputer/opte/"$OPTE_RE
 # use the total number of pages to get the total number of commits.
 # Thus the query parameter `page` in the "last" link (e.g. `&page=162`)
 # gives us the rev count we want.
-REV_COUNT=$(curl -I -s "https://api.github.com/repos/oxidecomputer/opte/commits?per_page=1&sha=$OPTE_REV" | sed -n '/^[Ll]ink:/ s/.*"next".*page=\([0-9]*\).*"last".*/\1/p')
+#
+# We should be resilient against a transient GitHub issue here. If GitHub gives
+# any answer, we'll carry on trying to get a page number out, but we really
+# shouldn't if we get a non-200 error. We could `curl -f` to fail for a 4xx or
+# above status, but then the observed output when this fails would be an opaque
+# "exited with status 22" or something. Help ourselves out and keep the response
+# head, printing that if something goes sideways instead.
+COMMIT_INFO_HEAD="$(curl -I -s "https://api.github.com/repos/oxidecomputer/opte/commits?per_page=1&sha=$OPTE_REV")"
+REV_COUNT=$(echo "$COMMIT_INFO_HEAD" | sed -n '/^[Ll]ink:/ s/.*"next".*page=\([0-9]*\).*"last".*/\1/p')
+
+if [ -z "$REV_COUNT" ]; then
+    # We didn't get a OPTE rev out. The rev *should* exist, so it should not be
+    # a 404. If this is a 5xx, it might be a transient error from GitHub. In
+    # either case, errors are infrequent enough lets just dump the response head
+    # and hope someone can do something contextually appropriate. And hope this
+    # doesn't become regular enough anyone wants to be smarter.
+    echo "Could not get rev count from GitHub response. Response headers:"
+    echo "$COMMIT_INFO_HEAD"
+    exit 1
+fi
 
 # Combine the API version and the revision count to get the full version
 OPTE_VER="0.$API_VER.$REV_COUNT"
