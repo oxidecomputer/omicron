@@ -71,6 +71,7 @@ members = [
     "internal-dns/cli",
     "internal-dns/resolver",
     "internal-dns/types",
+    "internal-dns/types/versions",
     "ipcc",
     "key-manager",
     "live-tests",
@@ -242,6 +243,7 @@ default-members = [
     "internal-dns/cli",
     "internal-dns/resolver",
     "internal-dns/types",
+    "internal-dns/types/versions",
     "ipcc",
     "key-manager",
     "live-tests",
@@ -539,6 +541,7 @@ installinator-common = { path = "installinator-common" }
 installinator-common-versions = { path = "installinator-common/versions" }
 internal-dns-resolver = { path = "internal-dns/resolver" }
 internal-dns-types = { path = "internal-dns/types" }
+internal-dns-types-versions = { path = "internal-dns/types/versions" }
 ipcc = { path = "ipcc" }
 ipnet = "2.9"
 itertools = "0.14.0"
