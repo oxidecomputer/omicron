@@ -39,6 +39,7 @@ members = [
     "dev-tools/db-dev",
     "dev-tools/downloader",
     "dev-tools/dropshot-apis",
+    "dev-tools/hist",
     "dev-tools/ls-apis",
     "dev-tools/mgs-dev",
     "dev-tools/omdb",
@@ -208,6 +209,7 @@ default-members = [
     "dev-tools/db-dev",
     "dev-tools/downloader",
     "dev-tools/dropshot-apis",
+    "dev-tools/hist",
     "dev-tools/ls-apis",
     "dev-tools/mgs-dev",
     "dev-tools/omdb",
@@ -671,6 +673,7 @@ prettyplease = { version = "0.2.36", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.10.0"
 progenitor-client = "0.10.0"
+quick-xml = "0.37.1"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
