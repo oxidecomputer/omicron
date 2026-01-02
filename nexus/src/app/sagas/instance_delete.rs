@@ -276,6 +276,7 @@ mod test {
                 params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![params::ExternalIpCreate::Ephemeral {
                 pool: None,
+                ip_version: None,
             }],
             boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },

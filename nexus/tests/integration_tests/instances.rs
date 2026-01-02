@@ -7463,6 +7463,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool: Some("pool1".parse::<Name>().unwrap().into()),
+            ip_version: None,
         }],
         ssh_public_keys: None,
         disks: vec![],
@@ -7536,6 +7537,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool: Some("orphan-pool".parse::<Name>().unwrap().into()),
+            ip_version: None,
         }],
         ssh_public_keys: None,
         disks: vec![],
@@ -7603,6 +7605,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool: None, // <--- the only important thing here
+            ip_version: None,
         }],
         ssh_public_keys: None,
         disks: vec![],
@@ -7624,6 +7627,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
     let body = params::InstanceCreate {
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool: Some("nonexistent-pool".parse::<Name>().unwrap().into()),
+            ip_version: None,
         }],
         ..body
     };
@@ -7654,8 +7658,10 @@ async fn test_instance_attach_several_external_ips(
     assert_ip_pool_utilization(client, "default", 0, capacity).await;
 
     // Create several floating IPs for the instance, totalling 8 IPs.
-    let mut external_ip_create =
-        vec![params::ExternalIpCreate::Ephemeral { pool: None }];
+    let mut external_ip_create = vec![params::ExternalIpCreate::Ephemeral {
+        pool: None,
+        ip_version: None,
+    }];
     let mut fips = vec![];
     for i in 1..8 {
         let name = format!("fip-{i}");
@@ -7734,6 +7740,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
 
     let ephemeral_create = params::ExternalIpCreate::Ephemeral {
         pool: Some("default".parse::<Name>().unwrap().into()),
+        ip_version: None,
     };
     let create_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -7785,6 +7792,7 @@ async fn create_instance_with_pool(
         vec![],
         vec![params::ExternalIpCreate::Ephemeral {
             pool: pool_name.map(|name| name.parse::<Name>().unwrap().into()),
+            ip_version: None,
         }],
         true,
         Default::default(),
@@ -7889,6 +7897,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool: Some("default".parse::<Name>().unwrap().into()),
+            ip_version: None,
         }],
         disks: vec![],
         boot_disk: None,

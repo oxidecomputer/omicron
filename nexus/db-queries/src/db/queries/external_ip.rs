@@ -896,10 +896,10 @@ mod tests {
     use nexus_db_model::ByteCount;
     use nexus_db_model::ExternalIp;
     use nexus_db_model::IncompleteExternalIp;
+    use nexus_db_model::IncompleteIpPoolResource;
     use nexus_db_model::Instance;
     use nexus_db_model::InstanceCpuCount;
     use nexus_db_model::IpPoolReservationType;
-    use nexus_db_model::IpPoolResource;
     use nexus_db_model::IpPoolResourceType;
     use nexus_db_model::Name;
     use nexus_db_model::NetworkInterfaceKind;
@@ -963,7 +963,7 @@ mod tests {
                 .expect("Failed to create IP pool");
 
             let silo_id = self.db.opctx().authn.silo_required().unwrap().id();
-            let association = IpPoolResource {
+            let association = IncompleteIpPoolResource {
                 resource_id: silo_id,
                 resource_type: IpPoolResourceType::Silo,
                 ip_pool_id: pool.id(),
@@ -1200,6 +1200,7 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 /* pool_name = */ None,
+                None,
                 true,
             )
             .await
@@ -1244,6 +1245,7 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 /* pool_name = */ None,
+                None,
                 true,
             )
             .await;
@@ -1395,6 +1397,7 @@ mod tests {
                 id,
                 instance_id,
                 pool_name,
+                None,
                 true,
             )
             .await
@@ -1757,6 +1760,7 @@ mod tests {
                 id,
                 instance_id,
                 Some(p1),
+                None,
                 true,
             )
             .await
@@ -1803,6 +1807,7 @@ mod tests {
                     Uuid::new_v4(),
                     instance_id,
                     Some(p1.clone()),
+                    None,
                     true,
                 )
                 .await
@@ -1826,6 +1831,7 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 Some(p1),
+                None,
                 true,
             )
             .await
@@ -1968,6 +1974,7 @@ mod tests {
                     Uuid::new_v4(),
                     iid,
                     Some(p1.clone()),
+                    None,
                     true,
                 )
                 .await
@@ -1991,6 +1998,7 @@ mod tests {
                 ips[0].id,
                 instance_id.unwrap(),
                 Some(p1),
+                None,
                 true,
             )
             .await
@@ -2090,6 +2098,7 @@ mod tests {
                     id,
                     iid,
                     Some(pool.clone()),
+                    None,
                     true,
                 )
                 .await
@@ -2120,6 +2129,7 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 Some(pool),
+                None,
                 true,
             )
             .await
@@ -2253,6 +2263,7 @@ mod tests {
                 Uuid::new_v4(),
                 iid,
                 Some(authz_pool.clone()),
+                None,
                 true,
             )
             .await
@@ -2275,6 +2286,7 @@ mod tests {
                 Uuid::new_v4(),
                 iid,
                 Some(authz_pool.clone()),
+                None,
                 true,
             )
             .await

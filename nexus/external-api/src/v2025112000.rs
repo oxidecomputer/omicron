@@ -4,14 +4,8 @@
 
 //! Nexus external types that changed from 2025112000 to 2025120300
 
-use std::net::IpAddr;
-
-use crate::v2026010100;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
-use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Name;
-use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -189,58 +183,6 @@ impl From<InstanceDiskAttachment> for params::InstanceDiskAttachment {
     }
 }
 
-/// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
-/// at the time the instance is created.
-// NOTE: VPC's are an organizing concept for networking resources, not for
-// instances. It's true that all networking resources for an instance must
-// belong to a single VPC, but we don't consider instances to be "scoped" to a
-// VPC in the same way that they are scoped to projects, for example.
-//
-// This is slightly different than some other cloud providers, such as AWS,
-// which use VPCs as both a networking concept, and a container more similar to
-// our concept of a project. One example for why this is useful is that "moving"
-// an instance to a new VPC can be done by detaching any interfaces in the
-// original VPC and attaching interfaces in the new VPC.
-//
-// This type then requires the VPC identifiers, exactly because instances are
-// _not_ scoped to a VPC, and so the VPC and/or VPC Subnet names are not present
-// in the path of endpoints handling instance operations.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", content = "params", rename_all = "snake_case")]
-pub enum InstanceNetworkInterfaceAttachment {
-    /// Create one or more `InstanceNetworkInterface`s for the `Instance`.
-    ///
-    /// If more than one interface is provided, then the first will be
-    /// designated the primary interface for the instance.
-    Create(Vec<InstanceNetworkInterfaceCreate>),
-
-    /// The default networking configuration for an instance is to create a
-    /// single primary interface with an automatically-assigned IP address. The
-    /// IP will be pulled from the Project's default VPC / VPC Subnet.
-    #[default]
-    Default,
-
-    /// No network interfaces at all will be created for the instance.
-    None,
-}
-
-/// Create-time parameters for an `InstanceNetworkInterface`
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceNetworkInterfaceCreate {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    /// The VPC in which to create the interface.
-    pub vpc_name: Name,
-    /// The VPC Subnet in which to create the interface.
-    pub subnet_name: Name,
-    /// The IP address for the interface. One will be auto-assigned if not provided.
-    pub ip: Option<IpAddr>,
-    /// A set of additional networks that this interface may send and
-    /// receive traffic on.
-    #[serde(default)]
-    pub transit_ips: Vec<IpNet>,
-}
-
 /// Create-time parameters for an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
@@ -269,7 +211,7 @@ pub struct InstanceCreate {
 
     /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interfaces: InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: params::InstanceNetworkInterfaceAttachment,
 
     /// The external IP addresses provided to this instance.
     ///
@@ -357,43 +299,15 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<external::InstanceCpuPlatform>,
 }
 
-impl From<InstanceNetworkInterfaceAttachment>
-    for v2026010100::InstanceNetworkInterfaceAttachment
-{
-    fn from(value: InstanceNetworkInterfaceAttachment) -> Self {
-        match value {
-            InstanceNetworkInterfaceAttachment::Create(nics) => {
-                Self::Create(nics.into_iter().map(Into::into).collect())
-            }
-            InstanceNetworkInterfaceAttachment::Default => Self::Default,
-            InstanceNetworkInterfaceAttachment::None => Self::None,
-        }
-    }
-}
-
-impl From<InstanceNetworkInterfaceCreate>
-    for v2026010100::InstanceNetworkInterfaceCreate
-{
-    fn from(value: InstanceNetworkInterfaceCreate) -> Self {
-        Self {
-            identity: value.identity,
-            vpc_name: value.vpc_name,
-            subnet_name: value.subnet_name,
-            ip: value.ip,
-            transit_ips: value.transit_ips,
-        }
-    }
-}
-
-impl From<InstanceCreate> for v2026010100::InstanceCreate {
-    fn from(old: InstanceCreate) -> v2026010100::InstanceCreate {
-        v2026010100::InstanceCreate {
+impl From<InstanceCreate> for params::InstanceCreate {
+    fn from(old: InstanceCreate) -> params::InstanceCreate {
+        params::InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,
             memory: old.memory,
             hostname: old.hostname,
             user_data: old.user_data,
-            network_interfaces: old.network_interfaces.into(),
+            network_interfaces: old.network_interfaces,
             external_ips: old.external_ips,
             multicast_groups: old.multicast_groups,
             disks: old.disks.into_iter().map(Into::into).collect(),

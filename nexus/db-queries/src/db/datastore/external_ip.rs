@@ -89,7 +89,7 @@ impl DataStore {
         pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalIp> {
         let authz_pool = self
-            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast, None)
             .await?;
         let data = IncompleteExternalIp::for_ephemeral_probe(
             ip_id,
@@ -117,6 +117,7 @@ impl DataStore {
         ip_id: Uuid,
         instance_id: InstanceUuid,
         pool: Option<authz::IpPool>,
+        ip_version: Option<IpVersion>,
         creating_instance: bool,
     ) -> CreateResult<(ExternalIp, bool)> {
         // This is slightly hacky: we need to create an unbound ephemeral IP, and
@@ -127,7 +128,12 @@ impl DataStore {
         // IP was not attached, including on idempotent success.
 
         let authz_pool = self
-            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .resolve_pool_for_allocation(
+                opctx,
+                pool,
+                IpPoolType::Unicast,
+                ip_version,
+            )
             .await?;
         let data = IncompleteExternalIp::for_ephemeral(ip_id, authz_pool.id());
 
@@ -197,6 +203,10 @@ impl DataStore {
     }
 
     /// Allocates a floating IP address for instance usage.
+    ///
+    /// If `ip_version` is provided and no pool is specified, the default pool
+    /// lookup will be filtered to that version. If both IPv4 and IPv6 default
+    /// pools exist and `ip_version` is `None`, an error is returned.
     pub async fn allocate_floating_ip(
         &self,
         opctx: &OpContext,
@@ -204,11 +214,17 @@ impl DataStore {
         identity: IdentityMetadataCreateParams,
         ip: Option<IpAddr>,
         pool: Option<authz::IpPool>,
+        ip_version: Option<IpVersion>,
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
         let authz_pool = self
-            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .resolve_pool_for_allocation(
+                opctx,
+                pool,
+                IpPoolType::Unicast,
+                ip_version,
+            )
             .await?;
 
         let data = if let Some(ip) = ip {
@@ -1202,11 +1218,24 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::{
+        create_project, create_stopped_instance_record,
+    };
+    use nexus_db_model::IncompleteIpPoolResource;
+    use nexus_db_model::IpPool;
+    use nexus_db_model::IpPoolReservationType;
+    use nexus_db_model::IpPoolResourceType;
+    use nexus_db_model::IpVersion;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::shared::IpRange;
+    use nexus_types::external_api::shared::Ipv4Range;
+    use nexus_types::identity::Resource;
     use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
+    use omicron_common::api::external::{
+        IdentityMetadataCreateParams, LookupType,
+    };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
     use std::collections::BTreeSet;
@@ -1312,6 +1341,367 @@ mod tests {
         // Ensure we see them all remaining IPs.
         let ips = read_all_service_ips(&datastore, opctx).await;
         assert_eq!(ips, external_ips);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that ephemeral IP allocation uses unicast default pool, not
+    /// multicast. When only a multicast default pool exists, allocation
+    /// should fail. When a unicast default pool exists, allocation should
+    /// succeed and use that pool.
+    #[tokio::test]
+    async fn test_ephemeral_ip_uses_unicast_default_not_multicast() {
+        let logctx = dev::test_setup_log(
+            "test_ephemeral_ip_uses_unicast_default_not_multicast",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create a project and instance
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "test-project").await;
+        let instance_id = create_stopped_instance_record(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "test-instance",
+        )
+        .await;
+
+        // Create a multicast default pool first
+        let multicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &IdentityMetadataCreateParams {
+                        name: "multicast-default".parse().unwrap(),
+                        description: "Multicast default pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast pool");
+
+        // Add a range to multicast pool
+        let multicast_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 10, 1, 1),
+                Ipv4Addr::new(224, 10, 1, 254),
+            )
+            .unwrap(),
+        );
+        let authz_multicast_pool = authz::IpPool::new(
+            authz::FLEET,
+            multicast_pool.id(),
+            LookupType::ById(multicast_pool.id()),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_multicast_pool,
+                &multicast_pool,
+                &multicast_range,
+            )
+            .await
+            .expect("Should add multicast range");
+
+        // Link multicast pool to silo as default
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link multicast pool");
+
+        // Try to allocate ephemeral IP (using instance_id created above)
+        let ip_id = Uuid::new_v4();
+        let res = datastore
+            .allocate_instance_ephemeral_ip(
+                &opctx,
+                ip_id,
+                instance_id,
+                None, // No specific pool - use default
+                None, // No specific IP version
+                true, // creating instance
+            )
+            .await;
+
+        // Should fail because no unicast default pool exists
+        assert!(
+            res.is_err(),
+            "Ephemeral IP allocation should fail without unicast default pool"
+        );
+
+        // Now create a unicast default pool
+        let unicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "unicast-default".parse().unwrap(),
+                        description: "Unicast default pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create unicast pool");
+
+        // Add a range to unicast pool
+        let unicast_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 254),
+            )
+            .unwrap(),
+        );
+        let authz_unicast_pool = authz::IpPool::new(
+            authz::FLEET,
+            unicast_pool.id(),
+            LookupType::ById(unicast_pool.id()),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_unicast_pool,
+                &unicast_pool,
+                &unicast_range,
+            )
+            .await
+            .expect("Should add unicast range");
+
+        // Link unicast pool to silo as default
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast pool");
+
+        // Now ephemeral IP allocation should succeed
+        let ip_id = Uuid::new_v4();
+        let (ephemeral_ip, _) = datastore
+            .allocate_instance_ephemeral_ip(
+                &opctx,
+                ip_id,
+                instance_id,
+                None, // No specific pool - use default
+                None, // No specific IP version, but just 1 default pool
+                true, // creating instance
+            )
+            .await
+            .expect("Ephemeral IP allocation should succeed with unicast default pool");
+
+        // Verify the IP came from the unicast pool (10.0.0.x range)
+        let ip_addr = ephemeral_ip.ip.ip();
+        assert!(
+            matches!(ip_addr, std::net::IpAddr::V4(v4) if v4.octets()[0] == 10),
+            "Ephemeral IP {ip_addr} should be from unicast pool (10.0.0.x), not multicast"
+        );
+
+        // Verify the IP is associated with the unicast pool
+        assert_eq!(
+            ephemeral_ip.ip_pool_id,
+            unicast_pool.id(),
+            "Ephemeral IP should be from unicast pool"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that floating IP allocation uses unicast default pool, not
+    /// multicast. When only a multicast default pool exists, allocation
+    /// should fail. When a unicast default pool exists, allocation should
+    /// succeed and use that pool.
+    #[tokio::test]
+    async fn test_floating_ip_uses_unicast_default_not_multicast() {
+        let logctx = dev::test_setup_log(
+            "test_floating_ip_uses_unicast_default_not_multicast",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create a project for our floating IP
+        let (_authz_project, project) =
+            create_project(&opctx, &datastore, "test-project").await;
+
+        // Create a multicast default pool first
+        let multicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &IdentityMetadataCreateParams {
+                        name: "multicast-default".parse().unwrap(),
+                        description: "Multicast default pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast pool");
+
+        // Add a range to multicast pool
+        let multicast_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 10, 1, 1),
+                Ipv4Addr::new(224, 10, 1, 254),
+            )
+            .unwrap(),
+        );
+        let authz_multicast_pool = authz::IpPool::new(
+            authz::FLEET,
+            multicast_pool.id(),
+            LookupType::ById(multicast_pool.id()),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_multicast_pool,
+                &multicast_pool,
+                &multicast_range,
+            )
+            .await
+            .expect("Should add multicast range");
+
+        // Link multicast pool to silo as default
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link multicast pool");
+
+        // Try to allocate floating IP
+        let res = datastore
+            .allocate_floating_ip(
+                &opctx,
+                project.id(),
+                IdentityMetadataCreateParams {
+                    name: "my-floating-ip".parse().unwrap(),
+                    description: "A floating IP".to_string(),
+                },
+                None, // No specific IP
+                None, // No specific pool - use default
+                None, // No specific IP version
+            )
+            .await;
+
+        // This should fail because no unicast default pool exists
+        assert!(
+            res.is_err(),
+            "Floating IP allocation should fail without unicast default pool"
+        );
+
+        // Now create a unicast default pool
+        let unicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "unicast-default".parse().unwrap(),
+                        description: "Unicast default pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create unicast pool");
+
+        // Add a range to unicast pool
+        let unicast_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 254),
+            )
+            .unwrap(),
+        );
+        let authz_unicast_pool = authz::IpPool::new(
+            authz::FLEET,
+            unicast_pool.id(),
+            LookupType::ById(unicast_pool.id()),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_unicast_pool,
+                &unicast_pool,
+                &unicast_range,
+            )
+            .await
+            .expect("Should add unicast range");
+
+        // Link unicast pool to silo as default
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast pool");
+
+        // Now floating IP allocation should succeed
+        let floating_ip = datastore
+            .allocate_floating_ip(
+                &opctx,
+                project.id(),
+                IdentityMetadataCreateParams {
+                    name: "my-floating-ip".parse().unwrap(),
+                    description: "A floating IP".to_string(),
+                },
+                None, // No specific IP
+                None, // No specific pool - use default
+                None, // No specific IP version, but just 1 default pool
+            )
+            .await
+            .expect("Floating IP allocation should succeed with unicast default pool");
+
+        // Verify the IP came from the unicast pool (10.0.0.x range)
+        let ip_addr = floating_ip.ip.ip();
+        assert!(
+            matches!(ip_addr, std::net::IpAddr::V4(v4) if v4.octets()[0] == 10),
+            "Floating IP {ip_addr} should be from unicast pool (10.0.0.x), not multicast"
+        );
+
+        // Verify the IP is associated with the unicast pool
+        assert_eq!(
+            floating_ip.ip_pool_id,
+            unicast_pool.id(),
+            "Floating IP should be from unicast pool"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

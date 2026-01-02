@@ -244,28 +244,27 @@ impl DataStore {
             .collect();
 
         // Pull zone manifest zones out of all sled agents.
-        let zone_manifest_zones: Vec<_> = collection
-            .sled_agents
-            .iter()
-            .filter_map(|sled_agent| {
-                sled_agent
-                    .zone_image_resolver
-                    .zone_manifest
-                    .boot_inventory
-                    .as_ref()
-                    .ok()
-                    .map(|artifacts| {
-                        artifacts.artifacts.iter().map(|artifact| {
-                            InvZoneManifestZone::new(
-                                collection_id,
-                                sled_agent.sled_id,
-                                artifact,
-                            )
-                        })
-                    })
-            })
-            .flatten()
-            .collect();
+        let mut zone_manifest_zones = Vec::new();
+        for sled_agent in &collection.sled_agents {
+            if let Some(artifacts) = sled_agent
+                .zone_image_resolver
+                .zone_manifest
+                .boot_inventory
+                .as_ref()
+                .ok()
+            {
+                for artifact in artifacts.artifacts.iter() {
+                    zone_manifest_zones.push(
+                        InvZoneManifestZone::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            artifact,
+                        )
+                        .map_err(|e| Error::internal_error(&e.to_string()))?,
+                    );
+                }
+            }
+        }
 
         // Pull zone manifest non-boot info out of all sled agents.
         let zone_manifest_non_boot: Vec<_> = collection
@@ -3632,7 +3631,11 @@ impl DataStore {
                     by_sled_id
                         .entry(row.sled_id.into())
                         .or_default()
-                        .insert_unique(row.into())
+                        .insert_unique(row.try_into().map_err(
+                            |e: anyhow::Error| {
+                                Error::internal_error(&e.to_string())
+                            },
+                        )?)
                         .expect("database ensures the row is unique");
                 }
             }

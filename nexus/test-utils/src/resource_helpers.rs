@@ -393,6 +393,7 @@ pub async fn create_floating_ip(
             },
             ip,
             pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
+            ip_version: None,
         },
     )
     .await

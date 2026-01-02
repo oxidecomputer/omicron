@@ -133,6 +133,7 @@ impl super::Nexus {
                             opctx,
                             Some(authz_pool),
                             nexus_db_model::IpPoolType::Multicast,
+                            None, // TODO: pass ip_version when SSM/ASM support is added
                         )
                         .await?,
                 )

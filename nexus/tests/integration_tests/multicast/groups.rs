@@ -17,6 +17,9 @@ use crate::integration_tests::instances::{
 };
 use dpd_client::Error as DpdError;
 use dpd_client::types as dpd_types;
+use nexus_auth::authz;
+use nexus_db_model::{IncompleteIpPoolResource, IpPoolResourceType};
+use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::dpd_client;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -2901,6 +2904,168 @@ async fn test_multicast_group_mvlan_reconciler_update(
     object_delete(client, &instance_url).await;
     object_delete(client, &mcast_group_url(group_name)).await;
     wait_for_group_deleted(client, group_name).await;
+}
+
+/// Test that creating a multicast group fails when both IPv4 and IPv6 default
+/// multicast pools exist and neither pool nor `ip_version` fields are specified,
+/// but succeeds with explicit IP version.
+#[nexus_test]
+async fn test_multicast_group_ip_version_conflict(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let log = cptestctx.logctx.log.new(o!());
+    let opctx = OpContext::for_tests(log, datastore.clone());
+    let silo_id = DEFAULT_SILO.id();
+
+    // Create IPv4 ASM multicast pool via datastore
+    let v4_pool_name = "v4-mcast-conflict-pool";
+    let v4_identity = IdentityMetadataCreateParams {
+        name: v4_pool_name.parse().unwrap(),
+        description: "IPv4 multicast pool for conflict test".to_string(),
+    };
+    let v4_pool = datastore
+        .ip_pool_create(
+            &opctx,
+            nexus_db_model::IpPool::new_multicast(
+                &v4_identity,
+                nexus_db_model::IpVersion::V4,
+                nexus_db_model::IpPoolReservationType::ExternalSilos,
+            ),
+        )
+        .await
+        .expect("Should create IPv4 multicast pool");
+
+    // Add IPv4 ASM range
+    let by_id_v4 = NameOrId::Id(v4_pool.id());
+    let (authz_v4_pool, db_v4_pool) = nexus
+        .ip_pool_lookup(&opctx, &by_id_v4)
+        .expect("Should lookup pool")
+        .fetch_for(authz::Action::CreateChild)
+        .await
+        .expect("Should fetch pool");
+    let v4_range = IpRange::V4(
+        Ipv4Range::new(
+            Ipv4Addr::new(224, 11, 0, 1),
+            Ipv4Addr::new(224, 11, 0, 100),
+        )
+        .unwrap(),
+    );
+    datastore
+        .ip_pool_add_range(&opctx, &authz_v4_pool, &db_v4_pool, &v4_range)
+        .await
+        .expect("Should add IPv4 multicast range");
+
+    // Link IPv4 pool as default via datastore
+    let v4_link = IncompleteIpPoolResource {
+        ip_pool_id: v4_pool.id(),
+        resource_type: IpPoolResourceType::Silo,
+        resource_id: silo_id,
+        is_default: true,
+    };
+    datastore
+        .ip_pool_link_silo(&opctx, v4_link)
+        .await
+        .expect("Should link IPv4 pool");
+
+    // Create IPv6 ASM multicast pool via datastore (API rejects IPv6 ranges)
+    let v6_identity = IdentityMetadataCreateParams {
+        name: "v6-mcast-conflict-pool".parse().unwrap(),
+        description: "IPv6 multicast pool for conflict test".to_string(),
+    };
+    let v6_pool = datastore
+        .ip_pool_create(
+            &opctx,
+            nexus_db_model::IpPool::new_multicast(
+                &v6_identity,
+                nexus_db_model::IpVersion::V6,
+                nexus_db_model::IpPoolReservationType::ExternalSilos,
+            ),
+        )
+        .await
+        .expect("Should create IPv6 multicast pool");
+
+    // Add IPv6 ASM range (ff0e::/16 is ASM, not ff3x::/32 which is SSM)
+    let by_id_v6 = NameOrId::Id(v6_pool.id());
+    let (authz_v6_pool, db_v6_pool) = nexus
+        .ip_pool_lookup(&opctx, &by_id_v6)
+        .expect("Should lookup pool")
+        .fetch_for(authz::Action::CreateChild)
+        .await
+        .expect("Should fetch pool");
+    let v6_range = IpRange::V6(
+        Ipv6Range::new(
+            "ff0e::1".parse().unwrap(),
+            "ff0e::100".parse().unwrap(),
+        )
+        .unwrap(),
+    );
+    datastore
+        .ip_pool_add_range(&opctx, &authz_v6_pool, &db_v6_pool, &v6_range)
+        .await
+        .expect("Should add IPv6 multicast range");
+
+    // Link IPv6 pool as default via datastore
+    let v6_link = IncompleteIpPoolResource {
+        ip_pool_id: v6_pool.id(),
+        resource_type: IpPoolResourceType::Silo,
+        resource_id: silo_id,
+        is_default: true,
+    };
+    datastore
+        .ip_pool_link_silo(&opctx, v6_link)
+        .await
+        .expect("Should link IPv6 pool");
+
+    let group_url = mcast_groups_url();
+
+    // Without pool or IP version, this should fail with conflict error
+    let conflict_params = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "conflict-test-group".parse().unwrap(),
+            description: "Should fail due to ip_version conflict".to_string(),
+        },
+        multicast_ip: None,
+        source_ips: None,
+        pool: None, // No explicit pool
+        mvlan: None,
+    };
+    let error: HttpErrorResponseBody = object_create_error(
+        client,
+        &group_url,
+        &conflict_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert!(
+        error.message.contains("Multiple")
+            && error.message.contains("IP pools"),
+        "Expected ip_version conflict error, got: {}",
+        error.message
+    );
+
+    // With explicit pool, should succeed
+    let v4_params = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "v4-explicit-pool-group".parse().unwrap(),
+            description: "Should succeed with explicit V4 pool".to_string(),
+        },
+        multicast_ip: None,
+        source_ips: None,
+        pool: Some(NameOrId::Name(v4_pool_name.parse().unwrap())),
+        mvlan: None,
+    };
+    let group: MulticastGroup =
+        object_create(client, &group_url, &v4_params).await;
+
+    assert!(group.multicast_ip.is_ipv4(), "Expected IPv4 address");
+
+    // Cleanup
+    object_delete(client, &mcast_group_url("v4-explicit-pool-group")).await;
+    wait_for_group_deleted(client, "v4-explicit-pool-group").await;
 }
 
 /// Assert that two multicast groups are equal in all fields.
