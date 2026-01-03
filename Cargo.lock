@@ -1534,7 +1534,7 @@ name = "clickhouse-admin-keeper-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clickhouse-admin-types",
+ "clickhouse-admin-types-versions",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.10.0",
@@ -1549,7 +1549,7 @@ name = "clickhouse-admin-server-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clickhouse-admin-types",
+ "clickhouse-admin-types-versions",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.10.0",
@@ -1564,7 +1564,7 @@ name = "clickhouse-admin-single-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clickhouse-admin-types",
+ "clickhouse-admin-types-versions",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.10.0",
@@ -3894,7 +3894,7 @@ dependencies = [
  "daft",
  "ereport-types",
  "gateway-messages",
- "gateway-types",
+ "gateway-types-versions",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.10.0",
@@ -13008,7 +13008,6 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "sled-agent-types",
  "sled-agent-types-versions",
  "slog",
  "uuid",
