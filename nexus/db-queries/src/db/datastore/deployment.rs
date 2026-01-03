@@ -104,7 +104,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TypedUuid;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -3115,7 +3115,7 @@ mod tests {
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
     use rand::Rng;
-    use sled_agent_types::sled::BaseboardId;
+    use sled_hardware_types::BaseboardId;
     use std::collections::BTreeSet;
     use std::mem;
     use std::net::Ipv6Addr;

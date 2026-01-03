@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026010100.0.0"
+    "version": "2026010300.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -22164,7 +22164,7 @@
             ]
           },
           "pool_type": {
-            "description": "Type of IP pool (unicast or multicast)",
+            "description": "Type of IP pool (unicast or multicast).",
             "allOf": [
               {
                 "$ref": "#/components/schemas/IpPoolType"
@@ -25523,6 +25523,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "ip_version": {
+            "description": "The IP version for the pool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpVersion"
+              }
+            ]
+          },
           "is_default": {
             "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified.\n\nA silo can have at most one default pool per combination of pool type (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4 default pools total.",
             "type": "boolean"
@@ -25532,6 +25540,14 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "pool_type": {
+            "description": "Type of IP pool (unicast or multicast).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolType"
               }
             ]
           },
@@ -25549,8 +25565,10 @@
         "required": [
           "description",
           "id",
+          "ip_version",
           "is_default",
           "name",
+          "pool_type",
           "time_created",
           "time_modified"
         ]

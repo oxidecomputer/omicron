@@ -118,7 +118,7 @@ use sled_agent_types::rack_init::{
     RackInitializeRequestParams,
 };
 use sled_agent_types::rack_ops::RssStep;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -131,6 +131,7 @@ use thiserror::Error;
 use tokio::sync::watch;
 use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
+use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 
 pub(crate) use crate::rack_setup::plan::service::Plan as ServicePlan;
 pub(crate) use crate::rack_setup::plan::service::PlannedSledDescription;
@@ -1499,13 +1500,13 @@ async fn init_trust_quorum(
     members: BTreeSet<BaseboardId>,
     rack_id: RackUuid,
 ) -> Result<(), SetupServiceError> {
-    let threshold = trust_quorum_protocol::Threshold(
+    let threshold = trust_quorum_types::types::Threshold(
         u8::try_from(members.len()).unwrap() / 2 + 1,
     );
 
-    let initial_epoch = trust_quorum_protocol::Epoch(1);
+    let initial_epoch = trust_quorum_types::types::Epoch(1);
 
-    let msg = trust_quorum_protocol::ReconfigureMsg {
+    let msg = TqReconfigureMsg {
         rack_id,
         epoch: initial_epoch,
         last_committed_epoch: None,
@@ -1564,11 +1565,11 @@ async fn init_trust_quorum(
     {
         info!(log, "RSS: Attempting to commit initial trust quorum at {id}");
         match proxy.commit(id.clone(), rack_id, initial_epoch).await? {
-            trust_quorum::CommitStatus::Committed => {
+            trust_quorum_types::status::CommitStatus::Committed => {
                 info!(log, "RSS: Committed initial trust quorum at {id}");
                 let _ = acked.insert(id.clone());
             }
-            trust_quorum::CommitStatus::Pending => {
+            trust_quorum_types::status::CommitStatus::Pending => {
                 error!(
                     log,
                     "RSS: Failed to commit {id} to trust quorum: Pending"

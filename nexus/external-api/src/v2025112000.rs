@@ -5,7 +5,7 @@
 //! Nexus external types that changed from 2025112000 to 2025120300
 
 use crate::v2025121200;
-use crate::v2025122300;
+use crate::v2026010100;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use schemars::JsonSchema;
@@ -213,7 +213,7 @@ pub struct InstanceCreate {
 
     /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interfaces: v2025122300::InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: v2026010100::InstanceNetworkInterfaceAttachment,
 
     /// The external IP addresses provided to this instance.
     ///

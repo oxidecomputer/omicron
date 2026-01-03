@@ -34,6 +34,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (13, ADD_TRUST_QUORUM),
     (12, ADD_SMF_SERVICES_HEALTH_CHECK),
     (11, ADD_DUAL_STACK_EXTERNAL_IP_CONFIG),
     (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
@@ -1065,4 +1066,100 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         path_params: Path<latest::dataset::LocalStoragePathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate a trust quorum reconfiguration
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/configuration",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_reconfigure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<trust_quorum_types::messages::ReconfigureMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate an upgrade from LRTQ
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/upgrade",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_upgrade_from_lrtq(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<trust_quorum_types::messages::LrtqUpgradeMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Commit a trust quorum configuration
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<trust_quorum_types::messages::CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the coordinator status if this node is coordinating a reconfiguration
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/coordinator-status",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_coordinator_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<Option<trust_quorum_types::status::CoordinatorStatus>>,
+        HttpError,
+    >;
+
+    /// Attempt to prepare and commit a trust quorum configuration
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/prepare-and-commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<trust_quorum_types::messages::PrepareAndCommitRequest>,
+    ) -> Result<
+        HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+        HttpError,
+    >;
+
+    /// Proxy a commit operation to another trust quorum node
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/proxy/commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_proxy_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Proxy a prepare-and-commit operation to another trust quorum node
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/proxy/prepare-and-commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_proxy_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::ProxyPrepareAndCommitRequest>,
+    ) -> Result<
+        HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+        HttpError,
+    >;
+
+    /// Proxy a status request to another trust quorum node
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/proxy/status",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_proxy_status(
+        request_context: RequestContext<Self::Context>,
+        query_params: Query<sled_hardware_types::BaseboardId>,
+    ) -> Result<HttpResponseOk<trust_quorum_types::status::NodeStatus>, HttpError>;
 }

@@ -23,7 +23,7 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::de::Error as _;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use strum::EnumIter;
 use uuid::Uuid;

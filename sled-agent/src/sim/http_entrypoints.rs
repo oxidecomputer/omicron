@@ -67,15 +67,25 @@ use sled_agent_types::support_bundle::{
     SupportBundleMetadata, SupportBundlePathParam,
     SupportBundleTransferQueryParams,
 };
+use sled_agent_types::trust_quorum::{
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+};
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
 };
+use sled_hardware_types::BaseboardId;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use trust_quorum_types::messages::{
+    CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
+};
+use trust_quorum_types::status::CommitStatus;
+use trust_quorum_types::status::CoordinatorStatus;
+use trust_quorum_types::status::NodeStatus;
 
 use super::sled_agent::SledAgent;
 
@@ -921,6 +931,61 @@ impl SledAgentApi for SledAgentSimImpl {
         _body: TypedBody<ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_reconfigure(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ReconfigureMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_upgrade_from_lrtq(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<LrtqUpgradeMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_coordinator_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_prepare_and_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<PrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_prepare_and_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProxyPrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_status(
+        _request_context: RequestContext<Self::Context>,
+        _query_params: Query<BaseboardId>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        method_unimplemented()
     }
 }
 

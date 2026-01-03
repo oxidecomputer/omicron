@@ -73,7 +73,7 @@ use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZoneImageResolverInventory;
 use sled_agent_types::inventory::ZoneKind;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;

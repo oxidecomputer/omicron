@@ -53,6 +53,7 @@ textwrap.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 trust-quorum-protocol.workspace = true
+trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 
 newtype-uuid.workspace = true
@@ -82,4 +83,5 @@ omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
 sled-agent-types-versions = { workspace = true, features = ["testing"] }
+sled-hardware-types = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true

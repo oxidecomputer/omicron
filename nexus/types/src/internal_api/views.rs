@@ -35,7 +35,7 @@ use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneImageSource;
 use sled_agent_types::inventory::OmicronZoneType;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fmt::Display;
@@ -1263,7 +1263,7 @@ mod test {
     use crate::internal_api::views::UpdateAttemptStatus;
     use chrono::Utc;
     use gateway_types::component::SpType;
-    use sled_agent_types::sled::BaseboardId;
+    use sled_hardware_types::BaseboardId;
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::Instant;
