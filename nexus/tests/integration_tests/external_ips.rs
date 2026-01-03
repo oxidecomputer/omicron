@@ -794,7 +794,7 @@ async fn test_external_ip_live_attach_detach(
             client,
             INSTANCE_NAMES[i],
             *start,
-            &params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+            &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
             None,
             &[],
         )
@@ -1828,13 +1828,13 @@ async fn cannot_attach_ephemeral_ipv6_to_instance_missing_ipv6_stack(
 async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let (pool, _v6_pool) = create_default_ip_pools(&client).await;
+    let (v4_pool, v6_pool) = create_default_ip_pools(&client).await;
     let _project = create_project(client, PROJECT_NAME).await;
 
-    // Get the first address in the pool.
+    // Get the first address in the v4 pool.
     let range = NexusRequest::object_get(
         client,
-        &format!("/v1/system/ip-pools/{}/ranges", pool.identity.id),
+        &format!("/v1/system/ip-pools/{}/ranges", v4_pool.identity.id),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -1850,9 +1850,31 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
     else {
         panic!("Expected IPv4 range, found {:?}", &range.items[0]);
     };
-    let expected_ip = IpAddr::V4(*first);
+    let expected_v4_ip = IpAddr::V4(*first);
 
-    // Create a running instance with only an SNAT IP address.
+    // Get the first address in the vs6 pool.
+    let range = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/ip-pools/{}/ranges", v6_pool.identity.id),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|e| panic!("failed to get IP pool range: {e}"))
+    .parsed_body::<IpPoolRangeResultsPage>()
+    .unwrap_or_else(|e| panic!("failed to parse IP pool range: {e}"));
+    assert_eq!(range.items.len(), 1, "Should have 1 range in the pool");
+    let oxide_client::types::IpRange::V6(oxide_client::types::Ipv6Range {
+        first,
+        ..
+    }) = &range.items[0].range
+    else {
+        panic!("Expected IPv6 range, found {:?}", &range.items[0]);
+    };
+    let expected_v6_ip = IpAddr::V6(*first);
+
+    // Create a running instance with only an SNAT IP address, for each IP
+    // stack.
     let instance_name = INSTANCE_NAMES[0];
     let instance = instance_for_external_ips(
         client,
@@ -1878,20 +1900,61 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
     let ips = page.items;
     assert_eq!(
         ips.len(),
-        1,
-        "Instance should have been created with exactly 1 IP"
+        2,
+        "Instance should have been created with exactly 2 IPs"
     );
+
+    // Find the IPv4 IP and check it.
+    let res = ips
+        .iter()
+        .find(|ip| match ip {
+            oxide_client::types::ExternalIp::Snat { ip, .. }
+                if ip.is_ipv4() =>
+            {
+                true
+            }
+            _ => false,
+        })
+        .expect("Expected to find IPv4 SNAT IP");
     let oxide_client::types::ExternalIp::Snat {
         ip,
         ip_pool_id,
         first_port,
         last_port,
-    } = &ips[0]
+    } = res
     else {
-        panic!("Expected an SNAT external IP, found {:?}", &ips[0]);
+        panic!("Expected an SNAT external IP, found {:?}", res);
     };
-    assert_eq!(ip_pool_id, &pool.identity.id);
-    assert_eq!(ip, &expected_ip);
+    assert_eq!(ip_pool_id, &v4_pool.identity.id);
+    assert_eq!(ip, &expected_v4_ip);
+
+    // Port ranges are half-open on the right, e.g., [0, 16384).
+    assert_eq!(*first_port, 0);
+    assert_eq!(*last_port, NUM_SOURCE_NAT_PORTS - 1);
+
+    // Find the IPv6 IP and check it.
+    let res = ips
+        .iter()
+        .find(|ip| match ip {
+            oxide_client::types::ExternalIp::Snat { ip, .. }
+                if ip.is_ipv6() =>
+            {
+                true
+            }
+            _ => false,
+        })
+        .expect("Expected to find IPv6 SNAT IP");
+    let oxide_client::types::ExternalIp::Snat {
+        ip,
+        ip_pool_id,
+        first_port,
+        last_port,
+    } = res
+    else {
+        panic!("Expected an SNAT external IP, found {:?}", res);
+    };
+    assert_eq!(ip_pool_id, &v6_pool.identity.id);
+    assert_eq!(ip, &expected_v6_ip);
 
     // Port ranges are half-open on the right, e.g., [0, 16384).
     assert_eq!(*first_port, 0);
@@ -1970,14 +2033,18 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
         2,
         "Instance should have been created with exactly 2 external IPs"
     );
+    let res = ips
+        .iter()
+        .find(|ip| matches!(ip, oxide_client::types::ExternalIp::Snat { .. }))
+        .expect("An SNAT IP");
     let oxide_client::types::ExternalIp::Snat {
         ip,
         ip_pool_id,
         first_port,
         last_port,
-    } = &ips[0]
+    } = res
     else {
-        panic!("Expected an SNAT external IP, found {:?}", &ips[0]);
+        panic!("Expected an SNAT external IP, found {:?}", res);
     };
     assert_eq!(ip_pool_id, &v6_pool.identity.id);
     assert_eq!(ip, &expected_ip);
@@ -1987,9 +2054,15 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
     assert_eq!(*last_port, NUM_SOURCE_NAT_PORTS - 1);
 
     // Now check the Ephemeral IPv6 address.
-    let oxide_client::types::ExternalIp::Ephemeral { ip, ip_pool_id } = &ips[1]
+    let res = ips
+        .iter()
+        .find(|ip| {
+            matches!(ip, oxide_client::types::ExternalIp::Ephemeral { .. })
+        })
+        .expect("An Ephemeral IP");
+    let oxide_client::types::ExternalIp::Ephemeral { ip, ip_pool_id } = res
     else {
-        panic!("Expected an Ephemeral external IP, found {:?}", &ips[1]);
+        panic!("Expected an Ephemeral external IP, found {:?}", res);
     };
     assert_eq!(ip_pool_id, &v6_pool.identity.id);
     let expected_ip = IpAddr::V6(Ipv6Addr::from_bits(first.to_bits() + 1));
