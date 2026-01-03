@@ -12,7 +12,7 @@ use dropshot::{
 use dropshot_api_manager_types::api_versions;
 use nexus_types::{
     external_api::{
-        shared::ProbeInfo,
+        shared::ProbeExternalIp,
         views::{Ping, PingStatus},
     },
     internal_api::{
@@ -22,8 +22,9 @@ use nexus_types::{
         views::NatEntryView,
     },
 };
+use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface as NetworkInterfaceV1;
 use omicron_common::api::{
-    external::http_pagination::PaginatedById,
+    external::{Name, http_pagination::PaginatedById},
     internal::nexus::{
         DiskRuntimeState, DownstairsClientStopRequest, DownstairsClientStopped,
         ProducerEndpoint, ProducerRegistrationResponse, RepairFinishInfo,
@@ -278,6 +279,25 @@ pub trait NexusInternalApi {
     async fn refresh_vpc_routes(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+}
+
+/// Information about a networking probe.
+//
+// This type is used by the abandoned `probes_get` endpoint which always
+// returns 410 Gone. That type uses V1 of the shared network interface type. We
+// cannot update the actual API type, since that's part of the client-side
+// versioned Nexus internal API. When that's supported, we can make this change
+// versioned too.
+//
+// See https://github.com/oxidecomputer/omicron/issues/9290.
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProbeInfo {
+    pub id: Uuid,
+    pub name: Name,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
+    pub external_ips: Vec<ProbeExternalIp>,
+    pub interface: NetworkInterfaceV1,
 }
 
 /// Path parameters for Sled Agent requests (internal API)

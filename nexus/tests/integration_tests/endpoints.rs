@@ -20,6 +20,7 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::IpVersion;
@@ -656,7 +657,8 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         hostname: "demo-instance".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: Some(Vec::new()),
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces:
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool: Some(DEMO_IP_POOL_NAME.clone().into()),
             ip_version: None,
@@ -680,7 +682,8 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         hostname: "demo-instance".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: Some(Vec::new()),
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces:
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool: Some(DEMO_IP_POOL_NAME.clone().into()),
             ip_version: None,
@@ -721,8 +724,7 @@ pub static DEMO_INSTANCE_NIC_CREATE: LazyLock<
     },
     vpc_name: DEMO_VPC_NAME.clone(),
     subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
-    ip: None,
-    transit_ips: vec![],
+    ip_config: PrivateIpStackCreate::auto_ipv4(),
 });
 pub static DEMO_INSTANCE_NIC_PUT: LazyLock<
     params::InstanceNetworkInterfaceUpdate,

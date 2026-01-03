@@ -938,6 +938,7 @@ impl DataStore {
                 }
                 AttachError::NoUpdate {
                     attached_count,
+                    update_condition_satisfied: _,
                     resource,
                     collection,
                 } => {

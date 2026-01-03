@@ -853,6 +853,7 @@ impl DataStore {
         #[derive(Debug)]
         enum NetworkInterfaceUpdateError {
             InstanceNotStopped,
+            CandidatePrimaryMissingIpStack(u8),
             FailedToUnsetPrimary(DieselError),
         }
 
@@ -893,6 +894,48 @@ impl DataStore {
                                     |e| NetworkInterfaceUpdateError::FailedToUnsetPrimary(e)
                                 ));
                             }
+
+                            // Ensure that the new secondary has VPC-private IP
+                            // addresses of the same family as any external IP
+                            // addresses.
+                            //
+                            // Fetch the IP versions for all external addresses
+                            // attached to this instance, and whether the
+                            // secondary we're trying to make into primary has
+                            // the private IP stacks to support those.
+                            let ip_versions = {
+                                use nexus_db_schema::schema::external_ip::dsl;
+                                dsl::external_ip
+                                    .filter(dsl::parent_id.eq(instance_id))
+                                    .filter(dsl::time_deleted.is_null())
+                                    // NOTE: We would like to use the `family()` function, but this
+                                    // confuses Diesel. It expects that to return an `i32`, but CRDB
+                                    // returns an `INT` which is an alias for an `i64`.
+                                    // Deserialization fails.
+                                    .select(diesel::dsl::sql::<diesel::sql_types::BigInt>(
+                                        "family(ip)",
+                                    ))
+                                    .distinct()
+                                    .get_results_async(&conn)
+                                    .await?
+                            };
+                            let (secondary_has_ipv4, secondary_has_ipv6): (bool, bool) = {
+                                use nexus_db_schema::schema::instance_network_interface::dsl;
+                                dsl::instance_network_interface
+                                    .find(interface_id)
+                                    .filter(dsl::time_deleted.is_null())
+                                    .select((dsl::ipv4.is_not_null(), dsl::ipv6.is_not_null()))
+                                    .get_result_async(&conn)
+                                    .await?
+                            };
+                            if ip_versions.contains(&4) && !secondary_has_ipv4 {
+                                return
+                                    Err(err.bail(NetworkInterfaceUpdateError::CandidatePrimaryMissingIpStack(4)));
+                            }
+                            if ip_versions.contains(&6) && !secondary_has_ipv6 {
+                                return
+                                    Err(err.bail(NetworkInterfaceUpdateError::CandidatePrimaryMissingIpStack(6)));
+                            }
                         }
 
                         // In any case, update the actual target
@@ -932,6 +975,15 @@ impl DataStore {
                             "Instance must be stopped to update its network interfaces",
                         );
                     },
+                    NetworkInterfaceUpdateError::CandidatePrimaryMissingIpStack(version) => {
+                        return Error::invalid_request(format!(
+                            "Interface cannot be made the primary for this instance, since \
+                            it does not have a private IPv{} address to handle traffic for \
+                            the instance's external IPv{} addresses",
+                            version,
+                            version,
+                        ));
+                    }
                     NetworkInterfaceUpdateError::FailedToUnsetPrimary(err) => {
                         return public_error_from_diesel(err, ErrorHandler::Server);
                     },
@@ -1016,7 +1068,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
-    use nexus_db_model::IpConfig;
+    use nexus_types::external_api::params::PrivateIpStackCreate;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;
     use std::collections::BTreeSet;
@@ -1068,7 +1120,7 @@ mod tests {
                     name: name.parse().unwrap(),
                     description: name,
                 },
-                IpConfig::from_ipv4(ip),
+                PrivateIpStackCreate::from_ipv4(ip),
                 macs.next().unwrap(),
                 0,
             )

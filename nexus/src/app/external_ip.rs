@@ -11,6 +11,7 @@ use crate::external_api::views::FloatingIp;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::IpAttachState;
+use nexus_db_model::IpVersion;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
@@ -176,8 +177,8 @@ impl super::Nexus {
         target: params::FloatingIpAttach,
     ) -> UpdateResult<views::FloatingIp> {
         let fip_lookup = self.floating_ip_lookup(opctx, fip_selector)?;
-        let (.., authz_project, authz_fip) =
-            fip_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_project, authz_fip, db_fip) =
+            fip_lookup.fetch_for(authz::Action::Modify).await?;
 
         match target.kind {
             params::FloatingIpParentKind::Instance => {
@@ -196,10 +197,15 @@ impl super::Nexus {
                 let instance =
                     self.instance_lookup(opctx, instance_selector)?;
 
+                let ip_version = match db_fip.ip {
+                    ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
+                    ipnetwork::IpNetwork::V6(_) => IpVersion::V6,
+                };
                 self.instance_attach_floating_ip(
                     opctx,
                     &instance,
                     authz_fip,
+                    ip_version.into(),
                     authz_project,
                 )
                 .await

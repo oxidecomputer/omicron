@@ -214,11 +214,12 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_db_queries::{authn::saga::Serialized, context::OpContext, db};
     use nexus_test_utils::resource_helpers::DiskTest;
-    use nexus_test_utils::resource_helpers::create_default_ip_pool;
+    use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
+    use omicron_common::address::IpVersion;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
@@ -234,7 +235,7 @@ mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
@@ -273,10 +274,10 @@ mod test {
             user_data: vec![],
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::Default,
+                params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
             external_ips: vec![params::ExternalIpCreate::Ephemeral {
                 pool: None,
-                ip_version: None,
+                ip_version: Some(IpVersion::V4),
             }],
             boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },

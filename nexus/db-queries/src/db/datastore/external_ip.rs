@@ -40,6 +40,7 @@ use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpVersion;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -60,6 +61,17 @@ use sled_agent_types::inventory::ZoneKind;
 use std::net::IpAddr;
 use uuid::Uuid;
 
+// NOTE: This number includes the automatically-created SNAT IP for every
+// instance. We need to change that allocation so that it's only when necessary,
+// tracked by https://github.com/oxidecomputer/omicron/issues/9003.
+//
+// With the addition of dual-stack NICs, we actually get one or _two_ automatic
+// SNAT addresses, one per IP stack. The code today makes it challenging to
+// enforce a limit that respects this -- if you create a dual-stack NIC, you can
+// create 31 external IPs, if you create a single-stack, you can have 32.
+// Bumping this by 1 just moves the problem, the fundamental issue is that our
+// code for attaching resources has only a single limit on the number (they're
+// all homogenous) and that we still haven't fixed #9003.
 const MAX_EXTERNAL_IPS_PLUS_SNAT: u32 = MAX_EXTERNAL_IPS_PER_INSTANCE + 1;
 
 impl DataStore {
@@ -148,12 +160,17 @@ impl DataStore {
             return Ok((eip, false));
         }
         let temp_ip = temp_ip?;
+        let ip_version = match temp_ip.ip {
+            ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
+            ipnetwork::IpNetwork::V6(_) => IpVersion::V6,
+        };
 
         match self
             .begin_attach_ip(
                 opctx,
                 temp_ip.id,
                 instance_id,
+                ip_version,
                 IpKind::Ephemeral,
                 creating_instance,
             )
@@ -443,6 +460,7 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         instance_id: InstanceUuid,
+        ip_version: IpVersion,
         kind: IpKind,
         creating_instance: bool,
     ) -> Result<Option<(ExternalIp, bool)>, Error> {
@@ -452,6 +470,8 @@ impl DataStore {
         use nexus_db_schema::schema::external_ip::table;
         use nexus_db_schema::schema::instance::dsl as inst_dsl;
         use nexus_db_schema::schema::instance::table as inst_table;
+        use nexus_db_schema::schema::network_interface::dsl as nic_dsl;
+        use nexus_db_schema::schema::network_interface::table as nic_table;
 
         let safe_states = if creating_instance {
             &SAFE_TO_ATTACH_INSTANCE_STATES_CREATING[..]
@@ -459,7 +479,17 @@ impl DataStore {
             &SAFE_TO_ATTACH_INSTANCE_STATES[..]
         };
 
-        let query = Instance::attach_resource(
+        let base_nic_query = nic_table
+            .into_boxed()
+            .filter(nic_dsl::parent_id.eq(instance_id.into_untyped_uuid()))
+            .filter(nic_dsl::time_deleted.is_null())
+            .filter(nic_dsl::kind.eq(NetworkInterfaceKind::Instance));
+        let has_matching_ip_stack = match ip_version {
+            IpVersion::V4 => base_nic_query.select(nic_dsl::ip.is_not_null()),
+            IpVersion::V6 => base_nic_query.select(nic_dsl::ipv6.is_not_null()),
+        };
+
+        let query = Instance::attach_resource_with_update_condition(
             instance_id.into_untyped_uuid(),
             ip_id,
             inst_table
@@ -477,6 +507,7 @@ impl DataStore {
                 dsl::time_modified.eq(Utc::now()),
                 dsl::state.eq(IpAttachState::Attaching),
             )),
+            has_matching_ip_stack,
         );
 
         let mut do_saga = true;
@@ -500,7 +531,7 @@ impl DataStore {
                     )
                 })
             },
-            AttachError::NoUpdate { attached_count, resource, collection } => {
+            AttachError::NoUpdate { attached_count, update_condition_satisfied, resource, collection } => {
                 match resource.state {
                     // Idempotent errors: is in progress or complete for same resource pair -- this is fine.
                     IpAttachState::Attaching if resource.parent_id == Some(instance_id.into_untyped_uuid()) =>
@@ -527,6 +558,7 @@ impl DataStore {
                     IpAttachState::Detached => {},
                 }
 
+                // Attempt to attach during a migration.
                 if collection.runtime_state.migration_id.is_some() {
                     return Err(Error::unavail(&format!(
                         "tried to attach {kind} IP while instance was migrating: \
@@ -534,21 +566,40 @@ impl DataStore {
                     )))
                 }
 
-                Err(match &collection.runtime_state.nexus_state {
-                    state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
-                        if attached_count >= i64::from(MAX_EXTERNAL_IPS_PLUS_SNAT) {
-                            Error::invalid_request(&format!(
-                                "an instance may not have more than \
-                                {MAX_EXTERNAL_IPS_PER_INSTANCE} external IP addresses",
-                            ))
-                        } else {
-                            Error::internal_error(&format!("failed to attach {kind} IP"))
-                        }
-                    },
-                    state => Error::invalid_request(&format!(
+                // Attach while instance is in an unsafe state.
+                let state = &collection.runtime_state.nexus_state;
+                if !safe_states.contains(state) {
+                    return Err(Error::invalid_request(&format!(
                         "cannot attach {kind} IP to instance in {state} state"
-                    )),
-                })
+                    )));
+                }
+
+                // Too many attached external IP addresses.
+                if attached_count >= i64::from(MAX_EXTERNAL_IPS_PLUS_SNAT) {
+                    return Err(Error::invalid_request(&format!(
+                        "an instance may not have more than \
+                        {MAX_EXTERNAL_IPS_PER_INSTANCE} external IP addresses",
+                    )));
+                }
+
+                // Primary NIC Missing an IP stack for this external IP.
+                if !update_condition_satisfied {
+                    return Err(Error::invalid_request(&format!(
+                        "The {} external IP is an IP{} address, but \
+                        the instance with ID {} does not have a \
+                        primary network interface with a VPC-private IP{} \
+                        address. Add a VPC-private IP{} address to the \
+                        interface, or attach a different IP address",
+                        kind,
+                        ip_version,
+                        instance_id,
+                        ip_version,
+                        ip_version,
+                    )));
+                }
+
+                // Anything else, just report a generic error.
+                Err(Error::internal_error(&format!("failed to attach {kind} IP")))
             },
             // This case occurs for both currently attaching and attached ephemeral IPs:
             AttachError::DatabaseError(DatabaseError(UniqueViolation, ..))
@@ -989,6 +1040,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
+        ip_version: IpVersion,
         instance_id: InstanceUuid,
         creating_instance: bool,
     ) -> UpdateResult<(ExternalIp, bool)> {
@@ -1004,6 +1056,7 @@ impl DataStore {
             opctx,
             authz_fip.id(),
             instance_id,
+            ip_version,
             IpKind::Floating,
             creating_instance,
         )
@@ -1179,20 +1232,24 @@ mod tests {
     use crate::db::pub_test_utils::helpers::{
         create_project, create_stopped_instance_record,
     };
-    use nexus_db_model::IncompleteIpPoolResource;
-    use nexus_db_model::IpPool;
-    use nexus_db_model::IpPoolReservationType;
     use nexus_db_model::IpPoolResourceType;
     use nexus_db_model::IpVersion;
+    use nexus_db_model::{Generation, IpPoolReservationType, Ipv4Net, Ipv6Net};
+    use nexus_db_model::{
+        IncompleteIpPoolResource, IncompleteNetworkInterface, IncompleteVpc,
+        VpcSubnet,
+    };
+    use nexus_db_model::{IpPool, VpcSubnetIdentity};
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
+    use nexus_types::external_api::params::{self, PrivateIpStackCreate};
     use nexus_types::external_api::shared::IpRange;
     use nexus_types::external_api::shared::Ipv4Range;
     use nexus_types::identity::Resource;
     use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::{
-        IdentityMetadataCreateParams, LookupType,
+        self, IdentityMetadataCreateParams, LookupType,
     };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -1453,6 +1510,85 @@ mod tests {
             )
             .await
             .expect("Should link unicast pool");
+
+        // NOTE: When we create a stopped instance, as above, we do that with
+        // `project_create_instance()`, rather than the normal saga that creates
+        // instances. That means we get no NIC for the instance. As part of
+        // #9508, we added verification that an instane's primary NIC can handle
+        // traffic when attaching an external IP, e.g., that it has a VPC
+        // private IPv4 address when attaching an external IPv4 address.
+        //
+        // That check will fail if we do not create the NIC for this instance
+        // first, so do that now. There's a _lot_ of boilerplate, since nothing
+        // exists yet.
+        let (_silo, project, authz_instance, _db_instance) =
+            LookupPath::new(opctx, datastore)
+                .instance_id(instance_id.into_untyped_uuid())
+                .fetch_for(authz::Action::CreateChild)
+                .await
+                .unwrap();
+        let (authz_vpc, _vpc) = datastore
+            .project_create_vpc(
+                opctx,
+                &project,
+                IncompleteVpc::new(
+                    Uuid::new_v4(),
+                    project.id(),
+                    Uuid::new_v4(),
+                    params::VpcCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "default".parse().unwrap(),
+                            description: String::new(),
+                        },
+                        ipv6_prefix: Some("fd00::/48".parse().unwrap()),
+                        dns_name: "foo".parse().unwrap(),
+                    },
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (authz_subnet, db_subnet) = datastore
+            .vpc_create_subnet(
+                opctx,
+                &authz_vpc,
+                VpcSubnet {
+                    identity: VpcSubnetIdentity {
+                        id: Uuid::new_v4(),
+                        name: Name("default".parse().unwrap()),
+                        description: String::new(),
+                        time_created: Utc::now(),
+                        time_modified: Utc::now(),
+                        time_deleted: None,
+                    },
+                    vpc_id: authz_vpc.id(),
+                    rcgen: Generation(external::Generation::new()),
+                    ipv4_block: Ipv4Net("192.168.1.0/24".parse().unwrap()),
+                    ipv6_block: Ipv6Net("fd00::/64".parse().unwrap()),
+                    custom_router_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let _nic = datastore
+            .instance_create_network_interface(
+                opctx,
+                &authz_subnet,
+                &authz_instance,
+                IncompleteNetworkInterface::new_instance(
+                    Uuid::new_v4(),
+                    instance_id,
+                    db_subnet,
+                    IdentityMetadataCreateParams {
+                        name: "net0".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    PrivateIpStackCreate::auto_dual_stack(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("Failed to create NIC for instance");
 
         // Now ephemeral IP allocation should succeed
         let ip_id = Uuid::new_v4();

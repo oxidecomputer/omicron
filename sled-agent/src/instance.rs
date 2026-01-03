@@ -1361,12 +1361,11 @@ impl InstanceRunner {
         // version, then we fail the overall request. We _could_ support this,
         // dynamically creating the external IP configuration for the specified
         // address on-demand. But it's not clear that's what we want right now,
-        // and so we'll defer it. Instead, this means instances need to be
-        // created with the IP stacks they need.
+        // and so we'll defer it. Instead, this means network interfaces need to
+        // be created with the IP stacks they need right now.
         //
-        // We should revisit this when actually implementing the public API for
-        // external dual-stack addressing, see
-        // https://github.com/oxidecomputer/omicron/issues/9248.
+        // Users can work around this in the meantime by creating a new NIC and
+        // setting it as the primary.
         let Some(external_ips) = &mut self.external_ips else {
             return Err(Error::Opte(
                 illumos_utils::opte::Error::InvalidPortIpConfig,
