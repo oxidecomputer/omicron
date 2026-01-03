@@ -1322,34 +1322,76 @@ pub(crate) async fn mgd_clients(
     Ok(mappings)
 }
 
-// We currently ignore the rack_id argument here, as the shared
-// switch_zone_address_mappings function doesn't allow filtering on the rack ID.
-// Since we only have a single rack, this is OK for now.
-// TODO: https://github.com/oxidecomputer/omicron/issues/1276
-//
 /// Returns a mapping of clients for the LLDP daemons of reachable switch zones.
 /// If we are unable to communicate with the switch zone and determine the mapping
 /// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn lldpd_clients(
     resolver: &internal_dns_resolver::Resolver,
+    // TODO: https://github.com/oxidecomputer/omicron/issues/1276
     _rack_id: Uuid,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, lldpd_client::Client>, String> {
-    let mappings = switch_zone_address_mappings(resolver, log).await?;
-    let log = log.new(o!( "component" => "LldpdClient"));
-    let port = lldpd_client::default_port();
-    let clients: HashMap<SwitchLocation, lldpd_client::Client> = mappings
+    let lldpd_socketaddrs = match resolver
+        .lookup_all_socket_v6(ServiceName::Lldpd)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!(log, "failed to resolve addresses for LLDP services"; "error" => %e);
+            return Err(e.to_string());
+        }
+    };
+
+    let clients: Vec<(SocketAddrV6, lldpd_client::Client)> = lldpd_socketaddrs
         .iter()
-        .map(|(location, addr)| {
-            let lldpd_client = lldpd_client::Client::new(
-                &format!("http://[{addr}]:{port}"),
-                log.clone(),
+        .map(|socket_addr| {
+            let client = lldpd_client::Client::new(
+                &format!("http://{socket_addr}"),
+                log.new(o!(
+                    "component" => "LldpClient"
+                )),
             );
-            (*location, lldpd_client)
+
+            (*socket_addr, client)
         })
         .collect();
-    Ok(clients)
+
+    let mut mappings: HashMap<SwitchLocation, lldpd_client::Client> =
+        HashMap::new();
+
+    for (addr, client) in clients {
+        let switch_slot = match client.switch_identifiers().await {
+            Ok(response) => response.slot,
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to determine switch slot for lldpd";
+                    "error" => %e,
+                    "addr" => %addr,
+                );
+                continue;
+            }
+        };
+
+        let location = match switch_slot {
+            Some(0) => SwitchLocation::Switch0,
+            Some(1) => SwitchLocation::Switch1,
+            Some(v) => {
+                warn!(log, "unexpected value for switch slot: {v}");
+                continue;
+            }
+            None => {
+                warn!(log, "Lldpd has not learned switch slot from MGS");
+                continue;
+            }
+        };
+
+        mappings.insert(location, client);
+    }
+
+    Ok(mappings)
 }
+
 
 /// Look up Dendrite addresses in DNS then determine the switch location of
 /// any addresses we're able to resolve the SwitchLocation for. If a switch
