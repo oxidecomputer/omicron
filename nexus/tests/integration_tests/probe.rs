@@ -16,7 +16,7 @@ type ControlPlaneTestContext =
 async fn test_probe_basic_crud(ctx: &ControlPlaneTestContext) {
     let client = &ctx.external_client;
 
-    create_default_ip_pools(&client).await;
+    let (_v4_pool, v6_pool) = create_default_ip_pools(&client).await;
     create_project(&client, "nebula").await;
 
     let probes = NexusRequest::iter_collection_authn::<ProbeInfo>(
@@ -36,7 +36,7 @@ async fn test_probe_basic_crud(ctx: &ControlPlaneTestContext) {
             name: "class1".parse().unwrap(),
             description: "subspace relay probe".to_owned(),
         },
-        ip_pool: None,
+        ip_pool: Some(v6_pool.identity.name.clone().into()),
         sled: SLED_AGENT_UUID.parse().unwrap(),
     };
 

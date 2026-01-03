@@ -240,12 +240,19 @@ async fn test_project_deletion_with_floating_ip(
     let name = "springfield-squidport";
     let url = format!("/v1/projects/{}", name);
 
-    create_default_ip_pools(&client).await;
+    let (_v4_pool, v6_pool) = create_default_ip_pools(&client).await;
 
     create_project(&client, &name).await;
     delete_project_default_subnet(&name, &client).await;
     delete_project_default_vpc(&name, &client).await;
-    let fip = create_floating_ip(&client, "my-fip", &name, None, None).await;
+    let fip = create_floating_ip(
+        &client,
+        "my-fip",
+        &name,
+        None,
+        Some(v6_pool.identity.name.as_str()),
+    )
+    .await;
     assert_eq!(
         "project to be deleted contains a floating ip: my-fip",
         delete_project_expect_fail(&url, &client).await,

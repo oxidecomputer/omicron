@@ -356,14 +356,14 @@ pub(crate) mod test {
     const FIP_NAME: &str = "affogato";
 
     pub async fn ip_manip_test_setup(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pools(&client).await;
+        let (v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_floating_ip(
             client,
             FIP_NAME,
             &project.identity.id.to_string(),
             None,
-            None,
+            Some(v4_pool.identity.name.as_str()),
         )
         .await;
 
@@ -390,7 +390,10 @@ pub(crate) mod test {
             .into();
             ExternalIpAttach::Floating { floating_ip, ip_version }
         } else {
-            ExternalIpAttach::Ephemeral { pool: None, ip_version: None }
+            ExternalIpAttach::Ephemeral {
+                pool: None,
+                ip_version: Some(IpVersion::V4.into()),
+            }
         };
 
         let (.., authz_project, authz_instance) =

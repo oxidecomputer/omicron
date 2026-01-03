@@ -722,8 +722,8 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create IP pool and project (with default VPC and subnet)
-    create_default_ip_pools(client).await;
+    // Create IP pools and project (with default VPC and subnet)
+    let (v4_pool, _v6_pool) = create_default_ip_pools(client).await;
     let project_name = "test-project";
     create_project(&client, &project_name).await;
 
@@ -768,7 +768,7 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
                 description: "test floating ip".to_string(),
             },
             ip: None,
-            pool: None,
+            pool: Some(v4_pool.identity.name.clone().into()),
             ip_version: None,
         },
     )

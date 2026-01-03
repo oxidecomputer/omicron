@@ -61,6 +61,17 @@ use sled_agent_types::inventory::ZoneKind;
 use std::net::IpAddr;
 use uuid::Uuid;
 
+// NOTE: This number includes the automatically-created SNAT IP for every
+// instance. We need to change that allocation so that it's only when necessary,
+// tracked by https://github.com/oxidecomputer/omicron/issues/9003.
+//
+// With the addition of dual-stack NICs, we actually get one or _two_ automatic
+// SNAT addresses, one per IP stack. The code today makes it challenging to
+// enforce a limit that respects this -- if you create a dual-stack NIC, you can
+// create 31 external IPs, if you create a single-stack, you can have 32.
+// Bumping this by 1 just moves the problem, the fundamental issue is that our
+// code for attaching resources has only a single limit on the number (they're
+// all homogenous) and that we still haven't fixed #9003.
 const MAX_EXTERNAL_IPS_PLUS_SNAT: u32 = MAX_EXTERNAL_IPS_PER_INSTANCE + 1;
 
 impl DataStore {
@@ -1221,20 +1232,24 @@ mod tests {
     use crate::db::pub_test_utils::helpers::{
         create_project, create_stopped_instance_record,
     };
-    use nexus_db_model::IncompleteIpPoolResource;
-    use nexus_db_model::IpPool;
-    use nexus_db_model::IpPoolReservationType;
     use nexus_db_model::IpPoolResourceType;
     use nexus_db_model::IpVersion;
+    use nexus_db_model::{Generation, IpPoolReservationType, Ipv4Net, Ipv6Net};
+    use nexus_db_model::{
+        IncompleteIpPoolResource, IncompleteNetworkInterface, IncompleteVpc,
+        VpcSubnet,
+    };
+    use nexus_db_model::{IpPool, VpcSubnetIdentity};
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
+    use nexus_types::external_api::params::{self, PrivateIpStackCreate};
     use nexus_types::external_api::shared::IpRange;
     use nexus_types::external_api::shared::Ipv4Range;
     use nexus_types::identity::Resource;
     use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::{
-        IdentityMetadataCreateParams, LookupType,
+        self, IdentityMetadataCreateParams, LookupType,
     };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -1495,6 +1510,85 @@ mod tests {
             )
             .await
             .expect("Should link unicast pool");
+
+        // NOTE: When we create a stopped instance, as above, we do that with
+        // `project_create_instance()`, rather than the normal saga that creates
+        // instances. That means we get no NIC for the instance. As part of
+        // #9508, we added verification that an instane's primary NIC can handle
+        // traffic when attaching an external IP, e.g., that it has a VPC
+        // private IPv4 address when attaching an external IPv4 address.
+        //
+        // That check will fail if we do not create the NIC for this instance
+        // first, so do that now. There's a _lot_ of boilerplate, since nothing
+        // exists yet.
+        let (_silo, project, authz_instance, _db_instance) =
+            LookupPath::new(opctx, datastore)
+                .instance_id(instance_id.into_untyped_uuid())
+                .fetch_for(authz::Action::CreateChild)
+                .await
+                .unwrap();
+        let (authz_vpc, _vpc) = datastore
+            .project_create_vpc(
+                opctx,
+                &project,
+                IncompleteVpc::new(
+                    Uuid::new_v4(),
+                    project.id(),
+                    Uuid::new_v4(),
+                    params::VpcCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "default".parse().unwrap(),
+                            description: String::new(),
+                        },
+                        ipv6_prefix: Some("fd00::/48".parse().unwrap()),
+                        dns_name: "foo".parse().unwrap(),
+                    },
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (authz_subnet, db_subnet) = datastore
+            .vpc_create_subnet(
+                opctx,
+                &authz_vpc,
+                VpcSubnet {
+                    identity: VpcSubnetIdentity {
+                        id: Uuid::new_v4(),
+                        name: Name("default".parse().unwrap()),
+                        description: String::new(),
+                        time_created: Utc::now(),
+                        time_modified: Utc::now(),
+                        time_deleted: None,
+                    },
+                    vpc_id: authz_vpc.id(),
+                    rcgen: Generation(external::Generation::new()),
+                    ipv4_block: Ipv4Net("192.168.1.0/24".parse().unwrap()),
+                    ipv6_block: Ipv6Net("fd00::/64".parse().unwrap()),
+                    custom_router_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let _nic = datastore
+            .instance_create_network_interface(
+                opctx,
+                &authz_subnet,
+                &authz_instance,
+                IncompleteNetworkInterface::new_instance(
+                    Uuid::new_v4(),
+                    instance_id,
+                    db_subnet,
+                    IdentityMetadataCreateParams {
+                        name: "net0".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    PrivateIpStackCreate::auto_dual_stack(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("Failed to create NIC for instance");
 
         // Now ephemeral IP allocation should succeed
         let ip_id = Uuid::new_v4();

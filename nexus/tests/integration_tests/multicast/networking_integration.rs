@@ -54,7 +54,7 @@ async fn test_multicast_with_external_ip_basic(
     let instance_name = "external-ip-mcast-instance";
 
     // Setup: project and IP pools in parallel
-    let (_, _, mcast_pool) = ops::join3(
+    let (_, (v4_pool, _v6_pool), mcast_pool) = ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client), // For external IPs
         create_multicast_ip_pool_with_range(
@@ -157,7 +157,7 @@ async fn test_multicast_with_external_ip_basic(
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
             .body(Some(&EphemeralIpCreate {
-                pool: None, // Use default pool
+                pool: Some(v4_pool.identity.name.clone().into()),
                 ip_version: None,
             }))
             .expect_status(Some(StatusCode::ACCEPTED)),
@@ -247,7 +247,7 @@ async fn test_multicast_external_ip_lifecycle(
     let instance_name = "external-ip-lifecycle-instance";
 
     // Setup in parallel
-    let (_, _, mcast_pool) = ops::join3(
+    let (_, (v4_pool, _v6_pool), mcast_pool) = ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
@@ -344,7 +344,7 @@ async fn test_multicast_external_ip_lifecycle(
         NexusRequest::new(
             RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
                 .body(Some(&EphemeralIpCreate {
-                    pool: None, // Use default pool
+                    pool: Some(v4_pool.identity.name.clone().into()),
                     ip_version: None,
                 }))
                 .expect_status(Some(StatusCode::ACCEPTED)),
@@ -432,7 +432,7 @@ async fn test_multicast_with_external_ip_at_creation(
     let instance_name = "creation-mixed-instance";
 
     // Setup - parallelize project and pool creation
-    let (_, _, mcast_pool) = ops::join3(
+    let (_, (v4_pool, _v6_pool), mcast_pool) = ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
@@ -462,8 +462,10 @@ async fn test_multicast_with_external_ip_at_creation(
     wait_for_group_active(client, group_name).await;
 
     // Create instance with external IP specified at creation
-    let external_ip_param =
-        ExternalIpCreate::Ephemeral { pool: None, ip_version: None };
+    let external_ip_param = ExternalIpCreate::Ephemeral {
+        pool: Some(v4_pool.identity.name.clone().into()),
+        ip_version: None,
+    };
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
@@ -568,7 +570,7 @@ async fn test_multicast_with_floating_ip_basic(
     let floating_ip_name = "floating-ip-mcast-ip";
 
     // Setup: project and IP pools - parallelize creation
-    let (_, _, mcast_pool) = ops::join3(
+    let (_, (v4_pool, _v6_pool), mcast_pool) = ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client), // For floating IPs
         create_multicast_ip_pool_with_range(
@@ -581,9 +583,14 @@ async fn test_multicast_with_floating_ip_basic(
     .await;
 
     // Create floating IP
-    let floating_ip =
-        create_floating_ip(client, floating_ip_name, project_name, None, None)
-            .await;
+    let floating_ip = create_floating_ip(
+        client,
+        floating_ip_name,
+        project_name,
+        None,
+        Some(v4_pool.identity.name.as_str()),
+    )
+    .await;
 
     // Create multicast group
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 200, 0, 50));
