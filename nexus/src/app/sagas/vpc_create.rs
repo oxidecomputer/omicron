@@ -662,7 +662,7 @@ pub(crate) mod test {
         authn::saga::Serialized, authz, context::OpContext,
         db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
     };
-    use nexus_test_utils::resource_helpers::create_default_ip_pool;
+    use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -676,7 +676,7 @@ pub(crate) mod test {
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }

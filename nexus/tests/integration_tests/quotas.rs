@@ -106,7 +106,7 @@ impl ResourceAllocator {
                 user_data: b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
                 ssh_public_keys:  Some(Vec::new()),
-                network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+                network_interfaces: params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 external_ips: Vec::<params::ExternalIpCreate>::new(),
                 disks: Vec::<params::InstanceDiskAttachment>::new(),
                 boot_disk: None,

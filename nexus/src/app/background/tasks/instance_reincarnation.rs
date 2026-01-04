@@ -321,7 +321,7 @@ mod test {
     use nexus_db_model::VmmState;
     use nexus_db_queries::authz;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project, object_create,
+        create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
@@ -341,7 +341,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
     ) -> authz::Project {
-        create_default_ip_pool(&cptestctx.external_client).await;
+        create_default_ip_pools(&cptestctx.external_client).await;
         let project =
             create_project(&cptestctx.external_client, PROJECT_NAME).await;
 

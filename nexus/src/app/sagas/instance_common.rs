@@ -535,5 +535,5 @@ pub(super) async fn instance_ip_remove_opte(
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ExternalIpAttach {
     Ephemeral { pool: Option<NameOrId>, ip_version: Option<IpVersion> },
-    Floating { floating_ip: authz::FloatingIp },
+    Floating { floating_ip: authz::FloatingIp, ip_version: IpVersion },
 }
