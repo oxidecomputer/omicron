@@ -33,7 +33,7 @@ use http::{Method, StatusCode};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_instance_with,
+    create_default_ip_pools, create_instance, create_instance_with,
     create_project, object_get, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
@@ -62,7 +62,7 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
     // Setup: project, pools - parallelize creation
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -161,7 +161,7 @@ async fn test_multicast_reconciler_state_consistency_validation(
     // Setup: project and pools
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -265,7 +265,7 @@ async fn test_dpd_failure_during_creating_state(
     // Setup: project, pools
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -326,7 +326,7 @@ async fn test_dpd_failure_during_active_state(
     // Create project and pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -402,7 +402,7 @@ async fn test_dpd_failure_during_deleting_state(
     // Create project and pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -494,7 +494,7 @@ async fn test_multicast_group_members_during_dpd_failure(
     // Setup: project, pools
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -592,7 +592,7 @@ async fn test_implicit_creation_with_dpd_failure(
     // Create project and pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "implicit-create-pool"),
     )
     .await;
@@ -664,7 +664,7 @@ async fn test_implicit_deletion_with_dpd_failure(
     // Create project and pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "implicit-delete-pool"),
     )
     .await;
@@ -743,7 +743,7 @@ async fn test_concurrent_implicit_creation_race(
     // Create project and pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "concurrent-implicit-create-pool"),
     )
     .await;
@@ -756,7 +756,7 @@ async fn test_concurrent_implicit_creation_race(
             client,
             project_name,
             name,
-            &InstanceNetworkInterfaceAttachment::Default,
+            &InstanceNetworkInterfaceAttachment::DefaultIpv4,
             Vec::<InstanceDiskAttachment>::new(),
             Vec::<ExternalIpCreate>::new(),
             false, // start=false: Don't start instances to avoid timing issues
@@ -830,7 +830,7 @@ async fn test_implicit_deletion_race_with_instance_join(
     // Create project and pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "delete-race-pool"),
     )
     .await;
@@ -972,7 +972,7 @@ async fn test_multicast_join_deleted_instance(
     // Setup: project and pools
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -1037,7 +1037,7 @@ async fn test_drift_correction_missing_group_in_dpd(
     // Create project and pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "drift-pool"),
     )
     .await;
@@ -1123,7 +1123,7 @@ async fn test_member_joining_to_left_on_instance_stop(
 
     // Setup: Create project and pools
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, project_name),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
@@ -1204,7 +1204,7 @@ async fn test_left_member_waits_for_group_active(
 
     // Setup: Create project and pools
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, project_name),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
@@ -1215,7 +1215,7 @@ async fn test_left_member_waits_for_group_active(
         client,
         project_name,
         instance_name,
-        &InstanceNetworkInterfaceAttachment::Default,
+        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
         vec![],
         vec![],
         false,  // don't start
@@ -1324,7 +1324,7 @@ async fn test_multicast_group_underlay_collision_retry(
     // Setup: project, pools
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",

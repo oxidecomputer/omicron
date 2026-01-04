@@ -35,7 +35,7 @@ use nexus_test_utils::http_testing::{
     AuthnMode, Collection, NexusRequest, RequestBuilder,
 };
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_project, link_ip_pool,
+    create_default_ip_pools, create_instance, create_project, link_ip_pool,
     object_create, object_create_error, object_delete, object_delete_error,
     object_get, object_get_error, object_put_error,
 };
@@ -116,23 +116,49 @@ async fn test_multicast_ip_pool_range_validation(
     );
     object_create::<_, IpPoolRange>(client, range_url, &valid_ipv4_range).await;
 
-    // TODO: Remove this test once IPv6 is enabled for multicast pools.
-    // IPv6 ranges should currently be rejected (not yet supported)
-    let ipv6_range = IpRange::V6(
+    // Create IPv6 multicast pool
+    let ipv6_pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "test-v6-pool".parse().unwrap(),
+            description: "IPv6 multicast pool for validation tests".to_string(),
+        },
+        IpVersion::V6,
+    );
+    object_create::<_, IpPool>(
+        client,
+        "/v1/system/ip-pools",
+        &ipv6_pool_params,
+    )
+    .await;
+
+    let v6_range_url = "/v1/system/ip-pools/test-v6-pool/ranges/add";
+
+    // IPv6 link-local multicast range (ff02::/16) should be rejected
+    let ipv6_link_local_range = IpRange::V6(
+        Ipv6Range::new(
+            Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1),
+            Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 255),
+        )
+        .unwrap(),
+    );
+    object_create_error(
+        client,
+        v6_range_url,
+        &ipv6_link_local_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    // Valid IPv6 site-local multicast range (ff05::/16) should be accepted
+    let valid_ipv6_range = IpRange::V6(
         Ipv6Range::new(
             Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 1),
             Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 255),
         )
         .unwrap(),
     );
-    let error = object_create_error(
-        client,
-        range_url,
-        &ipv6_range,
-        StatusCode::BAD_REQUEST,
-    )
-    .await;
-    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
+    object_create::<_, IpPoolRange>(client, v6_range_url, &valid_ipv6_range)
+        .await;
 }
 
 #[nexus_test]
@@ -147,7 +173,7 @@ async fn test_multicast_group_member_operations(
     // Create project and IP pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client), // For instance networking
+        create_default_ip_pools(&client), // For instance networking
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",
@@ -317,7 +343,7 @@ async fn test_instance_multicast_endpoints(
     // Create project and IP pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",
@@ -537,7 +563,7 @@ async fn test_multicast_group_member_errors(
     // Create project and IP pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",
@@ -587,7 +613,7 @@ async fn test_lookup_multicast_group_by_ip(
     // Create project and IP pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",
@@ -641,7 +667,7 @@ async fn test_instance_deletion_removes_multicast_memberships(
     // Create project and IP pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",
@@ -710,7 +736,7 @@ async fn test_member_response_includes_multicast_ip(
     // Create project and IP pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "test-pool",
@@ -831,7 +857,7 @@ async fn test_cannot_delete_multicast_pool_with_groups(
     // Create project and IP pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             client,
             pool_name,
@@ -952,7 +978,7 @@ async fn test_source_ip_validation_on_join(
     // Create project and IP pools in parallel
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "source-ip-mcast-pool",
@@ -1118,7 +1144,7 @@ async fn test_source_ip_address_family_validation(
     // Create project and pools
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "addr-family-mcast-pool",
@@ -1179,7 +1205,7 @@ async fn test_default_pool_on_implicit_creation(
     // Setup: project and default IP pool in parallel (but no multicast pool yet)
     ops::join2(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
     )
     .await;
     create_instance(client, project_name, instance_name).await;
@@ -1232,7 +1258,7 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
     // Multicast pool has small range (3 IPs: 224.10.0.1-224.10.0.3)
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "small-range-pool",
@@ -1323,7 +1349,7 @@ async fn test_automatic_pool_selection(cptestctx: &ControlPlaneTestContext) {
     // Setup: project and default IP pool in parallel
     ops::join2(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
     )
     .await;
     create_instance(client, project_name, instance_name).await;
@@ -1368,7 +1394,7 @@ async fn test_pool_exhaustion(cptestctx: &ControlPlaneTestContext) {
     // Create project and IP pools in parallel (multicast pool has single IP)
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "empty-pool",
@@ -1433,7 +1459,7 @@ async fn test_multiple_ssm_groups_same_pool(
     // Create project and IP pools in parallel
     let (_, _, ssm_pool) = ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "ssm-shared-pool",
@@ -1602,7 +1628,7 @@ async fn test_multicast_group_ip_version_conflict(
     let instance_name = "ip-version-conflict-instance";
     ops::join2(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
     )
     .await;
 

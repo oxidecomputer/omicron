@@ -477,7 +477,7 @@ impl DataStore {
         // Convert from omicron_common::address::IpVersion to nexus_db_model::IpVersion
         let db_ip_version = ip_version.map(Into::into);
 
-        let pool_result = if has_sources {
+        let pool_res = if has_sources {
             // Try SSM first for source-filtered groups
             match self.ip_pools_fetch_ssm_multicast(opctx, db_ip_version).await
             {
@@ -502,18 +502,29 @@ impl DataStore {
                 .map(|(pool, _)| pool)
         };
 
-        pool_result.map_err(|_| {
-            // SSM = 232/8 or ff3x::/32, ASM = 224/8 or ff0x::/16
-            let pool_type = if has_sources { "SSM or ASM" } else { "ASM" };
-            let prefix = match ip_version {
-                Some(v) => format!("No {v} {pool_type}"),
-                None => format!("No {pool_type}"),
-            };
-            external::Error::invalid_request(format!(
-                "{prefix} multicast pool linked to your silo. \
-                 Create a multicast pool and link it to your silo, \
-                 or provide an explicit pool or multicast address.",
-            ))
+        pool_res.map_err(|e| {
+            // Preserve ambiguity errors (invalid_request) indicating the
+            // user needs to specify IP version when multiple pools of different
+            // versions exist. Only replace "not found" errors with a helpful
+            // message about pool setup.
+            match &e {
+                external::Error::ObjectNotFound { .. } => {
+                    // SSM = 232/8 or ff3x::/32, ASM = 224/8 or ff0x::/16
+                    let pool_type =
+                        if has_sources { "SSM or ASM" } else { "ASM" };
+                    let prefix = match ip_version {
+                        Some(v) => format!("No {v} {pool_type}"),
+                        None => format!("No {pool_type}"),
+                    };
+                    external::Error::invalid_request(format!(
+                        "{prefix} multicast pool linked to your silo. \
+                         Create a multicast pool and link it to your silo, \
+                         or provide an explicit pool or multicast address.",
+                    ))
+                }
+                // Preserve all other errors (including ambiguity errors)
+                _ => e,
+            }
         })
     }
 

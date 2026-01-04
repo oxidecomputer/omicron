@@ -28,16 +28,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use nexus_types::external_api::params::UserData;
 use nexus_types::external_api::{params, views};
 use nexus_types::multicast::MulticastGroupCreate as InternalMulticastGroupCreate;
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
+    ByteCount, IdentityMetadata, IdentityMetadataCreateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, Name,
     NameOrId, Nullable,
 };
 use omicron_common::vlan::VlanID;
-use params::{InstanceDiskAttachment, InstanceNetworkInterfaceAttachment};
 
 /// Path parameter for multicast group operations.
 ///
@@ -255,104 +253,10 @@ impl From<views::MulticastGroupMember> for MulticastGroupMember {
     }
 }
 
-/// Create-time parameters for an `Instance`.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceCreate {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    /// The number of vCPUs to be allocated to the instance
-    pub ncpus: InstanceCpuCount,
-    /// The amount of RAM (in bytes) to be allocated to the instance
-    pub memory: ByteCount,
-    /// The hostname to be assigned to the instance
-    pub hostname: Hostname,
-
-    /// User data for instance initialization systems (such as cloud-init).
-    /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /
-    /// characters with padding). Maximum 32 KiB unencoded data.
-    #[serde(default, with = "UserData")]
-    pub user_data: Vec<u8>,
-
-    /// The network interfaces to be created for this instance.
-    #[serde(default)]
-    pub network_interfaces: InstanceNetworkInterfaceAttachment,
-
-    /// The external IP addresses provided to this instance.
-    #[serde(default)]
-    pub external_ips: Vec<params::ExternalIpCreate>,
-
-    /// Multicast groups this instance should be joined to upon creation.
-    ///
-    /// Provide a list of multicast group names or UUIDs. Newer API versions
-    /// also accept multicast IP addresses.
-    #[serde(default)]
-    pub multicast_groups: Vec<NameOrId>,
-
-    /// A list of disks to be attached to the instance.
-    #[serde(default)]
-    pub disks: Vec<InstanceDiskAttachment>,
-
-    /// The disk the instance is configured to boot from.
-    #[serde(default)]
-    pub boot_disk: Option<InstanceDiskAttachment>,
-
-    /// An allowlist of SSH public keys to be transferred to the instance via
-    /// cloud-init during instance creation.
-    pub ssh_public_keys: Option<Vec<NameOrId>>,
-
-    /// Should this instance be started upon creation; true by default.
-    #[serde(default = "bool_true")]
-    pub start: bool,
-
-    /// The auto-restart policy for this instance.
-    #[serde(default)]
-    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
-
-    /// Anti-Affinity groups which this instance should be added.
-    #[serde(default)]
-    pub anti_affinity_groups: Vec<NameOrId>,
-
-    /// The CPU platform to be used for this instance.
-    #[serde(default)]
-    pub cpu_platform: Option<InstanceCpuPlatform>,
-}
-
-#[inline]
-fn bool_true() -> bool {
-    true
-}
-
-impl From<InstanceCreate> for params::InstanceCreate {
-    fn from(old: InstanceCreate) -> Self {
-        Self {
-            identity: old.identity,
-            ncpus: old.ncpus,
-            memory: old.memory,
-            hostname: old.hostname,
-            user_data: old.user_data,
-            network_interfaces: old.network_interfaces,
-            external_ips: old.external_ips,
-            multicast_groups: old
-                .multicast_groups
-                .into_iter()
-                .map(|g| params::MulticastGroupJoinSpec {
-                    group: g.into(),
-                    source_ips: None,
-                    ip_version: None,
-                })
-                .collect(),
-            disks: old.disks,
-            boot_disk: old.boot_disk,
-            ssh_public_keys: old.ssh_public_keys,
-            start: old.start,
-            auto_restart_policy: old.auto_restart_policy,
-            anti_affinity_groups: old.anti_affinity_groups,
-            cpu_platform: old.cpu_platform,
-        }
-    }
-}
-
 /// Parameters of an `Instance` that can be reconfigured after creation.
+///
+/// This version uses `Vec<NameOrId>` for multicast_groups instead of
+/// `Vec<MulticastGroupJoinSpec>` in newer versions.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceUpdate {
     /// The number of vCPUs to be allocated to the instance

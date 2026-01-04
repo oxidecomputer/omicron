@@ -14,7 +14,7 @@
 use gateway_client::types::{PowerState, RotState, SpState};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_project,
+    create_default_ip_pools, create_project,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::SledFilter;
@@ -51,7 +51,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
 
     // Create project and pools in parallel
     ops::join3(
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(client, "sled-move-pool"),
     )
@@ -312,7 +312,7 @@ async fn test_cache_ttl_driven_refresh() {
 
     // Create project and pools in parallel
     ops::join3(
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(client, "ttl-test-pool"),
     )
@@ -513,7 +513,7 @@ async fn test_backplane_cache_ttl_expiry() {
 
     // Create project and pools in parallel
     ops::join3(
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(client, "backplane-ttl-pool"),
     )

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2025121200 to 2025122300.
+//! Nexus external types that changed from 2025121200 to 2026010100.
 //!
 //! Version 2025121200 types (before `ip_version` preference was added for
 //! default IP pool selection).
@@ -27,6 +27,8 @@ use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, NameOrId,
 };
+
+use crate::v2026010100;
 
 // Re-export multicast types from v2025122300.
 // They're identical for both versions (both use NameOrId, explicit
@@ -126,7 +128,7 @@ pub struct InstanceCreate {
     pub user_data: Vec<u8>,
     /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interfaces: params::InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: v2026010100::InstanceNetworkInterfaceAttachment,
     /// The external IP addresses provided to this instance.
     #[serde(default)]
     pub external_ips: Vec<ExternalIpCreate>,
@@ -155,9 +157,9 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
-impl From<InstanceCreate> for params::InstanceCreate {
-    fn from(old: InstanceCreate) -> params::InstanceCreate {
-        params::InstanceCreate {
+impl From<InstanceCreate> for v2026010100::InstanceCreate {
+    fn from(old: InstanceCreate) -> v2026010100::InstanceCreate {
+        v2026010100::InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,
             memory: old.memory,
@@ -169,15 +171,7 @@ impl From<InstanceCreate> for params::InstanceCreate {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            multicast_groups: old
-                .multicast_groups
-                .into_iter()
-                .map(|g| params::MulticastGroupJoinSpec {
-                    group: g.into(),
-                    source_ips: None,
-                    ip_version: None,
-                })
-                .collect(),
+            multicast_groups: old.multicast_groups,
             disks: old.disks,
             boot_disk: old.boot_disk,
             ssh_public_keys: old.ssh_public_keys,

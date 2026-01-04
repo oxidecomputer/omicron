@@ -204,17 +204,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pool_params: &params::IpPoolCreate,
     ) -> CreateResult<IpPool> {
-        // https://github.com/oxidecomputer/omicron/issues/8881
         let ip_version = pool_params.ip_version.into();
-
-        // IPv6 is not yet supported for unicast pools
-        if matches!(pool_params.pool_type, shared::IpPoolType::Unicast)
-            && matches!(ip_version, IpVersion::V6)
-        {
-            return Err(Error::invalid_request(
-                "IPv6 pools are not yet supported for unicast pools",
-            ));
-        }
 
         let pool = match pool_params.pool_type.clone() {
             shared::IpPoolType::Unicast => IpPool::new(
@@ -464,21 +454,6 @@ impl super::Nexus {
 
         if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
-        }
-
-        // Disallow V6 ranges until IPv6 is fully supported by the networking
-        // subsystem. Instead of changing the API to reflect that (making this
-        // endpoint inconsistent with the rest) and changing it back when we
-        // add support, we accept them at the API layer and error here. It
-        // would be nice if we could do it in the datastore layer, but we'd
-        // have no way of creating IPv6 ranges for the purpose of testing IP
-        // pool utilization.
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/8761.
-        if matches!(range, shared::IpRange::V6(_)) {
-            return Err(Error::invalid_request(
-                "IPv6 ranges are not allowed yet",
-            ));
         }
 
         // Validate uniformity and pool type constraints.

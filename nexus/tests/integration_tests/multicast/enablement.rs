@@ -7,7 +7,7 @@
 //! TODO: Remove once we have full multicast support in PROD.
 
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_project, object_get,
+    create_default_ip_pools, create_project, object_get,
 };
 use omicron_common::api::external::{Instance, InstanceState};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
@@ -39,7 +39,7 @@ async fn test_multicast_enablement() {
 
     // Create project and pools in parallel
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(client, "test-pool"),
     )

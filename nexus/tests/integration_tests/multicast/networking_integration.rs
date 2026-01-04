@@ -14,7 +14,7 @@ use http::{Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_project, object_create, object_delete,
+    create_default_ip_pools, create_project, object_create, object_delete,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -27,6 +27,7 @@ use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
     InstanceState, NameOrId,
 };
+use omicron_common::api::external::IpVersion;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 
 use super::*;
@@ -53,7 +54,7 @@ async fn test_multicast_with_external_ip_basic(
     // Setup: project and IP pools in parallel
     ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client), // For external IPs
+        create_default_ip_pools(client), // For external IPs
         create_multicast_ip_pool_with_range(
             client,
             "external-ip-mcast-pool",
@@ -74,7 +75,7 @@ async fn test_multicast_with_external_ip_basic(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![], // Start without external IP
         multicast_groups: vec![],
         disks: vec![],
@@ -127,7 +128,7 @@ async fn test_multicast_with_external_ip_basic(
         RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
             .body(Some(&EphemeralIpCreate {
                 pool: None, // Use default pool
-                ip_version: None,
+                ip_version: Some(IpVersion::V4),
             }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
@@ -218,7 +219,7 @@ async fn test_multicast_external_ip_lifecycle(
     // Setup in parallel
     ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "external-ip-lifecycle-pool",
@@ -239,7 +240,7 @@ async fn test_multicast_external_ip_lifecycle(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -296,7 +297,7 @@ async fn test_multicast_external_ip_lifecycle(
             RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
                 .body(Some(&EphemeralIpCreate {
                     pool: None, // Use default pool
-                    ip_version: None,
+                    ip_version: Some(IpVersion::V4),
                 }))
                 .expect_status(Some(StatusCode::ACCEPTED)),
         )
@@ -385,7 +386,7 @@ async fn test_multicast_with_external_ip_at_creation(
     // Setup - parallelize project and pool creation
     ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "creation-mixed-pool",
@@ -397,7 +398,7 @@ async fn test_multicast_with_external_ip_at_creation(
 
     // Create instance with external IP specified at creation
     let external_ip_param =
-        ExternalIpCreate::Ephemeral { pool: None, ip_version: None };
+        ExternalIpCreate::Ephemeral { pool: None, ip_version: Some(IpVersion::V4) };
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
@@ -409,7 +410,7 @@ async fn test_multicast_with_external_ip_at_creation(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![external_ip_param], // External IP at creation
         multicast_groups: vec![], // Will add to multicast group after creation
         disks: vec![],
@@ -490,9 +491,9 @@ async fn test_multicast_with_floating_ip_basic(
     let floating_ip_name = "floating-ip-mcast-ip";
 
     // Setup: project and IP pools - parallelize creation
-    ops::join3(
+    let (_, (v4_pool, _v6_pool), _) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client), // For floating IPs
+        create_default_ip_pools(client), // For floating IPs
         create_multicast_ip_pool_with_range(
             client,
             "floating-ip-mcast-pool",
@@ -502,9 +503,9 @@ async fn test_multicast_with_floating_ip_basic(
     )
     .await;
 
-    // Create floating IP
+    // Create floating IP (specify pool to avoid ambiguity with dual-stack default pools)
     let floating_ip =
-        create_floating_ip(client, floating_ip_name, project_name, None, None)
+        create_floating_ip(client, floating_ip_name, project_name, None, Some(v4_pool.identity.name.as_str()))
             .await;
 
     // Create instance (will start by default)
@@ -518,7 +519,7 @@ async fn test_multicast_with_floating_ip_basic(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![], // Start without external IP
         multicast_groups: vec![],
         disks: vec![],

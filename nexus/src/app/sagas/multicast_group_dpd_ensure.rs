@@ -344,7 +344,7 @@ mod test {
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, link_ip_pool, object_create,
+        create_default_ip_pools, link_ip_pool, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::params::IpPoolCreate;
@@ -468,7 +468,7 @@ mod test {
         let opctx = test_helpers::test_opctx(cptestctx);
 
         // Setup: Create IP pools
-        create_default_ip_pool(client).await;
+        create_default_ip_pools(client).await;
 
         // Create multicast IP pool
         let pool_name = "saga-state-pool";

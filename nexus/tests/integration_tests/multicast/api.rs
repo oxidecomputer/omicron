@@ -29,7 +29,7 @@ use nexus_test_utils::http_testing::{
     AuthnMode, Collection, NexusRequest, RequestBuilder,
 };
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_project, object_create,
+    create_default_ip_pools, create_instance, create_project, object_create,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -54,7 +54,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     // Setup in parallel
     ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool(client, "api-edge-pool"),
     )
     .await;
@@ -73,7 +73,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         hostname: "edge-case-1".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![], // No groups at creation
         disks: vec![],
@@ -104,7 +104,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         hostname: "edge-case-2".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![], // No groups at creation
         disks: vec![],
@@ -187,7 +187,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         hostname: "edge-case-3".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -324,7 +324,7 @@ async fn test_join_by_ip_asm(cptestctx: &ControlPlaneTestContext) {
     // Setup: project and pools
     let (_, _, mcast_pool) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "asm-pool",
@@ -406,7 +406,7 @@ async fn test_join_by_ip_ssm_with_sources(cptestctx: &ControlPlaneTestContext) {
     // Setup: project and pools
     let (_, _, ssm_pool) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "ssm-pool",
@@ -477,7 +477,7 @@ async fn test_join_by_ip_ssm_without_sources_fails(
     // Setup
     let (_, _, _ssm_pool) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "ssm-fail-pool",
@@ -536,7 +536,7 @@ async fn test_join_existing_ssm_group_by_id_without_sources_fails(
     // Setup: SSM pool
     let (_, _, _ssm_pool) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "ssm-id-fail-pool",
@@ -614,7 +614,7 @@ async fn test_join_existing_ssm_group_by_name_without_sources_fails(
     // Setup: SSM pool
     let (_, _, _ssm_pool) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "ssm-name-fail-pool",
@@ -694,7 +694,7 @@ async fn test_ssm_with_empty_sources_array_fails(
     // Setup
     let (_, _, _ssm_pool) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "ssm-empty-sources-pool",
@@ -753,7 +753,7 @@ async fn test_join_existing_ssm_group_by_ip_without_sources_fails(
     // Setup: SSM pool
     let (_, _, _ssm_pool) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "ssm-ip-existing-fail-pool",
@@ -829,7 +829,7 @@ async fn test_join_by_ip_not_in_pool_fails(
     // Setup: only create a pool with limited range
     ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "limited-pool",
@@ -881,7 +881,7 @@ async fn test_join_by_ip_existing_group(cptestctx: &ControlPlaneTestContext) {
     // Setup
     ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "existing-pool",
@@ -950,7 +950,7 @@ async fn test_join_by_ip_different_sources_succeeds(
     // Setup with SSM pool
     let (_, _, _ssm_pool) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "diff-sources-ssm-pool",
@@ -1032,7 +1032,7 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
     // Setup: project and pools
     ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "asm-sources-pool",
@@ -1158,7 +1158,7 @@ async fn test_explicit_ip_bypasses_ssm_asm_selection(
     // Setup: create BOTH SSM and ASM pools
     ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "bypass-ssm-pool",

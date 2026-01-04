@@ -28,7 +28,7 @@ use http::{Method, StatusCode};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_project, object_create,
+    create_default_ip_pools, create_instance, create_project, object_create,
     object_delete, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
@@ -61,7 +61,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
 
     // Create project and pools in parallel
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool_with_range(
             &client,
@@ -291,7 +291,7 @@ async fn test_multicast_group_attach_conflicts(
 
     // Create project and pools in parallel
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool_with_range(
             &client,
@@ -383,7 +383,7 @@ async fn test_multicast_group_attach_limits(
 
     // Create project and pools in parallel
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
@@ -476,7 +476,7 @@ async fn test_multicast_group_instance_state_transitions(
 
     // Create project and pools in parallel
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
@@ -600,7 +600,7 @@ async fn test_multicast_group_persistence_through_stop_start(
 
     // Create project and pools in parallel
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
@@ -790,7 +790,7 @@ async fn test_multicast_concurrent_operations(
 
     // Create project and pools in parallel
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool_with_range(
             &client,
@@ -955,7 +955,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
     // Create project and pools in parallel
     ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "never-started-pool",
@@ -976,7 +976,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -1083,7 +1083,7 @@ async fn test_multicast_group_membership_during_migration(
     // Create project and pools in parallel
     ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "migration-pool",
@@ -1314,7 +1314,7 @@ async fn test_multicast_group_concurrent_member_migrations(
     // Create project and pools in parallel
     ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "concurrent-migration-pool",
@@ -1531,7 +1531,7 @@ async fn test_source_ips_preserved_on_instance_restart(
     // Setup: project and SSM pool
     let (_, _, _ssm_pool) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "source-preserve-ssm-pool",
@@ -1665,7 +1665,7 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
 
     // Setup: create project and pools
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, project_name),
         // SSM pool for source-filtered groups
         create_multicast_ip_pool_with_range(
@@ -1702,7 +1702,7 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
             hostname: instance_name.parse().unwrap(),
             user_data: Vec::new(),
             ssh_public_keys: None,
-            network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: Vec::new(),
             disks: Vec::new(),
             boot_disk: None,
@@ -1861,7 +1861,7 @@ async fn test_instance_create_with_ssm_multicast_groups(
 
     // Setup: create pools and project
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, project_name),
         create_multicast_ip_pool_with_range(
             client,
@@ -1886,7 +1886,7 @@ async fn test_instance_create_with_ssm_multicast_groups(
         hostname: instance_name.parse().unwrap(),
         user_data: Vec::new(),
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: Vec::new(),
         disks: Vec::new(),
         boot_disk: None,
@@ -1961,7 +1961,7 @@ async fn test_instance_create_with_ssm_without_sources_fails(
 
     // Setup: create pools and project
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, project_name),
         create_multicast_ip_pool_with_range(
             client,
@@ -1986,7 +1986,7 @@ async fn test_instance_create_with_ssm_without_sources_fails(
         hostname: instance_name.parse().unwrap(),
         user_data: Vec::new(),
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: Vec::new(),
         disks: Vec::new(),
         boot_disk: None,
@@ -2041,7 +2041,7 @@ async fn test_instance_reconfigure_add_new_ssm_without_sources_fails(
 
     // Setup: create pools and project
     ops::join3(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, project_name),
         create_multicast_ip_pool_with_range(
             client,
@@ -2063,7 +2063,7 @@ async fn test_instance_reconfigure_add_new_ssm_without_sources_fails(
         hostname: instance_name.parse().unwrap(),
         user_data: Vec::new(),
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: Vec::new(),
         disks: Vec::new(),
         boot_disk: None,
@@ -2144,7 +2144,7 @@ async fn test_member_state_transitions_on_reactivation(
     // Setup
     ops::join2(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
     )
     .await;
     create_multicast_ip_pool(client, "state-pool").await;
@@ -2163,7 +2163,7 @@ async fn test_member_state_transitions_on_reactivation(
             hostname: instance_name.parse().unwrap(),
             user_data: Vec::new(),
             ssh_public_keys: None,
-            network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: Vec::new(),
             disks: Vec::new(),
             boot_disk: None,
@@ -2292,7 +2292,7 @@ async fn test_instance_delete_preserves_other_memberships(
 
     // Setup: create project and multicast pool
     ops::join3(
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_project(client, project_name),
         create_multicast_ip_pool_with_range(
             client,

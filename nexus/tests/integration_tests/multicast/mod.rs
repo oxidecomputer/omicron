@@ -172,6 +172,43 @@ pub(crate) async fn create_multicast_ip_pool_with_range(
     pool
 }
 
+/// Create an IPv6 multicast IP pool with a global scope range (ff0e::/16).
+pub(crate) async fn create_multicast_ip_pool_v6(
+    client: &ClientTestContext,
+    pool_name: &str,
+) -> IpPool {
+    use nexus_types::external_api::shared::Ipv6Range;
+    use std::net::Ipv6Addr;
+
+    let pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: pool_name.parse().unwrap(),
+            description: "IPv6 multicast IP pool for testing".to_string(),
+        },
+        IpVersion::V6,
+    );
+
+    let pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &pool_params).await;
+
+    // Add IPv6 global scope multicast range (ff0e::/16)
+    // Small range to avoid generate_series performance issues with IPv6
+    let ipv6_range = IpRange::V6(
+        Ipv6Range::new(
+            Ipv6Addr::new(0xff0e, 0, 0, 0, 0, 0, 0, 1),
+            Ipv6Addr::new(0xff0e, 0, 0, 0, 0, 0, 0, 0xff),
+        )
+        .unwrap(),
+    );
+    let range_url = format!("/v1/system/ip-pools/{pool_name}/ranges/add");
+    object_create::<_, IpPoolRange>(client, &range_url, &ipv6_range).await;
+
+    // Link the pool to the silo so it can be found by multicast group creation
+    link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
+
+    pool
+}
+
 /// Waits for the multicast group reconciler to complete.
 ///
 /// This wraps wait_background_task with the correct task name.
@@ -1012,7 +1049,7 @@ pub(crate) async fn instance_for_multicast_groups(
             hostname: instance_name.parse::<Hostname>().unwrap(),
             user_data: vec![],
             ssh_public_keys: None,
-            network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![],
             multicast_groups,
             disks: vec![],

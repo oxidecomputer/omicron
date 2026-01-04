@@ -37,7 +37,9 @@ use openapiv3::OpenAPI;
 mod v2025112000;
 mod v2025120300;
 pub mod v2025121200;
-pub mod v2025122300;
+mod v2025122300;
+mod v2026010100;
+mod v2026010300;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -67,8 +69,9 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026010400, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
+    (2026010300, DUAL_STACK_NICS),
     (2026010100, SILO_PROJECT_IP_VERSION_AND_POOL_TYPE),
-    (2025122600, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
     (2025122300, IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS),
     (2025121200, BGP_PEER_COLLISION_STATE),
     (2025120300, LOCAL_STORAGE),
@@ -1432,8 +1435,9 @@ pub trait NexusExternalApi {
         _new_group: TypedBody<v2025121200::MulticastGroupCreate>,
     ) -> Result<HttpResponseCreated<v2025121200::MulticastGroup>, HttpError>
     {
-        Err(HttpError::for_bad_request(
+        Err(HttpError::for_client_error(
             None,
+            dropshot::ClientErrorStatusCode::GONE,
             "multicast group creation is deprecated; groups are created \
              implicitly when instances join via: \
              PUT /v1/instances/{instance}/multicast-groups/{group}"
@@ -1487,8 +1491,9 @@ pub trait NexusExternalApi {
         _path_params: Path<v2025121200::MulticastGroupPath>,
         _update_params: TypedBody<v2025121200::MulticastGroupUpdate>,
     ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError> {
-        Err(HttpError::for_bad_request(
+        Err(HttpError::for_client_error(
             None,
+            dropshot::ClientErrorStatusCode::GONE,
             "multicast group update is deprecated; groups are managed \
              implicitly through member operations"
                 .to_string(),
@@ -1508,8 +1513,9 @@ pub trait NexusExternalApi {
         _rqctx: RequestContext<Self::Context>,
         _path_params: Path<v2025121200::MulticastGroupPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        Err(HttpError::for_bad_request(
+        Err(HttpError::for_client_error(
             None,
+            dropshot::ClientErrorStatusCode::GONE,
             "multicast group deletion is deprecated; groups are \
              automatically deleted when all members leave"
                 .to_string(),
@@ -1570,8 +1576,9 @@ pub trait NexusExternalApi {
         _member_params: TypedBody<v2025121200::MulticastGroupMemberAdd>,
     ) -> Result<HttpResponseCreated<v2025121200::MulticastGroupMember>, HttpError>
     {
-        Err(HttpError::for_bad_request(
+        Err(HttpError::for_client_error(
             None,
+            dropshot::ClientErrorStatusCode::GONE,
             "multicast group member add is deprecated; use the instance \
              join endpoint: PUT /v1/instances/{instance}/multicast-groups/{group}"
                 .to_string(),
@@ -1594,8 +1601,9 @@ pub trait NexusExternalApi {
         _path_params: Path<v2025121200::MulticastGroupMemberPath>,
         _query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        Err(HttpError::for_bad_request(
+        Err(HttpError::for_client_error(
             None,
+            dropshot::ClientErrorStatusCode::GONE,
             "multicast group member remove is deprecated; use the instance \
              leave endpoint: DELETE /v1/instances/{instance}/multicast-groups/{group}"
                 .to_string(),
@@ -1824,8 +1832,12 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         new_instance: TypedBody<v2025112000::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
-            .await
+        Self::v2025121200_instance_create(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
     }
 
     /// Create instance
@@ -1841,8 +1853,47 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         new_instance: TypedBody<v2025121200::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
-            .await
+        Self::v2026010100_instance_create(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions =
+            VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2026010100::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        let new_instance = new_instance.try_map(TryInto::try_into)?;
+        Self::instance_create(rqctx, query_params, new_instance).await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v2026010300_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2026010300::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        let new_instance = new_instance.try_map(TryInto::try_into)?;
+        Self::instance_create(rqctx, query_params, new_instance).await
     }
 
     /// Create instance
@@ -1850,7 +1901,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS..,
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
@@ -3006,9 +3057,35 @@ pub trait NexusExternalApi {
 
     /// List network interfaces
     #[endpoint {
+        operation_id = "instance_network_interface_list",
         method = GET,
         path = "/v1/network-interfaces",
         tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_instance_network_interface_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::InstanceSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026010100::InstanceNetworkInterface>>,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { next_page, items }) =
+            Self::instance_network_interface_list(rqctx, query_params).await?;
+        items
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { next_page, items }))
+            .map_err(HttpError::from)
+    }
+
+    /// List network interfaces
+    #[endpoint {
+        method = GET,
+        path = "/v1/network-interfaces",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn instance_network_interface_list(
         rqctx: RequestContext<Self::Context>,
@@ -3017,9 +3094,38 @@ pub trait NexusExternalApi {
 
     /// Create network interface
     #[endpoint {
+        operation_id = "instance_network_interface_create",
         method = POST,
         path = "/v1/network-interfaces",
         tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_instance_network_interface_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::InstanceSelector>,
+        interface_params: TypedBody<
+            v2026010100::InstanceNetworkInterfaceCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026010100::InstanceNetworkInterface>,
+        HttpError,
+    > {
+        let interface_params = interface_params.try_map(TryInto::try_into)?;
+        let HttpResponseCreated(nic) = Self::instance_network_interface_create(
+            rqctx,
+            query_params,
+            interface_params,
+        )
+        .await?;
+        nic.try_into().map(HttpResponseCreated).map_err(HttpError::from)
+    }
+
+    /// Create network interface
+    #[endpoint {
+        method = POST,
+        path = "/v1/network-interfaces",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn instance_network_interface_create(
         rqctx: RequestContext<Self::Context>,
@@ -3046,9 +3152,33 @@ pub trait NexusExternalApi {
 
     /// Fetch network interface
     #[endpoint {
+        operation_id = "instance_network_interface_view",
         method = GET,
         path = "/v1/network-interfaces/{interface}",
         tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_instance_network_interface_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::NetworkInterfacePath>,
+        query_params: Query<params::OptionalInstanceSelector>,
+    ) -> Result<HttpResponseOk<v2026010100::InstanceNetworkInterface>, HttpError>
+    {
+        let HttpResponseOk(nic) = Self::instance_network_interface_view(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await?;
+        nic.try_into().map(HttpResponseOk).map_err(HttpError::from)
+    }
+
+    /// Fetch network interface
+    #[endpoint {
+        method = GET,
+        path = "/v1/network-interfaces/{interface}",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn instance_network_interface_view(
         rqctx: RequestContext<Self::Context>,
@@ -3058,9 +3188,35 @@ pub trait NexusExternalApi {
 
     /// Update network interface
     #[endpoint {
+        operation_id = "instance_network_interface_update",
         method = PUT,
         path = "/v1/network-interfaces/{interface}",
         tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_instance_network_interface_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::NetworkInterfacePath>,
+        query_params: Query<params::OptionalInstanceSelector>,
+        updated_iface: TypedBody<params::InstanceNetworkInterfaceUpdate>,
+    ) -> Result<HttpResponseOk<v2026010100::InstanceNetworkInterface>, HttpError>
+    {
+        let HttpResponseOk(nic) = Self::instance_network_interface_update(
+            rqctx,
+            path_params,
+            query_params,
+            updated_iface,
+        )
+        .await?;
+        nic.try_into().map(HttpResponseOk).map_err(HttpError::from)
+    }
+
+    /// Update network interface
+    #[endpoint {
+        method = PUT,
+        path = "/v1/network-interfaces/{interface}",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn instance_network_interface_update(
         rqctx: RequestContext<Self::Context>,
@@ -3461,9 +3617,41 @@ pub trait NexusExternalApi {
 
     /// List network interfaces
     #[endpoint {
+        operation_id = "vpc_subnet_list_network_interfaces",
         method = GET,
         path = "/v1/vpc-subnets/{subnet}/network-interfaces",
         tags = ["vpcs"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_vpc_subnet_list_network_interfaces(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPath>,
+        query_params: Query<PaginatedByNameOrId<params::OptionalVpcSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026010100::InstanceNetworkInterface>>,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::vpc_subnet_list_network_interfaces(
+                rqctx,
+                path_params,
+                query_params,
+            )
+            .await?;
+        items
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { items, next_page }))
+            .map_err(HttpError::from)
+    }
+
+    /// List network interfaces
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpc-subnets/{subnet}/network-interfaces",
+        tags = ["vpcs"],
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn vpc_subnet_list_network_interfaces(
         rqctx: RequestContext<Self::Context>,
@@ -4480,9 +4668,33 @@ pub trait NexusExternalApi {
 
     /// List instrumentation probes
     #[endpoint {
+        operation_id = "probe_list",
         method = GET,
         path = "/experimental/v1/probes",
         tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_probe_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026010100::ProbeInfo>>, HttpError>
+    {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::probe_list(rqctx, query_params).await?;
+        items
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { items, next_page }))
+            .map_err(HttpError::from)
+    }
+
+    /// List instrumentation probes
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/probes",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn probe_list(
         rqctx: RequestContext<Self::Context>,
@@ -4491,9 +4703,28 @@ pub trait NexusExternalApi {
 
     /// View instrumentation probe
     #[endpoint {
+        operation_id = "probe_view",
         method = GET,
         path = "/experimental/v1/probes/{probe}",
         tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_probe_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::ProbePath>,
+        query_params: Query<params::ProjectSelector>,
+    ) -> Result<HttpResponseOk<v2026010100::ProbeInfo>, HttpError> {
+        let HttpResponseOk(info) =
+            Self::probe_view(rqctx, path_params, query_params).await?;
+        info.try_into().map(HttpResponseOk).map_err(HttpError::from)
+    }
+
+    /// View instrumentation probe
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/probes/{probe}",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn probe_view(
         rqctx: RequestContext<Self::Context>,

@@ -23,7 +23,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
@@ -111,7 +111,7 @@ fn get_disk_detach_url(instance: &NameOrId) -> String {
 }
 
 async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
@@ -1110,7 +1110,7 @@ async fn test_disk_virtual_provisioning_collection(
 
     let _test = DiskTest::new(&cptestctx).await;
 
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
     let project_id2 = create_project(client, PROJECT_NAME_2).await.identity.id;
 
