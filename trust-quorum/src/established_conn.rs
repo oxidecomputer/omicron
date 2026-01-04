@@ -7,7 +7,7 @@
 use crate::{ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg};
 use bytes::Buf;
 use serde::Serialize;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog::{Logger, debug, error, o, warn};
 use slog_error_chain::SlogInlineError;
 use std::collections::VecDeque;

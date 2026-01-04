@@ -21,7 +21,7 @@ use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::OxideSled;
 use slog::Logger;
 use slog::debug;

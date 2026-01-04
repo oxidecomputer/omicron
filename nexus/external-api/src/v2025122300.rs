@@ -404,3 +404,23 @@ impl From<InstanceUpdate> for params::InstanceUpdate {
         }
     }
 }
+
+/// An IP pool in the context of a silo (pre-2026010100 API version).
+///
+/// This version does not include `ip_version` or `pool_type` fields.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloIpPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo.
+    pub is_default: bool,
+}
+
+impl From<views::SiloIpPool> for SiloIpPool {
+    fn from(new: views::SiloIpPool) -> SiloIpPool {
+        SiloIpPool { identity: new.identity, is_default: new.is_default }
+    }
+}

@@ -18,7 +18,7 @@ use reedline::{
     FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline,
     ReedlineEvent, default_emacs_keybindings,
 };
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog::{Logger, o};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;

@@ -16,7 +16,7 @@ use gateway_test_utils::setup::GatewayTestContext;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
 use omicron_common::disk::M2Slot;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use sp_sim::SimulatedSp;
 use std::time::Duration;

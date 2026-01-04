@@ -30,7 +30,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::inventory::ZoneKind;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;

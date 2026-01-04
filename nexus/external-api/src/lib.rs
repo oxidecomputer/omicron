@@ -67,6 +67,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026010100, SILO_PROJECT_IP_VERSION_AND_POOL_TYPE),
     (2025122600, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
     (2025122300, IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS),
     (2025121200, BGP_PEER_COLLISION_STATE),
@@ -492,9 +493,36 @@ pub trait NexusExternalApi {
     /// can have at most one default pool. IPs are allocated from the default
     /// pool when users ask for one without specifying a pool.
     #[endpoint {
+        operation_id = "silo_ip_pool_list",
         method = GET,
         path = "/v1/system/silos/{silo}/ip-pools",
         tags = ["system/silos"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn v2025122300_silo_ip_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SiloPath>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025122300::SiloIpPool>>, HttpError>
+    {
+        let page =
+            Self::silo_ip_pool_list(rqctx, path_params, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// List IP pools linked to silo
+    ///
+    /// Linked IP pools are available to users in the specified silo. A silo
+    /// can have at most one default pool. IPs are allocated from the default
+    /// pool when users ask for one without specifying a pool.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}/ip-pools",
+        tags = ["system/silos"],
+        versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..,
     }]
     async fn silo_ip_pool_list(
         rqctx: RequestContext<Self::Context>,
@@ -943,9 +971,30 @@ pub trait NexusExternalApi {
 
     /// List IP pools
     #[endpoint {
+        operation_id = "project_ip_pool_list",
         method = GET,
         path = "/v1/ip-pools",
         tags = ["projects"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn v2025122300_project_ip_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025122300::SiloIpPool>>, HttpError>
+    {
+        let page = Self::project_ip_pool_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// List IP pools
+    #[endpoint {
+        method = GET,
+        path = "/v1/ip-pools",
+        tags = ["projects"],
+        versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..,
     }]
     async fn project_ip_pool_list(
         rqctx: RequestContext<Self::Context>,
@@ -954,9 +1003,28 @@ pub trait NexusExternalApi {
 
     /// Fetch IP pool
     #[endpoint {
+        operation_id = "project_ip_pool_view",
         method = GET,
         path = "/v1/ip-pools/{pool}",
         tags = ["projects"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn v2025122300_project_ip_pool_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<v2025122300::SiloIpPool>, HttpError> {
+        match Self::project_ip_pool_view(rqctx, path_params).await {
+            Ok(HttpResponseOk(pool)) => Ok(HttpResponseOk(pool.into())),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fetch IP pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/ip-pools/{pool}",
+        tags = ["projects"],
+        versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..,
     }]
     async fn project_ip_pool_view(
         rqctx: RequestContext<Self::Context>,

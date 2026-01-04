@@ -9,7 +9,7 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use omicron_common::address;
 use sha3::{Digest, Sha3_256};
 
-use crate::latest::sled::{BaseboardId, StartSledAgentRequest};
+use crate::latest::sled::StartSledAgentRequest;
 
 impl StartSledAgentRequest {
     /// Returns the sled's address.
@@ -32,16 +32,5 @@ impl StartSledAgentRequest {
             .as_slice()
             .try_into()
             .unwrap()
-    }
-}
-
-impl slog::KV for BaseboardId {
-    fn serialize(
-        &self,
-        _record: &slog::Record,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        serializer.emit_str("part_number".into(), &self.part_number)?;
-        serializer.emit_str("serial_number".into(), &self.serial_number)
     }
 }

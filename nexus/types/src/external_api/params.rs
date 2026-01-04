@@ -31,7 +31,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{self, Visitor},
 };
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::num::NonZeroU32;
 use std::{

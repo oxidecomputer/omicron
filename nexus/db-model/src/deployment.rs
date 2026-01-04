@@ -68,7 +68,7 @@ use omicron_uuid_kinds::{
     PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
 use sled_agent_types::inventory::OmicronZoneDataset;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use std::net::{IpAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;

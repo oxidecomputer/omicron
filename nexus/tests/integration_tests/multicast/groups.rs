@@ -26,7 +26,10 @@ use dpd_client::types as dpd_types;
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
-use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+
+use crate::integration_tests::instances::{
+    instance_simulate, instance_wait_for_state,
+};
 use nexus_test_utils::dpd_client;
 use nexus_test_utils::http_testing::{
     AuthnMode, Collection, NexusRequest, RequestBuilder,
@@ -50,9 +53,6 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::InstanceUuid;
 
 use super::*;
-use crate::integration_tests::instances::{
-    instance_simulate, instance_wait_for_state,
-};
 
 /// Test that multicast IP pools reject invalid ranges at the pool level
 #[nexus_test]

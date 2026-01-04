@@ -396,7 +396,7 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
     /// The IP version for the pool.
     pub ip_version: IpVersion,
-    /// Type of IP pool (unicast or multicast)
+    /// Type of IP pool (unicast or multicast).
     pub pool_type: shared::IpPoolType,
 }
 
@@ -429,6 +429,12 @@ pub struct SiloIpPool {
     /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
     /// default pools total.
     pub is_default: bool,
+
+    /// The IP version for the pool.
+    pub ip_version: IpVersion,
+
+    /// Type of IP pool (unicast or multicast).
+    pub pool_type: shared::IpPoolType,
 }
 
 /// A link between an IP pool and a silo that allows one to allocate IPs from

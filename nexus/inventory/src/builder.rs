@@ -40,7 +40,7 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::Inventory;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -804,7 +804,7 @@ mod test {
     use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
     use sled_agent_types::inventory::SledRole;
-    use sled_agent_types::sled::BaseboardId;
+    use sled_hardware_types::BaseboardId;
 
     // Verify the contents of an empty collection.
     #[test]

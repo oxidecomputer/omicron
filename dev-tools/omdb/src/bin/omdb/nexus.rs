@@ -91,7 +91,7 @@ use quiesce::cmd_nexus_quiesce;
 use reconfigurator_config::ReconfiguratorConfigArgs;
 use reconfigurator_config::cmd_nexus_reconfigurator_config;
 use serde::Deserialize;
-use sled_agent_types::sled::BaseboardId;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;

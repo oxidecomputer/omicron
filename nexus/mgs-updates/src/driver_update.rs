@@ -783,7 +783,7 @@ mod test {
     use nexus_types::internal_api::views::UpdateAttemptStatus;
     use nexus_types::internal_api::views::UpdateCompletedHow;
     use nexus_types::inventory::SpType;
-    use sled_agent_types::sled::BaseboardId;
+    use sled_hardware_types::BaseboardId;
     use slog_error_chain::InlineErrorChain;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;

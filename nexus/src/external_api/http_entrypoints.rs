@@ -548,6 +548,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .map(|(pool, silo_link)| views::SiloIpPool {
                     identity: pool.identity(),
                     is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
+                    pool_type: pool.pool_type.into(),
                 })
                 .collect();
 
@@ -1643,6 +1645,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .map(|(pool, silo_link)| views::SiloIpPool {
                     identity: pool.identity(),
                     is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
+                    pool_type: pool.pool_type.into(),
                 })
                 .collect();
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
@@ -1673,6 +1677,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(views::SiloIpPool {
                 identity: pool.identity(),
                 is_default: silo_link.is_default,
+                ip_version: pool.ip_version.into(),
+                pool_type: pool.pool_type.into(),
             }))
         };
         apictx

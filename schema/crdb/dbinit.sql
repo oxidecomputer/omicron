@@ -7536,7 +7536,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     -- In some documentation we call this the `K` parameter.
     threshold INT2 NOT NULL CHECK (threshold > 0),
 
-    -- The number of additional nodes beyond threshold to commit 
+    -- The number of additional nodes beyond threshold to commit
     --
     -- This represents the number of prepared nodes that can be offline after
     -- a commit at Nexus and still allow the secret to be reconstructed during
