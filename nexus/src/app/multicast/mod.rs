@@ -50,7 +50,6 @@
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use ipnetwork::IpNetwork;
 use ref_cast::RefCast;
 use slog::error;
 
@@ -102,11 +101,9 @@ pub(crate) mod dataplane;
 /// - `Err` if SSM address without sources
 pub(crate) fn validate_ssm_sources(
     group_ip: std::net::IpAddr,
-    source_ips: &Option<Vec<std::net::IpAddr>>,
+    source_ips: Option<&[std::net::IpAddr]>,
 ) -> Result<(), external::Error> {
-    if is_ssm_address(group_ip)
-        && source_ips.as_ref().is_none_or(|s| s.is_empty())
-    {
+    if is_ssm_address(group_ip) && source_ips.is_none_or(|s| s.is_empty()) {
         return Err(external::Error::invalid_request(
             "SSM multicast addresses require at least one source IP",
         ));
@@ -337,12 +334,14 @@ impl super::Nexus {
     /// - **IP/name joins**: Creates the group implicitly if it doesn't exist
     /// - **ID joins**: The group must already exist (returns error otherwise)
     /// - **Source IPs**: Optional for ASM, required for SSM addresses (232/8, ff3x::/32)
+    /// - **IP version**: Required when joining by name if multiple default pools exist
     pub(crate) async fn instance_join_multicast_group(
         self: &Arc<Self>,
         opctx: &OpContext,
         group_identifier: &params::MulticastGroupIdentifier,
         instance_lookup: &lookup::Instance<'_>,
-        source_ips: &Option<Vec<IpAddr>>,
+        source_ips: Option<&[IpAddr]>,
+        ip_version: Option<external::IpVersion>,
     ) -> CreateResult<db::model::MulticastGroupMember> {
         // Check if multicast is enabled
         if !self.multicast_enabled() {
@@ -367,6 +366,7 @@ impl super::Nexus {
                     opctx,
                     name.clone().into(),
                     source_ips,
+                    ip_version,
                 )
                 .await?
             }
@@ -375,11 +375,6 @@ impl super::Nexus {
             }
         };
 
-        // Convert source IPs to IpNetwork for storage.
-        let source_networks: Option<Vec<IpNetwork>> = source_ips
-            .as_ref()
-            .map(|ips| ips.iter().copied().map(IpNetwork::from).collect());
-
         // Attach the member with its source IPs
         let member = self
             .db_datastore
@@ -387,7 +382,7 @@ impl super::Nexus {
                 opctx,
                 group_id,
                 InstanceUuid::from_untyped_uuid(authz_instance.id()),
-                source_networks,
+                source_ips,
             )
             .await?;
 
@@ -407,7 +402,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         ip: IpAddr,
-        source_ips: &Option<Vec<IpAddr>>,
+        source_ips: Option<&[IpAddr]>,
     ) -> Result<MulticastGroupUuid, external::Error> {
         // Source IPs must match the multicast group's address family
         validate_source_address_family(ip, source_ips)?;
@@ -490,7 +485,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name: Name,
-        source_ips: &Option<Vec<IpAddr>>,
+        source_ips: Option<&[IpAddr]>,
+        ip_version: Option<external::IpVersion>,
     ) -> Result<MulticastGroupUuid, external::Error> {
         let selector = params::MulticastGroupSelector {
             multicast_group: params::MulticastGroupIdentifier::Name(
@@ -526,8 +522,7 @@ impl super::Nexus {
             multicast_ip: None,
             mvlan: None,
             has_sources,
-            // No explicit IP, defaults to V4 when allocating from pool
-            ip_version: None,
+            ip_version,
         };
 
         // Create the group; on conflict -> re-lookup
@@ -585,7 +580,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         id: uuid::Uuid,
-        source_ips: &Option<Vec<IpAddr>>,
+        source_ips: Option<&[IpAddr]>,
     ) -> Result<MulticastGroupUuid, external::Error> {
         let selector = params::MulticastGroupSelector {
             multicast_group: params::MulticastGroupIdentifier::Id(id),
@@ -656,11 +651,13 @@ impl super::Nexus {
     ///
     /// - Address family mismatch between group and source IPs
     /// - SSM address without sources (any identifier type)
+    /// - Multiple default pools with different IP versions without `ip_version`
     pub(crate) async fn resolve_multicast_group_identifier_with_sources(
         &self,
         opctx: &OpContext,
         identifier: &params::MulticastGroupIdentifier,
-        source_ips: &Option<Vec<IpAddr>>,
+        source_ips: Option<&[IpAddr]>,
+        ip_version: Option<external::IpVersion>,
     ) -> Result<MulticastGroupUuid, external::Error> {
         match identifier {
             params::MulticastGroupIdentifier::Ip(ip) => {
@@ -672,6 +669,7 @@ impl super::Nexus {
                     opctx,
                     name.clone().into(),
                     source_ips,
+                    ip_version,
                 )
                 .await
             }
@@ -811,7 +809,7 @@ impl super::Nexus {
 /// Validate that source IPs match the multicast group's address family.
 fn validate_source_address_family(
     multicast_ip: IpAddr,
-    source_ips: &Option<Vec<IpAddr>>,
+    source_ips: Option<&[IpAddr]>,
 ) -> Result<(), external::Error> {
     let Some(sources) = source_ips else {
         return Ok(());

@@ -1569,8 +1569,10 @@ async fn test_source_ips_preserved_on_instance_restart(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{ssm_ip}?project={project_name}"
     );
-    let join_body =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source_ip]) };
+    let join_body = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source_ip]),
+        ip_version: None,
+    };
 
     let member_before: MulticastGroupMember =
         put_upsert(client, &join_url, &join_body).await;
@@ -1737,8 +1739,10 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{ssm_ip}?project={project_name}"
     );
-    let join_body =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source_ip]) };
+    let join_body = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source_ip]),
+        ip_version: None,
+    };
 
     let member_before: MulticastGroupMember =
         put_upsert(client, &join_url, &join_body).await;
@@ -1894,6 +1898,7 @@ async fn test_instance_create_with_ssm_multicast_groups(
         multicast_groups: vec![MulticastGroupJoinSpec {
             group: ssm_ip.to_string().parse().unwrap(),
             source_ips: Some(vec![source_ip]),
+            ip_version: None,
         }],
     };
 
@@ -1993,6 +1998,7 @@ async fn test_instance_create_with_ssm_without_sources_fails(
         multicast_groups: vec![MulticastGroupJoinSpec {
             group: ssm_ip.to_string().parse().unwrap(),
             source_ips: None, // Missing sources for SSM!
+            ip_version: None,
         }],
     };
 
@@ -2091,6 +2097,7 @@ async fn test_instance_reconfigure_add_new_ssm_without_sources_fails(
         multicast_groups: Some(vec![MulticastGroupJoinSpec {
             group: ssm_ip.to_string().parse().unwrap(),
             source_ips: None, // Missing sources for new SSM group!
+            ip_version: None,
         }]),
     };
 

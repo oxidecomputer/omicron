@@ -138,7 +138,7 @@ fn dpd_state_matches_sources(
         Some(&source_filter.specific_sources)
     } else {
         // ASM: Dendrite doesn't support ASM filtering yet
-        // Future: check `has_any_source_member` to enable/disable filtering
+        // TODO: check `has_any_source_member` to enable/disable filtering
         None
     };
 

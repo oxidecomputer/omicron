@@ -20,9 +20,11 @@
 //! Prevents TOCTOU races: group validation, instance sled_id lookup, and member
 //! upsert all happen in one atomic database operation.
 //!
-//! We use sentinel-based error handling (like `network_interface.rs`): validation
+//! We use sentinel-based error handling (like [`network_interface`]): validation
 //! failures trigger a CAST error with a sentinel string, which is decoded in
 //! error handling to return the appropriate error type.
+//!
+//! [`network_interface`]: crate::db::datastore::network_interface
 
 use std::fmt::Debug;
 
@@ -36,10 +38,11 @@ use diesel::sql_types::{Array, Timestamptz};
 use ipnetwork::IpNetwork;
 use uuid::Uuid;
 
-use crate::db::true_or_cast_error::matches_sentinel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{MulticastGroupMember, MulticastGroupMemberState};
 use omicron_common::api::external;
+
+use crate::db::true_or_cast_error::matches_sentinel;
 
 // Sentinel strings for validation errors.
 // These trigger a CAST error when validation fails, allowing us to decode
@@ -170,7 +173,7 @@ impl AttachMemberToGroupStatement {
     /// - `group_id`: Multicast group to attach to
     /// - `instance_id`: Instance being attached as member
     /// - `new_member_id`: UUID for new member row (if creating)
-    /// - `source_ips`: Source IPs for SSM (`None` preserves existing on reactivation)
+    /// - `source_ips`: Source IPs for filtering (`None` preserves existing on reactivation)
     ///
     /// CTEs atomically validate group is not in a "Deleting" state,
     /// that the instance exists, retrieves the current `sled_id` from

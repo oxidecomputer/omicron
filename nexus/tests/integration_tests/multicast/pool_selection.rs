@@ -7,6 +7,12 @@
 //! These tests verify pool selection behavior when joining multicast groups,
 //! particularly the SSM→ASM fallback when `has_sources=true` but no SSM pool
 //! is available.
+//!
+//! TODO: Add `test_ip_version_disambiguation` when IPv6 multicast pools are
+//! enabled. This test should verify that when both IPv4 and IPv6 default
+//! multicast pools exist, joining by name without `ip_version` returns an
+//! error, and specifying `ip_version` selects the correct pool. The datastore
+//! logic is already tested in `test_ip_pools_fetch_any_by_type_ip_version_filtering`.
 
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::InstanceMulticastGroupJoin;
@@ -66,6 +72,7 @@ async fn test_ssm_to_asm_fallback_with_sources(
                 "10.0.0.1".parse::<IpAddr>().unwrap(),
                 "10.0.0.2".parse::<IpAddr>().unwrap(),
             ]),
+            ip_version: None,
         },
     )
     .await;
@@ -137,6 +144,7 @@ async fn test_ssm_pool_preferred_with_sources(
         &join_url,
         &InstanceMulticastGroupJoin {
             source_ips: Some(vec!["10.0.0.1".parse::<IpAddr>().unwrap()]),
+            ip_version: None,
         },
     )
     .await;
@@ -202,7 +210,7 @@ async fn test_asm_pool_used_without_sources(
     put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url,
-        &InstanceMulticastGroupJoin { source_ips: None },
+        &InstanceMulticastGroupJoin { source_ips: None, ip_version: None },
     )
     .await;
 

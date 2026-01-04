@@ -196,7 +196,6 @@ async fn test_multicast_with_external_ip_basic(
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    // Implicit deletion model: group is implicitly deleted when last member (instance) is removed
     wait_for_group_deleted(client, group_name).await;
 }
 

@@ -870,7 +870,7 @@ async fn test_implicit_deletion_race_with_instance_join(
             let join_url = format!(
                 "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
             );
-            let join_params = InstanceMulticastGroupJoin { source_ips: None };
+            let join_params = InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
             async move {
                 // This might fail if group is deleted, or succeed if it beats the delete
                 let res = nexus_test_utils::http_testing::NexusRequest::new(
@@ -1002,7 +1002,8 @@ async fn test_multicast_join_deleted_instance(
     let join_url = format!(
         "/v1/instances/{instance_to_delete}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &join_url)
             .body(Some(&join_params))
@@ -1234,7 +1235,8 @@ async fn test_left_member_waits_for_group_active(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_params)
         .await;
 

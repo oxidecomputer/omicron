@@ -991,6 +991,7 @@ pub(crate) async fn instance_for_multicast_groups(
         .map(|name| MulticastGroupJoinSpec {
             group: MulticastGroupIdentifier::Name(name.parse().unwrap()),
             source_ips: None,
+            ip_version: None,
         })
         .collect();
 
@@ -1059,7 +1060,7 @@ pub(crate) async fn multicast_group_attach_with_sources(
     let url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let body = InstanceMulticastGroupJoin { source_ips };
+    let body = InstanceMulticastGroupJoin { source_ips, ip_version: None };
     put_upsert::<_, MulticastGroupMember>(client, &url, &body).await;
 }
 
@@ -1167,6 +1168,9 @@ pub(crate) async fn cleanup_instances(
         async move { object_delete(client, &url).await }
     });
     ops::join_all(delete_futures).await;
+
+    // Trigger reconciler so implicit group deletions are processed
+    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
 }
 
 /// Stop multiple instances using the exact same pattern as groups.rs.

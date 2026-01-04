@@ -1046,16 +1046,11 @@ async fn sic_join_instance_multicast_group(
         .resolve_multicast_group_identifier_with_sources(
             &opctx,
             &join_spec.group,
-            &join_spec.source_ips,
+            join_spec.source_ips.as_deref(),
+            join_spec.ip_version,
         )
         .await
         .map_err(ActionError::action_failed)?;
-
-    // Convert source IPs to IpNetwork for storage
-    let source_networks: Option<Vec<ipnetwork::IpNetwork>> =
-        join_spec.source_ips.as_ref().map(|ips| {
-            ips.iter().copied().map(ipnetwork::IpNetwork::from).collect()
-        });
 
     // Add the instance as a member of the multicast group in "Joining" state.
     //
@@ -1069,7 +1064,7 @@ async fn sic_join_instance_multicast_group(
             &opctx,
             group_id,
             instance_id,
-            source_networks,
+            join_spec.source_ips.as_deref(),
         )
         .await
     {

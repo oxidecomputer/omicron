@@ -516,6 +516,7 @@ impl DataStore {
             // For multicast pools, use `ip_pools_fetch_any_by_type` which
             // prefers the default but falls back to any linked pool (selecting
             // alphabetically by name if multiple exist).
+            //
             // For unicast pools, require the default pool (existing behavior).
             None => {
                 let (authz_pool, ..) = match pool_type {
@@ -3280,7 +3281,7 @@ mod test {
             .await
             .expect("Should link multicast pool to silo");
 
-        // fetch_default_by_type should fail (no default)
+        // `fetch_default_by_type` should fail (no default)
         let error = datastore
             .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast, None)
             .await

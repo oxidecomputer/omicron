@@ -192,8 +192,8 @@ pub struct MulticastGroup {
     pub identity: IdentityMetadata,
     /// The multicast IP address held by this resource.
     pub multicast_ip: IpAddr,
-    /// Source IP addresses for Source-Specific Multicast (SSM).
-    /// Empty array means any source is allowed.
+    /// Source IP addresses for multicast source filtering (SSM requires these;
+    /// ASM can optionally use them via IGMPv3/MLDv2). Empty array means any source.
     pub source_ips: Vec<IpAddr>,
     /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
     /// None means no VLAN tagging on egress.
@@ -338,6 +338,7 @@ impl From<InstanceCreate> for params::InstanceCreate {
                 .map(|g| params::MulticastGroupJoinSpec {
                     group: g.into(),
                     source_ips: None,
+                    ip_version: None,
                 })
                 .collect(),
             disks: old.disks,
@@ -398,6 +399,7 @@ impl From<InstanceUpdate> for params::InstanceUpdate {
                     .map(|g| params::MulticastGroupJoinSpec {
                         group: g.into(),
                         source_ips: None,
+                        ip_version: None,
                     })
                     .collect()
             }),

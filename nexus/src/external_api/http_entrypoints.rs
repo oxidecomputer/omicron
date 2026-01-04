@@ -2518,7 +2518,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 results.into_iter().map(Into::into).collect(),
-                &|_, m: &v2025121200::MulticastGroupMember| m.id,
+                &|_, member: &v2025121200::MulticastGroupMember| member.id,
             )?))
         };
         apictx
@@ -2567,7 +2567,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 results,
-                &|_, m: &views::MulticastGroupMember| m.identity.id,
+                &|_, member: &views::MulticastGroupMember| member.identity.id,
             )?))
         };
         apictx
@@ -5716,7 +5716,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &opctx,
                     &path.multicast_group,
                     &instance_lookup,
-                    &body.source_ips,
+                    body.source_ips.as_deref(),
+                    body.ip_version,
                 )
                 .await?;
             Ok(HttpResponseCreated(views::MulticastGroupMember::try_from(
@@ -5860,7 +5861,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &opctx,
                     &path.multicast_group,
                     &instance_lookup,
-                    &None, // Old API version doesn't support source_ips
+                    None, // Old API version doesn't support source_ips
+                    None, // Old API version doesn't support ip_version
                 )
                 .await?;
             let member = views::MulticastGroupMember::try_from(result)?;

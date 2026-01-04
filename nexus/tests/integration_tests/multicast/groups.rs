@@ -163,7 +163,8 @@ async fn test_multicast_group_member_operations(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     let added_member: MulticastGroupMember =
         put_upsert(client, &join_url, &join_params).await;
 
@@ -354,7 +355,8 @@ async fn test_instance_multicast_endpoints(
     let instance_join_group1_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group1_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     // Use PUT method and expect 201 Created (implicitly creating group1)
     let member1: MulticastGroupMember =
         put_upsert(client, &instance_join_group1_url, &join_params).await;
@@ -398,7 +400,8 @@ async fn test_instance_multicast_endpoints(
     let join_group2_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group2_name}?project={project_name}"
     );
-    let join_params2 = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params2 =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     let member2: MulticastGroupMember =
         put_upsert(client, &join_group2_url, &join_params2).await;
     assert_eq!(member2.instance_id, instance.identity.id);
@@ -559,7 +562,8 @@ async fn test_multicast_group_member_errors(
     let bad_join_url = format!(
         "/v1/instances/{nonexistent_instance}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     object_put_error(
         client,
         &bad_join_url,
@@ -723,7 +727,8 @@ async fn test_member_response_includes_multicast_ip(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     // Add member and verify multicast_ip field is present in response
     let added_member: MulticastGroupMember =
@@ -970,8 +975,10 @@ async fn test_source_ip_validation_on_join(
     let join_url1 = format!(
         "/v1/instances/{instance_name}/multicast-groups/{ssm_ip}?project={project_name}"
     );
-    let join_body1 =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source1]) };
+    let join_body1 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source1]),
+        ip_version: None,
+    };
     put_upsert::<_, MulticastGroupMember>(client, &join_url1, &join_body1)
         .await;
 
@@ -984,8 +991,10 @@ async fn test_source_ip_validation_on_join(
     let join_url2 = format!(
         "/v1/instances/{instance2_name}/multicast-groups/{ssm_ip}?project={project_name}"
     );
-    let join_body2 =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source1, source2]) };
+    let join_body2 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source1, source2]),
+        ip_version: None,
+    };
     put_upsert::<_, MulticastGroupMember>(client, &join_url2, &join_body2)
         .await;
 
@@ -1005,8 +1014,10 @@ async fn test_source_ip_validation_on_join(
     let join_url3 = format!(
         "/v1/instances/{instance3_name}/multicast-groups/{ssm_ip}?project={project_name}"
     );
-    let join_body3 =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source3]) };
+    let join_body3 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source3]),
+        ip_version: None,
+    };
     put_upsert::<_, MulticastGroupMember>(client, &join_url3, &join_body3)
         .await;
 
@@ -1124,8 +1135,10 @@ async fn test_source_ip_address_family_validation(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{ipv4_ssm_ip}?project={project_name}"
     );
-    let join_body =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![ipv6_source]) };
+    let join_body = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![ipv6_source]),
+        ip_version: None,
+    };
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &join_url)
@@ -1175,7 +1188,8 @@ async fn test_default_pool_on_implicit_creation(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     object_put_error(client, &join_url, &join_params, StatusCode::BAD_REQUEST)
         .await;
 
@@ -1254,7 +1268,8 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
     let join_url4 = format!(
         "/v1/instances/{instance_name4}/multicast-groups/{group_name4}?project={project_name}"
     );
-    let join_params4 = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params4 =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     let error = object_put_error(
         client,
         &join_url4,
@@ -1382,7 +1397,8 @@ async fn test_pool_exhaustion(cptestctx: &ControlPlaneTestContext) {
     let join_url_fail = format!(
         "/v1/instances/{instance2_name}/multicast-groups/{group_fail}?project={project_name}"
     );
-    let join_params_fail = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params_fail =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     object_put_error(
         client,
         &join_url_fail,
@@ -1448,6 +1464,7 @@ async fn test_multiple_ssm_groups_same_pool(
         );
         let join_params = InstanceMulticastGroupJoin {
             source_ips: Some(vec![source_ip.parse().unwrap()]),
+            ip_version: None,
         };
         put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_params)
             .await;
@@ -1533,8 +1550,10 @@ async fn test_multiple_ssm_groups_same_pool(
     let join_url_diff_source = format!(
         "/v1/instances/{instance4_name}/multicast-groups/ssm-group-1?project={project_name}"
     );
-    let join_params_diff_source =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![different_source]) };
+    let join_params_diff_source = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![different_source]),
+        ip_version: None,
+    };
     put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url_diff_source,
@@ -1606,7 +1625,7 @@ async fn test_multicast_group_ip_version_conflict(
     put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url,
-        &InstanceMulticastGroupJoin { source_ips: None },
+        &InstanceMulticastGroupJoin { source_ips: None, ip_version: None },
     )
     .await;
 
@@ -1618,7 +1637,7 @@ async fn test_multicast_group_ip_version_conflict(
     put_upsert::<_, MulticastGroupMember>(
         client,
         &explicit_ip_join_url,
-        &InstanceMulticastGroupJoin { source_ips: None },
+        &InstanceMulticastGroupJoin { source_ips: None, ip_version: None },
     )
     .await;
 
@@ -1638,8 +1657,11 @@ async fn test_multicast_group_ip_version_conflict(
     assert_eq!(group.ip_pool_id, v4_pool.identity.id, "Should use V4 pool");
 
     // Cleanup
-    let expected_group_name =
+    let ip_based_group_name =
         format!("mcast-{}", explicit_ip.replace('.', "-"));
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, &expected_group_name).await;
+
+    // Wait for both groups to be deleted (test creates two groups)
+    wait_for_group_deleted(client, "conflict-test-group").await;
+    wait_for_group_deleted(client, &ip_based_group_name).await;
 }

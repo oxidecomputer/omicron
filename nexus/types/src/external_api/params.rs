@@ -3002,6 +3002,16 @@ pub struct InstanceMulticastGroupJoin {
     /// Each member stores its own sources; the group's `source_ips` shows the union.
     #[serde(default, deserialize_with = "validate_source_ips_param")]
     pub source_ips: Option<Vec<IpAddr>>,
+
+    /// IP version for default pool selection when joining by name.
+    ///
+    /// Only used when `group` is a name and the group doesn't exist yet
+    /// (implicit creation). Required if multiple default multicast pools
+    /// of different IP versions are linked to the silo.
+    ///
+    /// Ignored when joining by UUID or IP address.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 /// Specification for joining a multicast group with optional source filtering.
@@ -3021,6 +3031,16 @@ pub struct MulticastGroupJoinSpec {
     /// Each member stores its own sources; the group's `source_ips` shows the union.
     #[serde(default, deserialize_with = "validate_source_ips_param")]
     pub source_ips: Option<Vec<IpAddr>>,
+
+    /// IP version for default pool selection when joining by name.
+    ///
+    /// Only used when `group` is a name and the group doesn't exist yet
+    /// (implicit creation). Required if multiple default multicast pools
+    /// of different IP versions are linked to the silo.
+    ///
+    /// Ignored when joining by UUID or IP address.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 /// Validate that an IP address is suitable for use as a SSM source.

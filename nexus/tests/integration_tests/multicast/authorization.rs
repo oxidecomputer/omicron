@@ -109,7 +109,8 @@ async fn create_group_via_instance_join(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url)
@@ -242,7 +243,8 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
         "/v1/instances/{}/multicast-groups/{}?project=second-project",
         instance.identity.name, group.identity.name
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url)
@@ -386,7 +388,8 @@ async fn test_cross_project_instance_attachment_allowed(
 
     // First instance join implicitly creates the group
     let join_url1 = "/v1/instances/instance1/multicast-groups/cross-project-group?project=project1";
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     put_upsert::<_, MulticastGroupMember>(client, join_url1, &join_params)
         .await;
 
@@ -529,7 +532,8 @@ async fn test_unauthenticated_cannot_access_member_operations(
         "/v1/instances/{}/multicast-groups/{}?project=test-project",
         instance.identity.name, group.identity.name
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     RequestBuilder::new(client, http::Method::PUT, &join_url)
         .body(Some(&join_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
@@ -660,7 +664,8 @@ async fn test_unprivileged_users_can_list_group_members(
         "/v1/instances/{}/multicast-groups/{}?project={}",
         instance_name, group.identity.name, project_name
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url)
@@ -897,7 +902,8 @@ async fn test_project_only_users_can_access_multicast_groups(
         "/v1/instances/{}/multicast-groups/created-by-project-user?project={}",
         instance.identity.id, project.identity.id
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url)
@@ -1360,7 +1366,8 @@ async fn test_cross_silo_instance_attachment(
         "/v1/instances/{}/multicast-groups/{}?project=project-silo-a",
         instance_a.identity.id, group_name
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url_a)
@@ -1689,7 +1696,8 @@ async fn test_both_member_endpoints_have_same_permissions(
         "/v1/instances/{}/multicast-groups/{}?project={}",
         instance_a.identity.id, group_name, project_a.identity.name
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url_a)
@@ -1780,7 +1788,8 @@ async fn test_both_member_endpoints_have_same_permissions(
         "/v1/instances/{}/multicast-groups/{}",
         instance_c.identity.id, group_a.identity.id
     );
-    let join_body = InstanceMulticastGroupJoin { source_ips: None };
+    let join_body =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &instance_centric_url_c)
             .body(Some(&join_body))
@@ -1923,7 +1932,8 @@ async fn test_silo_cannot_use_unlinked_pool(
     // is not linked to Silo B
     // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
     let join_url = "/v1/instances/instance-silo-b/multicast-groups/test-group?project=project-silo-b";
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, join_url)

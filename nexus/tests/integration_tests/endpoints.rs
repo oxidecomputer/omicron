@@ -783,7 +783,10 @@ pub static DEMO_INSTANCE_MULTICAST_GROUP_JOIN_URL: LazyLock<String> =
     });
 pub static DEMO_INSTANCE_MULTICAST_GROUP_JOIN: LazyLock<
     params::InstanceMulticastGroupJoin,
-> = LazyLock::new(|| params::InstanceMulticastGroupJoin { source_ips: None });
+> = LazyLock::new(|| params::InstanceMulticastGroupJoin {
+    source_ips: None,
+    ip_version: None,
+});
 
 // Switch port settings and status
 pub const DEMO_SWITCH_PORT_URL: &'static str =

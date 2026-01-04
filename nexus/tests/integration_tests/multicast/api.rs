@@ -154,7 +154,8 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     let duplicate_join_url = format!(
         "/v1/instances/edge-case-1/multicast-groups/{group_name}?project={project_name}"
     );
-    let duplicate_join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let duplicate_join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     // This should succeed idempotently
     put_upsert::<_, MulticastGroupMember>(
@@ -341,7 +342,8 @@ async fn test_join_by_ip_asm(cptestctx: &ControlPlaneTestContext) {
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{explicit_ip}?project={project_name}"
     );
-    let join_body = InstanceMulticastGroupJoin { source_ips: None };
+    let join_body =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     let response = NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &join_url)
@@ -423,8 +425,10 @@ async fn test_join_by_ip_ssm_with_sources(cptestctx: &ControlPlaneTestContext) {
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{explicit_ssm_ip}?project={project_name}"
     );
-    let join_body =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source_ip]) };
+    let join_body = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source_ip]),
+        ip_version: None,
+    };
 
     let member: MulticastGroupMember =
         put_upsert(client, &join_url, &join_body).await;
@@ -492,6 +496,7 @@ async fn test_join_by_ip_ssm_without_sources_fails(
     );
     let join_body = InstanceMulticastGroupJoin {
         source_ips: None, // No sources!
+        ip_version: None,
     };
 
     let error = NexusRequest::new(
@@ -551,8 +556,10 @@ async fn test_join_existing_ssm_group_by_id_without_sources_fails(
         "/v1/instances/ssm-id-inst-1/multicast-groups/{ssm_ip}?project={project_name}"
     );
 
-    let join_body_1 =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source_ip]) };
+    let join_body_1 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source_ip]),
+        ip_version: None,
+    };
     let member_1: MulticastGroupMember =
         put_upsert(client, &join_url_1, &join_body_1).await;
 
@@ -567,6 +574,7 @@ async fn test_join_existing_ssm_group_by_id_without_sources_fails(
         RequestBuilder::new(client, Method::PUT, &join_url_by_id)
             .body(Some(&InstanceMulticastGroupJoin {
                 source_ips: None, // No sources!
+                ip_version: None,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -626,6 +634,7 @@ async fn test_join_existing_ssm_group_by_name_without_sources_fails(
     );
     let join_body = InstanceMulticastGroupJoin {
         source_ips: Some(vec!["10.0.0.1".parse().unwrap()]),
+        ip_version: None,
     };
 
     put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_body).await;
@@ -637,7 +646,8 @@ async fn test_join_existing_ssm_group_by_name_without_sources_fails(
     let join_by_name_url = format!(
         "/v1/instances/ssm-name-inst-2/multicast-groups/{expected_group_name}?project={project_name}"
     );
-    let join_body_no_sources = InstanceMulticastGroupJoin { source_ips: None };
+    let join_body_no_sources =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &join_by_name_url)
@@ -701,7 +711,10 @@ async fn test_ssm_with_empty_sources_array_fails(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{ssm_ip}?project={project_name}"
     );
-    let join_body = InstanceMulticastGroupJoin { source_ips: Some(vec![]) };
+    let join_body = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![]),
+        ip_version: None,
+    };
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &join_url)
@@ -760,6 +773,7 @@ async fn test_join_existing_ssm_group_by_ip_without_sources_fails(
     );
     let join_body = InstanceMulticastGroupJoin {
         source_ips: Some(vec!["10.0.0.1".parse().unwrap()]),
+        ip_version: None,
     };
 
     put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_body).await;
@@ -771,7 +785,8 @@ async fn test_join_existing_ssm_group_by_ip_without_sources_fails(
     let join_url_2 = format!(
         "/v1/instances/ssm-ip-inst-2/multicast-groups/{ssm_ip}?project={project_name}"
     );
-    let join_body_no_sources = InstanceMulticastGroupJoin { source_ips: None };
+    let join_body_no_sources =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &join_url_2)
@@ -831,7 +846,8 @@ async fn test_join_by_ip_not_in_pool_fails(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{ip_not_in_pool}?project={project_name}"
     );
-    let join_body = InstanceMulticastGroupJoin { source_ips: None };
+    let join_body =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &join_url)
@@ -957,8 +973,10 @@ async fn test_join_by_ip_different_sources_succeeds(
     let join_url_1 = format!(
         "/v1/instances/diff-sources-inst-1/multicast-groups/{explicit_ssm_ip}?project={project_name}"
     );
-    let join_body_1 =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source1]) };
+    let join_body_1 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source1]),
+        ip_version: None,
+    };
     put_upsert::<_, MulticastGroupMember>(client, &join_url_1, &join_body_1)
         .await;
 
@@ -968,8 +986,10 @@ async fn test_join_by_ip_different_sources_succeeds(
     let join_url_2 = format!(
         "/v1/instances/diff-sources-inst-2/multicast-groups/{explicit_ssm_ip}?project={project_name}"
     );
-    let join_body_2 =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source2]) };
+    let join_body_2 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source2]),
+        ip_version: None,
+    };
     put_upsert::<_, MulticastGroupMember>(client, &join_url_2, &join_body_2)
         .await;
 
@@ -1065,8 +1085,10 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
     );
     let source1: IpAddr = "10.99.99.1".parse().unwrap();
     let source2: IpAddr = "10.99.99.2".parse().unwrap();
-    let join_body_2 =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source1, source2]) };
+    let join_body_2 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source1, source2]),
+        ip_version: None,
+    };
     put_upsert::<_, MulticastGroupMember>(client, &join_url2, &join_body_2)
         .await;
 
@@ -1163,8 +1185,10 @@ async fn test_explicit_ip_bypasses_ssm_asm_selection(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{asm_ip}?project={project_name}"
     );
-    let join_body =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source_ip]) };
+    let join_body = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source_ip]),
+        ip_version: None,
+    };
 
     let member: MulticastGroupMember =
         put_upsert(client, &join_url, &join_body).await;

@@ -175,6 +175,7 @@ impl From<InstanceCreate> for params::InstanceCreate {
                 .map(|g| params::MulticastGroupJoinSpec {
                     group: g.into(),
                     source_ips: None,
+                    ip_version: None,
                 })
                 .collect(),
             disks: old.disks,

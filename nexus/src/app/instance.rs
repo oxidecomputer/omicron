@@ -439,19 +439,21 @@ impl super::Nexus {
                         self.resolve_multicast_group_identifier_with_sources(
                             opctx,
                             &spec.group,
-                            &spec.source_ips,
+                            spec.source_ips.as_deref(),
+                            spec.ip_version,
                         )
                         .await?;
                     }
                     uuid
                 }
                 Err(Error::ObjectNotFound { .. }) => {
-                    // Group doesn't exist - resolve will create it (and validate)
+                    // Group doesn't exist: resolve will create it (and validate accordingly)
                     let id = self
                         .resolve_multicast_group_identifier_with_sources(
                             opctx,
                             &spec.group,
-                            &spec.source_ips,
+                            spec.source_ips.as_deref(),
+                            spec.ip_version,
                         )
                         .await?;
                     id.into_untyped_uuid()
@@ -508,24 +510,19 @@ impl super::Nexus {
                 .cloned()
                 .expect("group_id must be in group_source_ips");
 
-            let source_networks: Option<Vec<ipnetwork::IpNetwork>> = source_ips
-                .map(|ips| {
-                    ips.into_iter().map(ipnetwork::IpNetwork::from).collect()
-                });
-
             debug!(
                 opctx.log,
                 "adding member to group (reconciler will handle dataplane updates)";
                 "instance_id" => %instance_id,
                 "group_id" => %group_id,
-                "source_ips" => ?source_networks
+                "source_ips" => ?source_ips
             );
             self.datastore()
                 .multicast_group_member_attach_to_instance(
                     opctx,
                     MulticastGroupUuid::from_untyped_uuid(group_id),
                     InstanceUuid::from_untyped_uuid(instance_id),
-                    source_networks,
+                    source_ips.as_deref(),
                 )
                 .await?;
         }

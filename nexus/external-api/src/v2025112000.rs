@@ -322,6 +322,7 @@ impl From<InstanceCreate> for params::InstanceCreate {
                 .map(|group| params::MulticastGroupJoinSpec {
                     group: group.into(),
                     source_ips: None,
+                    ip_version: None,
                 })
                 .collect(),
             disks: old.disks.into_iter().map(Into::into).collect(),

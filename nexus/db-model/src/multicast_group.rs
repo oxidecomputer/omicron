@@ -329,7 +329,9 @@ impl TryFrom<MulticastGroupMember> for views::MulticastGroupMember {
 
 /// An incomplete external multicast group, used to store state required for
 /// issuing the database query that selects an available multicast IP and stores
-/// the resulting record. Tag is computed in SQL as `{uuid}:{multicast_ip}`.
+/// the resulting record.
+///
+/// Note: tag is computed in SQL as `{uuid}:{multicast_ip}`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IncompleteExternalMulticastGroup {
     pub id: Uuid,

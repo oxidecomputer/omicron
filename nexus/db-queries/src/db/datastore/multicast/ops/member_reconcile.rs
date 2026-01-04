@@ -284,7 +284,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(&[][..]),
             )
             .await
             .expect("Should attach instance");
@@ -373,7 +373,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(&[][..]),
             )
             .await
             .expect("Should attach instance");
@@ -462,7 +462,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(&[][..]),
             )
             .await
             .expect("Should attach instance");
@@ -612,7 +612,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(&[][..]),
             )
             .await
             .expect("Should attach instance");
@@ -713,7 +713,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(&[][..]),
             )
             .await
             .expect("Should attach instance");

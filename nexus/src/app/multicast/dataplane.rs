@@ -438,7 +438,7 @@ impl MulticastDataplaneClient {
             )
         } else {
             // ASM: Dendrite doesn't support ASM filtering yet
-            // Future: check `has_any_source_member` to enable/disable filtering
+            // TODO: check `has_any_source_member` to enable/disable filtering
             None
         };
 
@@ -598,7 +598,7 @@ impl MulticastDataplaneClient {
             )
         } else {
             // ASM: Dendrite doesn't support ASM filtering yet
-            // Future: check `has_any_source_member` to enable/disable filtering
+            // TODO: check `has_any_source_member` to enable/disable filtering
             None
         };
 
