@@ -530,8 +530,8 @@ libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
-lldpd_client = { git = "https://github.com/oxidecomputer/lldp", package = "lldpd-client", rev = "e472eb405c37567622f03d27bc0a271d65c2d7e7" }
-lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "protocol", rev = "e472eb405c37567622f03d27bc0a271d65c2d7e7" }
+lldpd_client = { git = "https://github.com/oxidecomputer/lldp", package = "lldpd-client", rev = "01b79698257c8d0414a2da6529e381c6c1a50893" }
+lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "protocol", rev = "01b79698257c8d0414a2da6529e381c6c1a50893" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
