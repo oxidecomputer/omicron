@@ -1117,6 +1117,7 @@ impl BlueprintSledConfig {
                 .collect(),
             remove_mupdate_override: self.remove_mupdate_override,
             host_phase_2: self.host_phase_2.into(),
+            measurements: Vec::new(),
         }
     }
 
