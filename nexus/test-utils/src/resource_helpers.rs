@@ -347,13 +347,31 @@ pub async fn link_ip_pool(
     .await;
 }
 
+/// Create a default IPv4 and IPv6 IP Pool.
+///
 /// What you want for any test that is not testing IP logic specifically
-pub async fn create_default_ip_pool(
+pub async fn create_default_ip_pools(
     client: &ClientTestContext,
-) -> views::IpPool {
-    let (pool, ..) = create_ip_pool(&client, "default", None).await;
-    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
-    pool
+) -> (views::IpPool, views::IpPool) {
+    let ranges = [
+        IpRange::try_from((
+            std::net::Ipv4Addr::new(10, 0, 0, 0),
+            std::net::Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap(),
+        IpRange::try_from((
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0xffff),
+        ))
+        .unwrap(),
+    ];
+    let (v4_pool, ..) =
+        create_ip_pool(&client, "default-v4", Some(ranges[0])).await;
+    link_ip_pool(&client, "default-v4", &DEFAULT_SILO.id(), true).await;
+    let (v6_pool, ..) =
+        create_ip_pool(&client, "default-v6", Some(ranges[1])).await;
+    link_ip_pool(&client, "default-v6", &DEFAULT_SILO.id(), true).await;
+    (v4_pool, v6_pool)
 }
 
 pub async fn create_floating_ip(
@@ -373,6 +391,7 @@ pub async fn create_floating_ip(
             },
             ip,
             pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
+            ip_version: None,
         },
     )
     .await
@@ -697,7 +716,7 @@ pub async fn create_instance(
         client,
         project_name,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::Default,
+        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         // Disks=
         Vec::<params::InstanceDiskAttachment>::new(),
         // External IPs=

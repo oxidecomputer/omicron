@@ -1390,7 +1390,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         user_data: vec![],
                         ssh_public_keys: None,
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::Default,
+                            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                         external_ips: vec![],
                         boot_disk: None,
                         cpu_platform: None,

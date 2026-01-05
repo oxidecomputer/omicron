@@ -95,7 +95,7 @@ declare_saga_actions! {
         + sis_list_local_storage
     }
 
-    ENSURE_LOCAL_STORAGE (0, 1, 2, 3, 4, 5, 6, 7) -> "ensure_local_storage" {
+    ENSURE_LOCAL_STORAGE (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) -> "ensure_local_storage" {
         + sis_ensure_local_storage
         // No undo action for this, that is handled in the disk delete saga!
     }
@@ -172,8 +172,8 @@ impl NexusSaga for SagaInstanceStart {
         builder.append(list_local_storage_action());
 
         // Changing MAX_DISKS_PER_INSTANCE requires changing this saga
-        static_assertions::const_assert!(MAX_DISKS_PER_INSTANCE == 8);
-        seq!(N in 0..8 {
+        static_assertions::const_assert!(MAX_DISKS_PER_INSTANCE == 12);
+        seq!(N in 0..12 {
             builder.append(paste!([<ensure_local_storage_ N _action>]()));
         });
 
@@ -693,7 +693,7 @@ async fn sis_ensure_local_storage(
     Ok(())
 }
 
-seq!(M in 0..8 {
+seq!(M in 0..12 {
     async fn sis_ensure_local_storage_~M(
         sagactx: NexusActionContext,
     ) -> Result<(), ActionError> {
@@ -1102,7 +1102,7 @@ mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project, object_create,
+        create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
@@ -1122,7 +1122,7 @@ mod test {
     const INSTANCE_NAME: &str = "test-instance";
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(&client, PROJECT_NAME).await;
         project.identity.id
     }
@@ -1145,7 +1145,7 @@ mod test {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::Default,
+                    params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,

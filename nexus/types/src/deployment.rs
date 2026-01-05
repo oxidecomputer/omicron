@@ -83,7 +83,6 @@ pub mod planning_report;
 mod reconfigurator_config;
 mod zone_type;
 
-use crate::inventory::BaseboardId;
 use anyhow::anyhow;
 use anyhow::bail;
 pub use blueprint_diff::BlueprintDiffSummary;
@@ -155,6 +154,7 @@ pub use reconfigurator_config::ReconfiguratorConfigDisplay;
 pub use reconfigurator_config::ReconfiguratorConfigParam;
 pub use reconfigurator_config::ReconfiguratorConfigView;
 pub use reconfigurator_config::ReconfiguratorConfigViewDisplay;
+use sled_hardware_types::BaseboardId;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
 pub use zone_type::blueprint_zone_type;
@@ -2594,8 +2594,8 @@ mod test {
     use super::PendingMgsUpdateDetails;
     use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
-    use crate::inventory::BaseboardId;
     use gateway_types::component::SpType;
+    use sled_hardware_types::BaseboardId;
     use sled_hardware_types::GIMLET_SLED_MODEL;
 
     #[test]

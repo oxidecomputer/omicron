@@ -7,6 +7,7 @@
 use crate::{ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg};
 use bytes::Buf;
 use serde::Serialize;
+use sled_hardware_types::BaseboardId;
 use slog::{Logger, debug, error, o, warn};
 use slog_error_chain::SlogInlineError;
 use std::collections::VecDeque;
@@ -17,7 +18,6 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task;
 use tokio::time::{Instant, MissedTickBehavior, interval};
-use trust_quorum_protocol::BaseboardId;
 
 /// Max buffer size of a connection
 const CONN_BUF_SIZE: usize = 1024 * 1024;
