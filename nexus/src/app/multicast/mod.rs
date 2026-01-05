@@ -51,7 +51,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use ref_cast::RefCast;
-use slog::error;
+use slog::{debug, error};
 
 use nexus_db_lookup::{LookupPath, lookup};
 use nexus_db_model::Name;
@@ -734,15 +734,22 @@ impl super::Nexus {
         // The NOT EXISTS guard in the datastore method prevents race conditions
         // where a concurrent join could slip in between a "list members" check
         // and the mark-for-removal call.
-        let _ = self
+        if self
             .db_datastore
             .mark_multicast_group_for_removal_if_no_members(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(authz_group.id()),
             )
-            .await?;
+            .await?
+        {
+            debug!(
+                opctx.log,
+                "marked multicast group for removal (last member left)";
+                "group_id" => %authz_group.id(),
+            );
+        }
 
-        // Activate reconciler to process the member removal (and group deletion if triggered)
+        // Activate reconciler to process the member removal (and group deletion if applicable)
         self.background_tasks.task_multicast_reconciler.activate();
         Ok(())
     }

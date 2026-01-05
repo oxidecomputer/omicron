@@ -23,8 +23,8 @@
 //! ## Architecture: RPW +/- Sagas
 //!
 //! **Sagas handle immediate operations:**
-//! - User API requests (create/delete groups)
-//! - Instance lifecycle events (start/stop)
+//! - Instance lifecycle events (start/stop/delete)
+//! - Implicit group creation when first member joins
 //! - Database state transitions
 //! - Initial validation and resource allocation
 //!
@@ -110,11 +110,11 @@
 //! ## Deletion Semantics: Groups vs Members
 //!
 //! **Groups** use state machine deletion:
-//! - User deletes group → state="Deleting" (no `time_deleted` set yet)
+//! - Last member leaves → state="Deleting" (implicit lifecycle)
 //! - RPW cleans up switch config and associated resources
 //! - RPW hard-deletes the row (uses `diesel::delete`)
 //! - Note: `deallocate_external_multicast_group` (IP pool deallocation) sets
-//!   `time_deleted` directly, but this is separate from user-initiated deletion
+//!   `time_deleted` directly for cleanup
 //!
 //! **Members** use dual-purpose "Left" state with soft-delete:
 //! - Instance stopped: state="Left", time_deleted=NULL
@@ -535,20 +535,20 @@ impl MulticastGroupReconciler {
             }
         }
 
-        // Process deleting groups (DPD cleanup + hard-delete from DB)
-        match self.reconcile_deleting_groups(opctx, &dataplane_client).await {
-            Ok(count) => status.groups_deleted += count,
-            Err(e) => {
-                let msg = format!("failed to reconcile deleting groups: {e:#}");
-                status.errors.push(msg);
-            }
-        }
-
         // Reconcile active groups (verify state, update dataplane as needed)
         match self.reconcile_active_groups(opctx, &dataplane_client).await {
             Ok(count) => status.groups_verified += count,
             Err(e) => {
                 let msg = format!("failed to reconcile active groups: {e:#}");
+                status.errors.push(msg);
+            }
+        }
+
+        // Process deleting groups (DPD cleanup + hard-delete from DB)
+        match self.reconcile_deleting_groups(opctx, &dataplane_client).await {
+            Ok(count) => status.groups_deleted += count,
+            Err(e) => {
+                let msg = format!("failed to reconcile deleting groups: {e:#}");
                 status.errors.push(msg);
             }
         }

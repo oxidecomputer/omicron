@@ -475,7 +475,7 @@ async fn test_cache_ttl_driven_refresh() {
 /// - Create multicast group and instance, wait for member to join (populates both caches)
 /// - Verify initial port mapping works
 /// - Wait for backplane TTL to expire (sleep 2 seconds)
-/// - Trigger reconciler (which refreshes expired backplane cache from DPD)
+/// - Activate reconciler (which refreshes expired backplane cache from DPD)
 /// - Verify port mapping still works (confirms cache refresh succeeded)
 #[tokio::test]
 async fn test_backplane_cache_ttl_expiry() {
@@ -554,7 +554,7 @@ async fn test_backplane_cache_ttl_expiry() {
     // Sleep for 1 second to ensure backplane TTL has expired
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    // Force cache access by triggering reconciler
+    // Force cache access by activating reconciler
     // This will cause the reconciler to check backplane cache, find it expired,
     // and refresh from DPD. The sled cache should still be valid.
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;

@@ -224,8 +224,8 @@ pub(crate) async fn wait_for_multicast_reconciler(
 
 /// Activates the multicast reconciler and waits for it to complete.
 ///
-/// Use this when you need to explicitly trigger the reconciler (e.g., after
-/// restarting DPD) rather than waiting for an already-triggered run.
+/// Use this when you need to explicitly activate the reconciler (e.g., after
+/// restarting DPD) rather than waiting for an already-activated run.
 pub(crate) async fn activate_multicast_reconciler(
     lockstep_client: &ClientTestContext,
 ) -> nexus_lockstep_client::types::BackgroundTask {
@@ -260,7 +260,8 @@ where
 
     let last_reconciler_activation = Arc::new(Mutex::new(Instant::now()));
 
-    // Activate once at the start to kick things off
+    // First, wait for any already-activated reconciler run to complete.
+    // This tests explicit activation paths (saga completions, etc.).
     wait_for_multicast_reconciler(lockstep_client).await;
 
     wait_for_condition(
@@ -273,7 +274,8 @@ where
             };
 
             if should_activate {
-                wait_for_multicast_reconciler(lockstep_client).await;
+                // Use activate to drive progress
+                activate_multicast_reconciler(lockstep_client).await;
                 *last_reconciler_activation.lock().unwrap() = now;
             }
 
@@ -895,10 +897,14 @@ pub(crate) async fn wait_for_member_count(
 
 /// Wait for a multicast group to be deleted (returns 404).
 pub(crate) async fn wait_for_group_deleted(
-    client: &ClientTestContext,
+    cptestctx: &ControlPlaneTestContext,
     group_name: &str,
 ) {
-    match wait_for_condition(
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+
+    match wait_for_condition_with_reconciler(
+        lockstep_client,
         || async {
             let group_url = mcast_group_url(group_name);
             match NexusRequest::object_get(client, &group_url)
@@ -960,10 +966,9 @@ pub(crate) async fn verify_group_deleted_or_in_states(
         let actual_state = &matching_groups[0].state;
         assert!(
             expected_states.contains(&actual_state.as_str()),
-            "Group {group_name} should be in one of {expected_states:?} states, found: \"{actual_state}\""
+            "Group {group_name} should be in one of {expected_states:?} states, found: {actual_state}"
         );
     }
-    // If group is gone, that's also valid - operation completed
 }
 
 /// Wait for a multicast group to be deleted from DPD (dataplane) with reconciler activation.
@@ -1205,9 +1210,6 @@ pub(crate) async fn cleanup_instances(
         async move { object_delete(client, &url).await }
     });
     ops::join_all(delete_futures).await;
-
-    // Trigger reconciler so implicit group deletions are processed
-    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
 }
 
 /// Stop multiple instances using the exact same pattern as groups.rs.

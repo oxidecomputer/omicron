@@ -7,6 +7,8 @@
 //! Version 2025121200 types (before `ip_version` preference was added for
 //! default IP pool selection).
 //!
+//! ## IP Pool Selection Changes
+//!
 //! Key differences from newer API versions:
 //! - [`FloatingIpCreate`], [`EphemeralIpCreate`], and [`ExternalIpCreate`]
 //!   don't have the `ip_version` field. Newer versions allow specifying
@@ -14,6 +16,17 @@
 //! - When multiple default pools of different IP versions exist for a silo,
 //!   older clients cannot resolve the conflict. Newer API versions
 //!   require the `ip_version` field in this scenario.
+//!
+//! Affected endpoints:
+//! - `POST /v1/floating-ips` (floating_ip_create)
+//! - `POST /v1/instances/{instance}/external-ips/ephemeral` (instance_ephemeral_ip_attach)
+//! - `POST /v1/instances` (instance_create)
+//!
+//! ## Multicast Types
+//!
+//! Multicast types are re-exported from [`v2025122300`](super::v2025122300).
+//! Both versions use `NameOrId` for group references and have the same
+//! explicit create/update semantics.
 //!
 //! [`FloatingIpCreate`]: self::FloatingIpCreate
 //! [`EphemeralIpCreate`]: self::EphemeralIpCreate

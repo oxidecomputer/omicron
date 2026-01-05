@@ -12,9 +12,11 @@ use omicron_common::api::external;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// Re-export the InstanceNetworkInterfaceAttachment from v2026010100 since
-// v2026010300 has the same structure (the Default variant)
-pub use super::v2026010100::InstanceNetworkInterfaceAttachment;
+// v2026010300 (DUAL_STACK_NICS) uses the current `InstanceNetworkInterfaceAttachment`
+// with `DefaultIpv4`, `DefaultIpv6`, `DefaultDualStack` variants.
+//
+// Only the multicast_groups field differs (Vec<NameOrId> vs Vec<MulticastGroupJoinSpec>).
+pub use params::InstanceNetworkInterfaceAttachment;
 
 /// Create-time parameters for an `Instance`
 ///
@@ -82,18 +84,15 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<external::InstanceCpuPlatform>,
 }
 
-impl TryFrom<InstanceCreate> for params::InstanceCreate {
-    type Error = external::Error;
-
-    fn try_from(value: InstanceCreate) -> Result<Self, Self::Error> {
-        let network_interfaces = value.network_interfaces.try_into()?;
-        Ok(Self {
+impl From<InstanceCreate> for params::InstanceCreate {
+    fn from(value: InstanceCreate) -> Self {
+        Self {
             identity: value.identity,
             ncpus: value.ncpus,
             memory: value.memory,
             hostname: value.hostname,
             user_data: value.user_data,
-            network_interfaces,
+            network_interfaces: value.network_interfaces,
             external_ips: value.external_ips,
             multicast_groups: value
                 .multicast_groups
@@ -111,6 +110,6 @@ impl TryFrom<InstanceCreate> for params::InstanceCreate {
             auto_restart_policy: value.auto_restart_policy,
             anti_affinity_groups: value.anti_affinity_groups,
             cpu_platform: value.cpu_platform,
-        })
+        }
     }
 }

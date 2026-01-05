@@ -22,12 +22,11 @@ use nexus_types::external_api::params::{
     InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::views::FloatingIp;
-
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
     InstanceState, NameOrId,
 };
-use omicron_common::api::external::IpVersion;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 
 use super::*;
@@ -197,7 +196,7 @@ async fn test_multicast_with_external_ip_basic(
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Verify external IP allocation/deallocation lifecycle for multicast group members.
@@ -364,7 +363,7 @@ async fn test_multicast_external_ip_lifecycle(
     }
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Verify instances can be created with both external IP and multicast group
@@ -397,8 +396,10 @@ async fn test_multicast_with_external_ip_at_creation(
     .await;
 
     // Create instance with external IP specified at creation
-    let external_ip_param =
-        ExternalIpCreate::Ephemeral { pool: None, ip_version: Some(IpVersion::V4) };
+    let external_ip_param = ExternalIpCreate::Ephemeral {
+        pool: None,
+        ip_version: Some(IpVersion::V4),
+    };
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
@@ -470,7 +471,7 @@ async fn test_multicast_with_external_ip_at_creation(
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Verify instances can have both floating IPs and multicast group membership.
@@ -504,9 +505,14 @@ async fn test_multicast_with_floating_ip_basic(
     .await;
 
     // Create floating IP (specify pool to avoid ambiguity with dual-stack default pools)
-    let floating_ip =
-        create_floating_ip(client, floating_ip_name, project_name, None, Some(v4_pool.identity.name.as_str()))
-            .await;
+    let floating_ip = create_floating_ip(
+        client,
+        floating_ip_name,
+        project_name,
+        None,
+        Some(v4_pool.identity.name.as_str()),
+    )
+    .await;
 
     // Create instance (will start by default)
     let instance_params = InstanceCreate {
@@ -666,5 +672,5 @@ async fn test_multicast_with_floating_ip_basic(
     object_delete(client, &fip_delete_url).await;
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }

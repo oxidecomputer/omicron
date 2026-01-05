@@ -241,6 +241,7 @@ mod tests {
     use crate::db::pub_test_utils::helpers::{
         SledUpdateBuilder, create_instance_with_vmm,
     };
+    use crate::db::pub_test_utils::multicast::NO_SOURCE_IPS;
     use crate::db::pub_test_utils::{TestDatabase, multicast};
 
     #[tokio::test]
@@ -284,7 +285,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance");
@@ -373,7 +374,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance");
@@ -462,7 +463,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance");
@@ -612,7 +613,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance");
@@ -713,7 +714,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance");

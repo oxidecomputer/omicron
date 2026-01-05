@@ -1892,7 +1892,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         new_instance: TypedBody<v2026010300::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        let new_instance = new_instance.try_map(TryInto::try_into)?;
+        let new_instance = new_instance.map(Into::into);
         Self::instance_create(rqctx, query_params, new_instance).await
     }
 

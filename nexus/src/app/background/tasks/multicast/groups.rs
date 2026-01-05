@@ -62,10 +62,10 @@
 //! "Deleted" because the reconciler no longer sees the group.
 //!
 //! ## Triggering Events
-//! - **"Creating"**: User API creates group → DB inserts with "Creating" state
-//! - **"Active"**: DPD ensure completes successfully → state = "Active"
-//! - **"Deleting"**: User API deletes group → DB sets state = "Deleting"
-//! - **"Deleted"**: RPW reconciler completes cleanup → removes from DB
+//! - **"Creating"**: Instance joins group (implicitly creates if needed) → DB inserts with "Creating" state
+//! - **"Active"**: DPD ensure saga completes successfully → state = "Active"
+//! - **"Deleting"**: Last member leaves group → state = "Deleting" (implicit lifecycle)
+//! - **"Deleted"**: RPW reconciler completes DPD cleanup → removes from DB
 //!
 //! ## Error Handling
 //! - **Saga failures**: Group stays in "Creating", reconciler retries

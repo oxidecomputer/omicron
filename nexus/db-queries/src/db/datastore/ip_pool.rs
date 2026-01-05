@@ -1708,7 +1708,7 @@ impl DataStore {
     /// it requires checking existing ranges within a transaction to prevent
     /// race conditions.
     ///
-    /// Note: Reserved range validation (link-local, GLOP, admin-scoped, etc.)
+    /// Note: Reserved range validation (link-local, admin-scoped, etc.)
     /// is done at the app layer in `validate_multicast_range` since those
     /// checks are stateless.
     ///

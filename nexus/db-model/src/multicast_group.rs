@@ -170,12 +170,12 @@ pub type MulticastGroup = ExternalMulticastGroup;
 pub struct ExternalMulticastGroup {
     #[diesel(embed)]
     pub identity: ExternalMulticastGroupIdentity,
+    /// VNI for multicast group.
+    pub vni: Vni,
     /// IP pool this address was allocated from.
     pub ip_pool_id: Uuid,
     /// IP pool range this address was allocated from.
     pub ip_pool_range_id: Uuid,
-    /// VNI for multicast group.
-    pub vni: Vni,
     /// Primary multicast IP address (overlay/external).
     pub multicast_ip: IpNetwork,
     /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
@@ -204,17 +204,6 @@ pub struct ExternalMulticastGroup {
     /// Initially None in ["Creating"](MulticastGroupState::Creating) state,
     /// populated by reconciler when group becomes ["Active"](MulticastGroupState::Active).
     pub underlay_group_id: Option<Uuid>,
-    /// Salt used for XOR-fold collision avoidance when computing underlay IP.
-    ///
-    /// The underlay IP is computed deterministically from the external multicast
-    /// IP using XOR-folding. In the rare case of a collision (computed underlay
-    /// IP already in use), this salt is incremented and the mapping is retried.
-    /// The salt must be stored to enable deterministic reconstruction of the
-    /// underlay IP from the external IP.
-    ///
-    /// - `None` or `0`: Default, no salt applied
-    /// - `1..255`: Salt value used for collision avoidance
-    pub underlay_salt: Option<SqlU8>,
     /// DPD-client tag used to couple external (overlay) and underlay entries
     /// for this multicast group.
     ///
@@ -229,6 +218,17 @@ pub struct ExternalMulticastGroup {
     pub version_added: Generation,
     /// Version when this group was removed.
     pub version_removed: Option<Generation>,
+    /// Salt used for XOR-fold collision avoidance when computing underlay IP.
+    ///
+    /// The underlay IP is computed deterministically from the external multicast
+    /// IP using XOR-folding. In the rare case of a collision (computed underlay
+    /// IP already in use), this salt is incremented and the mapping is retried.
+    /// The salt must be stored to enable deterministic reconstruction of the
+    /// underlay IP from the external IP.
+    ///
+    /// - `None` or `0`: Default, no salt applied
+    /// - `1..255`: Salt value used for collision avoidance
+    pub underlay_salt: Option<SqlU8>,
 }
 
 /// Values used to create a [MulticastGroupMember] in the database.
@@ -245,14 +245,14 @@ pub struct MulticastGroupMemberValues {
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
     pub external_group_id: Uuid,
-    pub multicast_ip: IpNetwork,
     pub parent_id: Uuid,
     pub sled_id: Option<DbTypedUuid<SledKind>>,
     pub state: MulticastGroupMemberState,
-    /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
-    pub source_ips: Vec<IpNetwork>,
     // version_added and version_removed are omitted - database assigns these
     // via DEFAULT nextval()
+    pub multicast_ip: IpNetwork,
+    /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
+    pub source_ips: Vec<IpNetwork>,
 }
 
 /// A member of a multicast group (instance that receives multicast traffic).
@@ -279,8 +279,6 @@ pub struct MulticastGroupMember {
     pub time_deleted: Option<DateTime<Utc>>,
     /// External multicast group this member belongs to.
     pub external_group_id: Uuid,
-    /// The multicast IP address of the group this member belongs to.
-    pub multicast_ip: IpNetwork,
     /// Parent instance or service that receives multicast traffic.
     pub parent_id: Uuid,
     /// Sled hosting the parent.
@@ -288,12 +286,14 @@ pub struct MulticastGroupMember {
     /// Current state of the multicast group member (RPW pattern).
     /// See [MulticastGroupMemberState] for possible values.
     pub state: MulticastGroupMemberState,
-    /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
-    pub source_ips: Vec<IpNetwork>,
     /// Version when this member was added.
     pub version_added: Generation,
     /// Version when this member was removed.
     pub version_removed: Option<Generation>,
+    /// The multicast IP address of the group this member belongs to.
+    pub multicast_ip: IpNetwork,
+    /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
+    pub source_ips: Vec<IpNetwork>,
 }
 
 // Conversions to external API views

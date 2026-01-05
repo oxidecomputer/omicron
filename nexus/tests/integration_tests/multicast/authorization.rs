@@ -374,7 +374,7 @@ async fn test_cross_project_instance_attachment_allowed(
     let client = &cptestctx.external_client;
 
     // Create pools and projects
-    let (_, _project1, _project2, _) = ops::join4(
+    ops::join4(
         create_default_ip_pools(&client),
         create_project(client, "project1"),
         create_project(client, "project2"),
@@ -652,8 +652,6 @@ async fn test_unprivileged_users_can_list_group_members(
 
     // Unprivileged user should get 404 (not 403) when trying to add/remove
     // instances from inaccessible projects
-
-    // The helper created an instance with a predictable name
     let instance_name = "asymmetric-test-group-instance";
     let project_name = "asymmetric-test-group-project";
 
@@ -1948,10 +1946,10 @@ async fn test_silo_cannot_use_unlinked_pool(
     // Verify the error indicates no pool was found
     let error_body: dropshot::HttpErrorResponseBody =
         error.parsed_body().unwrap();
-    assert!(
-        error_body.message.contains("pool")
-            || error_body.message.contains("multicast"),
-        "Error should indicate no pool available, got: {}",
-        error_body.message
+    assert_eq!(
+        error_body.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for no pool available, got: {:?}",
+        error_body.error_code
     );
 }

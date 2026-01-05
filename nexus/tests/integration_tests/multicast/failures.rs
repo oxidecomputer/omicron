@@ -93,14 +93,13 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
     assert_eq!(fetched_group.identity.name.as_str(), group_name);
 
     // Case: Verify member state during DPD failure
-    // Members should be in "Joining" or "Left" state when DPD is unavailable
-    // (they can't transition to "Joined" without successful DPD programming)
+    // Instance is running, so member has sled_id,
+    // but DPD is unavailable so it can't be programmed.
     let members = list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have exactly one member");
-    assert!(
-        members[0].state == "Joining" || members[0].state == "Left",
-        "Member should be in Joining or Left state when DPD is unavailable, got: {}",
-        members[0].state
+    assert_eq!(
+        members[0].state, "Joining",
+        "Member should be Joining when DPD unavailable (waiting to be programmed)"
     );
 
     // Start instance so it has a valid VMM state for recovery
@@ -126,7 +125,7 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
-    // Restart DPD and verify member recovers to Joined
+    // Restart DPD and verify member recovers to "Joined"
     cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
@@ -148,7 +147,7 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 #[nexus_test]
@@ -216,16 +215,17 @@ async fn test_multicast_reconciler_state_consistency_validation(
         );
 
         // Case: Verify member state during DPD failure
+        // Instance is running, so member has sled_id,
+        // but DPD is unavailable so it can't be programmed.
         let members = list_multicast_group_members(client, group_name).await;
         assert_eq!(
             members.len(),
             1,
             "Group {group_name} should have exactly one member"
         );
-        assert!(
-            members[0].state == "Joining" || members[0].state == "Left",
-            "Member in group {group_name} should be Joining or Left when DPD unavailable, got: {}",
-            members[0].state
+        assert_eq!(
+            members[0].state, "Joining",
+            "Member in group {group_name} should be Joining when DPD unavailable"
         );
     }
 
@@ -244,12 +244,9 @@ async fn test_multicast_reconciler_state_consistency_validation(
     cleanup_instances(cptestctx, client, project_name, &instance_name_refs)
         .await;
 
-    // With DPD now restored, groups should be cleaned up via implicit deletion
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
     // Verify groups are deleted (implicit deletion completes with DPD available)
     for group_name in group_names.iter() {
-        wait_for_group_deleted(client, group_name).await;
+        wait_for_group_deleted(cptestctx, group_name).await;
     }
 }
 
@@ -299,12 +296,13 @@ async fn test_dpd_failure_during_creating_state(
     assert_eq!(fetched_group.identity.name.as_str(), group_name);
 
     // Case: Verify member state during DPD failure
+    // Instance is running, so member has sled_id,
+    // but DPD is unavailable so it can't be programmed.
     let members = list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have exactly one member");
-    assert!(
-        members[0].state == "Joining" || members[0].state == "Left",
-        "Member should be Joining or Left when DPD unavailable during Creating state, got: {}",
-        members[0].state
+    assert_eq!(
+        members[0].state, "Joining",
+        "Member should be Joining when DPD unavailable (waiting to be programmed)"
     );
 
     // Test cleanup - remove member, which triggers implicit deletion
@@ -478,8 +476,6 @@ async fn test_dpd_failure_during_deleting_state(
         // Verify group properties are maintained during failed deletion
         assert_eq!(group.identity.name.as_str(), group_name);
     }
-    // Note: If group is gone, that means deletion succeeded despite DPD being down,
-    // which would indicate the reconciler has fallback cleanup logic
 }
 
 #[nexus_test]
@@ -547,11 +543,11 @@ async fn test_multicast_group_members_during_dpd_failure(
     );
 
     // Case: Verify member state during DPD failure
-    assert!(
-        members_during_failure[0].state == "Joining"
-            || members_during_failure[0].state == "Left",
-        "Member should be Joining or Left when DPD unavailable, got: {}",
-        members_during_failure[0].state
+    // Instance is running, so member has sled_id,
+    // but DPD is unavailable so it can't be programmed.
+    assert_eq!(
+        members_during_failure[0].state, "Joining",
+        "Member should be Joining when DPD unavailable (waiting to be programmed)"
     );
 
     // Verify group is still in "Creating" state
@@ -634,10 +630,11 @@ async fn test_implicit_creation_with_dpd_failure(
     assert_eq!(members[0].instance_id, instance.identity.id);
 
     // Case: Verify member state during DPD failure for implicit creation
-    assert!(
-        members[0].state == "Joining" || members[0].state == "Left",
-        "Member should be Joining or Left when DPD unavailable during implicit creation, got: {}",
-        members[0].state
+    // Instance is running, so member has sled_id,
+    // but DPD is unavailable so it can't be programmed.
+    assert_eq!(
+        members[0].state, "Joining",
+        "Member should be Joining when DPD unavailable (waiting to be programmed)"
     );
 
     multicast_group_detach(client, project_name, instance_name, group_name)
@@ -718,13 +715,10 @@ async fn test_implicit_deletion_with_dpd_failure(
 
         // Restart DPD and verify cleanup completes
         cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
-        wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
         // Both group and orphaned members should be cleaned up
-        wait_for_group_deleted(client, group_name).await;
+        wait_for_group_deleted(cptestctx, group_name).await;
     }
-    // Note: If group is gone, implicit deletion succeeded despite DPD being down
-    // (possibly via database-only cleanup)
 }
 
 /// Test concurrent implicit creation race conditions.
@@ -808,9 +802,7 @@ async fn test_concurrent_implicit_creation_race(
     }
 
     cleanup_instances(cptestctx, client, project_name, &instance_names).await;
-
-    // Wait for group to be implicitly deleted (may already be deleted if cleanup succeeded)
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test implicit deletion race with instance join.
@@ -852,7 +844,7 @@ async fn test_implicit_deletion_race_with_instance_join(
     )
     .await;
 
-    // Wait for group to become Active
+    // Wait for group to become "Active"
     wait_for_group_active(client, group_name).await;
 
     // Now execute detach and add concurrently
@@ -949,10 +941,7 @@ async fn test_implicit_deletion_race_with_instance_join(
 
     // Cleanup - delete instances; group is implicitly deleted when last member removed
     cleanup_instances(cptestctx, client, project_name, &instance_names).await;
-
-    // Implicit model: group is implicitly deleted when last member (instance) is removed
-    // Wait for group to be deleted (may already be deleted if no joins succeeded)
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test that joining a deleted instance to a multicast group returns NOT_FOUND.
@@ -1017,7 +1006,7 @@ async fn test_multicast_join_deleted_instance(
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[remaining_instance])
         .await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test drift correction: DPD loses group state and reconciler re-syncs it.
@@ -1104,7 +1093,7 @@ async fn test_drift_correction_missing_group_in_dpd(
     // Cleanup
     multicast_group_detach(client, project_name, instance_name, group_name)
         .await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test member state transition: "Joining" → "Left" when instance becomes invalid.

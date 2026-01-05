@@ -309,7 +309,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         &["edge-case-1", "edge-case-2", "edge-case-3"],
     )
     .await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test ASM (Any-Source Multicast) join-by-IP: instance joins by specifying
@@ -391,7 +391,7 @@ async fn test_join_by_ip_asm(cptestctx: &ControlPlaneTestContext) {
     assert!(group.source_ips.is_empty(), "ASM group should have no source IPs");
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, &expected_group_name).await;
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
 /// Test SSM (Source-Specific Multicast) join-by-IP: instance joins an SSM IP
@@ -461,7 +461,7 @@ async fn test_join_by_ip_ssm_with_sources(cptestctx: &ControlPlaneTestContext) {
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, &expected_group_name).await;
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
 /// Test SSM join-by-IP without sources should fail.
@@ -475,7 +475,7 @@ async fn test_join_by_ip_ssm_without_sources_fails(
     let instance_name = "join-by-ip-ssm-fail-inst";
 
     // Setup
-    let (_, _, _ssm_pool) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
@@ -511,11 +511,11 @@ async fn test_join_by_ip_ssm_without_sources_fails(
 
     let error_body: dropshot::HttpErrorResponseBody =
         error.parsed_body().unwrap();
-    assert!(
-        error_body.message.contains("SSM")
-            || error_body.message.contains("source"),
-        "Error should mention SSM or source IPs: {}",
-        error_body.message
+    assert_eq!(
+        error_body.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for SSM without sources, got: {:?}",
+        error_body.error_code
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
@@ -534,7 +534,7 @@ async fn test_join_existing_ssm_group_by_id_without_sources_fails(
     let project_name = "ssm-id-fail-project";
 
     // Setup: SSM pool
-    let (_, _, _ssm_pool) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
@@ -585,11 +585,11 @@ async fn test_join_existing_ssm_group_by_id_without_sources_fails(
 
     let error_body: dropshot::HttpErrorResponseBody =
         error.parsed_body().unwrap();
-    assert!(
-        error_body.message.contains("SSM")
-            || error_body.message.contains("source"),
-        "Error should mention SSM or source IPs: {}",
-        error_body.message
+    assert_eq!(
+        error_body.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for SSM join-by-ID without sources, got: {:?}",
+        error_body.error_code
     );
 
     let expected_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
@@ -600,7 +600,7 @@ async fn test_join_existing_ssm_group_by_id_without_sources_fails(
         &["ssm-id-inst-1", "ssm-id-inst-2"],
     )
     .await;
-    wait_for_group_deleted(client, &expected_group_name).await;
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
 /// Test joining an existing SSM group by NAME without sources should fail.
@@ -612,7 +612,7 @@ async fn test_join_existing_ssm_group_by_name_without_sources_fails(
     let project_name = "ssm-name-fail-project";
 
     // Setup: SSM pool
-    let (_, _, _ssm_pool) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
@@ -661,11 +661,11 @@ async fn test_join_existing_ssm_group_by_name_without_sources_fails(
 
     let error_body: dropshot::HttpErrorResponseBody =
         error.parsed_body().unwrap();
-    assert!(
-        error_body.message.contains("SSM")
-            || error_body.message.contains("source"),
-        "Error should mention SSM or source IPs: {}",
-        error_body.message
+    assert_eq!(
+        error_body.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for SSM join-by-name without sources, got: {:?}",
+        error_body.error_code
     );
 
     cleanup_instances(
@@ -675,7 +675,7 @@ async fn test_join_existing_ssm_group_by_name_without_sources_fails(
         &["ssm-name-inst-1", "ssm-name-inst-2"],
     )
     .await;
-    wait_for_group_deleted(client, &expected_group_name).await;
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
 /// Test that SSM join-by-IP with empty sources array fails.
@@ -692,7 +692,7 @@ async fn test_ssm_with_empty_sources_array_fails(
     let instance_name = "ssm-empty-sources-inst";
 
     // Setup
-    let (_, _, _ssm_pool) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
@@ -728,11 +728,11 @@ async fn test_ssm_with_empty_sources_array_fails(
 
     let error_body: dropshot::HttpErrorResponseBody =
         error.parsed_body().unwrap();
-    assert!(
-        error_body.message.contains("SSM")
-            || error_body.message.contains("source"),
-        "Error should mention SSM or source IPs: {}",
-        error_body.message
+    assert_eq!(
+        error_body.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for SSM with empty sources, got: {:?}",
+        error_body.error_code
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
@@ -751,7 +751,7 @@ async fn test_join_existing_ssm_group_by_ip_without_sources_fails(
     let project_name = "ssm-ip-existing-fail-project";
 
     // Setup: SSM pool
-    let (_, _, _ssm_pool) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
@@ -800,11 +800,11 @@ async fn test_join_existing_ssm_group_by_ip_without_sources_fails(
 
     let error_body: dropshot::HttpErrorResponseBody =
         error.parsed_body().unwrap();
-    assert!(
-        error_body.message.contains("SSM")
-            || error_body.message.contains("source"),
-        "Error should mention SSM or source IPs: {}",
-        error_body.message
+    assert_eq!(
+        error_body.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for SSM join-by-IP without sources, got: {:?}",
+        error_body.error_code
     );
 
     cleanup_instances(
@@ -814,7 +814,7 @@ async fn test_join_existing_ssm_group_by_ip_without_sources_fails(
         &["ssm-ip-inst-1", "ssm-ip-inst-2"],
     )
     .await;
-    wait_for_group_deleted(client, &expected_group_name).await;
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
 /// Test join-by-IP with IP not in any pool should fail.
@@ -861,11 +861,11 @@ async fn test_join_by_ip_not_in_pool_fails(
 
     let error_body: dropshot::HttpErrorResponseBody =
         error.parsed_body().unwrap();
-    assert!(
-        error_body.message.contains("pool")
-            || error_body.message.contains("range"),
-        "Error should mention pool or range: {}",
-        error_body.message
+    assert_eq!(
+        error_body.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for IP not in pool, got: {:?}",
+        error_body.error_code
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
@@ -933,7 +933,7 @@ async fn test_join_by_ip_existing_group(cptestctx: &ControlPlaneTestContext) {
         &["existing-inst-1", "existing-inst-2"],
     )
     .await;
-    wait_for_group_deleted(client, &expected_group_name).await;
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
 /// Test that different members can have different source IPs.
@@ -948,7 +948,7 @@ async fn test_join_by_ip_different_sources_succeeds(
     let project_name = "join-by-ip-diff-sources-project";
 
     // Setup with SSM pool
-    let (_, _, _ssm_pool) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
@@ -1015,7 +1015,7 @@ async fn test_join_by_ip_different_sources_succeeds(
         &["diff-sources-inst-1", "diff-sources-inst-2"],
     )
     .await;
-    wait_for_group_deleted(client, &expected_group_name).await;
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
 /// Test that ASM groups can optionally have source IPs (IGMPv3/MLDv2 filtering).
@@ -1137,7 +1137,7 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
         &["asm-sources-inst-1", "asm-sources-inst-2"],
     )
     .await;
-    wait_for_group_deleted(client, &expected_group_name).await;
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
 /// Test that explicit IP determines pool selection, not source presence.
@@ -1222,5 +1222,5 @@ async fn test_explicit_ip_bypasses_ssm_asm_selection(
     assert_eq!(ip_octets[1], 80, "Second octet should be 80 (ASM pool)");
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, &expected_group_name).await;
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }

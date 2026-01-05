@@ -2,23 +2,44 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2025122300 to 2025122600.
+//! Nexus external types that changed from 2025122300 to 2026010100.
+//!
+//! This module contains both **views** (response bodies) and **params**
+//! (request bodies) that differ from newer API versions.
+//!
+//! ## SiloIpPool Changes
+//!
+//! [`SiloIpPool`] doesn't have `ip_version` or `pool_type` fields.
+//! Newer versions include these fields to indicate the IP version
+//! and pool type (unicast or multicast) of the pool.
+//!
+//! Affected endpoints:
+//! - `GET /v1/ip-pools` (project_ip_pool_list)
+//! - `GET /v1/ip-pools/{pool}` (project_ip_pool_view)
+//! - `GET /v1/system/silos/{silo}/ip-pools` (silo_ip_pool_list)
+//!
+//! ## Multicast Changes
 //!
 //! Version 2025122300 types (before [`MulticastGroupIdentifier`] was introduced
 //! and before implicit group lifecycle).
 //!
-//! Key differences from newer API versions:
+//! Key differences:
 //! - Uses [`NameOrId`] for multicast group references (not [`MulticastGroupIdentifier`]).
 //!   Newer versions accept name, UUID, or multicast IP address, while this version
 //!   only accepts name or UUID.
-//! - Has explicit [`MulticastGroupCreate`] and [`MulticastGroupUpdate`] types
-//!   (newer versions create/delete groups implicitly via member operations).
+//! - Had explicit create/update endpoints for multicast groups (removed in newer
+//!   versions which create/delete groups implicitly via member operations).
 //! - [`MulticastGroupMemberAdd`] doesn't have `source_ips` field.
 //!
-//! [`MulticastGroupIdentifier`]: params::MulticastGroupIdentifier
+//! Affected endpoints:
+//! - `GET /v1/multicast-groups` (multicast_group_list)
+//! - `GET /v1/multicast-groups/{multicast_group}` (multicast_group_view)
+//! - `POST /v1/multicast-groups/{multicast_group}/members` (multicast_group_member_add)
+//! - `PUT /v1/instances/{instance}` (instance_update)
+//!
+//! [`SiloIpPool`]: self::SiloIpPool
+//! [`MulticastGroupIdentifier`]: nexus_types::external_api::params::MulticastGroupIdentifier
 //! [`NameOrId`]: omicron_common::api::external::NameOrId
-//! [`MulticastGroupCreate`]: self::MulticastGroupCreate
-//! [`MulticastGroupUpdate`]: self::MulticastGroupUpdate
 //! [`MulticastGroupMemberAdd`]: self::MulticastGroupMemberAdd
 
 use std::net::IpAddr;

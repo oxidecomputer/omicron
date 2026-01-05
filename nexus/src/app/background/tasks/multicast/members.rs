@@ -1125,28 +1125,30 @@ impl MulticastGroupReconciler {
             return Ok(StateTransition::NeedsCleanup);
         }
 
+        // Always clean DPD for "Left" members before any other action.
+        // This ensures stale DPD state is removed before reactivation attempts.
+        // The cleanup is idempotent and handles cases where:
+        // - sled_id is None (uses fallback path)
+        // - member was already removed from DPD
+        if let Err(e) = self
+            .remove_member_from_dataplane(opctx, member, dataplane_client)
+            .await
+        {
+            debug!(
+                opctx.log,
+                "failed to clean up DPD state for 'Left' member (will retry)";
+                "member_id" => %member.id,
+                "error" => ?e
+            );
+            // Continue to reactivation even on cleanup failure because
+            // the add operation may succeed if the port was already removed
+        }
+
         // Handle reactivation: instance valid and group active -> transition to "Joining"
         if instance_valid && group.state == MulticastGroupState::Active {
             return self
                 .reactivate_left_member(opctx, group, member, current_sled_id)
                 .await;
-        }
-
-        // Clean up DPD if needed (best-effort)
-        if !instance_valid && member.sled_id.is_none() {
-            // This handles the case where a saga transitioned to "Left" (e.g., instance stop)
-            // but couldn't clean DPD because it doesn't have switch access.
-            if let Err(e) = self
-                .remove_member_from_dataplane(opctx, member, dataplane_client)
-                .await
-            {
-                debug!(
-                    opctx.log,
-                    "failed to clean up stale DPD state for 'Left' member";
-                    "member_id" => %member.id,
-                    "error" => ?e
-                );
-            }
         }
 
         // Stay in "Left" state

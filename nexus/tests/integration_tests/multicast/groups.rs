@@ -326,7 +326,7 @@ async fn test_multicast_group_member_operations(
 
     // Implicit deletion model: group is implicitly deleted when last member is removed
     // Wait for both Nexus group and DPD group to be deleted
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
     wait_for_group_deleted_from_dpd(cptestctx, external_multicast_ip).await;
 }
 
@@ -491,7 +491,7 @@ async fn test_instance_multicast_endpoints(
     object_delete(client, &instance_leave_group1_url).await;
 
     // Implicit deletion model: group1 should be deleted after last member leaves
-    wait_for_group_deleted(client, group1_name).await;
+    wait_for_group_deleted(cptestctx, group1_name).await;
 
     // Verify membership removed from both views
     // Check instance-centric view - should only show active memberships (group2)
@@ -545,8 +545,8 @@ async fn test_instance_multicast_endpoints(
 
     // Implicit deletion model: Groups should be implicitly deleted after last member removed
     ops::join2(
-        wait_for_group_deleted(client, group1_name),
-        wait_for_group_deleted(client, group2_name),
+        wait_for_group_deleted(cptestctx, group1_name),
+        wait_for_group_deleted(cptestctx, group2_name),
     )
     .await;
 }
@@ -599,7 +599,7 @@ async fn test_multicast_group_member_errors(
     .await;
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 #[nexus_test]
@@ -652,7 +652,7 @@ async fn test_lookup_multicast_group_by_ip(
     object_get_error(client, &lookup_bad_url, StatusCode::NOT_FOUND).await;
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 #[nexus_test]
@@ -716,7 +716,7 @@ async fn test_instance_deletion_removes_multicast_memberships(
     object_get_error(client, &instance_url, StatusCode::NOT_FOUND).await;
 
     // Implicit model: group is implicitly deleted when last member (instance) is removed
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 
     // Wait for reconciler to clean up DPD state (activates reconciler repeatedly until DPD confirms deletion)
     wait_for_group_deleted_from_dpd(cptestctx, multicast_ip).await;
@@ -807,7 +807,7 @@ async fn test_member_response_includes_multicast_ip(
     .await
     .expect("Should remove member");
 
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 
     // Re-create group by adding member again
     let readded_member: MulticastGroupMember =
@@ -833,7 +833,7 @@ async fn test_member_response_includes_multicast_ip(
     .await
     .expect("Should remove member for cleanup");
 
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test that we cannot delete a multicast IP pool when multicast groups are
@@ -921,7 +921,7 @@ async fn test_cannot_delete_multicast_pool_with_groups(
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 
     // Now we should be able to delete the range
     NexusRequest::new(
@@ -1124,7 +1124,7 @@ async fn test_source_ip_validation_on_join(
         &[instance_name, instance2_name, instance3_name],
     )
     .await;
-    wait_for_group_deleted(client, ssm_ip).await;
+    wait_for_group_deleted(cptestctx, ssm_ip).await;
 }
 
 /// Test that source IP address family must match multicast group address family.
@@ -1178,10 +1178,11 @@ async fn test_source_ip_address_family_validation(
     .parsed_body::<dropshot::HttpErrorResponseBody>()
     .expect("Should parse error body");
 
-    assert!(
-        error.message.contains("does not match multicast group address family"),
-        "Error should mention address family mismatch: {}",
-        error.message
+    assert_eq!(
+        error.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for address family mismatch, got: {:?}",
+        error.error_code
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
@@ -1242,7 +1243,7 @@ async fn test_default_pool_on_implicit_creation(
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name2).await;
+    wait_for_group_deleted(cptestctx, group_name2).await;
 }
 
 /// Test pool range allocation for multicast groups.
@@ -1303,18 +1304,17 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
         StatusCode::INSUFFICIENT_STORAGE, // or appropriate error code
     )
     .await;
-    assert!(
-        error.message.contains("IP")
-            || error.message.contains("exhausted")
-            || error.message.contains("available"),
-        "Error should mention IP exhaustion: {}",
-        error.message
+    assert_eq!(
+        error.error_code,
+        Some("InsufficientCapacity".to_string()),
+        "Expected InsufficientCapacity for pool exhaustion, got: {:?}",
+        error.error_code
     );
 
     // Case: Delete one group (by removing all members)
     cleanup_instances(cptestctx, client, project_name, &[instance_names[0]])
         .await;
-    wait_for_group_deleted(client, "range-group-0").await;
+    wait_for_group_deleted(cptestctx, "range-group-0").await;
 
     // Case: Create new group - should succeed (IP reclaimed)
     let group_name_new = "range-group-new";
@@ -1382,7 +1382,7 @@ async fn test_automatic_pool_selection(cptestctx: &ControlPlaneTestContext) {
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test validation errors for pool exhaustion.
@@ -1604,7 +1604,7 @@ async fn test_multiple_ssm_groups_same_pool(
 
     // Verify all groups are deleted
     for (group_name, _) in &group_configs {
-        wait_for_group_deleted(client, group_name).await;
+        wait_for_group_deleted(cptestctx, group_name).await;
     }
 }
 
@@ -1688,6 +1688,6 @@ async fn test_multicast_group_ip_version_conflict(
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
 
     // Wait for both groups to be deleted (test creates two groups)
-    wait_for_group_deleted(client, "conflict-test-group").await;
-    wait_for_group_deleted(client, &ip_based_group_name).await;
+    wait_for_group_deleted(cptestctx, "conflict-test-group").await;
+    wait_for_group_deleted(cptestctx, &ip_based_group_name).await;
 }

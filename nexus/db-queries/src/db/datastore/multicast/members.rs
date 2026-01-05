@@ -868,6 +868,7 @@ mod tests {
         SledUpdateBuilder, attach_instance_to_vmm, create_instance_with_vmm,
         create_stopped_instance_record, create_vmm_for_instance,
     };
+    use crate::db::pub_test_utils::multicast::NO_SOURCE_IPS;
     use crate::db::pub_test_utils::{TestDatabase, multicast};
 
     // Note: These are datastore-level tests. They validate database state
@@ -962,7 +963,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(creating_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach to 'Creating' group");
@@ -974,7 +975,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(active_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance to active group");
@@ -998,7 +999,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(active_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should handle duplicate attach to 'Joining' member");
@@ -1036,7 +1037,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(active_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should handle attach to 'Joined' member");
@@ -1210,7 +1211,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 InstanceUuid::from_untyped_uuid(*instance1_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group1");
@@ -1220,7 +1221,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group2.id()),
                 InstanceUuid::from_untyped_uuid(*instance1_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group2");
@@ -1230,7 +1231,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 InstanceUuid::from_untyped_uuid(*instance2_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance2 to group1");
@@ -1377,7 +1378,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(*instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance as member");
@@ -1461,7 +1462,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 instance_id,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance as member first time");
@@ -1472,7 +1473,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 instance_id,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should handle duplicate add idempotently");
@@ -1534,7 +1535,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(test_instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should create member record");
@@ -1668,7 +1669,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(test_instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should create member record");
@@ -2002,7 +2003,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(fake_group_id),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
         assert!(result.is_err(), "Attach to non-existent group should fail");
@@ -2049,7 +2050,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(fake_instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
         assert!(result.is_err(), "Attach non-existent instance should fail");
@@ -2060,7 +2061,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should create member");
@@ -2165,7 +2166,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 instance_id,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add member");
@@ -2376,7 +2377,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 instance1_id,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group1");
@@ -2386,7 +2387,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group2.id()),
                 instance1_id,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group2");
@@ -2397,7 +2398,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 instance2_id,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance2 to group1");
@@ -2552,7 +2553,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 instance1_id,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group1");
@@ -2562,7 +2563,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 instance2_id,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance2 to group1");
@@ -2573,7 +2574,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group2.id()),
                 instance1_id,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group2");
@@ -2583,7 +2584,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group2.id()),
                 instance3_id,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance3 to group2");
@@ -2754,7 +2755,7 @@ mod tests {
                     &opctx1,
                     MulticastGroupUuid::from_untyped_uuid(group_id),
                     InstanceUuid::from_untyped_uuid(instance_id),
-                    Some(&[][..]),
+                    Some(NO_SOURCE_IPS),
                 )
                 .await
         });
@@ -2765,7 +2766,7 @@ mod tests {
                     &opctx2,
                     MulticastGroupUuid::from_untyped_uuid(group_id),
                     InstanceUuid::from_untyped_uuid(instance_id),
-                    Some(&[][..]),
+                    Some(NO_SOURCE_IPS),
                 )
                 .await
         });
@@ -2819,7 +2820,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(fake_group_id),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
 
@@ -2846,7 +2847,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(fake_instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
 
@@ -2904,7 +2905,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(creating_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should allow attach to 'Creating' group");
@@ -2939,7 +2940,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(deleting_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
         assert!(res.is_err(), "Should reject attach to 'Deleting' group");
@@ -3039,7 +3040,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Third attach should succeed");
@@ -3356,7 +3357,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Attach should succeed");
@@ -3391,7 +3392,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should allow reattach of Left member");
@@ -3439,7 +3440,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(fake_group_id),
                 InstanceUuid::from_untyped_uuid(fake_instance_id),
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
 
@@ -3496,7 +3497,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 instance_id,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach stopped instance");
@@ -3632,7 +3633,7 @@ mod tests {
                 &opctx,
                 group_id,
                 instance3,
-                Some(&[][..]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add ASM member");
@@ -3920,7 +3921,7 @@ mod tests {
                 &opctx,
                 group_id,
                 instance,
-                Some(&[][..]), // Some([]) = clear source_ips
+                Some(NO_SOURCE_IPS), // Some([]) = clear source_ips
             )
             .await
             .expect("Should reactivate member");

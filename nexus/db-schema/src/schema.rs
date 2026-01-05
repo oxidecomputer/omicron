@@ -2781,17 +2781,17 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        vni -> Int4,
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
-        vni -> Int4,
         multicast_ip -> Inet,
         mvlan -> Nullable<Int2>,
         underlay_group_id -> Nullable<Uuid>,
-        underlay_salt -> Nullable<Int2>,
         tag -> Nullable<Text>,
         state -> crate::enums::MulticastGroupStateEnum,
         version_added -> Int8,
         version_removed -> Nullable<Int8>,
+        underlay_salt -> Nullable<Int2>,
     }
 }
 
@@ -2802,12 +2802,12 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         external_group_id -> Uuid,
-        multicast_ip -> Inet,
         parent_id -> Uuid,
         sled_id -> Nullable<Uuid>,
         state -> crate::enums::MulticastGroupMemberStateEnum,
         version_added -> Int8,
         version_removed -> Nullable<Int8>,
+        multicast_ip -> Inet,
         source_ips -> Array<Inet>,
     }
 }

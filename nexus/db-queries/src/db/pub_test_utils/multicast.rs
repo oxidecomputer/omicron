@@ -4,7 +4,13 @@
 
 //! Multicast-specific datastore test helpers.
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
+
+/// Empty source IPs slice for passing to functions that take `Option<&[IpAddr]>`.
+///
+/// Use `Some(NO_SOURCE_IPS)` to explicitly clear source IPs (switch to ASM),
+/// vs `None` which preserves existing source IPs on reactivation.
+pub const NO_SOURCE_IPS: &[IpAddr] = &[];
 
 use uuid::Uuid;
 

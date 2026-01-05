@@ -2,7 +2,24 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2026010100 to 2026010300
+//! Nexus external types that changed from 2026010100 to 2026010300.
+//!
+//! ## Network Interface Changes
+//!
+//! This version adds dual-stack NIC support with [`InstanceNetworkInterfaceAttachment`]
+//! and [`InstanceNetworkInterfaceCreate`] changes.
+//!
+//! ## Multicast Changes
+//!
+//! `InstanceCreate.multicast_groups` uses `Vec<NameOrId>` instead of
+//! `Vec<MulticastGroupJoinSpec>`. The conversion adds default values for
+//! `source_ips` and `ip_version` fields.
+//!
+//! Affected endpoints:
+//! - `POST /v1/instances` (instance_create)
+//!
+//! [`InstanceNetworkInterfaceAttachment`]: self::InstanceNetworkInterfaceAttachment
+//! [`InstanceNetworkInterfaceCreate`]: self::InstanceNetworkInterfaceCreate
 
 use api_identity::ObjectIdentity;
 use itertools::Either;

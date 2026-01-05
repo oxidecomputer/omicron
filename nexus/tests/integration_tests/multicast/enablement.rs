@@ -237,10 +237,11 @@ async fn test_multicast_enablement() {
     // Verify the error message indicates multicast is disabled
     let error: dropshot::HttpErrorResponseBody =
         attach_response.parsed_body().expect("Should parse error body");
-    assert!(
-        error.message.contains("multicast functionality is currently disabled"),
-        "Error message should indicate multicast is disabled, got: {}",
-        error.message
+    assert_eq!(
+        error.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for multicast disabled, got: {:?}",
+        error.error_code
     );
 
     cptestctx.teardown().await;
