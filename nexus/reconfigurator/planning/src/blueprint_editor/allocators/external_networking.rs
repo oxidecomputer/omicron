@@ -5,13 +5,12 @@
 use anyhow::bail;
 use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ExternalIpPolicy;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::inventory::SourceNatConfig;
+use nexus_types::inventory::SourceNatConfigGeneric;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -20,8 +19,10 @@ use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV6_SUBNET;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::MacAddr;
+use omicron_common::api::internal::shared::PrivateIpConfig;
+use omicron_common::api::internal::shared::PrivateIpConfigError;
 use omicron_common::api::internal::shared::SourceNatConfigError;
-use oxnet::IpNet;
+use sled_agent_types::inventory::ZoneKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -46,6 +47,8 @@ pub enum ExternalNetworkingError {
     ExhaustedOpteIps { kind: ZoneKind },
     #[error("attempted to add duplicate external DNS IP: {ip}")]
     AddDuplicateExternalDnsIp { ip: IpAddr },
+    #[error("invalid private IP configuration")]
+    InvalidPrivateIpConfig(#[from] PrivateIpConfigError),
 }
 
 #[derive(Debug)]
@@ -73,8 +76,12 @@ impl ExternalNetworkingAllocator {
     /// Construct an `ExternalNetworkingAllocator` that hands out IPs based on
     /// `external_ip_policy`, treating any IPs used by in-service zones
     /// in `blueprint` as already-in-use.
-    #[cfg(test)]
-    pub(crate) fn from_blueprint(
+    ///
+    /// This is mostly useful for tests that are starting from an established
+    /// blueprint; the real planner will typically use
+    /// [`ExternalNetworkingAllocator::from_current_zones()`] at an appropriate
+    /// stage of planning (e.g., after handling expungements).
+    pub fn from_blueprint(
         blueprint: &nexus_types::deployment::Blueprint,
         external_ip_policy: &ExternalIpPolicy,
     ) -> anyhow::Result<Self> {
@@ -152,30 +159,30 @@ impl ExternalNetworkingAllocator {
         for z in running_omicron_zones {
             let zone_type = &z.zone_type;
             match zone_type {
-                BlueprintZoneType::BoundaryNtp(ntp) => match ntp.nic.ip {
-                    IpAddr::V4(ip) => {
-                        if !existing_boundary_ntp_v4_ips.insert(ip) {
+                BlueprintZoneType::BoundaryNtp(ntp) => {
+                    if let Some(ip) = ntp.nic.ip_config.ipv4_addr() {
+                        if !existing_boundary_ntp_v4_ips.insert(*ip) {
                             bail!("duplicate Boundary NTP NIC IP: {ip}");
                         }
                     }
-                    IpAddr::V6(ip) => {
-                        if !existing_boundary_ntp_v6_ips.insert(ip) {
+                    if let Some(ip) = ntp.nic.ip_config.ipv6_addr() {
+                        if !existing_boundary_ntp_v6_ips.insert(*ip) {
                             bail!("duplicate Boundary NTP NIC IP: {ip}");
                         }
                     }
-                },
-                BlueprintZoneType::Nexus(nexus) => match nexus.nic.ip {
-                    IpAddr::V4(ip) => {
-                        if !existing_nexus_v4_ips.insert(ip) {
+                }
+                BlueprintZoneType::Nexus(nexus) => {
+                    if let Some(ip) = nexus.nic.ip_config.ipv4_addr() {
+                        if !existing_nexus_v4_ips.insert(*ip) {
                             bail!("duplicate Nexus NIC IP: {ip}");
                         }
                     }
-                    IpAddr::V6(ip) => {
-                        if !existing_nexus_v6_ips.insert(ip) {
+                    if let Some(ip) = nexus.nic.ip_config.ipv6_addr() {
+                        if !existing_nexus_v6_ips.insert(*ip) {
                             bail!("duplicate Nexus NIC IP: {ip}");
                         }
                     }
-                },
+                }
                 BlueprintZoneType::ExternalDns(dns) => {
                     if !used_external_dns_ips.insert(dns.dns_address.addr.ip())
                     {
@@ -184,16 +191,14 @@ impl ExternalNetworkingAllocator {
                             dns.dns_address.addr
                         );
                     }
-                    match dns.nic.ip {
-                        IpAddr::V4(ip) => {
-                            if !existing_external_dns_v4_ips.insert(ip) {
-                                bail!("duplicate external DNS IP: {ip}");
-                            }
+                    if let Some(ip) = dns.nic.ip_config.ipv4_addr() {
+                        if !existing_external_dns_v4_ips.insert(*ip) {
+                            bail!("duplicate external DNS IP: {ip}");
                         }
-                        IpAddr::V6(ip) => {
-                            if !existing_external_dns_v6_ips.insert(ip) {
-                                bail!("duplicate external DNS IP: {ip}");
-                            }
+                    }
+                    if let Some(ip) = dns.nic.ip_config.ipv6_addr() {
+                        if !existing_external_dns_v6_ips.insert(*ip) {
+                            bail!("duplicate external DNS IP: {ip}");
                         }
                     }
                 }
@@ -301,132 +306,116 @@ impl ExternalNetworkingAllocator {
     pub fn for_new_nexus(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
+        // TODO-completeness: Support dual-stack external networking for
+        // services. See https://github.com/oxidecomputer/omicron/issues/8949
+        // and https://github.com/oxidecomputer/omicron/issues/9288.
         let external_ip = self.external_ip_alloc.claim_next_exclusive_ip()?;
-        let (nic_ip, nic_subnet) = match external_ip {
-            IpAddr::V4(_) => (
-                self.nexus_v4_ips
-                    .next()
-                    .ok_or(ExternalNetworkingError::ExhaustedOpteIps {
+        let nic_ip_config = match external_ip {
+            IpAddr::V4(_) => {
+                let ip = self.nexus_v4_ips.next().ok_or(
+                    ExternalNetworkingError::ExhaustedOpteIps {
                         kind: ZoneKind::Nexus,
-                    })?
-                    .into(),
-                IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
-            ),
-            IpAddr::V6(_) => (
-                self.nexus_v6_ips
-                    .next()
-                    .ok_or(ExternalNetworkingError::ExhaustedOpteIps {
+                    },
+                )?;
+                PrivateIpConfig::new_ipv4(ip, *NEXUS_OPTE_IPV4_SUBNET)?
+            }
+            IpAddr::V6(_) => {
+                let ip = self.nexus_v6_ips.next().ok_or(
+                    ExternalNetworkingError::ExhaustedOpteIps {
                         kind: ZoneKind::Nexus,
-                    })?
-                    .into(),
-                IpNet::from(*NEXUS_OPTE_IPV6_SUBNET),
-            ),
+                    },
+                )?;
+                PrivateIpConfig::new_ipv6(ip, *NEXUS_OPTE_IPV6_SUBNET)?
+            }
         };
         let nic_mac = self
             .available_system_macs
             .next()
             .ok_or(ExternalNetworkingError::NoSystemMacAddressAvailable)?;
 
-        Ok(ExternalNetworkingChoice {
-            external_ip,
-            nic_ip,
-            nic_subnet,
-            nic_mac,
-        })
+        Ok(ExternalNetworkingChoice { external_ip, nic_ip_config, nic_mac })
     }
 
     pub fn for_new_boundary_ntp(
         &mut self,
     ) -> Result<ExternalSnatNetworkingChoice, ExternalNetworkingError> {
+        // TODO-completeness: Support dual-stack external networking for
+        // services. See https://github.com/oxidecomputer/omicron/issues/8949.
         let snat_cfg = self.external_ip_alloc.claim_next_snat_ip()?;
-        let (nic_ip, nic_subnet) = match snat_cfg.ip {
-            IpAddr::V4(_) => (
-                self.boundary_ntp_v4_ips
-                    .next()
-                    .ok_or(ExternalNetworkingError::ExhaustedOpteIps {
+        let nic_ip_config = match snat_cfg.ip {
+            IpAddr::V4(_) => {
+                let ip = self.boundary_ntp_v4_ips.next().ok_or(
+                    ExternalNetworkingError::ExhaustedOpteIps {
                         kind: ZoneKind::BoundaryNtp,
-                    })?
-                    .into(),
-                IpNet::from(*NTP_OPTE_IPV4_SUBNET),
-            ),
-            IpAddr::V6(_) => (
-                self.boundary_ntp_v6_ips
-                    .next()
-                    .ok_or(ExternalNetworkingError::ExhaustedOpteIps {
+                    },
+                )?;
+                PrivateIpConfig::new_ipv4(ip, *NTP_OPTE_IPV4_SUBNET)?
+            }
+            IpAddr::V6(_) => {
+                let ip = self.boundary_ntp_v6_ips.next().ok_or(
+                    ExternalNetworkingError::ExhaustedOpteIps {
                         kind: ZoneKind::BoundaryNtp,
-                    })?
-                    .into(),
-                IpNet::from(*NTP_OPTE_IPV6_SUBNET),
-            ),
+                    },
+                )?;
+                PrivateIpConfig::new_ipv6(ip, *NTP_OPTE_IPV6_SUBNET)?
+            }
         };
         let nic_mac = self
             .available_system_macs
             .next()
             .ok_or(ExternalNetworkingError::NoSystemMacAddressAvailable)?;
 
-        Ok(ExternalSnatNetworkingChoice {
-            snat_cfg,
-            nic_ip,
-            nic_subnet,
-            nic_mac,
-        })
+        Ok(ExternalSnatNetworkingChoice { snat_cfg, nic_ip_config, nic_mac })
     }
 
     pub fn for_new_external_dns(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
+        // TODO-completeness: Support dual-stack external networking for
+        // services. See https://github.com/oxidecomputer/omicron/issues/8949.
         let external_ip = self
             .available_external_dns_ips
             .pop_first()
             .ok_or(ExternalNetworkingError::NoExternalDnsIpAvailable)?;
 
-        let (nic_ip, nic_subnet) = match external_ip {
-            IpAddr::V4(_) => (
-                self.external_dns_v4_ips
-                    .next()
-                    .ok_or(ExternalNetworkingError::ExhaustedOpteIps {
+        let nic_ip_config = match external_ip {
+            IpAddr::V4(_) => {
+                let ip = self.external_dns_v4_ips.next().ok_or(
+                    ExternalNetworkingError::ExhaustedOpteIps {
                         kind: ZoneKind::ExternalDns,
-                    })?
-                    .into(),
-                IpNet::from(*DNS_OPTE_IPV4_SUBNET),
-            ),
-            IpAddr::V6(_) => (
-                self.external_dns_v6_ips
-                    .next()
-                    .ok_or(ExternalNetworkingError::ExhaustedOpteIps {
+                    },
+                )?;
+                PrivateIpConfig::new_ipv4(ip, *DNS_OPTE_IPV4_SUBNET)?
+            }
+            IpAddr::V6(_) => {
+                let ip = self.external_dns_v6_ips.next().ok_or(
+                    ExternalNetworkingError::ExhaustedOpteIps {
                         kind: ZoneKind::ExternalDns,
-                    })?
-                    .into(),
-                IpNet::from(*DNS_OPTE_IPV6_SUBNET),
-            ),
+                    },
+                )?;
+                PrivateIpConfig::new_ipv6(ip, *DNS_OPTE_IPV6_SUBNET)?
+            }
         };
         let nic_mac = self
             .available_system_macs
             .next()
             .ok_or(ExternalNetworkingError::NoSystemMacAddressAvailable)?;
 
-        Ok(ExternalNetworkingChoice {
-            external_ip,
-            nic_ip,
-            nic_subnet,
-            nic_mac,
-        })
+        Ok(ExternalNetworkingChoice { external_ip, nic_ip_config, nic_mac })
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ExternalNetworkingChoice {
     pub external_ip: IpAddr,
-    pub nic_ip: IpAddr,
-    pub nic_subnet: IpNet,
+    pub nic_ip_config: PrivateIpConfig,
     pub nic_mac: MacAddr,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ExternalSnatNetworkingChoice {
-    pub snat_cfg: SourceNatConfig,
-    pub nic_ip: IpAddr,
-    pub nic_subnet: IpNet,
+    pub snat_cfg: SourceNatConfigGeneric,
+    pub nic_ip_config: PrivateIpConfig,
     pub nic_mac: MacAddr,
 }
 
@@ -586,7 +575,7 @@ impl ExternalIpAllocator {
 
     fn claim_next_snat_ip(
         &mut self,
-    ) -> Result<SourceNatConfig, ExternalNetworkingError> {
+    ) -> Result<SourceNatConfigGeneric, ExternalNetworkingError> {
         // Prefer reusing an existing SNAT IP, if we still have port ranges
         // available on that ip.
         for (ip, used_port_ranges) in self.used_snat_ips.iter_mut() {
@@ -629,7 +618,7 @@ enum SnatPortRange {
 }
 
 impl SnatPortRange {
-    fn into_source_nat_config(self, ip: IpAddr) -> SourceNatConfig {
+    fn into_source_nat_config(self, ip: IpAddr) -> SourceNatConfigGeneric {
         let first = match self {
             SnatPortRange::One => 0,
             SnatPortRange::Two => NUM_SOURCE_NAT_PORTS,
@@ -641,9 +630,10 @@ impl SnatPortRange {
         let last = first + (NUM_SOURCE_NAT_PORTS - 1);
 
         // By construction our (first, last) pair is aligned, so we can unwrap
-        // here. We'll use an explicit match to guard against `SourceNatConfig`
-        // gaining other kinds of validation we're currently not aware of.
-        match SourceNatConfig::new(ip, first, last) {
+        // here. We'll use an explicit match to guard against
+        // `SourceNatConfigGeneric` gaining other kinds of validation we're
+        // currently not aware of.
+        match SourceNatConfigGeneric::new(ip, first, last) {
             Ok(cfg) => cfg,
             Err(SourceNatConfigError::UnalignedPortPair { .. }) => {
                 unreachable!("port pair guaranteed aligned: {first}, {last}");
@@ -687,7 +677,6 @@ impl TryFrom<(u16, u16)> for SnatPortRange {
 pub mod test {
     use super::*;
     use illumos_utils::zpool::ZpoolName;
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
@@ -703,6 +692,7 @@ pub mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::OmicronZoneDataset;
     use slog_error_chain::InlineErrorChain;
     use std::net::SocketAddr;
     use test_strategy::proptest;
@@ -913,6 +903,12 @@ pub mod test {
         let make_external_dns = |index, disposition| {
             let id = OmicronZoneUuid::new_v4();
             let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
+            let ip_addr = DNS_OPTE_IPV4_SUBNET
+                .addr_iter()
+                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + index)
+                .unwrap();
+            let ip = PrivateIpConfig::new_ipv4(ip_addr, *DNS_OPTE_IPV4_SUBNET)
+                .unwrap();
             BlueprintZoneConfig {
                 disposition,
                 id,
@@ -938,17 +934,11 @@ pub mod test {
                                 id: id.into_untyped_uuid(),
                             },
                             name: format!("test-{index}").parse().unwrap(),
-                            ip: DNS_OPTE_IPV4_SUBNET
-                                .addr_iter()
-                                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + index)
-                                .unwrap()
-                                .into(),
+                            ip_config: ip,
                             mac: MacAddr::iter_system().nth(index).unwrap(),
-                            subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                             vni: Vni::SERVICES_VNI,
                             primary: true,
                             slot: 0,
-                            transit_ips: Vec::new(),
                         },
                     },
                 ),

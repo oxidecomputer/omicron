@@ -1,14 +1,14 @@
 [package]
 name = "clickhouse-admin-api"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
 workspace = true
 
 [dependencies]
-clickhouse-admin-types.workspace = true
+clickhouse-admin-types-versions.workspace = true
 dropshot.workspace = true
 dropshot-api-manager-types.workspace = true
 omicron-common.workspace = true

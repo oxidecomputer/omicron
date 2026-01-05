@@ -10,9 +10,11 @@ use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::sync::Arc;
 
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_editor::ExternalNetworkingAllocator;
+use crate::planner::Planner;
 use crate::planner::rng::PlannerRng;
 use crate::system::RotStateOverrides;
 use crate::system::SledBuilder;
@@ -23,7 +25,6 @@ use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use nexus_inventory::CollectionBuilderRng;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -44,6 +45,7 @@ use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
+use sled_agent_types::inventory::ZoneKind;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::KnownArtifactKind;
@@ -181,7 +183,7 @@ pub struct ExampleSystem {
     pub input: PlanningInput,
     pub collection: Collection,
     /// The initial blueprint that was used to describe the system.
-    pub initial_blueprint: Blueprint,
+    pub initial_blueprint: Arc<Blueprint>,
 }
 
 /// Returns a collection, planning input, and blueprint describing a pretty
@@ -530,27 +532,27 @@ impl ExampleSystemBuilder {
         }
 
         let mut input_builder = system
-            .to_planning_input_builder()
+            .to_planning_input_builder(Arc::new(
+                // Start with an empty blueprint.
+                BlueprintBuilder::build_empty_seeded(
+                    "test suite",
+                    rng.blueprint1_rng,
+                ),
+            ))
             .expect("failed to make planning input builder");
 
         let base_input = input_builder.clone().build();
-
-        // Start with an empty blueprint containing only our sleds, no zones.
-        let initial_blueprint = BlueprintBuilder::build_empty_with_sleds_seeded(
-            base_input.all_sled_ids(SledFilter::Commissioned),
-            "test suite",
-            rng.blueprint1_rng,
-        );
+        let initial_blueprint = Arc::clone(&base_input.parent_blueprint());
 
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(
             &self.log,
             &initial_blueprint,
-            &base_input,
             "test suite",
             rng.blueprint2_rng,
         )
         .unwrap();
+        Planner::update_builder_from_planning_input(&mut builder, &base_input);
 
         let discretionary_sled_count =
             base_input.all_sled_ids(SledFilter::Discretionary).count();
@@ -749,6 +751,24 @@ impl ExampleSystemBuilder {
                     input_builder
                         .add_omicron_zone_external_ip(service_id, external_ip)
                         .expect("failed to add Omicron zone external IP");
+                    // TODO-completess: Support dual-stack Omicron zone NICs.
+                    // See https://github.com/oxidecomputer/omicron/issues/9314
+                    assert!(
+                        !nic.ip_config.is_dual_stack(),
+                        "Dual-stack OmicronZoneNics are not yet supported"
+                    );
+                    let ip = nic
+                        .ip_config
+                        .ipv4_addr()
+                        .copied()
+                        .map(IpAddr::V4)
+                        .unwrap_or_else(|| {
+                            nic.ip_config
+                                .ipv6_addr()
+                                .copied()
+                                .map(IpAddr::V6)
+                                .expect("must have at least one IP address")
+                        });
                     input_builder
                         .add_omicron_zone_nic(
                             service_id,
@@ -756,7 +776,7 @@ impl ExampleSystemBuilder {
                                 // TODO-cleanup use `TypedUuid` everywhere
                                 id: VnicUuid::from_untyped_uuid(nic.id),
                                 mac: nic.mac,
-                                ip: nic.ip,
+                                ip,
                                 slot: nic.slot,
                                 primary: nic.primary,
                             },
@@ -997,7 +1017,6 @@ mod tests {
     use internal_dns_resolver::ResolveError;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::names::ServiceName;
-    use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -1007,6 +1026,7 @@ mod tests {
     use omicron_common::address::get_sled_address;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
     use slog_error_chain::InlineErrorChain;
 
     use super::*;

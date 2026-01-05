@@ -164,6 +164,13 @@ fm.sitrep_load_period_secs = 15
 # only necessary to ensure that it always happens eventually.
 fm.sitrep_gc_period_secs = 600
 probe_distributor.period_secs = 60
+multicast_reconciler.period_secs = 60
+# TTL for sled-to-backplane-port mapping cache
+# Default: 3600 seconds (1 hour) - detects new sleds and inventory changes
+# multicast_reconciler.sled_cache_ttl_secs = 3600
+# TTL for backplane topology cache (static platform configuration)
+# Default: 86400 seconds (24 hours) - refreshed on-demand when validation fails
+# multicast_reconciler.backplane_cache_ttl_secs = 86400
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

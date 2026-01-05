@@ -1,7 +1,7 @@
 [package]
 name = "sled-agent-api"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -14,7 +14,7 @@ dropshot.workspace = true
 dropshot-api-manager-types.workspace = true
 http.workspace = true
 iddqd.workspace = true
-nexus-sled-agent-shared.workspace = true
+sled-agent-types-versions.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
@@ -25,4 +25,5 @@ sled-agent-types.workspace = true
 sled-diagnostics.workspace = true
 sled-hardware-types.workspace = true
 tufaceous-artifact.workspace = true
+trust-quorum-types.workspace = true
 uuid.workspace = true

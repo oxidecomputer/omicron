@@ -64,7 +64,7 @@ progenitor::generate_api!(
         ReconfiguratorConfig = nexus_types::deployment::ReconfiguratorConfig,
         ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
         ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
-        RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
+        RecoverySiloConfig = sled_agent_types_versions::latest::rack_init::RecoverySiloConfig,
         SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
         UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
         ZoneStatus = nexus_types::internal_api::views::ZoneStatus,
@@ -132,11 +132,11 @@ impl From<omicron_common::address::Ipv6Range> for types::Ipv6Range {
     }
 }
 
-impl From<&omicron_common::api::internal::shared::SourceNatConfig>
-    for types::SourceNatConfig
+impl From<&omicron_common::api::internal::shared::SourceNatConfigGeneric>
+    for types::SourceNatConfigGeneric
 {
     fn from(
-        r: &omicron_common::api::internal::shared::SourceNatConfig,
+        r: &omicron_common::api::internal::shared::SourceNatConfigGeneric,
     ) -> Self {
         let (first_port, last_port) = r.port_range_raw();
         Self { ip: r.ip, first_port, last_port }

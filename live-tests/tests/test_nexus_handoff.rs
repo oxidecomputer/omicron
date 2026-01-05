@@ -36,6 +36,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[live_test]
@@ -163,14 +164,21 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         .await
         .expect("obtained latest reconfigurator config")
         .map_or_else(PlannerConfig::default, |cs| cs.config.planner_config);
-    let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, planner_config)
-            .await
-            .expect("planning input");
+    let (_, parent_blueprint) = datastore
+        .blueprint_target_get_current_full(opctx)
+        .await
+        .expect("getting latest target blueprint");
+    let planning_input = PlanningInputFromDb::assemble(
+        opctx,
+        datastore,
+        planner_config,
+        Arc::new(parent_blueprint),
+    )
+    .await
+    .expect("planning input");
     let (_blueprint_initial, blueprint_new_nexus) =
         blueprint_edit_current_target(
             log,
-            &planning_input,
             &nexus,
             &|builder: &mut BlueprintBuilder| {
                 let mut external_networking_alloc =
@@ -264,14 +272,9 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     info!(log, "created demo saga"; "demo_saga" => ?demo_saga);
 
     // Now update the target blueprint to trigger a handoff.
-    let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, planner_config)
-            .await
-            .expect("planning input");
     let (_blueprint_new_nexus, blueprint_handoff) =
         blueprint_edit_current_target(
             log,
-            &planning_input,
             &nexus,
             &|builder: &mut BlueprintBuilder| {
                 builder.set_nexus_generation(next_generation);
@@ -427,16 +430,11 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     info!(log, "all new Nexus instances report running!");
 
     // Clean up: expunge the old Nexus instances.
-    let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, planner_config)
-            .await
-            .expect("planning input");
     let new_nexus =
         new_nexus_clients.values().next().expect("one new Nexus client");
     let (_blueprint_handoff, blueprint_cleanup) =
         blueprint_edit_current_target(
             log,
-            &planning_input,
             new_nexus,
             &|builder: &mut BlueprintBuilder| {
                 for (id, current_zone) in &current_nexus_zones {

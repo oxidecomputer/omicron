@@ -22,7 +22,6 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::TestDataset;
-use nexus_test_utils::test_setup;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -64,7 +63,9 @@ type DiskTest<'a> =
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_unauthorized() {
     let cptestctx =
-        test_setup::<omicron_nexus::Server>("test_unauthorized", 0).await;
+        nexus_test_utils::ControlPlaneBuilder::new("test_unauthorized")
+            .start::<omicron_nexus::Server>()
+            .await;
 
     let mut disk_test = DiskTest::new(&cptestctx).await;
     let sled_id = cptestctx.first_sled_id();
@@ -358,6 +359,32 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             url: &DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_STOPPED_INSTANCE_CREATE).unwrap(),
             id_routes: vec!["/v1/instances/{id}"],
+        },
+        // Create a multicast IP pool
+        SetupReq::Post {
+            url: &DEMO_IP_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_IP_POOL_CREATE)
+                .unwrap(),
+            id_routes: vec!["/v1/ip-pools/{id}"],
+        },
+        // Create a multicast IP pool range
+        SetupReq::Post {
+            url: &DEMO_MULTICAST_IP_POOL_RANGES_ADD_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_IP_POOL_RANGE).unwrap(),
+            id_routes: vec![],
+        },
+        // Link multicast pool to default silo
+        SetupReq::Post {
+            url: &DEMO_MULTICAST_IP_POOL_SILOS_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_IP_POOL_SILOS_BODY)
+                .unwrap(),
+            id_routes: vec![],
+        },
+        // Create a multicast group in the Project
+        SetupReq::Post {
+            url: &MULTICAST_GROUPS_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_GROUP_CREATE).unwrap(),
+            id_routes: vec!["/v1/multicast-groups/{id}"],
         },
         // Create an affinity group in the Project
         SetupReq::Post {

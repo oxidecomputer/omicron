@@ -180,7 +180,10 @@ where
             debug!(log, "failed to extend session")
         }
 
-        SchemeResult::Authenticated(Details { actor })
+        SchemeResult::Authenticated(Details {
+            actor,
+            device_token_expiration: None,
+        })
     }
 }
 
@@ -393,10 +396,7 @@ mod test {
             }]),
         };
         let result = authn_with_cookie(&context, Some("session=abc")).await;
-        assert!(matches!(
-            result,
-            SchemeResult::Authenticated(Details { actor: _ })
-        ));
+        assert!(matches!(result, SchemeResult::Authenticated(Details { .. })));
 
         // valid cookie should have updated time_last_used
         let sessions = context.sessions.lock().unwrap();

@@ -2,38 +2,43 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ACTION_GENERATE_ID, NexusActionContext, NexusSaga, SagaInitError};
+use super::ACTION_GENERATE_ID;
+use super::NexusActionContext;
+use super::NexusSaga;
+use super::SagaInitError;
+use super::subsaga_append;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
 use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
-    MAX_NICS_PER_INSTANCE,
+    MAX_MULTICAST_GROUPS_PER_INSTANCE, MAX_NICS_PER_INSTANCE,
 };
 use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::{
-    ExternalIp, IpConfig, Ipv4Assignment, Ipv4Config, NetworkInterfaceKind,
-};
+use nexus_db_model::NetworkInterfaceKind;
+use nexus_db_model::{ExternalIp, IpVersion};
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
-use nexus_types::external_api::params::InstanceDiskAttachment;
+use nexus_types::external_api::params::{
+    InstanceDiskAttachment, PrivateIpStackCreate,
+};
+use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::{
-    AffinityGroupUuid, AntiAffinityGroupUuid, GenericUuid, InstanceUuid,
+    AntiAffinityGroupUuid, GenericUuid, InstanceUuid, MulticastGroupUuid,
 };
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
-use slog::warn;
+use slog::{info, warn};
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
-use std::net::IpAddr;
 use steno::ActionError;
 use steno::Node;
 use steno::{DagBuilder, SagaName};
@@ -48,6 +53,7 @@ pub(crate) struct Params {
     pub create_params: params::InstanceCreate,
     pub boundary_switches: HashSet<SwitchLocation>,
 }
+
 // Several nodes in this saga are wrapped in their own subsaga so that they can
 // have a parameter that denotes which node they are (e.g., which NIC or which
 // external IP).  They also need the outer saga's parameters.
@@ -60,25 +66,10 @@ struct NetParams {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct AffinityParams {
-    serialized_authn: authn::saga::Serialized,
-    instance_id: InstanceUuid,
-    group: AffinityGroupUuid,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 struct AntiAffinityParams {
     serialized_authn: authn::saga::Serialized,
     instance_id: InstanceUuid,
     group: AntiAffinityGroupUuid,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct NetworkConfigParams {
-    saga_params: Params,
-    instance_id: InstanceUuid,
-    which: usize,
-    switch_location: SwitchLocation,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -110,9 +101,13 @@ declare_saga_actions! {
         + sic_create_network_interface
         - sic_create_network_interface_undo
     }
-    CREATE_SNAT_IP -> "snat_ip" {
-        + sic_allocate_instance_snat_ip
-        - sic_allocate_instance_snat_ip_undo
+    CREATE_SNAT_IPV4 -> "snat_ipv4" {
+        + sic_allocate_instance_snat_ipv4
+        - sic_allocate_instance_snat_ipv4_undo
+    }
+    CREATE_SNAT_IPV6 -> "snat_ipv6" {
+        + sic_allocate_instance_snat_ipv6
+        - sic_allocate_instance_snat_ipv6_undo
     }
     CREATE_EXTERNAL_IP -> "output" {
         + sic_allocate_instance_external_ip
@@ -125,6 +120,10 @@ declare_saga_actions! {
     SET_BOOT_DISK -> "set_boot_disk" {
         + sic_set_boot_disk
         - sic_set_boot_disk_undo
+    }
+    JOIN_MULTICAST_GROUP -> "joining multicast group" {
+        + sic_join_instance_multicast_group
+        - sic_join_instance_multicast_group_undo
     }
     MOVE_TO_STOPPED -> "stopped_instance" {
         + sic_move_to_stopped
@@ -161,34 +160,6 @@ impl NexusSaga for SagaInstanceCreate {
         builder.append(create_instance_record_action());
 
         builder.append(associate_ssh_keys_action());
-
-        // Helper function for appending subsagas to our parent saga.
-        fn subsaga_append<S: Serialize>(
-            node_basename: String,
-            subsaga_dag: steno::Dag,
-            parent_builder: &mut steno::DagBuilder,
-            params: S,
-            which: usize,
-        ) -> Result<(), SagaInitError> {
-            // The "parameter" node is a constant node that goes into the outer
-            // saga.  Its value becomes the parameters for the one-node subsaga
-            // (defined below) that actually creates each resource.
-            let params_node_name = format!("{}_params{}", node_basename, which);
-            parent_builder.append(Node::constant(
-                &params_node_name,
-                serde_json::to_value(&params).map_err(|e| {
-                    SagaInitError::SerializeError(params_node_name.clone(), e)
-                })?,
-            ));
-
-            let output_name = format!("{}{}", node_basename, which);
-            parent_builder.append(Node::subsaga(
-                output_name.as_str(),
-                subsaga_dag,
-                params_node_name,
-            ));
-            Ok(())
-        }
 
         for (i, group) in
             params.create_params.anti_affinity_groups.iter().enumerate()
@@ -272,13 +243,72 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
-        // Allocate an external IP address for the default outbound connectivity
-        builder.append(Node::action(
-            "snat_ip_id",
-            "CreateSnatIpId",
-            ACTION_GENERATE_ID.as_ref(),
-        ));
-        builder.append(create_snat_ip_action());
+        // Allocate an SNAT IP address for each IP stack in the instance's
+        // primary NIC.
+        //
+        // NOTE: This is really going in the wrong direction. As described in
+        // https://github.com/oxidecomputer/omicron/issues/4317, we want to only
+        // allocate these addresses if there aren't any others. In fixing that,
+        // we should also allow VPC-only networking (which isn't possible
+        // today), attaching / detaching an SNAT IP (you can only do Ephemeral
+        // or Floating today), and moving IP address allocation to the instance
+        // start saga from here.
+        //
+        // All of these together are a pretty big chunk of work, and should be
+        // tackled on their own. So we're deferring that for now.
+        match &params.create_params.network_interfaces {
+            params::InstanceNetworkInterfaceAttachment::Create(nics) => {
+                if let Some(primary) = nics.first() {
+                    if primary.ip_config.has_ipv4_stack() {
+                        builder.append(Node::action(
+                            "snat_ipv4_id",
+                            "CreateSnatIpv4Id",
+                            ACTION_GENERATE_ID.as_ref(),
+                        ));
+                        builder.append(create_snat_ipv4_action());
+                    }
+                    if primary.ip_config.has_ipv6_stack() {
+                        builder.append(Node::action(
+                            "snat_ipv6_id",
+                            "CreateSnatIpv6Id",
+                            ACTION_GENERATE_ID.as_ref(),
+                        ));
+                        builder.append(create_snat_ipv6_action());
+                    }
+                }
+            }
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv4 => {
+                builder.append(Node::action(
+                    "snat_ipv4_id",
+                    "CreateSnatIpv4Id",
+                    ACTION_GENERATE_ID.as_ref(),
+                ));
+                builder.append(create_snat_ipv4_action());
+            }
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv6 => {
+                builder.append(Node::action(
+                    "snat_ipv6_id",
+                    "CreateSnatIpv6Id",
+                    ACTION_GENERATE_ID.as_ref(),
+                ));
+                builder.append(create_snat_ipv6_action());
+            }
+            params::InstanceNetworkInterfaceAttachment::DefaultDualStack => {
+                builder.append(Node::action(
+                    "snat_ipv4_id",
+                    "CreateSnatIpv4Id",
+                    ACTION_GENERATE_ID.as_ref(),
+                ));
+                builder.append(create_snat_ipv4_action());
+                builder.append(Node::action(
+                    "snat_ipv6_id",
+                    "CreateSnatIpv6Id",
+                    ACTION_GENERATE_ID.as_ref(),
+                ));
+                builder.append(create_snat_ipv6_action());
+            }
+            params::InstanceNetworkInterfaceAttachment::None => {}
+        }
 
         // See the comment above where we add nodes for creating NICs.  We use
         // the same pattern here.
@@ -299,6 +329,32 @@ impl NexusSaga for SagaInstanceCreate {
             ));
             subsaga_append(
                 "external_ip".into(),
+                subsaga_builder.build()?,
+                &mut builder,
+                repeat_params,
+                i,
+            )?;
+        }
+
+        // Add the instance to multicast groups, following the same pattern as external IPs
+        for i in 0..MAX_MULTICAST_GROUPS_PER_INSTANCE {
+            let repeat_params = NetParams {
+                saga_params: params.clone(),
+                which: i,
+                instance_id,
+                new_id: Uuid::new_v4(),
+            };
+            let subsaga_name =
+                SagaName::new(&format!("instance-create-multicast-group{i}"));
+
+            let mut subsaga_builder = DagBuilder::new(subsaga_name);
+            subsaga_builder.append(Node::action(
+                format!("multicast-group-{i}").as_str(),
+                format!("JoinMulticastGroup{i}").as_str(),
+                JOIN_MULTICAST_GROUP.as_ref(),
+            ));
+            subsaga_append(
+                "multicast_group".into(),
                 subsaga_builder.build()?,
                 &mut builder,
                 repeat_params,
@@ -469,6 +525,27 @@ async fn sic_add_to_anti_affinity_group(
     Ok(())
 }
 
+/// Convert an `InstanceNetworkInterfaceAttachment` to an `IpConfig`.
+///
+/// # Panics
+///
+/// This panics if the attachment isn't one of the "default" variants.
+fn nic_attachment_to_ip_config(
+    attachment: &params::InstanceNetworkInterfaceAttachment,
+) -> Result<PrivateIpStackCreate, ActionError> {
+    use params::InstanceNetworkInterfaceAttachment::*;
+    match attachment {
+        DefaultIpv4 => Ok(PrivateIpStackCreate::auto_ipv4()),
+        DefaultIpv6 => Ok(PrivateIpStackCreate::auto_ipv6()),
+        DefaultDualStack => Ok(PrivateIpStackCreate::auto_dual_stack()),
+        Create(_) | None => {
+            Err(ActionError::action_failed(Error::internal_error(
+                "This should only be used with the automatic variants",
+            )))
+        }
+    }
+}
+
 /// Create a network interface for an instance, using the parameters at index
 /// `nic_index`, returning the UUID for the NIC (or None).
 async fn sic_create_network_interface(
@@ -482,31 +559,35 @@ async fn sic_create_network_interface(
     let interface_params = &saga_params.create_params.network_interfaces;
     match interface_params {
         params::InstanceNetworkInterfaceAttachment::None => Ok(()),
-        params::InstanceNetworkInterfaceAttachment::Default => {
+        params::InstanceNetworkInterfaceAttachment::DefaultIpv4
+        | params::InstanceNetworkInterfaceAttachment::DefaultIpv6
+        | params::InstanceNetworkInterfaceAttachment::DefaultDualStack => {
+            let ip_config = nic_attachment_to_ip_config(interface_params)?;
             create_default_primary_network_interface(
                 &sagactx,
                 &saga_params,
                 nic_index,
                 instance_id,
                 interface_id,
+                ip_config,
             )
             .await
         }
-        params::InstanceNetworkInterfaceAttachment::Create(
-            ref create_params,
-        ) => match create_params.get(nic_index) {
-            None => Ok(()),
-            Some(ref prs) => {
-                create_custom_network_interface(
-                    &sagactx,
-                    &saga_params,
-                    instance_id,
-                    interface_id,
-                    prs,
-                )
-                .await
+        params::InstanceNetworkInterfaceAttachment::Create(create_params) => {
+            match create_params.get(nic_index) {
+                None => Ok(()),
+                Some(ref prs) => {
+                    create_custom_network_interface(
+                        &sagactx,
+                        &saga_params,
+                        instance_id,
+                        interface_id,
+                        prs,
+                    )
+                    .await
+                }
             }
-        },
+        }
     }
 }
 
@@ -609,40 +690,12 @@ async fn create_custom_network_interface(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // TODO-completeness: Support IPv6 addressing in the public API, see
-    // https://github.com/oxidecomputer/omicron/issues/9248.
-    let ipv4_assignment = match interface_params.ip {
-        Some(IpAddr::V4(ip)) => Ipv4Assignment::Explicit(ip),
-        Some(IpAddr::V6(_)) => {
-            return Err(ActionError::action_failed(Error::invalid_request(
-                "IPv6 addressing is not yet suported for network interfaces",
-            )));
-        }
-        None => Ipv4Assignment::Auto,
-    };
-    let transit_ips = interface_params
-        .transit_ips
-        .iter()
-        .map(|ipnet| {
-            let oxnet::IpNet::V4(net) = ipnet else {
-                return Err(ActionError::action_failed(
-                    Error::invalid_request(
-                        "IPv6 transit IPs are not yet supported \
-                    for network interfaces",
-                    ),
-                ));
-            };
-            Ok(*net)
-        })
-        .collect::<Result<_, _>>()?;
-    let ip_config =
-        IpConfig::V4(Ipv4Config { ip: ipv4_assignment, transit_ips });
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
         db_subnet.clone(),
         interface_params.identity.clone(),
-        ip_config,
+        interface_params.ip_config.clone(),
     )
     .map_err(ActionError::action_failed)?;
     datastore
@@ -671,12 +724,16 @@ async fn create_custom_network_interface(
 
 /// Create a default primary network interface for an instance during the create
 /// saga.
+///
+/// Note that this is used to create any of the possible "default" interface
+/// types, IPv4-only, IPv6-only, and dual-stack.
 async fn create_default_primary_network_interface(
     sagactx: &NexusActionContext,
     saga_params: &Params,
     nic_index: usize,
     instance_id: InstanceUuid,
     interface_id: Uuid,
+    ip_config: PrivateIpStackCreate,
 ) -> Result<(), ActionError> {
     // We're statically creating up to MAX_NICS_PER_INSTANCE saga nodes, but
     // this method only applies to the case where there's exactly one parameter
@@ -714,8 +771,7 @@ async fn create_default_primary_network_interface(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip: None,            // Request an IP address allocation
-        transit_ips: vec![], // Default interfaces don't use transit IPs
+        ip_config,
     };
 
     // Lookup authz objects, used in the call to actually create the NIC.
@@ -731,41 +787,12 @@ async fn create_default_primary_network_interface(
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
-
-    // TODO-completeness: Support IPv6 addressing in the public API, see
-    // https://github.com/oxidecomputer/omicron/issues/9248.
-    let ipv4_assignment = match interface_params.ip {
-        Some(IpAddr::V4(ip)) => Ipv4Assignment::Explicit(ip),
-        Some(IpAddr::V6(_)) => {
-            return Err(ActionError::action_failed(Error::invalid_request(
-                "IPv6 addressing is not yet suported for network interfaces",
-            )));
-        }
-        None => Ipv4Assignment::Auto,
-    };
-    let transit_ips = interface_params
-        .transit_ips
-        .iter()
-        .map(|ipnet| {
-            let oxnet::IpNet::V4(net) = ipnet else {
-                return Err(ActionError::action_failed(
-                    Error::invalid_request(
-                        "IPv6 transit IPs are not yet supported \
-                    for network interfaces",
-                    ),
-                ));
-            };
-            Ok(*net)
-        })
-        .collect::<Result<_, _>>()?;
-    let ip_config =
-        IpConfig::V4(Ipv4Config { ip: ipv4_assignment, transit_ips });
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
         db_subnet.clone(),
         interface_params.identity.clone(),
-        ip_config,
+        interface_params.ip_config.clone(),
     )
     .map_err(ActionError::action_failed)?;
     datastore
@@ -792,9 +819,23 @@ async fn create_default_primary_network_interface(
     Ok(())
 }
 
-/// Create an external IP address for instance source NAT.
-async fn sic_allocate_instance_snat_ip(
+/// Create an external IPv4 address for instance source NAT.
+async fn sic_allocate_instance_snat_ipv4(
     sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    sic_allocate_instance_snat_ip_impl(sagactx, IpVersion::V4).await
+}
+
+/// Create an external IPv4 address for instance source NAT.
+async fn sic_allocate_instance_snat_ipv6(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    sic_allocate_instance_snat_ip_impl(sagactx, IpVersion::V6).await
+}
+
+async fn sic_allocate_instance_snat_ip_impl(
+    sagactx: NexusActionContext,
+    ip_version: IpVersion,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -804,10 +845,10 @@ async fn sic_allocate_instance_snat_ip(
         &saga_params.serialized_authn,
     );
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
-    let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
-
+    let ancestor_node_name = format!("snat_ip{}_id", ip_version);
+    let ip_id = sagactx.lookup::<Uuid>(&ancestor_node_name)?;
     let (.., pool) = datastore
-        .ip_pools_fetch_default(&opctx)
+        .ip_pools_fetch_default_by_version(&opctx, ip_version)
         .await
         .map_err(ActionError::action_failed)?;
     let pool_id = pool.identity.id;
@@ -819,9 +860,23 @@ async fn sic_allocate_instance_snat_ip(
     Ok(())
 }
 
-/// Destroy an allocated SNAT IP address for the instance.
-async fn sic_allocate_instance_snat_ip_undo(
+/// Destroy an allocated SNAT IPv4 address for the instance.
+async fn sic_allocate_instance_snat_ipv4_undo(
     sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    sic_allocate_instance_snat_ip_undo_impl(sagactx, "snat_ipv4_id").await
+}
+
+/// Destroy an allocated SNAT IPv6 address for the instance.
+async fn sic_allocate_instance_snat_ipv6_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    sic_allocate_instance_snat_ip_undo_impl(sagactx, "snat_ipv6_id").await
+}
+
+async fn sic_allocate_instance_snat_ip_undo_impl(
+    sagactx: NexusActionContext,
+    ip_name: &str,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -830,12 +885,12 @@ async fn sic_allocate_instance_snat_ip_undo(
         &sagactx,
         &saga_params.serialized_authn,
     );
-    let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
+    let ip_id = sagactx.lookup::<Uuid>(ip_name)?;
     datastore.deallocate_external_ip(&opctx, ip_id).await?;
     Ok(())
 }
 
-/// Create an external IPs for the instance, using the request parameters at
+/// Create external IPs for the instance, using the request parameters at
 /// index `ip_index`, and return its ID if one is created (or None).
 async fn sic_allocate_instance_external_ip(
     sagactx: NexusActionContext,
@@ -865,7 +920,7 @@ async fn sic_allocate_instance_external_ip(
     // Runtime state should never be able to make 'complete_op' fallible.
     let ip = match ip_params {
         // Allocate a new IP address from the target, possibly default, pool
-        params::ExternalIpCreate::Ephemeral { pool } => {
+        params::ExternalIpCreate::Ephemeral { pool, ip_version } => {
             let pool = if let Some(name_or_id) = pool {
                 Some(
                     osagactx
@@ -888,6 +943,7 @@ async fn sic_allocate_instance_external_ip(
                     ip_id,
                     instance_id,
                     pool,
+                    ip_version.map(Into::into),
                     true,
                 )
                 .await
@@ -896,7 +952,7 @@ async fn sic_allocate_instance_external_ip(
         }
         // Set the parent of an existing floating IP to the new instance's ID.
         params::ExternalIpCreate::Floating { floating_ip } => {
-            let (.., authz_project, authz_fip) = match floating_ip {
+            let (.., authz_project, authz_fip, db_fip) = match floating_ip {
                 NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
                     .project_id(saga_params.project_id)
                     .floating_ip_name(db::model::Name::ref_cast(name)),
@@ -904,7 +960,7 @@ async fn sic_allocate_instance_external_ip(
                     LookupPath::new(&opctx, datastore).floating_ip_id(*id)
                 }
             }
-            .lookup_for(authz::Action::Modify)
+            .fetch_for(authz::Action::Modify)
             .await
             .map_err(ActionError::action_failed)?;
 
@@ -916,8 +972,19 @@ async fn sic_allocate_instance_external_ip(
                 ));
             }
 
+            let ip_version = match db_fip.ip {
+                ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
+                ipnetwork::IpNetwork::V6(_) => IpVersion::V6,
+            };
+
             datastore
-                .floating_ip_begin_attach(&opctx, &authz_fip, instance_id, true)
+                .floating_ip_begin_attach(
+                    &opctx,
+                    &authz_fip,
+                    ip_version,
+                    instance_id,
+                    true,
+                )
                 .await
                 .map_err(ActionError::action_failed)?
                 .0
@@ -1011,6 +1078,136 @@ async fn sic_allocate_instance_external_ip_undo(
     Ok(())
 }
 
+/// Add the instance to a multicast group using the request parameters at
+/// index `group_index`, returning Some(()) if a group is joined (or None if
+/// no group is specified).
+async fn sic_join_instance_multicast_group(
+    sagactx: NexusActionContext,
+) -> Result<Option<()>, ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
+    let saga_params = repeat_saga_params.saga_params;
+    let group_index = repeat_saga_params.which;
+    let Some(group_name_or_id) =
+        saga_params.create_params.multicast_groups.get(group_index)
+    else {
+        return Ok(None);
+    };
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
+    let instance_id = repeat_saga_params.instance_id;
+
+    // Check if multicast is enabled
+    if !osagactx.nexus().multicast_enabled() {
+        debug!(osagactx.log(),
+               "multicast not enabled, skipping multicast group member attachment";
+               "instance_id" => %instance_id,
+               "group_name_or_id" => ?group_name_or_id);
+        return Ok(Some(()));
+    }
+
+    // Look up the multicast group by name or ID using the existing nexus method
+    let multicast_group_selector = params::MulticastGroupSelector {
+        multicast_group: group_name_or_id.clone(),
+    };
+    let multicast_group_lookup = osagactx
+        .nexus()
+        .multicast_group_lookup(&opctx, &multicast_group_selector)
+        .map_err(ActionError::action_failed)?;
+
+    // Multicast groups are fleet-scoped - users only need Read permission on the group
+    // (and implicit permission on the instance being created)
+    let (.., db_group) = multicast_group_lookup
+        .fetch_for(authz::Action::Read)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    // Add the instance as a member of the multicast group in "Joining" state
+    if let Err(e) = datastore
+        .multicast_group_member_attach_to_instance(
+            &opctx,
+            MulticastGroupUuid::from_untyped_uuid(db_group.id()),
+            instance_id,
+        )
+        .await
+    {
+        match e {
+            Error::ObjectAlreadyExists { .. } => {
+                debug!(
+                    opctx.log,
+                    "multicast member alredy exists";
+                    "instance_id" => %instance_id,
+                );
+                return Ok(Some(()));
+            }
+            e => return Err(ActionError::action_failed(e)),
+        }
+    }
+
+    info!(
+        osagactx.log(),
+        "successfully joined instance to multicast group";
+        "external_group_id" => %db_group.id(),
+        "external_group_ip" => %db_group.multicast_ip,
+        "instance_id" => %instance_id
+    );
+
+    Ok(Some(()))
+}
+
+async fn sic_join_instance_multicast_group_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
+    let saga_params = repeat_saga_params.saga_params;
+    let group_index = repeat_saga_params.which;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
+
+    // Check if we actually joined a group and get the group name/ID using chain
+    let Some(group_name_or_id) =
+        saga_params.create_params.multicast_groups.get(group_index)
+    else {
+        return Ok(());
+    };
+
+    // Check if multicast is enabled - if not, no cleanup needed since we didn't attach
+    if !osagactx.nexus().multicast_enabled() {
+        debug!(osagactx.log(),
+               "multicast not enabled, skipping multicast group member undo";
+               "group_name_or_id" => ?group_name_or_id);
+        return Ok(());
+    }
+
+    // Look up the multicast group by name or ID using the existing nexus method
+    let multicast_group_selector = params::MulticastGroupSelector {
+        multicast_group: group_name_or_id.clone(),
+    };
+    let multicast_group_lookup = osagactx
+        .nexus()
+        .multicast_group_lookup(&opctx, &multicast_group_selector)?;
+    // Undo uses same permission as forward action (Read on multicast group)
+    let (.., db_group) =
+        multicast_group_lookup.fetch_for(authz::Action::Read).await?;
+
+    // Delete the record outright.
+    datastore
+        .multicast_group_members_delete_by_group(
+            &opctx,
+            MulticastGroupUuid::from_untyped_uuid(db_group.id()),
+        )
+        .await?;
+
+    Ok(())
+}
+
 async fn sic_attach_disk_to_instance(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -1039,7 +1236,7 @@ async fn ensure_instance_disk_attach_state(
 
     let disk_name = match params.attach_params {
         InstanceDiskAttachment::Create(create_params) => {
-            db::model::Name(create_params.identity.name)
+            db::model::Name(create_params.identity.name.clone())
         }
         InstanceDiskAttachment::Attach(attach_params) => {
             db::model::Name(attach_params.name)
@@ -1267,8 +1464,8 @@ async fn sic_move_to_stopped(
     // of date.
     let new_state = db::model::InstanceRuntimeState {
         nexus_state: db::model::InstanceState::NoVmm,
-        gen: db::model::Generation::from(
-            instance_record.runtime_state.gen.next(),
+        generation: db::model::Generation::from(
+            instance_record.runtime_state.generation.next(),
         ),
         ..instance_record.runtime_state
     };
@@ -1305,10 +1502,11 @@ pub mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DataStore;
     use nexus_test_utils::resource_helpers::DiskTest;
-    use nexus_test_utils::resource_helpers::create_default_ip_pool;
+    use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::address::IpVersion;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
@@ -1325,7 +1523,7 @@ pub mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
@@ -1347,9 +1545,10 @@ pub mod test {
                 user_data: vec![],
                 ssh_public_keys: None,
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::Default,
+                    params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {
                     pool: None,
+                    ip_version: Some(IpVersion::V4),
                 }],
                 boot_disk: Some(params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -1361,6 +1560,7 @@ pub mod test {
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),
         }

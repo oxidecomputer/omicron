@@ -1,7 +1,7 @@
 [package]
 name = "reconfigurator-sp-updater"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -25,9 +25,11 @@ omicron-repl-utils.workspace = true
 oxide-tokio-rt.workspace = true
 qorb.workspace = true
 serde_json.workspace = true
+sled-agent-types.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
 swrite.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
+tokio = { workspace = true, features = ["full"] }
 tufaceous-artifact.workspace = true
 omicron-workspace-hack.workspace = true
 

@@ -26,6 +26,7 @@ impl_enum_type!(
 
     // Enum values
     Crucible => b"crucible"
+    LocalStorage => b"local_storage"
 );
 
 /// A Disk, where how the blocks are stored depend on the disk_type.
@@ -75,7 +76,8 @@ pub struct Disk {
     /// (where rows are matched based on the disk_id field in that table) and
     /// combined into a higher level `datastore::Disk` enum.
     ///
-    /// For `Crucible` disks, see the DiskTypeCrucible model.
+    /// For `Crucible` disks, see the DiskTypeCrucible model. For `LocalStorage`
+    /// disks, see the DiskTypeLocalStorage model.
     pub disk_type: DiskType,
 }
 
@@ -139,7 +141,8 @@ pub struct DiskRuntimeState {
     pub attach_instance_id: Option<Uuid>,
     /// generation number for this state
     #[diesel(column_name = state_generation)]
-    pub gen: Generation,
+    #[serde(rename = "gen")]
+    pub generation: Generation,
     /// timestamp for this information
     #[diesel(column_name = time_state_updated)]
     pub time_updated: DateTime<Utc>,
@@ -150,7 +153,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::Creating.label().to_string(),
             attach_instance_id: None,
-            gen: external::Generation::new().into(),
+            generation: external::Generation::new().into(),
             time_updated: Utc::now(),
         }
     }
@@ -161,7 +164,7 @@ impl DiskRuntimeState {
                 .label()
                 .to_string(),
             attach_instance_id: Some(instance_id),
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -170,7 +173,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::Detached.label().to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -179,7 +182,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::Maintenance.label().to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -188,7 +191,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::ImportReady.label().to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -199,7 +202,7 @@ impl DiskRuntimeState {
                 .label()
                 .to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -210,7 +213,7 @@ impl DiskRuntimeState {
                 .label()
                 .to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -219,7 +222,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::Finalizing.label().to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -240,7 +243,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::Faulted.label().to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -255,7 +258,7 @@ impl From<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
                 .disk_state
                 .attached_instance_id()
                 .map(|id| *id),
-            gen: runtime.gen.into(),
+            generation: runtime.generation.into(),
             time_updated: runtime.time_updated,
         }
     }
@@ -266,7 +269,7 @@ impl Into<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
     fn into(self) -> internal::nexus::DiskRuntimeState {
         internal::nexus::DiskRuntimeState {
             disk_state: self.state().into(),
-            gen: self.gen.into(),
+            generation: self.generation.into(),
             time_updated: self.time_updated,
         }
     }

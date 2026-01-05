@@ -23,6 +23,7 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::de::Error as _;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use strum::EnumIter;
 use uuid::Uuid;
@@ -356,6 +357,12 @@ pub struct Baseboard {
     pub revision: u32,
 }
 
+impl From<Baseboard> for BaseboardId {
+    fn from(value: crate::external_api::shared::Baseboard) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
+}
+
 /// A sled that has not been added to an initialized rack yet
 #[derive(
     Clone,
@@ -441,12 +448,12 @@ impl SwitchLinkState {
 
 impl JsonSchema for SwitchLinkState {
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         let obj = schemars::schema::Schema::Object(
             schemars::schema::SchemaObject::default(),
         );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        r#gen.definitions_mut().insert(Self::schema_name(), obj.clone());
         obj
     }
 
@@ -521,7 +528,7 @@ impl JsonSchema for AlertSubscription {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -748,17 +755,13 @@ impl RelayState {
 /// Type of IP pool.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum IpPoolType {
     /// Unicast IP pool for standard IP allocations.
+    #[default]
     Unicast,
     /// Multicast IP pool for multicast group allocations.
     ///
     /// All ranges in a multicast pool must be either ASM or SSM (not mixed).
     Multicast,
-}
-
-impl Default for IpPoolType {
-    fn default() -> Self {
-        Self::Unicast
-    }
 }

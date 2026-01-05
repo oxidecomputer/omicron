@@ -17,7 +17,7 @@ use slog::{Logger, info};
 use trust_quorum_protocol::PersistentState;
 
 /// A wrapper type around [`PersistentState`] for use as a [`Ledger`]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistentStateLedger {
     pub generation: u64,
     pub state: PersistentState,

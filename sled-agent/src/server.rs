@@ -73,6 +73,7 @@ impl Server {
             ..config.dropshot.clone()
         };
         let dropshot_log = log.new(o!("component" => "dropshot (SledAgent)"));
+
         let http_server =
             dropshot::ServerBuilder::new(http_api(), sled_agent, dropshot_log)
                 .config(dropshot_config)
@@ -84,7 +85,6 @@ impl Server {
                 )))
                 .start()
                 .map_err(|error| format!("initializing server: {}", error))?;
-
         Ok(Server { http_server })
     }
 

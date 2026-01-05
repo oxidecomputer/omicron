@@ -19,6 +19,7 @@ pub(crate) struct AllInstallMetadataFiles<T: 'static> {
     pub(crate) boot_zpool: InternalZpoolUuid,
     pub(crate) boot_dataset_dir: Utf8PathBuf,
     pub(crate) boot_disk_path: Utf8PathBuf,
+
     pub(crate) boot_disk_metadata:
         Result<Option<InstallMetadata<T>>, InstallMetadataReadError>,
     pub(crate) non_boot_disk_metadata: IdOrdMap<InstallMetadataNonBootInfo<T>>,
@@ -28,6 +29,62 @@ impl<T> AllInstallMetadataFiles<T>
 where
     T: DeserializeOwned + PartialEq,
 {
+    pub(crate) fn read_all_subdir<F>(
+        _log: &slog::Logger,
+        metadata_file_name: &str,
+        internal_disks: &InternalDisksWithBootDisk,
+        subdir: &str,
+        with_default: F,
+    ) -> Self
+    where
+        F: Fn(&Utf8Path) -> Result<Option<T>, InstallMetadataReadError>,
+    {
+        let boot_dataset_dir =
+            internal_disks.boot_disk_install_dataset().join(subdir);
+
+        // Read the file from the boot disk.
+        let boot_disk_path = boot_dataset_dir.join(metadata_file_name);
+
+        let boot_disk_metadata =
+            read_install_metadata_file::<T>(&boot_dataset_dir, &boot_disk_path);
+        let boot_disk_metadata =
+            InstallMetadata::new(boot_disk_metadata, || {
+                with_default(&boot_dataset_dir)
+            });
+
+        // Read the file from all other disks. We attempt to make sure they match up
+        // and will log a warning if they don't, though (until we have a better
+        // story on transient failures) it's not fatal.
+        let non_boot_datasets = internal_disks.non_boot_disk_install_datasets();
+        let non_boot_disk_overrides = non_boot_datasets
+            .map(|(zpool_id, dataset_dir)| {
+                let dataset_dir = dataset_dir.join(subdir);
+                let path = dataset_dir.join(metadata_file_name);
+                let res = read_install_metadata_file::<T>(&dataset_dir, &path);
+                let res =
+                    InstallMetadata::new(res, || with_default(&dataset_dir));
+
+                let result =
+                    InstallMetadataNonBootResult::new(res, &boot_disk_metadata);
+
+                InstallMetadataNonBootInfo {
+                    zpool_id,
+                    dataset_dir,
+                    path,
+                    result,
+                }
+            })
+            .collect();
+
+        Self {
+            boot_zpool: internal_disks.boot_disk_zpool_id(),
+            boot_dataset_dir,
+            boot_disk_path,
+            boot_disk_metadata,
+            non_boot_disk_metadata: non_boot_disk_overrides,
+        }
+    }
+
     /// Attempt to find manifest files.
     ///
     /// For now we treat the boot disk as authoritative, since install-dataset
@@ -55,6 +112,7 @@ where
 
         // Read the file from the boot disk.
         let boot_disk_path = boot_dataset_dir.join(metadata_file_name);
+
         let boot_disk_metadata =
             read_install_metadata_file::<T>(&boot_dataset_dir, &boot_disk_path);
         let boot_disk_metadata =

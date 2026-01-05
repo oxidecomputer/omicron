@@ -15,7 +15,8 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
-use clickhouse_admin_types::{KeeperId, ServerId};
+use clickhouse_admin_types::keeper::KeeperId;
+use clickhouse_admin_types::server::ServerId;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     blueprint, bp_clickhouse_cluster_config,
@@ -27,7 +28,6 @@ use nexus_db_schema::schema::{
     bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
     debug_log_blueprint_planning,
 };
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -57,7 +57,8 @@ use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
     OmicronZoneExternalSnatIp,
 };
-use nexus_types::inventory::BaseboardId;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
@@ -66,6 +67,8 @@ use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
     PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
+use sled_agent_types::inventory::OmicronZoneDataset;
+use sled_hardware_types::BaseboardId;
 use std::net::{IpAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -217,9 +220,24 @@ pub struct BpSledMetadata {
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
     pub host_phase_2_desired_slot_a: Option<ArtifactHash>,
     pub host_phase_2_desired_slot_b: Option<ArtifactHash>,
+    /// Public only for easy of writing queries; consumers should prefer the
+    /// `subnet()` method.
+    pub subnet: IpNetwork,
 }
 
 impl BpSledMetadata {
+    pub fn subnet(&self) -> anyhow::Result<Ipv6Subnet<SLED_PREFIX>> {
+        let subnet = match self.subnet {
+            IpNetwork::V4(subnet) => bail!(
+                "invalid subnet for sled {}: {subnet} (should be Ipv6)",
+                self.sled_id
+            ),
+            IpNetwork::V6(subnet) => subnet,
+        };
+
+        Ok(subnet.into())
+    }
+
     pub fn host_phase_2(
         &self,
         slot_a_artifact_version: Option<DbArtifactVersion>,
@@ -879,7 +897,7 @@ impl BpOmicronZone {
                     self.snat_last_port,
                 ) {
                     (Some(ip), Some(first_port), Some(last_port)) => {
-                        nexus_types::inventory::SourceNatConfig::new(
+                        nexus_types::inventory::SourceNatConfigGeneric::new(
                             ip.ip(),
                             *first_port,
                             *last_port,

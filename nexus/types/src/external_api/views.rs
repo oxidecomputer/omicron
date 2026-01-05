@@ -19,6 +19,7 @@ use omicron_common::api::external::{
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     Nullable, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
+use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
@@ -395,7 +396,7 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
     /// The IP version for the pool.
     pub ip_version: IpVersion,
-    /// Type of IP pool (unicast or multicast)
+    /// Type of IP pool (unicast or multicast).
     pub pool_type: shared::IpPoolType,
 }
 
@@ -423,8 +424,17 @@ pub struct SiloIpPool {
 
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
+
+    /// The IP version for the pool.
+    pub ip_version: IpVersion,
+
+    /// Type of IP pool (unicast or multicast).
+    pub pool_type: shared::IpPoolType,
 }
 
 /// A link between an IP pool and a silo that allows one to allocate IPs from
@@ -435,7 +445,10 @@ pub struct IpPoolSiloLink {
     pub silo_id: Uuid,
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
 }
 
@@ -533,6 +546,44 @@ impl TryFrom<ExternalIp> for FloatingIp {
             ExternalIp::Floating(v) => Ok(v),
         }
     }
+}
+
+// MULTICAST GROUPS
+
+/// View of a Multicast Group
+#[derive(
+    ObjectIdentity, Debug, PartialEq, Clone, Deserialize, Serialize, JsonSchema,
+)]
+pub struct MulticastGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The multicast IP address held by this resource.
+    pub multicast_ip: IpAddr,
+    /// Source IP addresses for Source-Specific Multicast (SSM).
+    /// Empty array means any source is allowed.
+    pub source_ips: Vec<IpAddr>,
+    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// None means no VLAN tagging on egress.
+    pub mvlan: Option<VlanID>,
+    /// The ID of the IP pool this resource belongs to.
+    pub ip_pool_id: Uuid,
+    /// Current state of the multicast group.
+    pub state: String,
+}
+
+/// View of a Multicast Group Member (instance belonging to a multicast group)
+#[derive(
+    ObjectIdentity, Debug, PartialEq, Clone, Deserialize, Serialize, JsonSchema,
+)]
+pub struct MulticastGroupMember {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the multicast group this member belongs to.
+    pub multicast_group_id: Uuid,
+    /// The ID of the instance that is a member of this group.
+    pub instance_id: Uuid,
+    /// Current state of the multicast group membership.
+    pub state: String,
 }
 
 // RACKS

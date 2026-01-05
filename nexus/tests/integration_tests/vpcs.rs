@@ -12,7 +12,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_local_user, create_project, create_vpc,
+    create_default_ip_pools, create_local_user, create_project, create_vpc,
     create_vpc_with_error, grant_iam, objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
@@ -394,7 +394,7 @@ async fn test_limited_collaborator_can_create_instance(
     let client = &cptestctx.external_client;
 
     // Create IP pool and project (with default VPC and subnet)
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project_name = "test-project";
     create_project(&client, &project_name).await;
 
@@ -464,8 +464,9 @@ async fn test_limited_collaborator_can_create_instance(
             user_data: vec![],
             ssh_public_keys: None,
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::Default,
+                params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![],
+            multicast_groups: vec![],
             disks: vec![],
             boot_disk: None,
             cpu_platform: None,
@@ -491,7 +492,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     let client = &cptestctx.external_client;
 
     // Create IP pool and project
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project_name = "test-project";
     create_project(&client, &project_name).await;
 
@@ -721,8 +722,8 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create IP pool and project (with default VPC and subnet)
-    create_default_ip_pool(client).await;
+    // Create IP pools and project (with default VPC and subnet)
+    let (v4_pool, _v6_pool) = create_default_ip_pools(client).await;
     let project_name = "test-project";
     create_project(&client, &project_name).await;
 
@@ -767,7 +768,8 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
                 description: "test floating ip".to_string(),
             },
             ip: None,
-            pool: None,
+            pool: Some(v4_pool.identity.name.clone().into()),
+            ip_version: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(limited_user.id))

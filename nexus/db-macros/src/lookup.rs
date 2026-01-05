@@ -516,8 +516,8 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
     // Generate the by-name branch of the match arm in "fetch_for()"
     let fetch_for_name_variant = if config.lookup_by_name {
         quote! {
-            #resource_name::Name(parent, &ref name)
-            | #resource_name::OwnedName(parent, ref name) => {
+            &#resource_name::Name(ref parent, &ref name)
+            | &#resource_name::OwnedName(ref parent, ref name) => {
                 #ancestors_authz_names_assign
                 let (#resource_authz_name, db_row) = Self::fetch_by_name_for(
                     opctx,
@@ -536,8 +536,8 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
     // Generate the by-name branch of the match arm in "lookup()"
     let lookup_name_variant = if config.lookup_by_name {
         quote! {
-            #resource_name::Name(parent, &ref name)
-            | #resource_name::OwnedName(parent, ref name) => {
+            &#resource_name::Name(ref parent, &ref name)
+            | &#resource_name::OwnedName(ref parent, ref name) => {
                 // When doing a by-name lookup, we have to look up the
                 // parent first.  Since this is recursive, we wind up
                 // hitting the database once for each item in the path,
@@ -568,7 +568,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         (
             quote! {
                 .and_then(|input| {
-                    let (
+                    let &(
                         ref authz_silo,
                         ..,
                         ref #resource_authz_name,
@@ -579,7 +579,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             },
             quote! {
                 .and_then(|input| {
-                    let (
+                    let &(
                         ref authz_silo,
                         ..,
                         ref #resource_authz_name,
@@ -628,7 +628,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let opctx = &lookup.opctx;
             let datastore = lookup.datastore;
 
-            match &self {
+            match self {
                 #resource_name::Error(_, error) => Err(error.clone()),
 
                 #fetch_for_name_variant
@@ -719,7 +719,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let opctx = &lookup.opctx;
             let datastore = lookup.datastore;
 
-            match &self {
+            match self {
                 #resource_name::Error(_, error) => Err(error.clone()),
 
                 #lookup_name_variant

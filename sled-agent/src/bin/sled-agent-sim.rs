@@ -116,7 +116,7 @@ async fn do_run() -> Result<(), CmdError> {
             cpu_family: SledCpuFamily::AmdMilan,
             baseboard: Baseboard::Gimlet {
                 identifier: format!("sim-{}", args.uuid),
-                model: String::from("sim-gimlet"),
+                model: String::from(sp_sim::FAKE_GIMLET_MODEL),
                 revision: 3,
             },
         },

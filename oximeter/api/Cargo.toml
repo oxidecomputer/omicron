@@ -1,18 +1,15 @@
 [package]
 name = "oximeter-api"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-chrono.workspace = true
 dropshot.workspace = true
 dropshot-api-manager-types.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
-schemars.workspace = true
+oximeter-types-versions.workspace = true
 semver.workspace = true
-serde.workspace = true
-uuid.workspace = true

@@ -10,6 +10,7 @@ use diesel::serialize;
 use diesel::serialize::ToSql;
 use diesel::sql_types;
 use omicron_common::api::external;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -23,6 +24,7 @@ use serde::Serialize;
     Deserialize,
     Eq,
     PartialEq,
+    JsonSchema,
 )]
 #[diesel(sql_type = sql_types::Int4)]
 pub struct Vni(pub external::Vni);

@@ -1,0 +1,45 @@
+
+
+Server-managed APIs:
+
+    Clickhouse Cluster Admin for Keepers (clickhouse-admin-keeper-client, exposed by omicron-clickhouse-admin)
+    Clickhouse Cluster Admin for Servers (clickhouse-admin-server-client, exposed by omicron-clickhouse-admin)
+    Clickhouse Single-Node Cluster Admin (clickhouse-admin-single-client, exposed by omicron-clickhouse-admin)
+    CockroachDB Cluster Admin (cockroach-admin-client, exposed by omicron-cockroach-admin)
+    Crucible Agent (crucible-agent-client, exposed by crucible-agent)
+    Crucible Control (for testing only) (crucible-control-client, exposed by propolis-server)
+    Crucible Pantry (crucible-pantry-client, exposed by crucible-pantry)
+    Maghemite DDM Admin (ddm-admin-client, exposed by ddmd)
+    DNS Server (dns-service-client, exposed by dns-server)
+    Dendrite DPD (dpd-client, exposed by dpd)
+    Management Gateway Service (gateway-client, exposed by omicron-gateway)
+    LLDP daemon (lldpd-client, exposed by lldpd)
+    Maghemite MG Admin (mg-admin-client, exposed by mgd)
+    NTP Admin (ntp-admin-client, exposed by omicron-ntp-admin)
+    External API (oxide-client, exposed by omicron-nexus)
+    Oximeter (oximeter-client, exposed by oximeter-collector)
+    Propolis (propolis-client, exposed by propolis-server)
+    Sled Agent (sled-agent-client, exposed by omicron-sled-agent)
+    Wicketd (wicketd-client, exposed by wicketd)
+
+
+Client-managed API:
+
+    Bootstrap Agent (bootstrap-agent-client, exposed by omicron-sled-agent)
+        reason: depends on itself (i.e., instances call each other)
+    Wicketd Installinator (installinator-client, exposed by wicketd)
+        reason: client is provided implicitly by the operator
+    Nexus Internal API (nexus-client, exposed by omicron-nexus)
+        reason: Circular dependencies between Nexus and other services
+    Nexus Internal Lockstep API (nexus-lockstep-client, exposed by omicron-nexus)
+        reason: Circular dependencies between Nexus and other services
+    Crucible Repair (repair-client, exposed by crucible-downstairs)
+        reason: depends on itself (i.e., instances call each other)
+    Repo Depot API (repo-depot-client, exposed by omicron-sled-agent)
+        reason: depends on itself (i.e., instances call each other)
+
+
+APIs with unknown version management: none
+
+
+APIs that failed consumer checks: none

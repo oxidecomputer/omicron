@@ -438,7 +438,7 @@ impl DataStore {
                 }
                 Err(e) => return Err(e),
                 Ok(None) => {
-                    crate::probes::vni__search__range__empty!(|| (&id));
+                    crate::probes::vni__search__range__empty!(|| &id);
                     debug!(
                         opctx.log,
                         "No VNIs available within current search range, retrying";
@@ -2977,9 +2977,9 @@ mod tests {
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_db_model::IncompleteNetworkInterface;
-    use nexus_db_model::IpConfig;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
+    use nexus_reconfigurator_planning::planner::Planner;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
@@ -2990,6 +2990,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::external_api::params;
+    use nexus_types::external_api::params::PrivateIpStackCreate;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
@@ -3002,6 +3003,7 @@ mod tests {
     use slog::info;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
+    use std::sync::Arc;
 
     // Test that we detect the right error condition and return None when we
     // fail to insert a VPC due to VNI exhaustion.
@@ -3282,10 +3284,6 @@ mod tests {
             datastore.sled_upsert(sled_update).await.expect("upserting sled");
         }
         sled_ids.sort_unstable();
-        let planning_input = system
-            .to_planning_input_builder()
-            .expect("creating planning builder")
-            .build();
 
         // Helper to convert a zone's nic into an insertable nic.
         let db_nic_from_zone = |zone_config: &BlueprintZoneConfig| {
@@ -3293,9 +3291,10 @@ mod tests {
                 .zone_type
                 .external_networking()
                 .expect("external networking for zone type");
-            let IpAddr::V4(ip) = nic.ip else {
-                panic!("Expected an IPv4 address for this NIC");
-            };
+            let ip = nic
+                .ip_config
+                .ipv4_addr()
+                .expect("an IPv4 address for this NIC");
             IncompleteNetworkInterface::new_service(
                 nic.id,
                 zone_config.id.into_untyped_uuid(),
@@ -3304,7 +3303,7 @@ mod tests {
                     name: nic.name.clone(),
                     description: nic.name.to_string(),
                 },
-                IpConfig::from_ipv4(ip),
+                PrivateIpStackCreate::from_ipv4(*ip),
                 nic.mac,
                 nic.slot,
             )
@@ -3312,11 +3311,13 @@ mod tests {
         };
 
         // Create an initial, empty blueprint, and make it the target.
-        let bp0 = BlueprintBuilder::build_empty_with_sleds(
-            sled_ids.iter().copied(),
-            "test",
-        );
+        let bp0 = Arc::new(BlueprintBuilder::build_empty("test"));
         bp_insert_and_make_target(&opctx, &datastore, &bp0).await;
+
+        let planning_input = system
+            .to_planning_input_builder(Arc::clone(&bp0))
+            .expect("creating planning builder")
+            .build();
 
         // Our blueprint doesn't describe any services, so we shouldn't find any
         // sled IDs running services.
@@ -3327,11 +3328,19 @@ mod tests {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp0,
-                &planning_input,
                 "test",
                 PlannerRng::from_entropy(),
             )
             .expect("created blueprint builder");
+
+            // We made changes to the planning input we want to be reflected in
+            // the new blueprint; reuse the `Planner`'s method for replicating
+            // those changes.
+            Planner::update_builder_from_planning_input(
+                &mut builder,
+                &planning_input,
+            );
+
             for &sled_id in &sled_ids {
                 builder
                     .sled_add_disks(
@@ -3420,7 +3429,6 @@ mod tests {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp2,
-                &planning_input,
                 "test",
                 PlannerRng::from_entropy(),
             )
@@ -3899,10 +3907,10 @@ mod tests {
             assert!(resolved.iter().any(|x| {
                 let k = &x.dest;
                 let v = &x.target;
-                *k == subnet.ipv4_block.0.into()
+                *k == IpNet::from(subnet.ipv4_block.0)
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
-                            *ip == subnet.ipv4_block.0.into()
+                            *ip == IpNet::from(subnet.ipv4_block.0)
                         }
                         _ => false,
                     }
@@ -3910,10 +3918,10 @@ mod tests {
             assert!(resolved.iter().any(|x| {
                 let k = &x.dest;
                 let v = &x.target;
-                *k == subnet.ipv6_block.0.into()
+                *k == IpNet::from(subnet.ipv6_block.0)
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
-                            *ip == subnet.ipv6_block.0.into()
+                            *ip == IpNet::from(subnet.ipv6_block.0)
                         }
                         _ => false,
                     }
@@ -4016,6 +4024,7 @@ mod tests {
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
                     },
                 ),
             )
@@ -4050,7 +4059,7 @@ mod tests {
                         name: "nic".parse().unwrap(),
                         description: "A NIC...".into(),
                     },
-                    IpConfig::auto_ipv4(),
+                    PrivateIpStackCreate::auto_ipv4(),
                 )
                 .unwrap(),
             )

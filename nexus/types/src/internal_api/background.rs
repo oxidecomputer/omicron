@@ -15,6 +15,7 @@ use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufRepoUuid;
@@ -144,6 +145,39 @@ impl InstanceUpdaterStatus {
     }
 }
 
+/// The status of a `multicast_reconciler` background task activation.
+#[derive(Default, Serialize, Deserialize, Debug)]
+pub struct MulticastGroupReconcilerStatus {
+    /// Whether the multicast reconciler is disabled due to the feature not
+    /// being enabled.
+    ///
+    /// We use disabled here to match other background task status structs.
+    pub disabled: bool,
+    /// Number of multicast groups transitioned from "Creating" to "Active" state.
+    pub groups_created: usize,
+    /// Number of multicast groups cleaned up (fully removed after "Deleting").
+    pub groups_deleted: usize,
+    /// Number of active multicast groups verified on dataplane switches.
+    pub groups_verified: usize,
+    /// Number of members processed ("Joining"→"Joined", "Left" with
+    /// time_deleted→hard-deleted cleanup).
+    pub members_processed: usize,
+    /// Number of members deleted (Left + time_deleted).
+    pub members_deleted: usize,
+    /// Errors that occurred during reconciliation operations.
+    pub errors: Vec<String>,
+}
+
+impl MulticastGroupReconcilerStatus {
+    pub fn total_groups_processed(&self) -> usize {
+        self.groups_created + self.groups_deleted + self.groups_verified
+    }
+
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+}
+
 /// The status of an `instance_reincarnation` background task activation.
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct InstanceReincarnationStatus {
@@ -159,7 +193,7 @@ pub struct InstanceReincarnationStatus {
     /// UUIDs of instances which changed state before they could be
     /// reincarnated.
     pub changed_state: Vec<ReincarnatableInstance>,
-    /// Any errors that occured while finding instances in need of reincarnation.
+    /// Any errors that occurred while finding instances in need of reincarnation.
     pub errors: Vec<String>,
     /// Errors that occurred while restarting individual instances.
     pub restart_errors: Vec<(ReincarnatableInstance, String)>,
@@ -239,43 +273,80 @@ pub struct SupportBundleCleanupReport {
 pub struct SupportBundleCollectionReport {
     pub bundle: SupportBundleUuid,
 
-    /// True iff we could list in-service sleds
-    pub listed_in_service_sleds: bool,
-
-    /// True iff we could list the service processors.
-    pub listed_sps: bool,
-
     /// True iff the bundle was successfully made 'active' in the database.
     pub activated_in_db_ok: bool,
 
-    /// Status of host OS ereport collection.
-    pub host_ereports: SupportBundleEreportStatus,
+    /// All steps taken, alongside their timing information, when collecting the
+    /// bundle.
+    pub steps: Vec<SupportBundleCollectionStep>,
 
-    /// Status of SP ereport collection.
-    pub sp_ereports: SupportBundleEreportStatus,
+    /// Status of ereport collection, or `None` if no ereports were requested
+    /// for this support bundle.
+    pub ereports: Option<SupportBundleEreportStatus>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub enum SupportBundleEreportStatus {
-    /// Ereports were not requested for this bundle.
-    NotRequested,
+pub struct SupportBundleCollectionStep {
+    pub name: String,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub status: SupportBundleCollectionStepStatus,
+}
 
-    /// Ereports were collected successfully.
-    Collected { n_collected: usize },
+impl SupportBundleCollectionStep {
+    /// Step name constants for the main collection steps.
+    ///
+    /// These are used both when creating steps and when validating in tests.
+    pub const STEP_BUNDLE_ID: &'static str = "bundle id";
+    pub const STEP_RECONFIGURATOR_STATE: &'static str = "reconfigurator state";
+    pub const STEP_EREPORTS: &'static str = "ereports";
+    pub const STEP_SLED_CUBBY_INFO: &'static str = "sled cubby info";
+    pub const STEP_SPAWN_SP_DUMPS: &'static str =
+        "spawn steps to query all SP dumps";
+    pub const STEP_SPAWN_SLEDS: &'static str = "spawn steps to query all sleds";
+}
 
-    /// Ereport collection failed, though some ereports may have been written.
-    Failed { n_collected: usize, error: String },
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SupportBundleCollectionStepStatus {
+    Ok,
+    Skipped,
+    Failed(String),
+}
+
+impl std::fmt::Display for SupportBundleCollectionStepStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use SupportBundleCollectionStepStatus::*;
+        match self {
+            Ok => write!(f, "ok"),
+            Skipped => write!(f, "skipped"),
+            Failed(why) => write!(f, "failed: {why}"),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleEreportStatus {
+    /// The total number of ereports found that match the requested filters.
+    ///
+    /// This may be greater than `n_collected` if some ereports were malformed.
+    pub n_found: usize,
+    /// The total number of ereports added to the bundle.
+    ///
+    /// This may be non-zero even if some errors occurred.
+    pub n_collected: usize,
+    /// Any errors which occurred while collecting ereports. Some errors may be
+    /// fatal and result in the termination of ereport collection, while others
+    /// may only indicate a failure to collect a particular ereport.
+    pub errors: Vec<String>,
 }
 
 impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
         Self {
             bundle,
-            listed_in_service_sleds: false,
-            listed_sps: false,
             activated_in_db_ok: false,
-            host_ereports: SupportBundleEreportStatus::NotRequested,
-            sp_ereports: SupportBundleEreportStatus::NotRequested,
+            steps: vec![],
+            ereports: None,
         }
     }
 }
@@ -818,6 +889,25 @@ pub enum SitrepLoadStatus {
 pub struct SitrepGcStatus {
     pub orphaned_sitreps_found: usize,
     pub orphaned_sitreps_deleted: usize,
+    pub errors: Vec<String>,
+}
+
+/// The status of a `fm_sitrep_execution` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SitrepExecutionStatus {
+    NoSitrep,
+    Executed { sitrep_id: SitrepUuid, alerts: SitrepAlertRequestStatus },
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SitrepAlertRequestStatus {
+    /// The total number of alerts requested by the current sitrep.
+    pub total_alerts_requested: usize,
+    /// The total number of alerts which were *first* requested in the current sitrep.
+    pub current_sitrep_alerts_requested: usize,
+    /// The number of alerts created by this activation.
+    pub alerts_created: usize,
+    /// Errors that occurred during this activation.
     pub errors: Vec<String>,
 }
 

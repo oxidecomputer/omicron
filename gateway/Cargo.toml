@@ -1,7 +1,7 @@
 [package]
 name = "omicron-gateway"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -20,6 +20,7 @@ gateway-api.workspace = true
 gateway-messages.workspace = true
 gateway-sp-comms.workspace = true
 gateway-types.workspace = true
+gateway-types-versions.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true

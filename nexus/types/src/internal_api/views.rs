@@ -4,7 +4,6 @@
 
 use crate::deployment::PendingMgsUpdate;
 use crate::deployment::TargetReleaseDescription;
-use crate::inventory::BaseboardId;
 use crate::inventory::CabooseWhich;
 use crate::inventory::Collection;
 use crate::quiesce::SagaQuiesceStatus;
@@ -18,11 +17,6 @@ use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use nexus_sled_agent_shared::inventory::BootPartitionContents;
-use nexus_sled_agent_shared::inventory::BootPartitionDetails;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
 use omicron_common::api::external::TufArtifactMeta;
@@ -36,6 +30,12 @@ use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::inventory::BootPartitionContents;
+use sled_agent_types::inventory::BootPartitionDetails;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::OmicronZoneImageSource;
+use sled_agent_types::inventory::OmicronZoneType;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fmt::Display;
@@ -352,7 +352,8 @@ pub struct NatEntryView {
     pub sled_address: Ipv6Addr,
     pub vni: Vni,
     pub mac: MacAddr,
-    pub gen: i64,
+    #[serde(rename = "gen")]
+    pub generation: i64,
     pub deleted: bool,
 }
 
@@ -1260,9 +1261,9 @@ mod test {
     use crate::deployment::PendingMgsUpdateDetails;
     use crate::deployment::PendingMgsUpdateSpDetails;
     use crate::internal_api::views::UpdateAttemptStatus;
-    use crate::inventory::BaseboardId;
     use chrono::Utc;
     use gateway_types::component::SpType;
+    use sled_hardware_types::BaseboardId;
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::Instant;

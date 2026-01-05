@@ -32,16 +32,20 @@ use futures::stream::FuturesUnordered;
 use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
+use illumos_utils::zfs::CanMount;
+use illumos_utils::zfs::DatasetEnsureArgs;
+use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::SizeDetails;
+use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolOrRamdisk;
 use itertools::Itertools as _;
-use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, SledRole,
-};
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
+use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
     ResolvedVpcFirewallRule, ResolvedVpcRouteSet, ResolvedVpcRouteState,
@@ -50,23 +54,28 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
+use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
-    GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
+    DatasetUuid, ExternalZpoolUuid, GenericUuid, MupdateOverrideUuid,
+    PropolisUuid, SledUuid,
 };
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
+use sled_agent_health_monitor::handle::HealthMonitorHandle;
+use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
-    VmmStateRequested, VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
+use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
 use sled_agent_types::probes::ProbeCreate;
-use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
@@ -78,6 +87,7 @@ use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -361,8 +371,14 @@ struct SledAgentInner {
     // A handle to the bootstore.
     bootstore: bootstore::NodeHandle,
 
+    // A handle to the trust quorum.
+    trust_quorum: trust_quorum::NodeTaskHandle,
+
     // A handle to the hardware monitor.
     hardware_monitor: HardwareMonitorHandle,
+
+    // A handle to the health monitor.
+    health_monitor: HealthMonitorHandle,
 
     // Object handling production of metrics for oximeter.
     _metrics_manager: MetricsManager,
@@ -671,8 +687,12 @@ impl SledAgent {
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
+                trust_quorum: long_running_task_handles.trust_quorum.clone(),
                 hardware_monitor: long_running_task_handles
                     .hardware_monitor
+                    .clone(),
+                health_monitor: long_running_task_handles
+                    .health_monitor
                     .clone(),
                 _metrics_manager: metrics_manager,
                 repo_depot,
@@ -914,6 +934,30 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
+    pub async fn instance_join_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .join_multicast_group(propolis_id, multicast_body)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    pub async fn instance_leave_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .leave_multicast_group(propolis_id, multicast_body)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
     /// Returns the state of the instance with the provided ID.
     pub async fn instance_get_state(
         &self,
@@ -1009,6 +1053,10 @@ impl SledAgent {
         self.inner.bootstore.clone()
     }
 
+    pub fn trust_quorum(&self) -> trust_quorum::NodeTaskHandle {
+        self.inner.trust_quorum.clone()
+    }
+
     pub fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
         self.inner.port_manager.vpc_routes_list()
     }
@@ -1096,6 +1144,8 @@ impl SledAgent {
         let zone_image_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
+        let health_monitor = self.inner.health_monitor.to_inventory();
+
         let ReconcilerInventory {
             disks,
             zpools,
@@ -1121,6 +1171,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
+            health_monitor,
         })
     }
 
@@ -1187,6 +1238,112 @@ impl SledAgent {
     /// Completely replace the set of probes managed by this sled.
     pub(crate) fn set_probes(&self, probes: IdHashMap<ProbeCreate>) {
         self.inner.probes.set_probes(probes);
+    }
+
+    pub(crate) async fn create_local_storage_dataset(
+        &self,
+        zpool_id: ExternalZpoolUuid,
+        dataset_id: DatasetUuid,
+        request: LocalStorageDatasetEnsureRequest,
+    ) -> Result<(), HttpError> {
+        // Ensure that the local storage dataset we want to use is still present
+        let present = self
+            .inner
+            .config_reconciler
+            .available_datasets_rx()
+            .all_mounted_local_storage_datasets()
+            .into_iter()
+            .any(|path_in_pool| match path_in_pool.pool {
+                ZpoolOrRamdisk::Zpool(zpool_name) => {
+                    zpool_name == ZpoolName::External(zpool_id)
+                }
+                ZpoolOrRamdisk::Ramdisk => false,
+            });
+
+        if !present {
+            // We cannot create a child dataset of the local storage dataset if
+            // it's not present! Return a 503.
+            let error =
+                format!("local storage dataset for pool {zpool_id} missing!");
+            return Err(HttpError::for_unavail(Some(error.clone()), error));
+        }
+
+        let delegated_zvol =
+            DelegatedZvol::LocalStorage { zpool_id, dataset_id };
+
+        let LocalStorageDatasetEnsureRequest { dataset_size, volume_size } =
+            request;
+
+        Zfs::ensure_dataset(DatasetEnsureArgs {
+            name: &delegated_zvol.parent_dataset_name(),
+            // dataset will never be mounted but a unique value is required here
+            // just in case.
+            mountpoint: Mountpoint(
+                delegated_zvol.parent_dataset_mountpoint().into(),
+            ),
+            can_mount: CanMount::Off,
+            zoned: false,
+            // encryption details not required, will inherit from parent
+            // "oxp_UUID/crypt/local_storage", which inherits from
+            // "oxp_UUID/crypt"
+            encryption_details: None,
+            size_details: Some(SizeDetails {
+                quota: Some(dataset_size),
+                reservation: Some(dataset_size),
+                compression: omicron_common::disk::CompressionAlgorithm::Off,
+            }),
+            id: None,
+            additional_options: None,
+        })
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Zfs::ensure_dataset_volume(
+            delegated_zvol.volume_name(),
+            volume_size,
+            delegated_zvol.volblocksize(),
+        )
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn delete_local_storage_dataset(
+        &self,
+        zpool_id: ExternalZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) -> Result<(), HttpError> {
+        // Ensure that the local storage dataset we want to use is still present
+        let present = self
+            .inner
+            .config_reconciler
+            .available_datasets_rx()
+            .all_mounted_local_storage_datasets()
+            .into_iter()
+            .any(|path_in_pool| match path_in_pool.pool {
+                ZpoolOrRamdisk::Zpool(zpool_name) => {
+                    zpool_name == ZpoolName::External(zpool_id)
+                }
+                ZpoolOrRamdisk::Ramdisk => false,
+            });
+
+        if !present {
+            // We cannot destroy a child dataset of the local storage dataset if
+            // it's not present! Return a 503.
+            let error =
+                format!("local storage dataset for pool {zpool_id} missing!");
+            return Err(HttpError::for_unavail(Some(error.clone()), error));
+        }
+
+        let delegated_zvol =
+            DelegatedZvol::LocalStorage { zpool_id, dataset_id };
+
+        Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name())
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(())
     }
 }
 

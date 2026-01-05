@@ -139,7 +139,6 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &blueprint1,
-            &example.input,
             "test suite",
             PlannerRng::from_entropy(),
         )
@@ -195,7 +194,6 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &blueprint2,
-            &example.input,
             "test suite",
             PlannerRng::from_entropy(),
         )

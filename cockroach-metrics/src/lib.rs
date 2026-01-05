@@ -10,7 +10,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use cockroach_admin_client::Client;
-use cockroach_admin_types::NodeId;
+use cockroach_admin_types::node::InternalNodeId;
 use futures::stream::{FuturesUnordered, StreamExt};
 use parallel_task_set::ParallelTaskSet;
 use serde::{Deserialize, Serialize};
@@ -307,7 +307,7 @@ impl CockroachClusterAdminClient {
     /// Fetch Prometheus metrics from all backends, returning all successful results
     pub async fn fetch_prometheus_metrics_from_all_nodes(
         &self,
-    ) -> Vec<(NodeId, PrometheusMetrics)> {
+    ) -> Vec<(InternalNodeId, PrometheusMetrics)> {
         let clients = self.clients.read().await;
 
         if clients.is_empty() {
@@ -316,7 +316,7 @@ impl CockroachClusterAdminClient {
 
         // Collect tasks from all nodes in parallel
         let mut results: Vec<
-            Result<(NodeId, PrometheusMetrics), anyhow::Error>,
+            Result<(InternalNodeId, PrometheusMetrics), anyhow::Error>,
         > = Vec::new();
         let mut tasks = ParallelTaskSet::new();
         for (addr, client) in clients.iter() {
@@ -332,7 +332,7 @@ impl CockroachClusterAdminClient {
                             .with_context(|| {
                                 format!("Failed to get node ID from {}", addr,)
                             })?;
-                        let node_id = NodeId::new(node_id_string);
+                        let node_id = InternalNodeId::new(node_id_string);
 
                         // Then fetch the metrics
                         let metrics = client
@@ -386,7 +386,7 @@ impl CockroachClusterAdminClient {
     /// Fetch node status from all backends, returning all successful results
     pub async fn fetch_node_status_from_all_nodes(
         &self,
-    ) -> Vec<(NodeId, NodesResponse)> {
+    ) -> Vec<(InternalNodeId, NodesResponse)> {
         let clients = self.clients.read().await;
 
         if clients.is_empty() {
@@ -394,8 +394,9 @@ impl CockroachClusterAdminClient {
         }
 
         // Create futures for all requests
-        let mut results: Vec<Result<(NodeId, NodesResponse), anyhow::Error>> =
-            Vec::new();
+        let mut results: Vec<
+            Result<(InternalNodeId, NodesResponse), anyhow::Error>,
+        > = Vec::new();
         let mut tasks = ParallelTaskSet::new();
         for (addr, client) in clients.iter() {
             let addr = *addr;
@@ -410,7 +411,7 @@ impl CockroachClusterAdminClient {
                             .with_context(|| {
                                 format!("Failed to get node ID from {}", addr,)
                             })?;
-                        let node_id = NodeId::new(node_id_string);
+                        let node_id = InternalNodeId::new(node_id_string);
 
                         // Then fetch the node status
                         let status =
@@ -670,7 +671,7 @@ impl PrometheusMetrics {
                                     mut entry,
                                 ) => {
                                     if let MetricValue::Histogram(
-                                        ref mut buckets,
+                                        buckets,
                                     ) = entry.get_mut()
                                     {
                                         buckets.push(bucket);
@@ -704,7 +705,7 @@ impl PrometheusMetrics {
 
         // Sort histogram buckets by their upper bound for consistent ordering
         for (_, metric_value) in metrics.iter_mut() {
-            if let MetricValue::Histogram(ref mut buckets) = metric_value {
+            if let MetricValue::Histogram(buckets) = metric_value {
                 buckets.sort_by(|a, b| {
                     a.le.partial_cmp(&b.le).unwrap_or(std::cmp::Ordering::Equal)
                 });
@@ -844,7 +845,8 @@ pub struct NodesResponse {
     pub nodes: Vec<NodeStatus>,
     /// Maps node ID to liveness status
     #[serde(rename = "livenessByNodeId")]
-    pub liveness_by_node_id: std::collections::BTreeMap<NodeId, NodeLiveness>,
+    pub liveness_by_node_id:
+        std::collections::BTreeMap<InternalNodeId, NodeLiveness>,
 }
 
 /// Node status information from CockroachDB /_status/nodes endpoint
@@ -870,7 +872,7 @@ pub struct NodeStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeDescriptor {
     #[serde(rename = "nodeId")]
-    pub node_id: NodeId,
+    pub node_id: InternalNodeId,
 
     #[serde(rename = "address")]
     pub address: AddressInfo,

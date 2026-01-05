@@ -1,7 +1,7 @@
 [package]
 name = "nexus-reconfigurator-execution"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 
 [lints]
 workspace = true
@@ -29,13 +29,13 @@ nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-mgs-updates.workspace = true
 nexus-networking.workspace = true
-nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 reqwest.workspace = true
 sled-agent-client.workspace = true
+sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 tokio.workspace = true

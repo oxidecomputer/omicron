@@ -236,6 +236,7 @@ mod test {
                 SKIP => SchemeResult::NotRequested,
                 OK => SchemeResult::Authenticated(authn::Details {
                     actor: self.actor,
+                    device_token_expiration: None,
                 }),
                 FAIL => SchemeResult::Failed(Reason::BadCredentials {
                     actor: self.actor,

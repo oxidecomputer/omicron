@@ -1377,7 +1377,7 @@ impl KstatSampler {
 impl oximeter::Producer for KstatSampler {
     fn produce(
         &mut self,
-    ) -> Result<Box<(dyn Iterator<Item = Sample>)>, MetricsError> {
+    ) -> Result<Box<dyn Iterator<Item = Sample>>, MetricsError> {
         // Swap the _entries_ of all the existing per-target sample queues, but
         // we need to leave empty queues in their place. I.e., we can't remove
         // keys.

@@ -321,7 +321,7 @@ mod test {
     use nexus_db_model::VmmState;
     use nexus_db_queries::authz;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project, object_create,
+        create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
@@ -341,7 +341,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
     ) -> authz::Project {
-        create_default_ip_pool(&cptestctx.external_client).await;
+        create_default_ip_pools(&cptestctx.external_client).await;
         let project =
             create_project(&cptestctx.external_client, PROJECT_NAME).await;
 
@@ -396,6 +396,7 @@ mod test {
                     start: state == InstanceState::Vmm,
                     auto_restart_policy,
                     anti_affinity_groups: Vec::new(),
+                    multicast_groups: Vec::new(),
                 },
             )
             .await;
@@ -443,7 +444,7 @@ mod test {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
+                        generation: Generation::new(),
                         state: VmmState::SagaUnwound,
                     },
                 },
@@ -461,7 +462,7 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    r#gen: Generation(prev_state.r#gen.next()),
+                    generation: Generation(prev_state.generation.next()),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm_id),
                     ..prev_state
@@ -509,7 +510,7 @@ mod test {
                     time_updated: Utc::now(),
                     nexus_state: state,
                     propolis_id,
-                    r#gen: Generation(prev_state.r#gen.next()),
+                    generation: Generation(prev_state.generation.next()),
                     ..prev_state
                 },
             )

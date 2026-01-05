@@ -7,6 +7,8 @@
 
 #![allow(clippy::result_large_err)]
 
+use crate::bootstrap::config::TRUST_QUORUM_PORT;
+
 use super::config::BOOTSTORE_PORT;
 use super::server::StartError;
 use bootstore::schemes::v0 as bootstore;
@@ -73,11 +75,13 @@ fn bootstore_network_config_paths(
     Ok(paths)
 }
 
-pub async fn poll_ddmd_for_bootstore_peer_update(
+pub async fn poll_ddmd_for_bootstore_and_tq_peer_update(
     log: Logger,
     bootstore_node_handle: bootstore::NodeHandle,
+    trust_quorum_handle: trust_quorum::NodeTaskHandle,
 ) {
-    let mut current_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
+    let mut current_bootstore_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
+    let mut current_tq_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
     // We're talking to a service's admin interface on localhost and
     // we're only asking for its current state. We use a retry in a loop
     // instead of `backoff`.
@@ -94,13 +98,16 @@ pub async fn poll_ddmd_for_bootstore_peer_update(
             .await
         {
             Ok(addrs) => {
-                let peers: BTreeSet<_> = addrs
-                    .map(|ip| SocketAddrV6::new(ip, BOOTSTORE_PORT, 0, 0))
+                let addrs: Vec<_> = addrs.collect();
+                // Inform the bootstore of all known peer addresses
+                let bootstore_peers: BTreeSet<_> = addrs
+                    .iter()
+                    .map(|ip| SocketAddrV6::new(*ip, BOOTSTORE_PORT, 0, 0))
                     .collect();
-                if peers != current_peers {
-                    current_peers = peers;
+                if bootstore_peers != current_bootstore_peers {
+                    current_bootstore_peers = bootstore_peers;
                     if let Err(e) = bootstore_node_handle
-                        .load_peer_addresses(current_peers.clone())
+                        .load_peer_addresses(current_bootstore_peers.clone())
                         .await
                     {
                         error!(
@@ -110,6 +117,25 @@ pub async fn poll_ddmd_for_bootstore_peer_update(
                                 "bootstore::Node task must have panicked",
                             ),
                             e
+                        );
+                        return;
+                    }
+                }
+                // Inform the trust quorum node of all known peer addresses
+                let tq_peers: BTreeSet<_> = addrs
+                    .iter()
+                    .map(|ip| SocketAddrV6::new(*ip, TRUST_QUORUM_PORT, 0, 0))
+                    .collect();
+                if tq_peers != current_tq_peers {
+                    current_tq_peers = tq_peers;
+                    if let Err(err) = trust_quorum_handle
+                        .load_peer_addresses(current_tq_peers.clone())
+                        .await
+                    {
+                        error!(
+                            log,
+                                "Error loading peer addresses for trust quorum";
+                                &err
                         );
                         return;
                     }

@@ -19,9 +19,9 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
-use nexus_db_model::IpConfig;
 use nexus_db_model::Probe;
 use nexus_db_model::VpcSubnet;
+use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -39,28 +39,8 @@ use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::ProbeUuid;
 use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use sled_agent_client::types::ProbeCreate;
 use uuid::Uuid;
-
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum IpKind {
-    Snat,
-    Floating,
-    Ephemeral,
-}
-
-impl From<nexus_db_model::IpKind> for IpKind {
-    fn from(value: nexus_db_model::IpKind) -> Self {
-        match value {
-            nexus_db_model::IpKind::SNat => Self::Snat,
-            nexus_db_model::IpKind::Ephemeral => Self::Ephemeral,
-            nexus_db_model::IpKind::Floating => Self::Floating,
-        }
-    }
-}
 
 impl super::DataStore {
     /// List the probes for the given project.
@@ -118,10 +98,13 @@ impl super::DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-            let mut interface: NetworkInterface =
-                interface.into_internal(db_subnet.ipv4_block.0.into());
-
-            interface.vni = vni.0;
+            let interface = NetworkInterface {
+                vni: vni.0,
+                ..interface.into_internal(
+                    db_subnet.ipv4_block.0,
+                    db_subnet.ipv6_block.0,
+                )?
+            };
 
             result.push(ProbeInfo {
                 id: probe.id(),
@@ -162,9 +145,11 @@ impl super::DataStore {
 
         let vni = self.resolve_vpc_to_vni(opctx, interface.vpc_id).await?;
 
-        let mut interface: NetworkInterface =
-            interface.into_internal(db_subnet.ipv4_block.0.into());
-        interface.vni = vni.0;
+        let interface = NetworkInterface {
+            vni: vni.0,
+            ..interface
+                .into_internal(db_subnet.ipv4_block.0, db_subnet.ipv6_block.0)?
+        };
 
         Ok(ProbeInfo {
             id: probe.id(),
@@ -273,7 +258,7 @@ impl super::DataStore {
                     probe.name(),
                 ),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_dual_stack(),
             None, //Request MAC address assignment
         )?;
 
@@ -382,6 +367,7 @@ impl super::DataStore {
                 external_ip::dsl::kind,
                 nexus_db_model::NetworkInterface::as_select(),
                 vpc_subnet::dsl::ipv4_block,
+                vpc_subnet::dsl::ipv6_block,
                 vpc::dsl::vni,
             ))
             .get_results_async::<(
@@ -391,14 +377,13 @@ impl super::DataStore {
                 nexus_db_model::SqlU16,
                 nexus_db_model::IpKind,
                 nexus_db_model::NetworkInterface,
-                // TODO: Need to extract IPv6 block when we support dual-stack
-                // external IP addresses. See
-                // https://github.com/oxidecomputer/omicron/issues/9318.
                 nexus_db_model::Ipv4Net,
+                nexus_db_model::Ipv6Net,
                 nexus_db_model::Vni,
             )>(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map(|rows| {
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .and_then(|rows| {
                 rows.into_iter()
                     .map(
                         |(
@@ -409,6 +394,7 @@ impl super::DataStore {
                             kind,
                             nic,
                             ipv4_block,
+                            ipv6_block,
                             vni,
                         )| {
                             let kind = db_ip_kind_to_sled(kind);
@@ -421,18 +407,17 @@ impl super::DataStore {
                                 }];
                             let interface = NetworkInterface {
                                 vni: vni.0,
-                                ..nic.into_internal((*ipv4_block).into())
+                                ..nic.into_internal(*ipv4_block, *ipv6_block)?
                             };
-                            ProbeCreate {
+                            Ok(ProbeCreate {
                                 id: ProbeUuid::from_untyped_uuid(probe_id),
                                 external_ips,
                                 interface,
-                            }
+                            })
                         },
                     )
-                    .collect()
+                    .collect::<Result<_, _>>()
             })
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Remove a probe from the data store.

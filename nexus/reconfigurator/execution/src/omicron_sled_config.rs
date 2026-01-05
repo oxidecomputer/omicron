@@ -81,8 +81,6 @@ pub(crate) async fn deploy_sled_configs(
 mod tests {
     use super::*;
     use iddqd::id_ord_map;
-    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
-    use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintDatasetConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
@@ -97,6 +95,7 @@ mod tests {
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
@@ -109,6 +108,9 @@ mod tests {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::OmicronZonesConfig;
+    use sled_agent_types::inventory::SledRole;
+    use std::net::Ipv6Addr;
     use std::net::SocketAddr;
 
     type ControlPlaneTestContext =
@@ -259,6 +261,7 @@ mod tests {
 
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
+            subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             sled_agent_generation: sim_sled_agent_config_generation.next(),
             disks,
             datasets,

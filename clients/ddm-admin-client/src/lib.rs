@@ -112,7 +112,7 @@ impl Client {
     pub async fn derive_bootstrap_addrs_from_prefixes<'a>(
         &self,
         interfaces: &'a [BootstrapInterface],
-    ) -> Result<impl Iterator<Item = Ipv6Addr> + 'a, DdmError> {
+    ) -> Result<impl Iterator<Item = Ipv6Addr> + 'a + use<'a>, DdmError> {
         let prefixes = self.inner.get_prefixes().await?.into_inner();
         Ok(prefixes.into_iter().flat_map(|(_, prefixes)| {
             prefixes.into_iter().flat_map(|prefix| {

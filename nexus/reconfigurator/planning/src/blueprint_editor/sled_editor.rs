@@ -20,8 +20,6 @@ use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
-use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -36,7 +34,6 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
-use nexus_types::inventory::BaseboardId;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
@@ -48,10 +45,11 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use scalar::ScalarEditor;
+use sled_agent_types::inventory::MupdateOverrideBootInventory;
+use sled_agent_types::inventory::ZoneKind;
 use std::iter;
 use std::mem;
 use std::net::Ipv6Addr;
-use std::sync::Arc;
 use underlay_ip_allocator::SledUnderlayIpAllocator;
 
 mod datasets;
@@ -161,44 +159,22 @@ enum InnerSledEditor {
 }
 
 impl SledEditor {
-    pub fn for_existing_active(
-        baseboard_id: Arc<BaseboardId>,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub fn for_existing(
         config: BlueprintSledConfig,
     ) -> Result<Self, SledInputError> {
-        assert_eq!(
-            config.state,
-            SledState::Active,
-            "for_existing_active called on non-active sled"
-        );
-        let inner = ActiveSledEditor::new(baseboard_id, subnet, config)?;
-        Ok(Self(InnerSledEditor::Active(inner)))
-    }
-
-    pub fn for_existing_decommissioned(
-        config: BlueprintSledConfig,
-    ) -> Result<Self, SledInputError> {
-        assert_eq!(
-            config.state,
-            SledState::Decommissioned,
-            "for_existing_decommissioned called on non-decommissioned sled"
-        );
-        let inner = EditedSled {
-            config,
-            edit_counts: SledEditCounts::zeroes(),
-            scalar_edits: EditedSledScalarEdits::zeroes(),
+        let inner = match config.state {
+            SledState::Active => {
+                InnerSledEditor::Active(ActiveSledEditor::new(config)?)
+            }
+            SledState::Decommissioned => {
+                InnerSledEditor::Decommissioned(EditedSled::new(config))
+            }
         };
-        Ok(Self(InnerSledEditor::Decommissioned(inner)))
+        Ok(Self(inner))
     }
 
-    pub fn for_new_active(
-        baseboard_id: Arc<BaseboardId>,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
-    ) -> Self {
-        Self(InnerSledEditor::Active(ActiveSledEditor::new_empty(
-            baseboard_id,
-            subnet,
-        )))
+    pub fn for_new_active(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+        Self(InnerSledEditor::Active(ActiveSledEditor::new_empty(subnet)))
     }
 
     pub fn finalize(self) -> EditedSled {
@@ -212,15 +188,6 @@ impl SledEditor {
         match &self.0 {
             InnerSledEditor::Active(_) => SledState::Active,
             InnerSledEditor::Decommissioned(_) => SledState::Decommissioned,
-        }
-    }
-
-    /// Returns the baseboard of this sled if it is active, or `None` if it is
-    /// decommissioned.
-    pub fn baseboard_id(&self) -> Option<&Arc<BaseboardId>> {
-        match &self.0 {
-            InnerSledEditor::Active(active) => Some(&active.baseboard_id),
-            InnerSledEditor::Decommissioned(_) => None,
         }
     }
 
@@ -261,10 +228,9 @@ impl SledEditor {
                 // below, we'll be left in the active state with an empty sled
                 // editor), but omicron in general is not panic safe and aborts
                 // on panic. Plus `finalize()` should never panic.
-                let mut stolen = ActiveSledEditor::new_empty(
-                    Arc::clone(&editor.baseboard_id),
-                    Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
-                );
+                let mut stolen = ActiveSledEditor::new_empty(Ipv6Subnet::new(
+                    Ipv6Addr::LOCALHOST,
+                ));
                 mem::swap(editor, &mut stolen);
 
                 let mut finalized = stolen.finalize();
@@ -506,7 +472,6 @@ impl SledEditor {
 
 #[derive(Debug)]
 struct ActiveSledEditor {
-    baseboard_id: Arc<BaseboardId>,
     underlay_ip_allocator: SledUnderlayIpAllocator,
     incoming_sled_agent_generation: Generation,
     zones: ZonesEditor,
@@ -524,12 +489,18 @@ pub(crate) struct EditedSled {
     pub scalar_edits: EditedSledScalarEdits,
 }
 
+impl EditedSled {
+    fn new(config: BlueprintSledConfig) -> Self {
+        Self {
+            config,
+            edit_counts: SledEditCounts::zeroes(),
+            scalar_edits: EditedSledScalarEdits::zeroes(),
+        }
+    }
+}
+
 impl ActiveSledEditor {
-    pub fn new(
-        baseboard_id: Arc<BaseboardId>,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
-        config: BlueprintSledConfig,
-    ) -> Result<Self, SledInputError> {
+    pub fn new(config: BlueprintSledConfig) -> Result<Self, SledInputError> {
         let zones =
             ZonesEditor::new(config.sled_agent_generation, config.zones);
 
@@ -541,9 +512,9 @@ impl ActiveSledEditor {
             zones.zones(BlueprintZoneDisposition::any).map(|z| z.underlay_ip());
 
         Ok(Self {
-            baseboard_id,
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
-                subnet, zone_ips,
+                config.subnet,
+                zone_ips,
             ),
             incoming_sled_agent_generation: config.sled_agent_generation,
             zones,
@@ -557,10 +528,7 @@ impl ActiveSledEditor {
         })
     }
 
-    pub fn new_empty(
-        baseboard_id: Arc<BaseboardId>,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
-    ) -> Self {
+    pub fn new_empty(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
         // Creating the underlay IP allocator can only fail if we have a zone
         // with an IP outside the sled subnet, but we don't have any zones at
         // all, so this can't fail. Match explicitly to guard against this error
@@ -569,7 +537,6 @@ impl ActiveSledEditor {
             SledUnderlayIpAllocator::new(subnet, iter::empty());
 
         Self {
-            baseboard_id,
             underlay_ip_allocator,
             incoming_sled_agent_generation: Generation::new(),
             zones: ZonesEditor::empty(),
@@ -611,6 +578,7 @@ impl ActiveSledEditor {
         EditedSled {
             config: BlueprintSledConfig {
                 state: SledState::Active,
+                subnet: self.underlay_ip_allocator.subnet(),
                 sled_agent_generation,
                 disks,
                 datasets,

@@ -89,7 +89,7 @@ impl DataStore {
             .map_err(|e| {
                 match err.take() {
                     // A called function performed its own error propagation.
-                    Some(txn_error) => txn_error.into(),
+                    Some(txn_error) => txn_error.into_public_ignore_retries(),
                     // The transaction setup/teardown itself encountered a diesel error.
                     None => public_error_from_diesel(e, ErrorHandler::Server),
                 }
@@ -110,7 +110,8 @@ impl DataStore {
     ) -> CreateResult<PhysicalDisk> {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
         let disk = Self::physical_disk_insert_on_connection(&conn, opctx, disk)
-            .await?;
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
         Ok(disk)
     }
 
@@ -339,15 +340,16 @@ mod test {
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use dropshot::PaginationOrder;
     use nexus_db_lookup::LookupPath;
-    use nexus_sled_agent_shared::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        SledCpuFamily, SledRole, ZoneImageResolverInventory,
-    };
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::{
+        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
+        Inventory, InventoryDisk, SledCpuFamily, SledRole,
+        ZoneImageResolverInventory,
+    };
     use std::num::NonZeroU32;
 
     async fn create_test_sled(db: &DataStore) -> Sled {
@@ -704,6 +706,7 @@ mod test {
                         ConfigReconcilerInventoryStatus::NotYetRun,
                     last_reconciliation: None,
                     zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                    health_monitor: HealthMonitorInventory::new(),
                 },
             )
             .unwrap();

@@ -7,13 +7,13 @@
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use legacy_configs::convert_legacy_ledgers;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use omicron_common::api::external::Generation;
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
-use sled_agent_api::ArtifactConfig;
+use sled_agent_types::artifact::ArtifactConfig;
+use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronZoneImageSource;
 use slog::Logger;
 use slog::error;
 use slog::info;
@@ -30,6 +30,7 @@ use tufaceous_artifact::ArtifactHash;
 
 use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
+use crate::ledger::legacy_configs::try_convert_v4_sled_config;
 
 mod legacy_configs;
 
@@ -633,18 +634,30 @@ async fn load_sled_config(
     let paths = config_datasets
         .iter()
         .map(|p| p.join(CONFIG_LEDGER_FILENAME))
-        .collect();
+        .collect::<Vec<_>>();
     info!(
         log, "Attempting to load sled config from ledger";
         "paths" => ?paths,
     );
-    if let Some(config) = Ledger::new(log, paths).await {
+    if let Some(config) = Ledger::new(log, paths.clone()).await {
         info!(log, "Ledger of sled config exists");
         return CurrentSledConfig::Ledgered(Box::new(config.into_inner()));
     }
 
     // If we have no ledgered config, see if we can convert from the previous
-    // triple of legacy ledgers.
+    // version of the format.
+    if let Some(config) = try_convert_v4_sled_config(log, paths).await {
+        info!(
+            log,
+            "Ledger of sled config exists, but it was formatted as \
+            version 6, with single-stack NICs. It has been rewritten \
+            to the current version",
+        );
+        return CurrentSledConfig::Ledgered(Box::new(config));
+    }
+
+    // If we have no ledgered config, see if we can convert from the even
+    // more-previous triple of legacy ledgers.
     if let Some(config) = convert_legacy_ledgers(&config_datasets, log).await {
         info!(log, "Converted legacy triple of ledgers into new sled config");
         return CurrentSledConfig::Ledgered(Box::new(config));
@@ -682,11 +695,6 @@ mod tests {
     use camino_tempfile::tempfile;
     use iddqd::IdOrdMap;
     use illumos_utils::zpool::ZpoolName;
-    use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
-    use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
-    use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-    use nexus_sled_agent_shared::inventory::OmicronZoneType;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::disk::OmicronPhysicalDiskConfig;
     use omicron_test_utils::dev;
@@ -697,6 +705,11 @@ mod tests {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::HostPhase2DesiredContents;
+    use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::OmicronZoneConfig;
+    use sled_agent_types::inventory::OmicronZoneImageSource;
+    use sled_agent_types::inventory::OmicronZoneType;
     use sled_storage::config::MountConfig;
     use std::collections::BTreeSet;
     use std::time::Duration;

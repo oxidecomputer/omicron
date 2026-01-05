@@ -62,5 +62,5 @@ pub fn align_reservoir_size(size_bytes: u64) -> u64 {
 }
 
 pub fn reservoir_size_is_aligned(size_bytes: u64) -> bool {
-    (size_bytes % RESERVOIR_SZ_ALIGN) == 0
+    size_bytes.is_multiple_of(RESERVOIR_SZ_ALIGN)
 }

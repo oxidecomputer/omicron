@@ -10,10 +10,9 @@
 //! convenient to separate these concerns.)
 
 use crate::external_api::params::PhysicalDiskKind;
-use crate::external_api::params::UninitializedSledId;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
@@ -22,21 +21,10 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::InventoryDataset;
-use nexus_sled_agent_shared::inventory::InventoryDisk;
-use nexus_sled_agent_shared::inventory::InventoryZpool;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::SledCpuFamily;
-use nexus_sled_agent_shared::inventory::SledRole;
-use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
-pub use omicron_common::api::internal::shared::SourceNatConfig;
+pub use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_common::disk::M2Slot;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
@@ -47,6 +35,19 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
+use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types_versions::latest::inventory::HealthMonitorInventory;
+use sled_agent_types_versions::latest::inventory::InventoryDataset;
+use sled_agent_types_versions::latest::inventory::InventoryDisk;
+use sled_agent_types_versions::latest::inventory::InventoryZpool;
+use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
+use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
+use sled_agent_types_versions::latest::inventory::SledCpuFamily;
+use sled_agent_types_versions::latest::inventory::SledRole;
+use sled_agent_types_versions::latest::inventory::ZoneImageResolverInventory;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
@@ -175,7 +176,7 @@ pub struct Collection {
 
     /// The status of our cockroachdb cluster, keyed by node identifier
     pub cockroach_status:
-        BTreeMap<cockroach_admin_types::NodeId, CockroachStatus>,
+        BTreeMap<cockroach_admin_types::node::InternalNodeId, CockroachStatus>,
 
     /// The status of time synchronization
     pub ntp_timesync: IdOrdMap<TimeSync>,
@@ -279,7 +280,7 @@ impl Collection {
         self.clickhouse_keeper_cluster_membership
             .iter()
             .max_by_key(|membership| membership.leader_committed_log_index)
-            .map(|membership| (membership.clone()))
+            .map(|membership| membership.clone())
     }
 
     /// Return a type which can be used to display a collection in a
@@ -289,69 +290,6 @@ impl Collection {
     /// to display part or all of a collection.
     pub fn display(&self) -> CollectionDisplay<'_> {
         CollectionDisplay::new(self)
-    }
-}
-
-/// A unique baseboard id found during a collection
-///
-/// Baseboard ids are the keys used to link up information from disparate
-/// sources (like a service processor and a sled agent).
-///
-/// These are normalized in the database.  Each distinct baseboard id is
-/// assigned a uuid and shared across the many possible collections that
-/// reference it.
-///
-/// Usually, the part number and serial number are combined with a revision
-/// number.  We do not include that here.  If we ever did find a baseboard with
-/// the same part number and serial number but a new revision number, we'd want
-/// to treat that as the same baseboard as one with a different revision number.
-#[derive(
-    Clone,
-    Debug,
-    Diffable,
-    Ord,
-    Eq,
-    Hash,
-    PartialOrd,
-    PartialEq,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-#[cfg_attr(test, derive(test_strategy::Arbitrary))]
-pub struct BaseboardId {
-    /// Oxide Part Number
-    pub part_number: String,
-    /// Serial number (unique for a given part number)
-    pub serial_number: String,
-}
-
-impl std::fmt::Display for BaseboardId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.part_number, self.serial_number)
-    }
-}
-
-impl From<crate::external_api::shared::Baseboard> for BaseboardId {
-    fn from(value: crate::external_api::shared::Baseboard) -> Self {
-        BaseboardId { part_number: value.part, serial_number: value.serial }
-    }
-}
-
-impl From<UninitializedSledId> for BaseboardId {
-    fn from(value: UninitializedSledId) -> Self {
-        BaseboardId { part_number: value.part, serial_number: value.serial }
-    }
-}
-
-impl slog::KV for BaseboardId {
-    fn serialize(
-        &self,
-        _record: &slog::Record,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        serializer.emit_str("part_number".into(), &self.part_number)?;
-        serializer.emit_str("serial_number".into(), &self.serial_number)
     }
 }
 
@@ -704,6 +642,7 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
+    pub health_monitor: HealthMonitorInventory,
 }
 
 impl IdOrdItem for SledAgent {

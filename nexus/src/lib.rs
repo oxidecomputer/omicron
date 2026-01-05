@@ -225,6 +225,18 @@ impl Server {
                 log.new(o!("component" => "dropshot_external")),
             )
             .config(config.deployment.dropshot_external.dropshot.clone())
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    nexus_external_api::latest_version(),
+                )
+                // Since we don't have control over all clients to the external
+                // API, we allow the api-version header to not be specified
+                // (picking the latest version in that case). However, all
+                // clients that *are* under our control should specify the
+                // api-version header.
+                .on_missing(nexus_external_api::latest_version()),
+            )))
             .tls(tls_config.clone().map(dropshot::ConfigTls::Dynamic))
             .start()
             .map_err(|error| {
@@ -238,6 +250,18 @@ impl Server {
                 log.new(o!("component" => "dropshot_external_techport")),
             )
             .config(techport_server_config)
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    nexus_external_api::latest_version(),
+                )
+                // Since we don't have control over all clients to the external
+                // API, we allow the api-version header to not be specified
+                // (picking the latest version in that case). However, all
+                // clients that *are* under our control should specify the
+                // api-version header.
+                .on_missing(nexus_external_api::latest_version()),
+            )))
             .tls(tls_config.map(dropshot::ConfigTls::Dynamic))
             .start()
             .map_err(|error| {
@@ -318,7 +342,7 @@ impl nexus_test_interface::NexusServer for Server {
         >,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
+        recovery_silo: sled_agent_types::rack_init::RecoverySiloConfig,
         certs: Vec<omicron_common::api::internal::nexus::Certificate>,
     ) -> Self {
         // Perform the "handoff from RSS".
@@ -418,20 +442,20 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.context.nexus.inventory_load_rx()
     }
 
-    async fn get_http_server_external_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_external_server_address().await.unwrap()
+    fn get_http_server_external_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_external_server_address().unwrap()
     }
 
-    async fn get_http_server_techport_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_techport_server_address().await.unwrap()
+    fn get_http_server_techport_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_techport_server_address().unwrap()
     }
 
-    async fn get_http_server_internal_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_internal_server_address().await.unwrap()
+    fn get_http_server_internal_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_internal_server_address().unwrap()
     }
 
-    async fn get_http_server_lockstep_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_lockstep_server_address().await.unwrap()
+    fn get_http_server_lockstep_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_lockstep_server_address().unwrap()
     }
 
     async fn upsert_test_dataset(

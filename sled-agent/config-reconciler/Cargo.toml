@@ -1,7 +1,7 @@
 [package]
 name = "sled-agent-config-reconciler"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -24,7 +24,7 @@ iddqd.workspace = true
 illumos-utils.workspace = true
 installinator-common.workspace = true
 key-manager.workspace = true
-nexus-sled-agent-shared.workspace = true
+sled-agent-types-versions.workspace = true
 ntp-admin-client.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true

@@ -45,9 +45,10 @@ impl<'a> Project<'a> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
         let datastore = lookup.datastore;
-        match &self {
+        match self {
             Project::Error(_, error) => Err(error.clone()),
-            Project::Name(parent, &ref name) | Project::OwnedName(parent, ref name) => {
+            &Project::Name(ref parent, &ref name)
+            | &Project::OwnedName(ref parent, ref name) => {
                 let (authz_silo,) = parent.lookup().await?;
                 let (authz_project, db_row) = Self::fetch_by_name_for(
                         opctx,
@@ -64,7 +65,7 @@ impl<'a> Project<'a> {
             }
         }
             .and_then(|input| {
-                let (ref authz_silo, .., ref authz_project, ref _db_row) = &input;
+                let &(ref authz_silo, .., ref authz_project, ref _db_row) = &input;
                 Self::silo_check(opctx, authz_silo, authz_project)?;
                 Ok(input)
             })
@@ -99,7 +100,7 @@ impl<'a> Project<'a> {
         opctx.authorize(action, &authz_project).await?;
         Ok((authz_silo, authz_project))
             .and_then(|input| {
-                let (ref authz_silo, .., ref authz_project) = &input;
+                let &(ref authz_silo, .., ref authz_project) = &input;
                 Self::silo_check(opctx, authz_silo, authz_project)?;
                 Ok(input)
             })
@@ -125,9 +126,10 @@ impl<'a> Project<'a> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
         let datastore = lookup.datastore;
-        match &self {
+        match self {
             Project::Error(_, error) => Err(error.clone()),
-            Project::Name(parent, &ref name) | Project::OwnedName(parent, ref name) => {
+            &Project::Name(ref parent, &ref name)
+            | &Project::OwnedName(ref parent, ref name) => {
                 let (authz_silo,) = parent.lookup().await?;
                 let (authz_project, _) = Self::lookup_by_name_no_authz(
                         opctx,

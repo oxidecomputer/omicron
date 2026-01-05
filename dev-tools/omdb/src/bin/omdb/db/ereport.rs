@@ -10,6 +10,7 @@ use crate::helpers::const_max_len;
 use crate::helpers::datetime_opt_rfc3339_concise;
 use crate::helpers::datetime_rfc3339_concise;
 use crate::helpers::display_option_blank;
+use crate::helpers::display_option_invalid;
 
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
@@ -21,17 +22,17 @@ use clap::Args;
 use clap::Subcommand;
 use diesel::dsl::{count_distinct, min};
 use diesel::prelude::*;
-use ereport_types::Ena;
-use ereport_types::EreporterRestartUuid;
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::SpType;
+use nexus_db_model::ereport as model;
+use nexus_db_model::ereport::DbEna;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
-use nexus_db_schema::schema::host_ereport::dsl as host_dsl;
-use nexus_db_schema::schema::sp_ereport::dsl as sp_dsl;
+use nexus_db_schema::schema::ereport::dsl;
+use nexus_types::fm::ereport::Ena;
+use nexus_types::fm::ereport::Reporter;
+use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledUuid;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -129,23 +130,32 @@ async fn cmd_db_ereport_list(
         restart_id: Uuid,
         ena: Ena,
         #[tabled(display_with = "display_option_blank")]
-        class: Option<String>,
-        source: db::model::Reporter,
+        class: Option<&'report str>,
+        #[tabled(display_with = "display_option_invalid")]
+        source: Option<Reporter>,
         #[tabled(display_with = "display_option_blank", rename = "S/N")]
         serial: Option<&'report str>,
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
         part_number: Option<&'report str>,
     }
 
-    impl<'report> From<&'report db::model::SpEreport> for EreportRow<'report> {
-        fn from(ereport: &'report db::model::SpEreport) -> Self {
-            let &db::model::SpEreport {
-                time_collected,
+    impl<'report> From<&'report db::model::Ereport> for EreportRow<'report> {
+        fn from(ereport: &'report db::model::Ereport) -> Self {
+            let source = match ereport.reporter() {
+                Ok(reporter) => Some(reporter),
+                Err(e) => {
+                    eprintln!(
+                        "error: ereport {} has an invalid reporter. {e}.",
+                        ereport.id()
+                    );
+                    None
+                }
+            };
+            let &db::model::Ereport {
                 restart_id,
-                ena,
+                ena: DbEna(ena),
+                time_collected,
                 ref class,
-                sp_type,
-                sp_slot,
                 ref serial_number,
                 ref part_number,
                 ..
@@ -153,37 +163,11 @@ async fn cmd_db_ereport_list(
             EreportRow {
                 time_collected,
                 restart_id: restart_id.into_untyped_uuid(),
-                ena: ena.into(),
-                class: class.clone(),
-                source: db::model::Reporter::Sp {
-                    sp_type: sp_type.into(),
-                    slot: sp_slot.0,
-                },
+                ena,
+                class: class.as_deref(),
+                source,
                 serial: serial_number.as_deref(),
                 part_number: part_number.as_deref(),
-            }
-        }
-    }
-
-    impl<'report> From<&'report db::model::HostEreport> for EreportRow<'report> {
-        fn from(ereport: &'report db::model::HostEreport) -> Self {
-            let &db::model::HostEreport {
-                time_collected,
-                restart_id,
-                ena,
-                ref class,
-                sled_id,
-                ref sled_serial,
-                ..
-            } = ereport;
-            EreportRow {
-                time_collected,
-                restart_id: restart_id.into_untyped_uuid(),
-                ena: ena.into(),
-                class: class.clone(),
-                source: db::model::Reporter::HostOs { sled: sled_id.into() },
-                serial: Some(&sled_serial),
-                part_number: None, // TODO(eliza): go get this from inventory?
             }
         }
     }
@@ -198,84 +182,40 @@ async fn cmd_db_ereport_list(
 
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let ctx = || "loading SP ereports";
-    let mut query = sp_dsl::sp_ereport
-        .select(db::model::SpEreport::as_select())
+    let ctx = || "loading ereports";
+    let mut query = dsl::ereport
+        .select(db::model::Ereport::as_select())
         .limit(fetch_opts.fetch_limit.get().into())
-        .order_by((sp_dsl::time_collected, sp_dsl::restart_id, sp_dsl::ena))
+        .order_by((dsl::time_collected, dsl::restart_id, dsl::ena))
         .into_boxed();
 
     if !args.serials.is_empty() {
-        query =
-            query.filter(sp_dsl::serial_number.eq_any(args.serials.clone()));
+        query = query.filter(dsl::serial_number.eq_any(args.serials.clone()));
     }
 
     if !args.classes.is_empty() {
-        query = query.filter(sp_dsl::class.eq_any(args.classes.clone()));
+        query = query.filter(dsl::class.eq_any(args.classes.clone()));
     }
 
     if !args.ids.is_empty() {
-        query = query.filter(sp_dsl::restart_id.eq_any(args.ids.clone()));
+        query = query.filter(dsl::restart_id.eq_any(args.ids.clone()));
     }
     if let Some(before) = args.before {
-        query = query.filter(sp_dsl::time_collected.lt(before));
+        query = query.filter(dsl::time_collected.lt(before));
     }
 
     if let Some(after) = args.after {
-        query = query.filter(sp_dsl::time_collected.gt(after));
+        query = query.filter(dsl::time_collected.gt(after));
     }
 
     if !fetch_opts.include_deleted {
-        query = query.filter(sp_dsl::time_deleted.is_null());
+        query = query.filter(dsl::time_deleted.is_null());
     }
 
-    let sp_ereports = query.load_async(&*conn).await.with_context(ctx)?;
-    check_limit(&sp_ereports, fetch_opts.fetch_limit, ctx);
+    let ereports = query.load_async(&*conn).await.with_context(ctx)?;
+    check_limit(&ereports, fetch_opts.fetch_limit, ctx);
 
-    let ctx = || "loading host OS ereports";
-    let mut query = host_dsl::host_ereport
-        .select(db::model::HostEreport::as_select())
-        .limit(fetch_opts.fetch_limit.get().into())
-        .order_by((
-            host_dsl::time_collected,
-            host_dsl::restart_id,
-            host_dsl::ena,
-        ))
-        .into_boxed();
-
-    if !args.serials.is_empty() {
-        query =
-            query.filter(host_dsl::sled_serial.eq_any(args.serials.clone()));
-    }
-
-    if !args.classes.is_empty() {
-        query = query.filter(host_dsl::class.eq_any(args.classes.clone()));
-    }
-
-    if !args.ids.is_empty() {
-        query = query.filter(host_dsl::restart_id.eq_any(args.ids.clone()));
-    }
-
-    if let Some(before) = args.before {
-        query = query.filter(host_dsl::time_collected.lt(before));
-    }
-
-    if let Some(after) = args.after {
-        query = query.filter(host_dsl::time_collected.gt(after));
-    }
-
-    if !fetch_opts.include_deleted {
-        query = query.filter(host_dsl::time_deleted.is_null());
-    }
-
-    let host_ereports = query.load_async(&*conn).await.with_context(ctx)?;
-    check_limit(&host_ereports, fetch_opts.fetch_limit, ctx);
-
-    let mut rows = sp_ereports
-        .iter()
-        .map(EreportRow::from)
-        .chain(host_ereports.iter().map(EreportRow::from))
-        .collect::<Vec<_>>();
+    let mut rows = ereports.iter().map(EreportRow::from).collect::<Vec<_>>();
 
     // Sort everything by time collected so that the host-OS and SP ereports are
     // interspersed by time collected, reporter, and ENA. Use
@@ -306,17 +246,8 @@ async fn cmd_db_ereport_info(
     let &InfoArgs { restart_id, ena } = args;
     let ereport_id = ereport_types::EreportId { restart_id, ena };
     let conn = datastore.pool_connection_for_tests().await?;
-    let db::model::Ereport { id, metadata, reporter, report } =
-        ereport_fetch(&conn, fetch_opts, ereport_id).await?;
+    let ereport = ereport_fetch(&conn, fetch_opts, ereport_id).await?;
 
-    let db::model::EreportMetadata {
-        time_collected,
-        time_deleted,
-        collector_id,
-        part_number,
-        serial_number,
-        class,
-    } = metadata;
     const ENA: &str = "ENA";
     const TIME_COLLECTED: &str = "collected at";
     const TIME_DELETED: &str = "deleted at";
@@ -335,8 +266,20 @@ async fn cmd_db_ereport_info(
         PART_NUMBER,
         SERIAL_NUMBER,
     ]);
+    let db::model::Ereport {
+        ena: DbEna(ena),
+        restart_id,
+        time_deleted,
+        time_collected,
+        collector_id,
+        ref part_number,
+        ref serial_number,
+        ref class,
+        ref report,
+        reporter,
+    } = ereport;
     println!("\n{:=<80}", "== EREPORT METADATA ");
-    println!("    {ENA:>WIDTH$}: {}", id.ena);
+    println!("    {ENA:>WIDTH$}: {ena}");
     match class {
         Some(class) => println!("    {CLASS:>WIDTH$}: {class}"),
         None => println!("/!\\ {CLASS:>WIDTH$}: <unknown>"),
@@ -346,13 +289,14 @@ async fn cmd_db_ereport_info(
     }
     println!("    {TIME_COLLECTED:>WIDTH$}: {time_collected}");
     println!("    {COLLECTOR_ID:>WIDTH$}: {collector_id}");
-    match reporter {
-        db::model::Reporter::Sp { sp_type, slot } => {
+    match Reporter::try_from(reporter) {
+        Err(err) => eprintln!("{err}"),
+        Ok(Reporter::Sp { sp_type, slot }) => {
             println!(
                 "    {REPORTER:>WIDTH$}: {sp_type:?} {slot} (service processor)"
             )
         }
-        db::model::Reporter::HostOs { sled } => {
+        Ok(Reporter::HostOs { sled }) => {
             println!("    {REPORTER:>WIDTH$}: sled {sled:?} (host OS)");
         }
     }
@@ -380,42 +324,21 @@ async fn ereport_fetch(
     id: ereport_types::EreportId,
 ) -> anyhow::Result<db::model::Ereport> {
     let restart_id = id.restart_id.into_untyped_uuid();
-    let ena = db::model::DbEna::from(id.ena);
+    let ena = DbEna::from(id.ena);
 
-    let sp_query = sp_dsl::sp_ereport
-        .filter(sp_dsl::restart_id.eq(restart_id))
-        .filter(sp_dsl::ena.eq(ena))
-        .select(db::model::SpEreport::as_select());
-    let sp_result = if !fetch_opts.include_deleted {
-        sp_query.filter(sp_dsl::time_deleted.is_null()).first_async(conn).await
+    let query = dsl::ereport
+        .filter(dsl::restart_id.eq(restart_id))
+        .filter(dsl::ena.eq(ena))
+        .select(db::model::Ereport::as_select());
+    let result = if !fetch_opts.include_deleted {
+        query.filter(dsl::time_deleted.is_null()).first_async(conn).await
     } else {
-        sp_query.first_async(conn).await
+        query.first_async(conn).await
     };
-    if let Some(report) = sp_result.optional().with_context(|| {
-        format!("failed to query for SP ereport matching {id}")
-    })? {
-        return Ok(report.into());
-    }
-
-    let host_query = host_dsl::host_ereport
-        .filter(host_dsl::restart_id.eq(restart_id))
-        .filter(host_dsl::ena.eq(ena))
-        .select(db::model::HostEreport::as_select());
-    let host_result = if !fetch_opts.include_deleted {
-        host_query
-            .filter(host_dsl::time_deleted.is_null())
-            .first_async(conn)
-            .await
-    } else {
-        host_query.first_async(conn).await
-    };
-    if let Some(report) = host_result.optional().with_context(|| {
-        format!("failed to query for host OS ereport matching {id}")
-    })? {
-        return Ok(report.into());
-    }
-
-    Err(anyhow::anyhow!("no ereport {id} found"))
+    result
+        .optional()
+        .with_context(|| format!("failed to query for ereport matching {id}"))?
+        .ok_or_else(|| anyhow::anyhow!("no ereport {id} found"))
 }
 
 async fn cmd_db_ereporters(
@@ -426,35 +349,36 @@ async fn cmd_db_ereporters(
     let slot_type = slot_type.map(nexus_db_model::SpType::from);
 
     let conn = datastore.pool_connection_for_tests().await?;
-    let sp_ereporters = (*conn).transaction_async({
+    let reporters = (*conn).transaction_async({
         let serial = serial.clone();
         async move |conn| {
             // Selecting all reporters may require a full table scan, depending
             // on filters.
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
-            let mut query = sp_dsl::sp_ereport
+            let mut query = dsl::ereport
                 .group_by((
-                    sp_dsl::restart_id,
-                    sp_dsl::sp_slot,
-                    sp_dsl::sp_type,
-                    sp_dsl::serial_number,
-                    sp_dsl::part_number
+                    dsl::restart_id,
+                    dsl::reporter,
+                    dsl::sled_id,
+                    dsl::sp_slot,
+                    dsl::sp_type,
+                    dsl::serial_number,
+                    dsl::part_number
                 ))
                 .select((
-                    sp_dsl::restart_id,
-                    sp_dsl::sp_slot,
-                    sp_dsl::sp_type,
-                    sp_dsl::serial_number,
-                    sp_dsl::part_number,
-                    min(sp_dsl::time_collected),
-                    count_distinct(sp_dsl::ena),
+                    dsl::restart_id,
+                    model::Reporter::as_select(),
+                    dsl::serial_number,
+                    dsl::part_number,
+                    min(dsl::time_collected),
+                    count_distinct(dsl::ena),
                 ))
                 .into_boxed();
 
             if let Some(slot) = slot {
                 if slot_type.is_some() {
                     query = query
-                        .filter(sp_dsl::sp_slot.eq(db::model::SqlU16::new(slot)));
+                        .filter(dsl::sp_slot.eq(db::model::SqlU16::new(slot)));
                 } else {
                     anyhow::bail!(
                         "cannot filter reporters by slot without a value for `--type`"
@@ -464,65 +388,20 @@ async fn cmd_db_ereporters(
 
             if let Some(slot_type) = slot_type {
                 query = query
-                    .filter(sp_dsl::sp_type.eq(slot_type));
+                    .filter(dsl::sp_type.eq(slot_type));
             }
 
             if let Some(serial) = serial {
-                query = query.filter(sp_dsl::serial_number.eq(serial.clone()));
+                query = query.filter(dsl::serial_number.eq(serial.clone()));
             }
 
             query
-                .load_async::<(Uuid, db::model::SqlU16, SpType, Option<String>, Option<String>, Option<DateTime<Utc>>, i64)>(
+                .load_async::<(Uuid, model::Reporter, Option<String>, Option<String>, Option<DateTime<Utc>>, i64)>(
                     &conn,
                 )
-                .await.context("listing SP reporter entries")
+                .await.context("listing reporter entries")
         }
     }).await?;
-
-    let host_ereporters = if slot_type != Some(SpType::Sled) || slot.is_some() {
-        // If we have a SP type filter or a SP slot number, don't include host
-        // OS reporters (for now).
-        // TODO: if the SP type is "sled", can we get the sled UUID for that
-        // slot from inventory?
-        eprintln!(
-            "selecting reporters with type {slot_type:?} and slot {slot:?} will \
-             skip host OS ereports",
-        );
-        Vec::new()
-    } else {
-        (*conn).transaction_async({
-            let serial = serial.clone();
-            async move |conn| {
-                // Selecting all reporters may require a full table scan, depending
-                // on filters.
-                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
-                let mut query = host_dsl::host_ereport
-                    .group_by((
-                        host_dsl::restart_id,
-                        host_dsl::sled_id,
-                        host_dsl::sled_serial,
-                    ))
-                    .select((
-                        host_dsl::restart_id,
-                        host_dsl::sled_id,
-                        host_dsl::sled_serial,
-                        min(host_dsl::time_collected),
-                        count_distinct(host_dsl::ena),
-                    ))
-                    .into_boxed();
-
-                if let Some(serial) = serial {
-                    query = query.filter(host_dsl::sled_serial.eq(serial.clone()));
-                }
-
-                query
-                    .load_async::<(Uuid, Uuid, String,  Option<DateTime<Utc>>, i64)>(
-                        &conn,
-                    )
-                    .await.context("listing host OS reporter entries")
-            }
-        }).await?
-    };
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -530,7 +409,8 @@ async fn cmd_db_ereporters(
         #[tabled(display_with = "datetime_opt_rfc3339_concise")]
         first_seen: Option<DateTime<Utc>>,
         id: Uuid,
-        identity: db::model::Reporter,
+        #[tabled(display_with = "display_option_invalid")]
+        identity: Option<Reporter>,
         #[tabled(display_with = "display_option_blank", rename = "S/N")]
         serial: Option<String>,
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
@@ -538,49 +418,32 @@ async fn cmd_db_ereporters(
         ereports: i64,
     }
 
-    let rows = {
-        let sp_rows = sp_ereporters.into_iter().map(
-            |(
-                restart_id,
-                slot,
-                sp_type,
+    let mut rows = reporters
+        .into_iter()
+        .map(|(id, reporter, serial, part_number, first_seen, ereports)| {
+            let identity = match reporter.try_into() {
+                Ok(reporter) => Some(reporter),
+                Err(err) => {
+                    eprintln!(
+                        "error: encounted an invalid reporter entry for \
+                         reporter ID {id}: {err}",
+                    );
+                    None
+                }
+            };
+            ReporterRow {
+                first_seen,
+                id,
+                identity,
                 serial,
                 part_number,
-                first_seen,
                 ereports,
-            )| {
-                ReporterRow {
-                    first_seen,
-                    identity: db::model::Reporter::Sp {
-                        slot: slot.0,
-                        sp_type: sp_type.into(),
-                    },
-                    serial,
-                    part_number,
-                    id: restart_id,
-                    ereports,
-                }
-            },
-        );
-        let host_rows = host_ereporters.into_iter().map(
-            |(restart_id, sled_id, serial, first_seen, ereports)| ReporterRow {
-                first_seen,
-                identity: db::model::Reporter::HostOs {
-                    sled: SledUuid::from_untyped_uuid(sled_id),
-                },
-                serial: Some(serial),
-                part_number: None,
-                id: restart_id,
-                ereports,
-            },
-        );
-        let mut rows = sp_rows.chain(host_rows).collect::<Vec<_>>();
-        rows.sort_by_key(|row| row.first_seen);
-        rows
-    };
+            }
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by_key(|row| row.first_seen);
 
     let mut table = tabled::Table::new(rows);
-
     table
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0));

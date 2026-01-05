@@ -66,7 +66,10 @@ where
             Ok(None) => SchemeResult::NotRequested,
             Ok(Some(token)) => match ctx.scim_token_actor(token).await {
                 Err(error) => SchemeResult::Failed(error),
-                Ok(actor) => SchemeResult::Authenticated(Details { actor }),
+                Ok(actor) => SchemeResult::Authenticated(Details {
+                    actor,
+                    device_token_expiration: None,
+                }),
             },
         }
     }

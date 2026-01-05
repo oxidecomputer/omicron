@@ -21,11 +21,11 @@ use super::{
     zone_sort_key,
 };
 use daft::{Diffable, Leaf};
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::{CompressionAlgorithm, DatasetName};
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid};
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 
@@ -124,7 +124,9 @@ impl<'a> BlueprintDiffSummary<'a> {
     }
 
     /// All sled IDs present in the diff in any way
-    pub fn all_sled_ids(&self) -> impl Iterator<Item = SledUuid> + '_ {
+    pub fn all_sled_ids(
+        &self,
+    ) -> impl Iterator<Item = SledUuid> + '_ + use<'_> {
         self.diff
             .sleds
             .added
@@ -1270,7 +1272,7 @@ pub struct ClickhouseClusterConfigDiffTables {
 
 impl ClickhouseClusterConfigDiffTables {
     pub fn diff_collection_and_blueprint(
-        before: &clickhouse_admin_types::ClickhouseKeeperClusterMembership,
+        before: &clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership,
         after: &ClickhouseClusterConfig,
     ) -> Self {
         let leader_committed_log_index = if before.leader_committed_log_index
@@ -1524,7 +1526,7 @@ impl ClickhouseClusterConfigDiffTables {
     /// We are diffing a `Collection` and `Blueprint` but  the latest blueprint
     /// does not have a ClickhouseClusterConfig.
     pub fn removed_from_collection(
-        before: &clickhouse_admin_types::ClickhouseKeeperClusterMembership,
+        before: &clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership,
     ) -> Self {
         // There's only so much information in a collection. Show what we can.
         let metadata = KvList::new(
@@ -1779,7 +1781,7 @@ impl<'diff, 'b> BlueprintDiffDisplay<'diff, 'b> {
 
     pub fn make_metadata_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvList> {
+    ) -> impl IntoIterator<Item = KvList> + use<> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)
@@ -1840,7 +1842,7 @@ impl<'diff, 'b> BlueprintDiffDisplay<'diff, 'b> {
 
     pub fn make_oximeter_read_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvList> {
+    ) -> impl IntoIterator<Item = KvList> + use<> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)

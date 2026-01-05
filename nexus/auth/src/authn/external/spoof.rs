@@ -109,7 +109,10 @@ where
                     Err(error) => SchemeResult::Failed(error),
                     Ok(silo_id) => {
                         let actor = Actor::SiloUser { silo_id, silo_user_id };
-                        SchemeResult::Authenticated(Details { actor })
+                        SchemeResult::Authenticated(Details {
+                            actor,
+                            device_token_expiration: None,
+                        })
                     }
                 }
             }

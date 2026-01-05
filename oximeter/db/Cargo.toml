@@ -1,7 +1,7 @@
 [package]
 name = "oximeter-db"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 description = "Tools for interacting with the Oxide control plane telemetry database"
 license = "MPL-2.0"
 

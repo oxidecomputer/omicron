@@ -8,7 +8,7 @@ use http::{Method, StatusCode, header};
 use nexus_db_queries::authn::USER_TEST_PRIVILEGED;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::{
-    DiskTest, create_console_session, create_default_ip_pool, create_disk,
+    DiskTest, create_console_session, create_default_ip_pools, create_disk,
     create_instance_with, create_local_user, create_project, create_silo,
     object_create_error, object_delete, objects_list_page_authz, test_params,
 };
@@ -61,7 +61,8 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(audit_log.items.len(), 1);
 
     // this this creates its own entry
-    let session_cookie = create_console_session(ctx).await;
+    let session_cookie =
+        format!("session={}", create_console_session(ctx).await);
 
     let t3 = Utc::now(); // after second entry
 
@@ -314,18 +315,19 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
 
     // Set up disk test infrastructure and create resources with audit logging
     DiskTest::new(&ctx).await;
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let _project = create_project(client, "test-project").await;
     let _instance = create_instance_with(
         client,
         "test-project",
         "test-instance",
-        &params::InstanceNetworkInterfaceAttachment::Default,
+        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
         false, // start=false, so instance is created in stopped state
         None::<InstanceAutoRestartPolicy>,
         None::<InstanceCpuPlatform>,
+        Vec::new(),
     )
     .await;
     let _disk = create_disk(client, "test-project", "test-disk").await;

@@ -596,7 +596,7 @@ async fn cannot_unlink_ip_pool_with_outstanding_instance_ips(
     let nexus = &apictx.nexus;
 
     // Create a project and add a default IP Pool.
-    const POOL_NAME: &str = "default";
+    const POOL_NAME: &str = "default-v4";
     let proj = create_project_and_pool(client).await;
 
     // Create an instance, which allocates an IP address.
@@ -652,7 +652,7 @@ async fn cannot_unlink_ip_pool_with_outstanding_floating_ips(
     let client = &cptestctx.external_client;
 
     // Create a project and add a default IP Pool.
-    const POOL_NAME: &str = "default";
+    const POOL_NAME: &str = "default-v4";
     let proj = create_project_and_pool(client).await;
 
     // Create a floating IP from the pool.
@@ -1161,38 +1161,6 @@ async fn test_bad_ip_ranges(
         );
         assert_eq!(error.message, expected_message);
     }
-}
-
-// Support for IPv6 ranges removed in
-// https://github.com/oxidecomputer/omicron/pull/5107
-// Delete this test when we support IPv6 again.
-#[nexus_test]
-async fn test_ip_pool_range_rejects_v6(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-
-    create_ip_pool(client, "p0", None).await;
-
-    let range = IpRange::V6(
-        Ipv6Range::new(
-            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
-            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
-        )
-        .unwrap(),
-    );
-
-    let add_url = "/v1/system/ip-pools/p0/ranges/add";
-    let error =
-        object_create_error(client, add_url, &range, StatusCode::BAD_REQUEST)
-            .await;
-
-    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
-
-    // same deal with service pool
-    let add_url = "/v1/system/ip-pools-service/ranges/add";
-    let error =
-        object_create_error(client, add_url, &range, StatusCode::BAD_REQUEST)
-            .await;
-    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
 }
 
 #[nexus_test]

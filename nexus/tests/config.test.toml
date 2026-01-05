@@ -201,6 +201,14 @@ fm.sitrep_load_period_secs = 15
 # only necessary to ensure that it always happens eventually.
 fm.sitrep_gc_period_secs = 600
 probe_distributor.period_secs = 60
+multicast_reconciler.period_secs = 60
+# Use shorter TTLs for tests to ensure cache invalidation logic is exercised
+multicast_reconciler.sled_cache_ttl_secs = 60
+multicast_reconciler.backplane_cache_ttl_secs = 120
+
+[multicast]
+# Enable multicast functionality for tests (disabled by default in production)
+enabled = true
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the

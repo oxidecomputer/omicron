@@ -13,7 +13,6 @@ use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
@@ -32,6 +31,7 @@ use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::Client as SledAgentClient;
+use sled_agent_types::inventory::SledRole;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -92,6 +92,14 @@ impl super::Nexus {
         // the control plane.
         if was_modified {
             self.activate_inventory_collection();
+
+            // Signal multicast cache invalidation since sled topology changed.
+            // The reconciler will be activated via its inventory watchers.
+            if let Some(flag) =
+                &self.background_tasks_internal.multicast_invalidate_cache
+            {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
         }
 
         Ok(())
@@ -122,6 +130,15 @@ impl super::Nexus {
         // ahead and activate it now so that those instances don't need to wait
         // for the next periodic activation before they can be cleaned up.
         self.background_tasks.task_instance_watcher.activate();
+
+        // Signal multicast cache invalidation since sled topology changed.
+        // Inventory collection will be triggered automatically, which will
+        // activate the reconciler via its inventory watchers.
+        if let Some(flag) =
+            &self.background_tasks_internal.multicast_invalidate_cache
+        {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
 
         Ok(prev_policy)
     }

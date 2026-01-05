@@ -492,7 +492,48 @@ has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
 has_permission(actor: AuthenticatedActor, "create_child", ip_pool: IpPool)
 	if actor.is_user and silo in actor.silo and silo.fleet = ip_pool.fleet;
 
-# Describes the policy for reading and writing the audit log 
+# Describes the policy for accessing "/v1/multicast-groups" in the API
+resource MulticastGroupList {
+	permissions = [
+	    "list_children",
+	    "create_child",
+	];
+
+	relations = { parent_fleet: Fleet };
+	# Fleet Administrators can create multicast groups
+	"create_child" if "admin" on "parent_fleet";
+
+	# Fleet Viewers can list multicast groups
+	"list_children" if "viewer" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", multicast_group_list: MulticastGroupList)
+	if multicast_group_list.fleet = fleet;
+
+# Any authenticated user can create multicast groups in their fleet.
+# This is necessary to allow silo users to create multicast groups for
+# cross-project and cross-silo communication without requiring Fleet::Admin.
+has_permission(actor: AuthenticatedActor, "create_child", multicast_group_list: MulticastGroupList)
+	if silo in actor.silo and silo.fleet = multicast_group_list.fleet;
+
+# Any authenticated user can list multicast groups in their fleet.
+# This is necessary because multicast groups are fleet-scoped resources that
+# silo users need to discover and attach their instances to, without requiring
+# Fleet::Viewer role.
+has_permission(actor: AuthenticatedActor, "list_children", multicast_group_list: MulticastGroupList)
+	if silo in actor.silo and silo.fleet = multicast_group_list.fleet;
+
+# Any authenticated user can read and modify individual multicast groups in their fleet.
+# Users can create, modify, and consume (attach instances to) multicast groups.
+# This enables cross-project and cross-silo multicast while maintaining
+# appropriate security boundaries via API authorization and underlay group
+# membership validation.
+has_permission(actor: AuthenticatedActor, "read", multicast_group: MulticastGroup)
+	if silo in actor.silo and silo.fleet = multicast_group.fleet;
+
+has_permission(actor: AuthenticatedActor, "modify", multicast_group: MulticastGroup)
+	if silo in actor.silo and silo.fleet = multicast_group.fleet;
+
+# Describes the policy for reading and writing the audit log
 resource AuditLog {
 	permissions = [
 	    "list_children", # retrieve audit log

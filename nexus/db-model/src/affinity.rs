@@ -151,7 +151,7 @@ impl From<params::AffinityGroupUpdate> for AffinityGroupUpdate {
 #[diesel(table_name = anti_affinity_group)]
 pub struct AntiAffinityGroup {
     #[diesel(embed)]
-    identity: AntiAffinityGroupIdentity,
+    pub identity: AntiAffinityGroupIdentity,
     pub project_id: Uuid,
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,

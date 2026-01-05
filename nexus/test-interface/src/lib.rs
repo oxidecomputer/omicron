@@ -78,7 +78,7 @@ pub trait NexusServer: Send + Sync + 'static {
         >,
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
+        recovery_silo: sled_agent_types::rack_init::RecoverySiloConfig,
         tls_certificates: Vec<
             omicron_common::api::internal::nexus::Certificate,
         >,
@@ -88,10 +88,10 @@ pub trait NexusServer: Send + Sync + 'static {
 
     fn inventory_load_rx(&self) -> watch::Receiver<Option<Arc<Collection>>>;
 
-    async fn get_http_server_external_address(&self) -> SocketAddr;
-    async fn get_http_server_techport_address(&self) -> SocketAddr;
-    async fn get_http_server_internal_address(&self) -> SocketAddr;
-    async fn get_http_server_lockstep_address(&self) -> SocketAddr;
+    fn get_http_server_external_address(&self) -> SocketAddr;
+    fn get_http_server_techport_address(&self) -> SocketAddr;
+    fn get_http_server_internal_address(&self) -> SocketAddr;
+    fn get_http_server_lockstep_address(&self) -> SocketAddr;
 
     // Previously, as a dataset was created (within the sled agent),
     // we'd use an internal API from Nexus to record that the dataset

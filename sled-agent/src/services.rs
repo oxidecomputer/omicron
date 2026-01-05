@@ -60,12 +60,11 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
-use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneType, ZoneKind,
-};
 use omicron_common::address::AZ_PREFIX;
+use omicron_common::address::ConcreteIp;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
+use omicron_common::address::MAX_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -81,7 +80,8 @@ use omicron_common::address::{
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig, SledIdentifiers,
+    ExternalIpConfig, ExternalIpConfigBuilder, ExternalIps, HostPortConfig,
+    PrivateIpConfig, RackNetworkConfig, SledIdentifiers,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -89,6 +89,9 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_types::inventory::{
+    OmicronZoneConfig, OmicronZoneType, ZoneKind,
+};
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_agent_types::zone_images::{
     MupdateOverrideReadError, PreparedOmicronZone,
@@ -1078,14 +1081,22 @@ impl ServiceManager {
             })
             .collect();
 
-        let external_ip;
-        let (zone_kind, nic, snat, floating_ips) = match &zone_args
-            .omicron_type()
-        {
+        let (zone_kind, nic, external_ips) = match &zone_args.omicron_type() {
             Some(
                 zone_type @ OmicronZoneType::Nexus { external_ip, nic, .. },
             ) => {
-                (zone_type.kind(), nic, None, std::slice::from_ref(external_ip))
+                let eip = match external_ip {
+                    IpAddr::V4(ipv4) => ExternalIpConfigBuilder::new()
+                        .with_floating_ips(vec![*ipv4])
+                        .build()
+                        .map(Into::into),
+                    IpAddr::V6(ipv6) => ExternalIpConfigBuilder::new()
+                        .with_floating_ips(vec![*ipv6])
+                        .build()
+                        .map(Into::into),
+                }
+                .expect("guaranteed to have exactly one floating IP");
+                (zone_type.kind(), nic, eip)
             }
             Some(
                 zone_type @ OmicronZoneType::ExternalDns {
@@ -1094,19 +1105,41 @@ impl ServiceManager {
                     ..
                 },
             ) => {
-                external_ip = dns_address.ip();
-                (
-                    zone_type.kind(),
-                    nic,
-                    None,
-                    std::slice::from_ref(&external_ip),
-                )
+                let eip = match dns_address.ip() {
+                    IpAddr::V4(ipv4) => ExternalIpConfigBuilder::new()
+                        .with_floating_ips(vec![ipv4])
+                        .build()
+                        .map(Into::into),
+                    IpAddr::V6(ipv6) => ExternalIpConfigBuilder::new()
+                        .with_floating_ips(vec![ipv6])
+                        .build()
+                        .map(Into::into),
+                }
+                .expect("guaranteed to have exactly one floating IP");
+                (zone_type.kind(), nic, eip)
             }
             Some(
                 zone_type @ OmicronZoneType::BoundaryNtp {
                     nic, snat_cfg, ..
                 },
-            ) => (zone_type.kind(), nic, Some(*snat_cfg), &[][..]),
+            ) => {
+                let eip = if let Some(snat) = snat_cfg.try_as_ipv4() {
+                    ExternalIpConfigBuilder::new()
+                        .with_source_nat(snat)
+                        .build()
+                        .expect("guaranteed to have exactly one SNAT")
+                        .into()
+                } else if let Some(snat) = snat_cfg.try_as_ipv6() {
+                    ExternalIpConfigBuilder::new()
+                        .with_source_nat(snat)
+                        .build()
+                        .expect("guaranteed to have exactly one SNAT")
+                        .into()
+                } else {
+                    unreachable!("Generic SNAT IP must be IPv4 or IPv6");
+                };
+                (zone_type.kind(), nic, eip)
+            }
             _ => unreachable!("unexpected zone type"),
         };
 
@@ -1115,12 +1148,16 @@ impl ServiceManager {
         // Nexus will plumb them down later but services' default OPTE
         // config allows outbound access which is enough for
         // Boundary NTP which needs to come up before Nexus.
+        //
+        // This is kind of silly, but we wrap the external IP configuration in
+        // an option and immediately unwrap it below. The PortCreateParams is
+        // used for instances, which technically can have no external IP
+        // configuration at all, hence it being optional there.
+        let external_ips = Some(external_ips);
         let port = port_manager
             .create_port(PortCreateParams {
                 nic,
-                source_nat: snat,
-                ephemeral_ip: None,
-                floating_ips,
+                external_ips: &external_ips,
                 firewall_rules: &[],
                 dhcp_config: DhcpCfg::default(),
             })
@@ -1128,17 +1165,10 @@ impl ServiceManager {
                 service: zone_kind,
                 err: Box::new(err),
             })?;
-
-        // We also need to update the switch with the NAT mappings
-        // XXX: need to revisit iff. any services get more than one
-        //      address.
-        let (target_ip, first_port, last_port) = match snat {
-            Some(s) => {
-                let (first_port, last_port) = s.port_range_raw();
-                (s.ip, first_port, last_port)
-            }
-            None => (floating_ips[0], 0, u16::MAX),
+        let Some(external_ips) = external_ips else {
+            unreachable!("wrapped into Option::Some(_) above");
         };
+        let nat_data = extract_nat_data_for_external_ip_config(&external_ips);
 
         for dpd_client in &dpd_clients {
             // TODO-correctness(#2933): If we fail part-way we need to
@@ -1149,18 +1179,23 @@ impl ServiceManager {
                     "zone_type" => zone_kind.report_str(),
                 );
 
-                dpd_ensure_nat_entry(
-                    dpd_client,
-                    &self.inner.log,
-                    target_ip,
-                    dpd_client::types::MacAddr { a: port.0.mac().into_array() },
-                    first_port,
-                    last_port,
-                    port.0.vni().as_u32(),
-                    underlay_address,
-                )
-                .await
-                .map_err(BackoffError::transient)
+                for data in nat_data.iter() {
+                    dpd_ensure_nat_entry(
+                        dpd_client,
+                        &self.inner.log,
+                        data.ip,
+                        dpd_client::types::MacAddr {
+                            a: port.0.mac().into_array(),
+                        },
+                        data.first_port,
+                        data.last_port,
+                        port.0.vni().as_u32(),
+                        underlay_address,
+                    )
+                    .await
+                    .map_err(BackoffError::<Error>::transient)?;
+                }
+                Ok::<(), BackoffError<Error>>(())
             };
             let log_failure = |error, _| {
                 warn!(
@@ -1306,8 +1341,11 @@ impl ServiceManager {
         })?;
 
         let opte_interface = port.name();
-        let opte_gateway = port.gateway().ip().to_string();
-        let opte_ip = port.ip().to_string();
+
+        // TODO-completeness: This needs to support dual-stack OPTE ports.
+        // See https://github.com/oxidecomputer/omicron/issues/9309.
+        let opte_gateway = port.gateway().ipv4_or_ipv6_addr().to_string();
+        let opte_ip = port.ipv4_or_ipv6_addr().to_string();
 
         let mut config_builder = PropertyGroupBuilder::new("config");
         config_builder = config_builder
@@ -1973,8 +2011,16 @@ impl ServiceManager {
                 // We need to tell external_dns to listen on its OPTE port IP
                 // address, which comes from `nic`. Attach the port from its
                 // true external DNS address (`dns_address`).
-                let dns_address =
-                    SocketAddr::new(nic.ip, dns_address.port()).to_string();
+                //
+                // Make sure we take the VPC-private IP address with the same
+                // version as the external address.
+                let private_ip = Self::private_ip_for_external_address(
+                    dns_address.ip(),
+                    &nic.ip_config,
+                    config.zone_type.kind(),
+                )?;
+                let private_dns_address =
+                    SocketAddr::new(private_ip, dns_address.port()).to_string();
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1982,7 +2028,11 @@ impl ServiceManager {
                         "astring",
                         http_address.to_string(),
                     )
-                    .add_property("dns_address", "astring", dns_address);
+                    .add_property(
+                        "dns_address",
+                        "astring",
+                        private_dns_address,
+                    );
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -2282,6 +2332,8 @@ impl ServiceManager {
                         lockstep_port,
                         external_tls,
                         external_dns_servers,
+                        external_ip,
+                        nic,
                         ..
                     },
                 id,
@@ -2303,7 +2355,6 @@ impl ServiceManager {
                 // external IP automatically.
                 let opte_interface_setup =
                     Self::opte_interface_set_up_install(&installed_zone)?;
-
                 let port_idx = 0;
                 let port = installed_zone
                     .opte_ports()
@@ -2316,8 +2367,15 @@ impl ServiceManager {
                             },
                         )
                     })?;
-                let opte_ip = port.ip();
                 let opte_iface_name = port.name();
+
+                // Fetch the private IP of the same IP version as the external
+                // IP address.
+                let private_ip = Self::private_ip_for_external_address(
+                    *external_ip,
+                    &nic.ip_config,
+                    config.zone_type.kind(),
+                )?;
 
                 // Nexus takes a separate config file for parameters
                 // which cannot be known at packaging time.
@@ -2330,7 +2388,9 @@ impl ServiceManager {
                     dropshot_external: ConfigDropshotWithTls {
                         tls: *external_tls,
                         dropshot: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(*opte_ip, nexus_port),
+                            bind_address: SocketAddr::new(
+                                private_ip, nexus_port,
+                            ),
                             default_request_body_max_bytes: 1048576,
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
@@ -4084,6 +4144,90 @@ impl ServiceManager {
         )
         .await;
     }
+
+    fn private_ip_for_external_address(
+        external_ip: IpAddr,
+        ip_config: &PrivateIpConfig,
+        kind: ZoneKind,
+    ) -> Result<IpAddr, Error> {
+        let maybe_private_ip = if external_ip.is_ipv6() {
+            ip_config.ipv6_addr().copied().map(IpAddr::V6)
+        } else {
+            ip_config.ipv4_addr().copied().map(IpAddr::V4)
+        };
+        maybe_private_ip.ok_or_else(|| {
+            let external_ip_version =
+                if external_ip.is_ipv6() { "6" } else { "4" };
+            let private_ip_stack = if ip_config.is_ipv4_only() {
+                "IPv4"
+            } else if ip_config.is_ipv6_only() {
+                "IPv6"
+            } else {
+                "dual-stack"
+            };
+            Error::BadServiceRequest {
+                service: kind.report_str().to_string(),
+                message: format!(
+                    "External IP address is IPv{}, but VPC-private \
+                    IP configuration is {}",
+                    external_ip_version, private_ip_stack,
+                ),
+            }
+        })
+    }
+}
+
+struct NatData {
+    ip: IpAddr,
+    first_port: u16,
+    last_port: u16,
+}
+
+// Construct a list of IP address and port-ranges needed to update
+// Dendrite wtih the NAT mappings. This handles dual-stack and mulitple
+// addresses.
+fn extract_nat_data_for_external_ip_config(
+    external_ips: &ExternalIpConfig,
+) -> Vec<NatData> {
+    let mut nat_data = Vec::new();
+    if let Some(cfg) = external_ips.ipv4_config() {
+        nat_data
+            .append(&mut extract_nat_data_for_concrete_external_ip_config(cfg));
+    }
+    if let Some(cfg) = external_ips.ipv6_config() {
+        nat_data
+            .append(&mut extract_nat_data_for_concrete_external_ip_config(cfg));
+    }
+    nat_data
+}
+
+fn extract_nat_data_for_concrete_external_ip_config<T: ConcreteIp>(
+    cfg: &ExternalIps<T>,
+) -> Vec<NatData> {
+    let mut nat_data = Vec::new();
+    if let Some(snat) = cfg.source_nat() {
+        let (first_port, last_port) = snat.port_range_raw();
+        nat_data.push(NatData {
+            ip: snat.ip.into_ipaddr(),
+            first_port,
+            last_port,
+        });
+    }
+    if let Some(ip) = cfg.ephemeral_ip() {
+        nat_data.push(NatData {
+            ip: ip.into_ipaddr(),
+            first_port: 0,
+            last_port: MAX_PORT,
+        });
+    }
+    for ip in cfg.floating_ips() {
+        nat_data.push(NatData {
+            ip: ip.into_ipaddr(),
+            first_port: 0,
+            last_port: MAX_PORT,
+        });
+    }
+    nat_data
 }
 
 fn internal_dns_addrobj_name(gz_address_index: u32) -> String {

@@ -19,7 +19,6 @@ use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
@@ -28,8 +27,10 @@ use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
+use sled_agent_types::inventory::ZoneKind;
 use slog::{debug, info};
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use std::time::Duration;
 
 // TODO-coverage This test could check other stuff:
@@ -49,15 +50,23 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let opctx = lc.opctx();
     let datastore = lc.datastore();
 
+    let (_, parent_blueprint) = datastore
+        .blueprint_target_get_current_full(opctx)
+        .await
+        .expect("obtained current target blueprint");
     let planner_config = datastore
         .reconfigurator_config_get_latest(opctx)
         .await
         .expect("obtained latest reconfigurator config")
         .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
-    let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
-            .await
-            .expect("planning input");
+    let planning_input = PlanningInputFromDb::assemble(
+        &opctx,
+        &datastore,
+        planner_config,
+        Arc::new(parent_blueprint),
+    )
+    .await
+    .expect("planning input");
     let initial_nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
     let nexus = initial_nexus_clients.first().expect("internal Nexus client");
 
@@ -68,7 +77,6 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let sled_id = *commissioned_sled_ids.first().expect("any sled id");
     let (blueprint1, blueprint2) = blueprint_edit_current_target(
         log,
-        &planning_input,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             // We have to tell the builder what image source to use for the new
@@ -188,7 +196,6 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // Now expunge the zone we just created.
     let (_blueprint2, blueprint3) = blueprint_edit_current_target(
         log,
-        &planning_input,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             builder
@@ -273,17 +280,20 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
 
     // Now run through the planner.
     info!(log, "running through planner");
-    let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
-            .await
-            .expect("planning input");
     let (_, parent_blueprint) = datastore
         .blueprint_target_get_current_full(opctx)
         .await
         .expect("getting latest target blueprint");
+    let planning_input = PlanningInputFromDb::assemble(
+        &opctx,
+        &datastore,
+        planner_config,
+        Arc::new(parent_blueprint),
+    )
+    .await
+    .expect("planning input");
     let planner = Planner::new_based_on(
         log.clone(),
-        &parent_blueprint,
         &planning_input,
         "live test suite",
         &latest_collection,

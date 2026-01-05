@@ -47,7 +47,7 @@ pub(super) struct IneligibleSleds {
 impl IneligibleSleds {
     pub(super) fn iter(
         &self,
-    ) -> impl Iterator<Item = (IneligibleSledKind, SledUuid)> {
+    ) -> impl Iterator<Item = (IneligibleSledKind, SledUuid)> + use<> {
         [
             (IneligibleSledKind::NonProvisionable, self.non_provisionable),
             (IneligibleSledKind::Expunged, self.expunged),

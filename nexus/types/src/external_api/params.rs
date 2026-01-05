@@ -9,6 +9,7 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
+use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
@@ -17,6 +18,7 @@ use omicron_common::api::external::{
     Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
+use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
@@ -26,10 +28,14 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{self, Visitor},
 };
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
-use std::{net::IpAddr, str::FromStr};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    str::FromStr,
+};
 use url::Url;
 use uuid::Uuid;
 
@@ -77,8 +83,15 @@ pub struct UninitializedSledId {
     pub part: String,
 }
 
+impl From<UninitializedSledId> for BaseboardId {
+    fn from(value: UninitializedSledId) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
+}
+
 path_param!(AffinityGroupPath, affinity_group, "affinity group");
 path_param!(AntiAffinityGroupPath, anti_affinity_group, "anti affinity group");
+path_param!(MulticastGroupPath, multicast_group, "multicast group");
 path_param!(ProjectPath, project, "project");
 path_param!(InstancePath, instance, "instance");
 path_param!(NetworkInterfacePath, interface, "network interface");
@@ -230,6 +243,19 @@ pub struct FloatingIpSelector {
     pub project: Option<NameOrId>,
     /// Name or ID of the Floating IP
     pub floating_ip: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema, Clone)]
+pub struct MulticastGroupSelector {
+    /// Name or ID of the multicast group (fleet-scoped)
+    pub multicast_group: NameOrId,
+}
+
+/// Path parameter for multicast group lookup by IP address.
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct MulticastGroupIpLookupPath {
+    /// IP address of the multicast group
+    pub address: IpAddr,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -565,7 +591,7 @@ impl JsonSchema for Password {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -930,12 +956,12 @@ pub struct InstanceNetworkInterfaceCreate {
     pub vpc_name: Name,
     /// The VPC Subnet in which to create the interface.
     pub subnet_name: Name,
-    /// The IP address for the interface. One will be auto-assigned if not provided.
-    pub ip: Option<IpAddr>,
-    /// A set of additional networks that this interface may send and
-    /// receive traffic on.
-    #[serde(default)]
-    pub transit_ips: Vec<IpNet>,
+    /// The IP stack configuration for this interface.
+    ///
+    /// If not provided, a default configuration will be used, which creates a
+    /// dual-stack IPv4 / IPv6 interface.
+    #[serde(default = "PrivateIpStackCreate::auto_dual_stack")]
+    pub ip_config: PrivateIpStackCreate,
 }
 
 /// Parameters for updating an `InstanceNetworkInterface`
@@ -963,10 +989,265 @@ pub struct InstanceNetworkInterfaceUpdate {
     #[serde(default)]
     pub primary: bool,
 
-    /// A set of additional networks that this interface may send and
-    /// receive traffic on.
+    /// A set of additional networks that this interface may send and receive
+    /// traffic on
     #[serde(default)]
     pub transit_ips: Vec<IpNet>,
+}
+
+/// How a VPC-private IP address is assigned to a network interface.
+//
+// NOTE: This type is used as a layer of indirection for generating the JSON
+// Schema we want for `IpAssignment`. In particular, we use most of its
+// contents, but let the real type set the _name_ of the schema based on the
+// `ConcreteIp` type being used.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+enum IpAssignmentShadow<T: ConcreteIp> {
+    /// Automatically assign an IP address from the VPC Subnet.
+    #[default]
+    Auto,
+    /// Explicitly assign a specific address, if available.
+    Explicit(T),
+}
+
+trait IpAssignmentSchema {
+    fn ip_assignment_schema_name() -> String;
+}
+
+impl IpAssignmentSchema for Ipv4Addr {
+    fn ip_assignment_schema_name() -> String {
+        String::from("Ipv4Assignment")
+    }
+}
+
+impl IpAssignmentSchema for Ipv6Addr {
+    fn ip_assignment_schema_name() -> String {
+        String::from("Ipv6Assignment")
+    }
+}
+
+/// How a VPC-private IP address is assigned to a network interface.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum IpAssignment<T: ConcreteIp> {
+    /// Automatically assign an IP address from the VPC Subnet.
+    #[default]
+    Auto,
+    /// Explicitly assign a specific address, if available.
+    Explicit(T),
+}
+
+impl<T> JsonSchema for IpAssignment<T>
+where
+    T: ConcreteIp + IpAssignmentSchema,
+{
+    fn schema_name() -> String {
+        <T as IpAssignmentSchema>::ip_assignment_schema_name()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        IpAssignmentShadow::<T>::json_schema(generator)
+    }
+}
+
+impl<T: ConcreteIp> From<T> for IpAssignment<T> {
+    fn from(ip: T) -> Self {
+        Self::Explicit(ip)
+    }
+}
+
+/// How to assign an IPv4 address.
+pub type Ipv4Assignment = IpAssignment<std::net::Ipv4Addr>;
+
+/// How to assign an IPv6 address.
+pub type Ipv6Assignment = IpAssignment<std::net::Ipv6Addr>;
+
+/// Configuration for a network interface's IPv4 addressing.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
+pub struct PrivateIpv4StackCreate {
+    /// The VPC-private address to assign to the interface.
+    pub ip: Ipv4Assignment,
+    /// Additional IP networks the interface can send / receive on.
+    #[serde(default)]
+    pub transit_ips: Vec<Ipv4Net>,
+}
+
+/// Configuration for a network interface's IPv6 addressing.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
+pub struct PrivateIpv6StackCreate {
+    /// The VPC-private address to assign to the interface.
+    pub ip: Ipv6Assignment,
+    /// Additional IP networks the interface can send / receive on.
+    #[serde(default)]
+    pub transit_ips: Vec<Ipv6Net>,
+}
+
+/// Create parameters for a network interface's IP stack.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum PrivateIpStackCreate {
+    /// The interface has only an IPv4 stack.
+    V4(PrivateIpv4StackCreate),
+    /// The interface has only an IPv6 stack.
+    V6(PrivateIpv6StackCreate),
+    /// The interface has both an IPv4 and IPv6 stack.
+    DualStack { v4: PrivateIpv4StackCreate, v6: PrivateIpv6StackCreate },
+}
+
+impl PrivateIpStackCreate {
+    /// Construct an IPv4 configuration with no transit IPs.
+    pub fn from_ipv4(addr: std::net::Ipv4Addr) -> Self {
+        PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
+            ip: Ipv4Assignment::Explicit(addr),
+            transit_ips: vec![],
+        })
+    }
+
+    /// Construct an IP configuration with only an automatic IPv4 address.
+    pub fn auto_ipv4() -> Self {
+        PrivateIpStackCreate::V4(PrivateIpv4StackCreate::default())
+    }
+
+    /// Return the IPv4 create parameters, if they exist.
+    pub fn as_ipv4_create(&self) -> Option<&PrivateIpv4StackCreate> {
+        match self {
+            PrivateIpStackCreate::V4(v4)
+            | PrivateIpStackCreate::DualStack { v4, .. } => Some(v4),
+            PrivateIpStackCreate::V6(_) => None,
+        }
+    }
+
+    /// Return the IPv4 address assignment.
+    pub fn ipv4_assignment(&self) -> Option<&Ipv4Assignment> {
+        self.as_ipv4_create().map(|c| &c.ip)
+    }
+
+    /// Return the IPv4 address explicitly requested, if one exists.
+    pub fn ipv4_addr(&self) -> Option<&std::net::Ipv4Addr> {
+        self.ipv4_assignment().and_then(|assignment| match assignment {
+            IpAssignment::Auto => None,
+            IpAssignment::Explicit(addr) => Some(addr),
+        })
+    }
+
+    /// Return the IPv4 transit IPs, if they exist.
+    pub fn ipv4_transit_ips(&self) -> Option<&[Ipv4Net]> {
+        self.as_ipv4_create().map(|c| c.transit_ips.as_slice())
+    }
+
+    /// Construct an IPv6 configuration with no transit IPs.
+    pub fn from_ipv6(addr: std::net::Ipv6Addr) -> Self {
+        PrivateIpStackCreate::V6(PrivateIpv6StackCreate {
+            ip: Ipv6Assignment::Explicit(addr),
+            transit_ips: vec![],
+        })
+    }
+
+    /// Construct an IP configuration with only an automatic IPv6 address.
+    pub fn auto_ipv6() -> Self {
+        PrivateIpStackCreate::V6(PrivateIpv6StackCreate::default())
+    }
+
+    /// Return the IPv6 create parameters, if they exist.
+    pub fn as_ipv6_create(&self) -> Option<&PrivateIpv6StackCreate> {
+        match self {
+            PrivateIpStackCreate::V6(v6)
+            | PrivateIpStackCreate::DualStack { v6, .. } => Some(v6),
+            PrivateIpStackCreate::V4(_) => None,
+        }
+    }
+
+    /// Return the IPv6 address assignment.
+    pub fn ipv6_assignment(&self) -> Option<&Ipv6Assignment> {
+        self.as_ipv6_create().map(|c| &c.ip)
+    }
+
+    /// Return the IPv6 address explicitly requested, if one exists.
+    pub fn ipv6_addr(&self) -> Option<&std::net::Ipv6Addr> {
+        self.ipv6_assignment().and_then(|assignment| match assignment {
+            IpAssignment::Auto => None,
+            IpAssignment::Explicit(addr) => Some(addr),
+        })
+    }
+
+    /// Return the IPv6 transit IPs, if they exist.
+    pub fn ipv6_transit_ips(&self) -> Option<&[Ipv6Net]> {
+        self.as_ipv6_create().map(|c| c.transit_ips.as_slice())
+    }
+
+    /// Return the transit IPs requested in this configuration.
+    pub fn transit_ips(&self) -> Vec<IpNet> {
+        self.ipv4_transit_ips()
+            .unwrap_or_default()
+            .iter()
+            .copied()
+            .map(Into::into)
+            .chain(
+                self.ipv6_transit_ips()
+                    .unwrap_or_default()
+                    .iter()
+                    .copied()
+                    .map(Into::into),
+            )
+            .collect()
+    }
+
+    /// Construct a dual-stack IP configuration with explicit IP addresses.
+    pub fn new_dual_stack(
+        ipv4: std::net::Ipv4Addr,
+        ipv6: std::net::Ipv6Addr,
+    ) -> Self {
+        PrivateIpStackCreate::DualStack {
+            v4: PrivateIpv4StackCreate {
+                ip: Ipv4Assignment::Explicit(ipv4),
+                transit_ips: Vec::new(),
+            },
+            v6: PrivateIpv6StackCreate {
+                ip: Ipv6Assignment::Explicit(ipv6),
+                transit_ips: Vec::new(),
+            },
+        }
+    }
+
+    /// Construct an IP configuration with both IPv4 / IPv6 addresses and no
+    /// transit IPs.
+    pub fn auto_dual_stack() -> Self {
+        PrivateIpStackCreate::DualStack {
+            v4: PrivateIpv4StackCreate::default(),
+            v6: PrivateIpv6StackCreate::default(),
+        }
+    }
+
+    /// Return true if this config has any transit IPs
+    pub fn has_transit_ips(&self) -> bool {
+        match self {
+            PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
+                transit_ips,
+                ..
+            }) => !transit_ips.is_empty(),
+            PrivateIpStackCreate::V6(PrivateIpv6StackCreate {
+                transit_ips,
+                ..
+            }) => !transit_ips.is_empty(),
+            PrivateIpStackCreate::DualStack {
+                v4: PrivateIpv4StackCreate { transit_ips: ipv4_addrs, .. },
+                v6: PrivateIpv6StackCreate { transit_ips: ipv6_addrs, .. },
+            } => !ipv4_addrs.is_empty() || !ipv6_addrs.is_empty(),
+        }
+    }
+
+    /// Return true if this IP configuration has an IPv4 stack.
+    pub fn has_ipv4_stack(&self) -> bool {
+        self.ipv4_assignment().is_some()
+    }
+
+    /// Return true if this IP configuration has an IPv6 stack.
+    pub fn has_ipv6_stack(&self) -> bool {
+        self.ipv6_assignment().is_some()
+    }
 }
 
 // CERTIFICATES
@@ -1055,7 +1336,10 @@ pub struct IpPoolLinkSilo {
     pub silo: NameOrId,
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
 }
 
@@ -1063,9 +1347,12 @@ pub struct IpPoolLinkSilo {
 pub struct IpPoolSiloUpdate {
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo, so when a pool is
-    /// made default, an existing default will remain linked but will no longer
-    /// be the default.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total. When a pool is made default, an existing default
+    /// of the same type and version will remain linked but will no longer be
+    /// the default.
     pub is_default: bool,
 }
 
@@ -1084,6 +1371,13 @@ pub struct FloatingIpCreate {
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
     pub pool: Option<NameOrId>,
+
+    /// IP version to use when allocating from the default pool.
+    /// Only used when both `ip` and `pool` are not specified. Required if
+    /// multiple default pools of different IP versions exist. Allocation
+    /// fails if no pool of the requested version is available.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1129,6 +1423,7 @@ pub struct FloatingIpAttach {
 // in the path of endpoints handling instance operations.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "params", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum InstanceNetworkInterfaceAttachment {
     /// Create one or more `InstanceNetworkInterface`s for the `Instance`.
     ///
@@ -1136,19 +1431,27 @@ pub enum InstanceNetworkInterfaceAttachment {
     /// designated the primary interface for the instance.
     Create(Vec<InstanceNetworkInterfaceCreate>),
 
-    /// The default networking configuration for an instance is to create a
-    /// single primary interface with an automatically-assigned IP address. The
-    /// IP will be pulled from the Project's default VPC / VPC Subnet.
-    Default,
+    /// Create a single primary interface with an automatically-assigned IPv4
+    /// address.
+    ///
+    /// The IP will be pulled from the Project's default VPC / VPC Subnet.
+    DefaultIpv4,
+
+    /// Create a single primary interface with an automatically-assigned IPv6
+    /// address.
+    ///
+    /// The IP will be pulled from the Project's default VPC / VPC Subnet.
+    DefaultIpv6,
+
+    /// Create a single primary interface with automatically-assigned IPv4 and
+    /// IPv6 addresses.
+    ///
+    /// The IPs will be pulled from the Project's default VPC / VPC Subnet.
+    #[default]
+    DefaultDualStack,
 
     /// No network interfaces at all will be created for the instance.
     None,
-}
-
-impl Default for InstanceNetworkInterfaceAttachment {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 /// Describe the instance's disks at creation time
@@ -1185,7 +1488,15 @@ pub enum ExternalIpCreate {
     /// An IP address providing both inbound and outbound access. The address is
     /// automatically assigned from the provided IP pool or the default IP pool
     /// if not specified.
-    Ephemeral { pool: Option<NameOrId> },
+    Ephemeral {
+        pool: Option<NameOrId>,
+        /// IP version to use when allocating from the default pool.
+        /// Only used when `pool` is not specified. Required if multiple default
+        /// pools of different IP versions exist. Allocation fails if no pool
+        /// of the requested version is available.
+        #[serde(default)]
+        ip_version: Option<IpVersion>,
+    },
     /// An IP address providing both inbound and outbound access. The address is
     /// an existing floating IP object assigned to the current project.
     ///
@@ -1200,6 +1511,13 @@ pub struct EphemeralIpCreate {
     /// Name or ID of the IP pool used to allocate an address. If unspecified,
     /// the default IP pool will be used.
     pub pool: Option<NameOrId>,
+
+    /// IP version to use when allocating from the default pool.
+    /// Only used when `pool` is not specified. Required if multiple default
+    /// pools of different IP versions exist. Allocation fails if no pool
+    /// of the requested version is available.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 /// Parameters for detaching an external IP from an instance.
@@ -1226,7 +1544,7 @@ pub struct InstanceCreate {
     /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /
     /// characters with padding). Maximum 32 KiB unencoded data.
     // While serde happily accepts #[serde(with = "<mod>")] as a shorthand for
-    // specifing `serialize_with` and `deserialize_with`, schemars requires the
+    // specifying `serialize_with` and `deserialize_with`, schemars requires the
     // argument to `with` to be a type rather than merely a path prefix (i.e. a
     // mod or type). It's admittedly a bit tricky for schemars to address;
     // unlike `serialize` or `deserialize`, `JsonSchema` requires several
@@ -1247,6 +1565,14 @@ pub struct InstanceCreate {
     /// known IP address for making inbound connections to the instance.
     #[serde(default)]
     pub external_ips: Vec<ExternalIpCreate>,
+
+    /// The multicast groups this instance should join.
+    ///
+    /// The instance will be automatically added as a member of the specified
+    /// multicast groups during creation, enabling it to send and receive
+    /// multicast traffic for those groups.
+    #[serde(default)]
+    pub multicast_groups: Vec<NameOrId>,
 
     /// A list of disks to be attached to the instance.
     ///
@@ -1362,10 +1688,21 @@ pub struct InstanceUpdate {
     /// instance will have the most general CPU platform supported by the sled
     /// it is initially placed on.
     pub cpu_platform: Nullable<InstanceCpuPlatform>,
+
+    /// Multicast groups this instance should join.
+    ///
+    /// When specified, this replaces the instance's current multicast group
+    /// membership with the new set of groups. The instance will leave any
+    /// groups not listed here and join any new groups that are specified.
+    ///
+    /// If not provided (None), the instance's multicast group membership
+    /// will not be changed.
+    #[serde(default)]
+    pub multicast_groups: Option<Vec<NameOrId>>,
 }
 
 #[inline]
-fn bool_true() -> bool {
+pub fn bool_true() -> bool {
     true
 }
 
@@ -1373,7 +1710,7 @@ fn bool_true() -> bool {
 // `UserData::deserialize()` below.
 pub const MAX_USER_DATA_BYTES: usize = 32 * 1024; // 32 KiB
 
-struct UserData;
+pub struct UserData;
 impl UserData {
     pub fn serialize<S>(
         data: &Vec<u8>,
@@ -1419,7 +1756,7 @@ impl JsonSchema for UserData {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
@@ -1656,7 +1993,7 @@ impl JsonSchema for BlockSize {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -1694,7 +2031,7 @@ impl From<DiskVariant> for PhysicalDiskKind {
     }
 }
 
-/// Different sources for a disk
+/// Different sources for a Distributed Disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DiskSource {
@@ -1703,13 +2040,28 @@ pub enum DiskSource {
         /// size of blocks for this Disk. valid values are: 512, 2048, or 4096
         block_size: BlockSize,
     },
+
     /// Create a disk from a disk snapshot
     Snapshot { snapshot_id: Uuid },
+
     /// Create a disk from an image
     Image { image_id: Uuid },
+
     /// Create a blank disk that will accept bulk writes or pull blocks from an
     /// external source.
     ImportingBlocks { block_size: BlockSize },
+}
+
+/// The source of a `Disk`'s blocks
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DiskBackend {
+    Local {},
+
+    Distributed {
+        /// The initial source for this disk
+        disk_source: DiskSource,
+    },
 }
 
 /// Create-time parameters for a `Disk`
@@ -1718,8 +2070,10 @@ pub struct DiskCreate {
     /// The common identifying metadata for the disk
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// The initial source for this disk
-    pub disk_source: DiskSource,
+
+    /// The source for this `Disk`'s blocks
+    pub disk_backend: DiskBackend,
+
     /// The total size of the Disk (in bytes)
     pub size: ByteCount,
 }
@@ -1784,7 +2138,7 @@ pub struct LoopbackAddressCreate {
     /// address from.
     pub address_lot: NameOrId,
 
-    /// The containing the switch this loopback address will be configured on.
+    /// The rack containing the switch this loopback address will be configured on.
     pub rack_id: Uuid,
 
     // TODO: #3604 Consider using `SwitchLocation` type instead of `Name` for `LoopbackAddressCreate.switch_location`
@@ -2553,8 +2907,18 @@ impl TryFrom<String> for RelativeUri {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAuthRequest {
     pub client_id: Uuid,
-    /// Optional lifetime for the access token in seconds. If not specified, the
-    /// silo's max TTL will be used (if set).
+    /// Optional lifetime for the access token in seconds.
+    ///
+    /// This value will be validated during the confirmation step. If not
+    /// specified, it defaults to the silo's max TTL, which can be seen at
+    /// `/v1/auth-settings`.  If specified, must not exceed the silo's max TTL.
+    ///
+    /// Some special logic applies when authenticating the confirmation request
+    /// with an existing device token: the requested TTL must not produce an
+    /// expiration time later than the authenticating token's expiration. If no
+    /// TTL is specified, the expiration will be the lesser of the silo max and
+    /// the authenticating token's expiration time. To get the longest allowed
+    /// lifetime, omit the TTL and authenticate with a web console session.
     pub ttl_seconds: Option<NonZeroU32>,
 }
 
@@ -2732,13 +3096,297 @@ pub struct AlertReceiverProbe {
     pub resend: bool,
 }
 
-// Audit log has its own pagination scheme because it paginates by timestamp.
+/// Audit log has its own pagination scheme because it paginates by timestamp.
 #[derive(Deserialize, JsonSchema, Serialize, PartialEq, Debug, Clone)]
 pub struct AuditLog {
     /// Required, inclusive
     pub start_time: DateTime<Utc>,
     /// Exclusive
     pub end_time: Option<DateTime<Utc>>,
+}
+
+/// Create-time parameters for a multicast group.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MulticastGroupCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// The multicast IP address to allocate. If None, one will be allocated
+    /// from the default pool.
+    #[serde(default, deserialize_with = "validate_multicast_ip_param")]
+    pub multicast_ip: Option<IpAddr>,
+    /// Source IP addresses for Source-Specific Multicast (SSM).
+    ///
+    /// None uses default behavior (Any-Source Multicast).
+    /// Empty list explicitly allows any source (Any-Source Multicast).
+    /// Non-empty list restricts to specific sources (SSM).
+    #[serde(default, deserialize_with = "validate_source_ips_param")]
+    pub source_ips: Option<Vec<IpAddr>>,
+    /// Name or ID of the IP pool to allocate from. If None, uses the default
+    /// multicast pool.
+    #[serde(default)]
+    pub pool: Option<NameOrId>,
+    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// Tags packets leaving the rack to traverse VLAN-segmented upstream networks.
+    ///
+    /// Valid range: 2-4094 (VLAN IDs 0-1 are reserved by IEEE 802.1Q standard).
+    #[serde(default, deserialize_with = "validate_mvlan_option")]
+    pub mvlan: Option<VlanID>,
+}
+
+/// Update-time parameters for a multicast group.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MulticastGroupUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    #[serde(
+        default,
+        deserialize_with = "validate_source_ips_param",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_ips: Option<Vec<IpAddr>>,
+    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// Set to null to clear the MVLAN. Valid range: 2-4094 when provided.
+    /// Omit the field to leave mvlan unchanged.
+    #[serde(
+        default,
+        deserialize_with = "validate_mvlan_option_nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mvlan: Option<Nullable<VlanID>>,
+}
+
+/// Parameters for adding an instance to a multicast group.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MulticastGroupMemberAdd {
+    /// Name or ID of the instance to add to the multicast group
+    pub instance: NameOrId,
+}
+
+// MVLAN validators
+
+/// Dendrite requires VLAN IDs >= 2 (rejects 0 and 1)
+///
+/// Valid range is 2-4094
+fn validate_mvlan(vlan_id: VlanID) -> Result<VlanID, String> {
+    let value: u16 = vlan_id.into();
+    if value >= 2 {
+        Ok(vlan_id)
+    } else {
+        Err(format!(
+            "invalid mvlan: {value} (must be >= 2, VLAN IDs 0-1 are reserved)"
+        ))
+    }
+}
+
+fn validate_mvlan_option<'de, D>(
+    deserializer: D,
+) -> Result<Option<VlanID>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<VlanID>::deserialize(deserializer)?;
+    match opt {
+        Some(v) => {
+            validate_mvlan(v).map(Some).map_err(serde::de::Error::custom)
+        }
+        None => Ok(None),
+    }
+}
+
+fn validate_mvlan_option_nullable<'de, D>(
+    deserializer: D,
+) -> Result<Option<Nullable<VlanID>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Deserialize as Nullable<VlanID> directly, which handles null properly
+    // When field has null value, Nullable deserializer returns Nullable(None)
+    // We always wrap in Some because if field is present, we got here
+    let nullable = Nullable::<VlanID>::deserialize(deserializer)?;
+    match nullable.0 {
+        Some(v) => validate_mvlan(v)
+            .map(|vv| Some(Nullable(Some(vv))))
+            .map_err(serde::de::Error::custom),
+        None => Ok(Some(Nullable(None))), // Explicit null to clear
+    }
+}
+
+/// Parameters for removing an instance from a multicast group.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MulticastGroupMemberRemove {
+    /// Name or ID of the instance to remove from the multicast group
+    pub instance: NameOrId,
+}
+
+/// Path parameters for multicast group member operations.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MulticastGroupMemberPath {
+    /// Name or ID of the multicast group
+    pub multicast_group: NameOrId,
+    /// Name or ID of the instance
+    pub instance: NameOrId,
+}
+
+/// Path parameters for instance multicast group operations.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceMulticastGroupPath {
+    /// Name or ID of the instance
+    pub instance: NameOrId,
+    /// Name or ID of the multicast group
+    pub multicast_group: NameOrId,
+}
+
+/// Validate that an IP address is suitable for use as a SSM source.
+///
+/// For specifics, follow-up on RFC 4607:
+/// <https://www.rfc-editor.org/rfc/rfc4607>
+pub fn validate_source_ip(ip: IpAddr) -> Result<(), String> {
+    match ip {
+        IpAddr::V4(ipv4) => validate_ipv4_source(ipv4),
+        IpAddr::V6(ipv6) => validate_ipv6_source(ipv6),
+    }
+}
+
+/// Validate that an IPv4 address is suitable for use as a multicast source.
+fn validate_ipv4_source(addr: Ipv4Addr) -> Result<(), String> {
+    // Must be a unicast address
+    if !is_unicast_v4(&addr) {
+        return Err(format!("{} is not a unicast address", addr));
+    }
+
+    // Exclude problematic addresses (mostly align with Dendrite, but block link-local)
+    if addr.is_loopback()
+        || addr.is_broadcast()
+        || addr.is_unspecified()
+        || addr.is_link_local()
+    {
+        return Err(format!("{} is a special-use address", addr));
+    }
+
+    Ok(())
+}
+
+/// Validate that an IPv6 address is suitable for use as a multicast source.
+fn validate_ipv6_source(addr: Ipv6Addr) -> Result<(), String> {
+    // Must be a unicast address
+    if !is_unicast_v6(&addr) {
+        return Err(format!("{} is not a unicast address", addr));
+    }
+
+    // Exclude problematic addresses (align with Dendrite validation, but block link-local)
+    if addr.is_loopback()
+        || addr.is_unspecified()
+        || ((addr.segments()[0] & 0xffc0) == 0xfe80)
+    // fe80::/10 link-local
+    {
+        return Err(format!("{} is a special-use address", addr));
+    }
+
+    Ok(())
+}
+
+/// Validate that an IP address is a proper multicast address for API validation.
+pub fn validate_multicast_ip(ip: IpAddr) -> Result<(), String> {
+    match ip {
+        IpAddr::V4(ipv4) => validate_ipv4_multicast(ipv4),
+        IpAddr::V6(ipv6) => validate_ipv6_multicast(ipv6),
+    }
+}
+
+// IPv4 link-local multicast range reserved for local network control.
+const RESERVED_IPV4_MULTICAST_LINK_LOCAL: Ipv4Addr =
+    Ipv4Addr::new(224, 0, 0, 0);
+const RESERVED_IPV4_MULTICAST_LINK_LOCAL_PREFIX: u8 = 24;
+
+/// Validates IPv4 multicast addresses.
+fn validate_ipv4_multicast(addr: Ipv4Addr) -> Result<(), String> {
+    // Verify this is actually a multicast address
+    if !addr.is_multicast() {
+        return Err(format!("{} is not a multicast address", addr));
+    }
+
+    // Block link-local multicast (224.0.0.0/24) as it's reserved for local network control
+    let link_local = Ipv4Net::new(
+        RESERVED_IPV4_MULTICAST_LINK_LOCAL,
+        RESERVED_IPV4_MULTICAST_LINK_LOCAL_PREFIX,
+    )
+    .unwrap();
+    if link_local.contains(addr) {
+        return Err(format!(
+            "{addr} is in the link-local multicast range (224.0.0.0/24)"
+        ));
+    }
+
+    Ok(())
+}
+
+/// Validates IPv6 multicast addresses.
+fn validate_ipv6_multicast(addr: Ipv6Addr) -> Result<(), String> {
+    if !addr.is_multicast() {
+        return Err(format!("{addr} is not a multicast address"));
+    }
+
+    // Define reserved IPv6 multicast subnets using oxnet
+    let reserved_subnets = [
+        // Interface-local scope (ff01::/16)
+        Ipv6Net::new(Ipv6Addr::new(0xff01, 0, 0, 0, 0, 0, 0, 0), 16).unwrap(),
+        // Link-local scope (ff02::/16)
+        Ipv6Net::new(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0), 16).unwrap(),
+    ];
+
+    // Check reserved subnets
+    for subnet in &reserved_subnets {
+        if subnet.contains(addr) {
+            return Err(format!(
+                "{} is in the reserved multicast subnet {}",
+                addr, subnet
+            ));
+        }
+    }
+
+    // Note: Admin-local scope (ff04::/16) is allowed for on-premises deployments.
+    // Collision avoidance with underlay addresses is handled by the mapping
+    // function which sets a collision-avoidance bit in the underlay space.
+
+    Ok(())
+}
+
+/// Deserializer for validating multicast IP addresses.
+fn validate_multicast_ip_param<'de, D>(
+    deserializer: D,
+) -> Result<Option<IpAddr>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let ip_opt = Option::<IpAddr>::deserialize(deserializer)?;
+    if let Some(ip) = ip_opt {
+        validate_multicast_ip(ip).map_err(|e| de::Error::custom(e))?;
+    }
+    Ok(ip_opt)
+}
+
+/// Deserializer for validating source IP addresses.
+fn validate_source_ips_param<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<IpAddr>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let ips_opt = Option::<Vec<IpAddr>>::deserialize(deserializer)?;
+    if let Some(ref ips) = ips_opt {
+        for ip in ips {
+            validate_source_ip(*ip).map_err(|e| de::Error::custom(e))?;
+        }
+    }
+    Ok(ips_opt)
+}
+
+const fn is_unicast_v4(ip: &Ipv4Addr) -> bool {
+    !ip.is_multicast()
+}
+
+const fn is_unicast_v6(ip: &Ipv6Addr) -> bool {
+    !ip.is_multicast()
 }
 
 // SCIM
@@ -2756,4 +3404,479 @@ pub struct ScimV2UserPathParam {
 #[derive(Deserialize, JsonSchema)]
 pub struct ScimV2GroupPathParam {
     pub group_id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_multicast_ip_v4() {
+        // Valid IPv4 multicast addresses
+        assert!(
+            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(224, 1, 0, 1)))
+                .is_ok()
+        );
+        assert!(
+            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(225, 2, 3, 4)))
+                .is_ok()
+        );
+        assert!(
+            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(231, 5, 6, 7)))
+                .is_ok()
+        );
+        assert!(
+            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(233, 1, 1, 1)))
+                .is_ok()
+        ); // GLOP addressing - allowed
+        assert!(
+            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(239, 1, 1, 1)))
+                .is_ok()
+        ); // Admin-scoped - allowed
+
+        // Invalid IPv4 multicast addresses - reserved ranges
+        assert!(
+            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)))
+                .is_err()
+        ); // Link-local control
+        assert!(
+            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 255)))
+                .is_err()
+        ); // Link-local control
+
+        // Non-multicast addresses
+        assert!(
+            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)))
+                .is_err()
+        );
+        assert!(
+            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_validate_multicast_ip_v6() {
+        // Valid IPv6 multicast addresses
+        assert!(
+            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
+                0xff0e, 0, 0, 0, 0, 0, 0, 1
+            )))
+            .is_ok()
+        ); // Global scope
+        assert!(
+            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
+                0xff0d, 0, 0, 0, 0, 0, 0, 1
+            )))
+            .is_ok()
+        ); // Site-local scope
+        assert!(
+            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
+                0xff05, 0, 0, 0, 0, 0, 0, 1
+            )))
+            .is_ok()
+        ); // Site-local admin scope - allowed
+        assert!(
+            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
+                0xff08, 0, 0, 0, 0, 0, 0, 1
+            )))
+            .is_ok()
+        ); // Org-local admin scope - allowed
+
+        // Invalid IPv6 multicast addresses - reserved ranges
+        assert!(
+            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
+                0xff01, 0, 0, 0, 0, 0, 0, 1
+            )))
+            .is_err()
+        ); // Interface-local
+        assert!(
+            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
+                0xff02, 0, 0, 0, 0, 0, 0, 1
+            )))
+            .is_err()
+        ); // Link-local
+
+        // Admin-local (ff04::/16) is allowed for on-premises deployments.
+        // Collision avoidance is handled by the mapping function which sets
+        // a collision-avoidance bit to separate external and underlay spaces.
+        assert!(
+            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
+                0xff04, 0, 0, 0, 0, 0, 0, 1
+            )))
+            .is_ok()
+        );
+
+        // Non-multicast addresses
+        assert!(
+            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
+                0x2001, 0xdb8, 0, 0, 0, 0, 0, 1
+            )))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_validate_source_ip_v4() {
+        // Valid IPv4 source addresses
+        assert!(
+            validate_source_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)))
+                .is_ok()
+        );
+        assert!(
+            validate_source_ip(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).is_ok()
+        );
+        assert!(
+            validate_source_ip(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1)))
+                .is_ok()
+        ); // TEST-NET-3
+
+        // Invalid IPv4 source addresses
+        assert!(
+            validate_source_ip(IpAddr::V4(Ipv4Addr::new(224, 1, 1, 1)))
+                .is_err()
+        ); // Multicast
+        assert!(
+            validate_source_ip(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))).is_err()
+        ); // Unspecified
+        assert!(
+            validate_source_ip(IpAddr::V4(Ipv4Addr::new(255, 255, 255, 255)))
+                .is_err()
+        ); // Broadcast
+        assert!(
+            validate_source_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1)))
+                .is_err()
+        ); // Link-local
+    }
+
+    #[test]
+    fn test_validate_source_ip_v6() {
+        // Valid IPv6 source addresses
+        assert!(
+            validate_source_ip(IpAddr::V6(Ipv6Addr::new(
+                0x2001, 0xdb8, 0, 0, 0, 0, 0, 1
+            )))
+            .is_ok()
+        );
+        assert!(
+            validate_source_ip(IpAddr::V6(Ipv6Addr::new(
+                0x2001, 0x4860, 0x4860, 0, 0, 0, 0, 0x8888
+            )))
+            .is_ok()
+        );
+
+        // Invalid IPv6 source addresses
+        assert!(
+            validate_source_ip(IpAddr::V6(Ipv6Addr::new(
+                0xff0e, 0, 0, 0, 0, 0, 0, 1
+            )))
+            .is_err()
+        ); // Multicast
+        assert!(
+            validate_source_ip(IpAddr::V6(Ipv6Addr::new(
+                0, 0, 0, 0, 0, 0, 0, 0
+            )))
+            .is_err()
+        ); // Unspecified
+        assert!(
+            validate_source_ip(IpAddr::V6(Ipv6Addr::new(
+                0, 0, 0, 0, 0, 0, 0, 1
+            )))
+            .is_err()
+        ); // Loopback
+    }
+
+    #[test]
+    fn test_multicast_group_create_deserialization_with_all_fields() {
+        let json = r#"{
+            "name": "test-group",
+            "description": "Test multicast group",
+            "multicast_ip": "224.1.2.3",
+            "source_ips": ["10.0.0.1", "10.0.0.2"],
+            "pool": "default",
+            "mvlan": 10
+        }"#;
+
+        let result: Result<MulticastGroupCreate, _> =
+            serde_json::from_str(json);
+        assert!(result.is_ok());
+        let params = result.unwrap();
+        assert_eq!(params.identity.name.as_str(), "test-group");
+        assert_eq!(
+            params.multicast_ip,
+            Some(IpAddr::V4(Ipv4Addr::new(224, 1, 2, 3)))
+        );
+        assert_eq!(
+            params.source_ips,
+            Some(vec![
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))
+            ])
+        );
+    }
+
+    #[test]
+    fn test_multicast_group_create_deserialization_without_optional_fields() {
+        // This is the critical test - multicast_ip, source_ips, pool, and mvlan are all optional
+        let json = r#"{
+            "name": "test-group",
+            "description": "Test multicast group"
+        }"#;
+
+        let result: Result<MulticastGroupCreate, _> =
+            serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "Failed to deserialize without optional fields: {:?}",
+            result.err()
+        );
+        let params = result.unwrap();
+        assert_eq!(params.identity.name.as_str(), "test-group");
+        assert_eq!(params.multicast_ip, None);
+        assert_eq!(params.source_ips, None);
+        assert_eq!(params.pool, None);
+        assert_eq!(params.mvlan, None);
+    }
+
+    #[test]
+    fn test_multicast_group_create_deserialization_with_empty_source_ips() {
+        let json = r#"{
+            "name": "test-group",
+            "description": "Test multicast group",
+            "multicast_ip": "224.1.2.3",
+            "source_ips": []
+        }"#;
+
+        let result: Result<MulticastGroupCreate, _> =
+            serde_json::from_str(json);
+        assert!(result.is_ok());
+        let params = result.unwrap();
+        assert_eq!(params.source_ips, Some(vec![]));
+    }
+
+    #[test]
+    fn test_multicast_group_create_deserialization_invalid_multicast_ip() {
+        // Non-multicast IP should be rejected
+        let json = r#"{
+            "name": "test-group",
+            "description": "Test multicast group",
+            "multicast_ip": "192.168.1.1"
+        }"#;
+
+        let result: Result<MulticastGroupCreate, _> =
+            serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_multicast_group_create_deserialization_invalid_source_ip() {
+        // Multicast address in source_ips should be rejected
+        let json = r#"{
+            "name": "test-group",
+            "description": "Test multicast group",
+            "multicast_ip": "224.1.2.3",
+            "source_ips": ["224.0.0.1"]
+        }"#;
+
+        let result: Result<MulticastGroupCreate, _> =
+            serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_multicast_group_create_deserialization_only_multicast_ip() {
+        // Test with only multicast_ip, no source_ips
+        let json = r#"{
+            "name": "test-group",
+            "description": "Test multicast group",
+            "multicast_ip": "224.1.2.3"
+        }"#;
+
+        let result: Result<MulticastGroupCreate, _> =
+            serde_json::from_str(json);
+        assert!(result.is_ok());
+        let params = result.unwrap();
+        assert_eq!(
+            params.multicast_ip,
+            Some(IpAddr::V4(Ipv4Addr::new(224, 1, 2, 3)))
+        );
+        assert_eq!(params.source_ips, None);
+    }
+
+    #[test]
+    fn test_multicast_group_create_deserialization_only_source_ips() {
+        // Test with only source_ips, no multicast_ip (will be auto-allocated)
+        let json = r#"{
+            "name": "test-group",
+            "description": "Test multicast group",
+            "source_ips": ["10.0.0.1"]
+        }"#;
+
+        let result: Result<MulticastGroupCreate, _> =
+            serde_json::from_str(json);
+        assert!(result.is_ok());
+        let params = result.unwrap();
+        assert_eq!(params.multicast_ip, None);
+        assert_eq!(
+            params.source_ips,
+            Some(vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))])
+        );
+    }
+
+    #[test]
+    fn test_multicast_group_create_deserialization_explicit_null_fields() {
+        // Test with explicit null values for optional fields
+        // This is what the CLI sends when fields are not provided
+        let json = r#"{
+            "name": "test-group",
+            "description": "Test multicast group",
+            "multicast_ip": null,
+            "source_ips": null,
+            "pool": null,
+            "mvlan": null
+        }"#;
+
+        let result: Result<MulticastGroupCreate, _> =
+            serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "Failed to deserialize with explicit null fields: {:?}",
+            result.err()
+        );
+        let params = result.unwrap();
+        assert_eq!(params.multicast_ip, None);
+        assert_eq!(params.source_ips, None);
+        assert_eq!(params.pool, None);
+        assert_eq!(params.mvlan, None);
+    }
+
+    #[test]
+    fn test_multicast_group_create_deserialization_mixed_null_and_values() {
+        // Test with some nulls and some values
+        let json = r#"{
+            "name": "test-group",
+            "description": "Test multicast group",
+            "multicast_ip": "224.1.2.3",
+            "source_ips": [],
+            "pool": null,
+            "mvlan": 30
+        }"#;
+
+        let result: Result<MulticastGroupCreate, _> =
+            serde_json::from_str(json);
+        assert!(result.is_ok());
+        let params = result.unwrap();
+        assert_eq!(
+            params.multicast_ip,
+            Some(IpAddr::V4(Ipv4Addr::new(224, 1, 2, 3)))
+        );
+        assert_eq!(params.source_ips, Some(vec![]));
+        assert_eq!(params.pool, None);
+        assert_eq!(params.mvlan, Some(VlanID::new(30).unwrap()));
+    }
+
+    #[test]
+    fn test_multicast_group_update_deserialization_omit_all_fields() {
+        // When fields are omitted, they should be None (no change)
+        let json = r#"{
+            "name": "test-group"
+        }"#;
+
+        let result: Result<MulticastGroupUpdate, _> =
+            serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "Failed to deserialize update with omitted fields: {:?}",
+            result.err()
+        );
+        let params = result.unwrap();
+        assert_eq!(params.source_ips, None);
+        assert_eq!(params.mvlan, None);
+    }
+
+    #[test]
+    fn test_multicast_group_update_deserialization_explicit_null_mvlan() {
+        // When mvlan is explicitly null, it should be Some(Nullable(None)) (clearing the field)
+        let json = r#"{
+            "name": "test-group",
+            "mvlan": null
+        }"#;
+
+        let result: Result<MulticastGroupUpdate, _> =
+            serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "Failed to deserialize update with null mvlan: {:?}",
+            result.err()
+        );
+        let params = result.unwrap();
+        assert_eq!(params.mvlan, Some(Nullable(None)));
+    }
+
+    #[test]
+    fn test_multicast_group_update_deserialization_set_mvlan() {
+        // When mvlan has a value, it should be Some(Nullable(Some(value)))
+        let json = r#"{
+            "name": "test-group",
+            "mvlan": 100
+        }"#;
+
+        let result: Result<MulticastGroupUpdate, _> =
+            serde_json::from_str(json);
+        assert!(result.is_ok());
+        let params = result.unwrap();
+        assert_eq!(
+            params.mvlan,
+            Some(Nullable(Some(VlanID::new(100).unwrap())))
+        );
+    }
+
+    #[test]
+    fn test_multicast_group_update_deserialization_update_source_ips() {
+        // Test updating source_ips
+        let json = r#"{
+            "name": "test-group",
+            "source_ips": ["10.0.0.5", "10.0.0.6"]
+        }"#;
+
+        let result: Result<MulticastGroupUpdate, _> =
+            serde_json::from_str(json);
+        assert!(result.is_ok());
+        let params = result.unwrap();
+        assert_eq!(
+            params.source_ips,
+            Some(vec![
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 6))
+            ])
+        );
+    }
+
+    #[test]
+    fn test_multicast_group_update_deserialization_clear_source_ips() {
+        // Empty array should clear source_ips (Any-Source Multicast)
+        let json = r#"{
+            "name": "test-group",
+            "source_ips": []
+        }"#;
+
+        let result: Result<MulticastGroupUpdate, _> =
+            serde_json::from_str(json);
+        assert!(result.is_ok());
+        let params = result.unwrap();
+        assert_eq!(params.source_ips, Some(vec![]));
+    }
+
+    #[test]
+    fn test_multicast_group_update_deserialization_invalid_mvlan() {
+        // VLAN ID 1 should be rejected (reserved)
+        let json = r#"{
+            "name": "test-group",
+            "mvlan": 1
+        }"#;
+
+        let result: Result<MulticastGroupUpdate, _> =
+            serde_json::from_str(json);
+        assert!(result.is_err(), "Should reject reserved VLAN ID 1");
+    }
 }

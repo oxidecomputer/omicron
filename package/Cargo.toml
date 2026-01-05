@@ -2,7 +2,7 @@
 name = "omicron-package"
 description = "Tools for building and installing Omicron packages"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]

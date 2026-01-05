@@ -24,9 +24,6 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use dropshot::endpoint;
-use nexus_sled_agent_shared::inventory::Inventory;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
@@ -35,27 +32,60 @@ use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use range_requests::PotentialRange;
 use sled_agent_api::*;
+use sled_agent_types::artifact::{
+    ArtifactConfig, ArtifactCopyFromDepotBody, ArtifactCopyFromDepotResponse,
+    ArtifactListResponse, ArtifactPathParam, ArtifactPutResponse,
+    ArtifactQueryParam,
+};
 use sled_agent_types::bootstore::BootstoreStatus;
-use sled_agent_types::disk::DiskEnsureBody;
+use sled_agent_types::dataset::{
+    LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
+};
+use sled_agent_types::debug::OperatorSwitchZonePolicy;
+use sled_agent_types::diagnostics::{
+    SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
+};
+use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
-use sled_agent_types::instance::InstanceEnsureBody;
-use sled_agent_types::instance::InstanceExternalIpBody;
-use sled_agent_types::instance::VmmPutStateBody;
-use sled_agent_types::instance::VmmPutStateResponse;
-use sled_agent_types::instance::VmmUnregisterResponse;
+use sled_agent_types::instance::{
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
+    VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
+    VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
+};
+use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
-use sled_agent_types::zone_bundle::BundleUtilization;
-use sled_agent_types::zone_bundle::CleanupContext;
-use sled_agent_types::zone_bundle::CleanupCount;
-use sled_agent_types::zone_bundle::ZoneBundleId;
-use sled_agent_types::zone_bundle::ZoneBundleMetadata;
+use sled_agent_types::support_bundle::{
+    RangeRequestHeaders, SupportBundleFilePathParam,
+    SupportBundleFinalizeQueryParams, SupportBundleListPathParam,
+    SupportBundleMetadata, SupportBundlePathParam,
+    SupportBundleTransferQueryParams,
+};
+use sled_agent_types::trust_quorum::{
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+};
+use sled_agent_types::zone_bundle::{
+    BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
+    ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
+};
+use sled_hardware_types::BaseboardId;
+// Fixed identifiers for prior versions only
+use sled_agent_types_versions::v1;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use trust_quorum_types::messages::{
+    CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
+};
+use trust_quorum_types::status::CommitStatus;
+use trust_quorum_types::status::CoordinatorStatus;
+use trust_quorum_types::status::NodeStatus;
 
 use super::sled_agent::SledAgent;
 
@@ -143,6 +173,58 @@ impl SledAgentApi for SledAgentSimImpl {
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
         sa.instance_delete_external_ip(id, &body_args).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn vmm_join_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+
+        match body_args {
+            InstanceMulticastBody::Join(membership) => {
+                sa.instance_join_multicast_group(propolis_id, &membership)
+                    .await?;
+            }
+            InstanceMulticastBody::Leave(_) => {
+                // This endpoint is for joining - reject leave operations
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "Join endpoint cannot process Leave operations".to_string(),
+                ));
+            }
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn vmm_leave_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+
+        match body_args {
+            InstanceMulticastBody::Leave(membership) => {
+                sa.instance_leave_multicast_group(propolis_id, &membership)
+                    .await?;
+            }
+            InstanceMulticastBody::Join(_) => {
+                // This endpoint is for leaving - reject join operations
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "Leave endpoint cannot process Join operations".to_string(),
+                ));
+            }
+        }
+
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -605,6 +687,42 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseDeleted())
     }
 
+    async fn local_storage_dataset_ensure(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetEnsureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+
+        let LocalStoragePathParam { zpool_id, dataset_id } =
+            path_params.into_inner();
+
+        sa.ensure_local_storage_dataset(
+            zpool_id,
+            dataset_id,
+            body.into_inner(),
+        );
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn local_storage_dataset_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+
+        let LocalStoragePathParam { zpool_id, dataset_id } =
+            path_params.into_inner();
+
+        sa.drop_dataset(
+            ZpoolUuid::from_untyped_uuid(zpool_id.into_untyped_uuid()),
+            dataset_id,
+        );
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
     // --- Unimplemented endpoints ---
 
     async fn set_eip_gateways(
@@ -680,9 +798,9 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn sled_role_get(
+    async fn sled_role_get_v1(
         _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<SledRole>, HttpError> {
+    ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
         method_unimplemented()
     }
 
@@ -773,22 +891,24 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_logs_download(
         _request_context: RequestContext<Self::Context>,
-        _path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        _path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
         _query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         method_unimplemented()
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_get(
+    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
+        HttpError,
+    > {
         method_unimplemented()
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_put(
+    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
         _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+        _body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
@@ -811,6 +931,61 @@ impl SledAgentApi for SledAgentSimImpl {
         _body: TypedBody<ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_reconfigure(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ReconfigureMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_upgrade_from_lrtq(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<LrtqUpgradeMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_coordinator_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_prepare_and_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<PrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_prepare_and_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProxyPrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_status(
+        _request_context: RequestContext<Self::Context>,
+        _query_params: Query<BaseboardId>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        method_unimplemented()
     }
 }
 

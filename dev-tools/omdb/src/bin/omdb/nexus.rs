@@ -72,12 +72,12 @@ use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
-use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
@@ -91,6 +91,7 @@ use quiesce::cmd_nexus_quiesce;
 use reconfigurator_config::ReconfiguratorConfigArgs;
 use reconfigurator_config::cmd_nexus_reconfigurator_config;
 use serde::Deserialize;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -98,6 +99,7 @@ use std::fs::OpenOptions;
 use std::os::unix::fs::PermissionsExt;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use support_bundle_viewer::LocalFileAccess;
 use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
@@ -2609,44 +2611,74 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
 
             if let Some(SupportBundleCollectionReport {
                 bundle,
-                listed_in_service_sleds,
-                listed_sps,
                 activated_in_db_ok,
-                sp_ereports,
-                host_ereports,
+                mut steps,
+                ereports,
             }) = collection_report
             {
                 println!("    Support Bundle Collection Report:");
                 println!("      Bundle ID: {bundle}");
-                println!(
-                    "      Bundle was able to list in-service sleds: {listed_in_service_sleds}"
-                );
-                println!(
-                    "      Bundle was able to list service processors: {listed_sps}"
-                );
+
+                #[derive(Tabled)]
+                #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                struct StepRow {
+                    step_name: String,
+                    start_time: DateTime<Utc>,
+                    duration: String,
+                    status: SupportBundleCollectionStepStatus,
+                }
+
+                steps.sort_unstable_by_key(|s| s.start);
+                let rows: Vec<StepRow> = steps
+                    .into_iter()
+                    .map(|step| {
+                        let duration = (step.end - step.start)
+                            .to_std()
+                            .unwrap_or(Duration::from_millis(0));
+                        StepRow {
+                            step_name: step.name,
+                            start_time: step.start,
+                            duration: format!("{:.3}s", duration.as_secs_f64()),
+                            status: step.status,
+                        }
+                    })
+                    .collect();
+
+                if !rows.is_empty() {
+                    println!("\n{}", tabled::Table::new(rows));
+                }
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
-                print_ereport_status("SP", &sp_ereports);
-                print_ereport_status("Host OS", &host_ereports);
-            }
-        }
-    }
-
-    fn print_ereport_status(which: &str, status: &SupportBundleEreportStatus) {
-        match status {
-            SupportBundleEreportStatus::NotRequested => {
-                println!("      {which} ereport collection was not requested");
-            }
-            SupportBundleEreportStatus::Failed { error, n_collected } => {
-                println!("      {which} ereport collection failed:");
-                println!(
-                    "        ereports collected successfully: {n_collected}"
-                );
-                println!("        error: {error}");
-            }
-            SupportBundleEreportStatus::Collected { n_collected } => {
-                println!("      {which} ereports collected: {n_collected}");
+                match ereports {
+                    None => {
+                        println!("      ereport collection was not requested");
+                    }
+                    Some(SupportBundleEreportStatus {
+                        errors,
+                        n_collected,
+                        n_found,
+                    }) if !errors.is_empty() => {
+                        println!("      ereport collection failed:");
+                        println!(
+                            "        total matching ereports found: {n_found}"
+                        );
+                        println!(
+                            "        ereports collected successfully: {n_collected}"
+                        );
+                        println!("        errors:");
+                        for error in errors {
+                            println!("          {error}");
+                        }
+                    }
+                    Some(SupportBundleEreportStatus {
+                        n_collected, ..
+                    }) => {
+                        // If ereport collection succeeded, n_found should be
+                        // equal to n_collected.
+                        println!("      ereports collected: {n_collected}");
+                    }
+                }
             }
         }
     }
@@ -4436,7 +4468,9 @@ async fn support_bundle_download_range(
     client: &nexus_lockstep_client::Client,
     id: SupportBundleUuid,
     range: (u64, u64),
-) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>> {
+) -> anyhow::Result<
+    impl futures::Stream<Item = anyhow::Result<bytes::Bytes>> + use<>,
+> {
     let range = format!("bytes={}-{}", range.0, range.1);
     Ok(client
         .support_bundle_download(id.as_untyped_uuid(), Some(&range))
@@ -4500,13 +4534,18 @@ async fn cmd_nexus_support_bundles_download(
     let stream =
         support_bundle_download_ranges(client, args.id, start, total_length);
 
+    let mut open_opts = OpenOptions::new();
+    open_opts.create(true);
+
     let sink: Box<dyn std::io::Write> = match &args.output {
         Some(path) => Box::new(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .truncate(!args.resume)
-                .open(path)?,
+            if args.resume {
+                open_opts.append(true)
+            } else {
+                open_opts.write(true).truncate(true)
+            }
+            .open(path)
+            .with_context(|| format!("failed to create {path}"))?,
         ),
         None => Box::new(std::io::stdout()),
     };
