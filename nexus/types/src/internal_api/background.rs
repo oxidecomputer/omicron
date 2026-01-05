@@ -892,7 +892,7 @@ pub struct SitrepGcStatus {
     pub errors: Vec<String>,
 }
 
-/// The status of a `fm_rendezvouz` background task activation.
+/// The status of a `fm_rendezvous` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum FmRendezvousStatus {
     NoSitrep,
