@@ -47,9 +47,8 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
-    BaseboardId, Caboose, CockroachStatus, Collection,
-    InternalDnsGenerationStatus, NvmeFirmware, PowerState, RotPage, RotSlot,
-    TimeSync,
+    Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
+    NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -94,6 +93,7 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddrV6};
 use std::time::Duration;
@@ -489,8 +489,8 @@ impl<'a> From<&'a Collection> for InvCollection {
     }
 }
 
-/// See [`nexus_types::inventory::BaseboardId`].
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+/// See [`sled_hardware_types::BaseboardId`].
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq, Eq)]
 #[diesel(table_name = hw_baseboard_id)]
 pub struct HwBaseboardId {
     pub id: Uuid,
@@ -1686,31 +1686,33 @@ impl InvZoneManifestZone {
         collection_id: CollectionUuid,
         sled_id: SledUuid,
         artifact: &ZoneArtifactInventory,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, anyhow::Error> {
+        Ok(Self {
             inv_collection_id: collection_id.into(),
             sled_id: sled_id.into(),
             zone_file_name: artifact.file_name.clone(),
             path: artifact.path.clone().into(),
-            expected_size: artifact.expected_size as i64,
+            expected_size: artifact.expected_size.try_into()?,
             expected_sha256: artifact.expected_hash.into(),
             error: artifact.status.as_ref().err().cloned(),
-        }
+        })
     }
 }
 
-impl From<InvZoneManifestZone> for ZoneArtifactInventory {
-    fn from(row: InvZoneManifestZone) -> Self {
-        Self {
+impl TryFrom<InvZoneManifestZone> for ZoneArtifactInventory {
+    type Error = anyhow::Error;
+
+    fn try_from(row: InvZoneManifestZone) -> Result<Self, Self::Error> {
+        Ok(Self {
             file_name: row.zone_file_name,
             path: row.path.into(),
-            expected_size: row.expected_size as u64,
+            expected_size: row.expected_size.try_into()?,
             expected_hash: row.expected_sha256.into(),
             status: match row.error {
                 None => Ok(()),
                 Some(error) => Err(error),
             },
-        }
+        })
     }
 }
 
@@ -2922,7 +2924,7 @@ pub struct InvCockroachStatus {
 impl InvCockroachStatus {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        node_id: cockroach_admin_types::NodeId,
+        node_id: cockroach_admin_types::node::InternalNodeId,
         status: &CockroachStatus,
     ) -> Result<Self, anyhow::Error> {
         Ok(Self {
