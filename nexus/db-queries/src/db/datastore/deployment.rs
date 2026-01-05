@@ -97,7 +97,6 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_common::bail_unless;
 use omicron_uuid_kinds::BlueprintKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -659,14 +658,11 @@ impl DataStore {
         }
     }
 
-    /// Read a complete blueprint from the database
-    pub async fn blueprint_read(
-        &self,
-        opctx: &OpContext,
+    async fn blueprint_read_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         authz_blueprint: &authz::Blueprint,
-    ) -> Result<Blueprint, Error> {
-        opctx.authorize(authz::Action::Read, authz_blueprint).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
+        err: OptionalError<Error>,
+    ) -> Result<Blueprint, DieselError> {
         let blueprint_id =
             BlueprintUuid::from_untyped_uuid(authz_blueprint.id());
 
@@ -690,14 +686,11 @@ impl DataStore {
             let Some(blueprint) = dsl::blueprint
                 .filter(dsl::id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(DbBlueprint::as_select())
-                .get_result_async(&*conn)
+                .get_result_async(conn)
                 .await
-                .optional()
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?
+                .optional()?
             else {
-                return Err(authz_blueprint.not_found());
+                return Err(err.bail(authz_blueprint.not_found()));
             };
 
             (
@@ -719,16 +712,16 @@ impl DataStore {
                 &cockroachdb_setting_preserve_downgrade,
             )
             .map_err(|_| {
-                Error::internal_error(&format!(
+                err.bail(Error::internal_error(&format!(
                     "unrecognized cluster version {:?}",
                     cockroachdb_setting_preserve_downgrade
-                ))
+                )))
             })?;
 
-        // Load the sled metadata for this blueprint. We use this to prime our
-        // primary map of sled configs, but we leave the zones / disks /
-        // datasets maps empty (to be filled in when we query those tables
-        // below).
+        // Load the sled metadata for this blueprint. We use this to
+        // prime our primary map of sled configs, but we leave the
+        // zones / disks / datasets maps empty (to be filled in when
+        // we query those tables below).
         let mut sled_configs: BTreeMap<SledUuid, BlueprintSledConfig> = {
             use nexus_db_schema::schema::bp_sled_metadata::dsl;
             use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
@@ -750,9 +743,9 @@ impl DataStore {
                     &p.current_pagparams(),
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
-                // Left join against the tuf_artifact table twice (once for each
-                // host slot) in case the artifact is missing from the table,
-                // which is non-fatal.
+                // Left join against the tuf_artifact table twice
+                // (once for each host slot) in case the artifact is
+                // missing from the table, which is non-fatal.
                 .left_join(
                     tuf1.on(tuf1
                         .field(tuf_artifact_dsl::kind)
@@ -782,19 +775,16 @@ impl DataStore {
                     BpSledMetadata,
                     Option<DbArtifactVersion>,
                     Option<DbArtifactVersion>,
-                )>(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                )>(conn)
+                .await?;
 
                 paginator = p.found_batch(&batch, &|(s, _, _)| s.sled_id);
 
                 for (s, slot_a_version, slot_b_version) in batch {
                     let subnet = s.subnet().map_err(|e| {
-                        Error::internal_error(
+                        err.bail(Error::internal_error(
                             &InlineErrorChain::new(&*e).to_string(),
-                        )
+                        ))
                     })?;
                     let config = BlueprintSledConfig {
                         state: s.sled_state.into(),
@@ -810,20 +800,21 @@ impl DataStore {
                             .host_phase_2(slot_a_version, slot_b_version),
                     };
                     let old = sled_configs.insert(s.sled_id.into(), config);
-                    bail_unless!(
-                        old.is_none(),
-                        "found duplicate sled ID in bp_sled_metadata: {}",
-                        s.sled_id
-                    );
+                    if old.is_some() {
+                        return Err(err.bail(Error::internal_error(&format!(
+                            "found duplicate sled ID in bp_sled_metadata: {}",
+                            s.sled_id
+                        ))));
+                    }
                 }
             }
             sled_configs
         };
 
-        // Assemble a mutable map of all the NICs found, by NIC id.  As we
-        // match these up with the corresponding zone below, we'll remove items
-        // from this set.  That way we can tell if the same NIC was used twice
-        // or not used at all.
+        // Assemble a mutable map of all the NICs found, by NIC id.
+        // As we match these up with the corresponding zone below,
+        // we'll remove items from this set.  That way we can tell
+        // if the same NIC was used twice or not used at all.
         let mut omicron_zone_nics = {
             use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
 
@@ -840,22 +831,20 @@ impl DataStore {
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpOmicronZoneNic::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
 
                 paginator = p.found_batch(&batch, &|n| n.id);
 
                 for n in batch {
                     let nic_id = n.id;
                     let old = omicron_zone_nics.insert(nic_id, n);
-                    bail_unless!(
-                        old.is_none(),
-                        "found duplicate NIC ID in bp_omicron_zone_nic: {}",
-                        nic_id,
-                    );
+                    if old.is_some() {
+                        return Err(err.bail(Error::internal_error(&format!(
+                            "found duplicate NIC ID in bp_omicron_zone_nic: {}",
+                            nic_id,
+                        ))));
+                    }
                 }
             }
 
@@ -872,16 +861,17 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                // `paginated` implicitly orders by our `id`, which is also
-                // handy for testing: the zones are always consistently ordered
+                // `paginated` implicitly orders by our `id`, which
+                // is also handy for testing: the zones are always
+                // consistently ordered
                 let batch = paginated(
                     dsl::bp_omicron_zone,
                     dsl::id,
                     &p.current_pagparams(),
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
-                // Left join in case the artifact is missing from the
-                // tuf_artifact table, which is non-fatal.
+                // Left join in case the artifact is missing from
+                // the tuf_artifact table, which is non-fatal.
                 .left_join(
                     tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
                         .eq(KnownArtifactKind::Zone.to_string())
@@ -895,11 +885,8 @@ impl DataStore {
                     BpOmicronZone::as_select(),
                     Option::<TufArtifact>::as_select(),
                 ))
-                .load_async::<(BpOmicronZone, Option<TufArtifact>)>(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async::<(BpOmicronZone, Option<TufArtifact>)>(conn)
+                .await?;
 
                 paginator = p.found_batch(&batch, &|(z, _)| z.id);
 
@@ -907,18 +894,20 @@ impl DataStore {
                     let nic_row = z
                         .bp_nic_id
                         .map(|id| {
-                            // This error means that we found a row in
-                            // bp_omicron_zone that references a NIC by id but
-                            // there's no corresponding row in
-                            // bp_omicron_zone_nic with that id.  This should be
-                            // impossible and reflects either a bug or database
+                            // This error means that we found a row
+                            // in bp_omicron_zone that references a
+                            // NIC by id but there's no
+                            // corresponding row in
+                            // bp_omicron_zone_nic with that id.
+                            // This should be impossible and
+                            // reflects either a bug or database
                             // corruption.
                             omicron_zone_nics.remove(&id).ok_or_else(|| {
-                                Error::internal_error(&format!(
+                                err.bail(Error::internal_error(&format!(
                                     "zone {:?}: expected to find NIC {:?}, \
                                      but didn't",
                                     z.id, z.bp_nic_id
-                                ))
+                                )))
                             })
                         })
                         .transpose()?;
@@ -931,9 +920,9 @@ impl DataStore {
                             // bp_sled_omicron_zones.  This should be
                             // impossible and reflects either a bug or database
                             // corruption.
-                            Error::internal_error(&format!(
+                            err.bail(Error::internal_error(&format!(
                                 "zone {zone_id}: unknown sled: {sled_id}",
-                            ))
+                            )))
                         })?;
                     let zone = z
                         .into_blueprint_zone_config(nic_row, artifact)
@@ -941,27 +930,28 @@ impl DataStore {
                             format!("zone {zone_id}: parse from database")
                         })
                         .map_err(|e| {
-                            Error::internal_error(&format!(
+                            err.bail(Error::internal_error(&format!(
                                 "{:#}",
                                 e.to_string()
-                            ))
+                            )))
                         })?;
                     sled_config.zones.insert_unique(zone).map_err(|e| {
-                        Error::internal_error(&format!(
+                        err.bail(Error::internal_error(&format!(
                             "duplicate zone ID found, but \
                              database guarantees uniqueness: {}",
                             InlineErrorChain::new(&e),
-                        ))
+                        )))
                     })?;
                 }
             }
         }
 
-        bail_unless!(
-            omicron_zone_nics.is_empty(),
-            "found extra Omicron zone NICs: {:?}",
-            omicron_zone_nics.keys()
-        );
+        if !omicron_zone_nics.is_empty() {
+            return Err(err.bail(Error::internal_error(&format!(
+                "found extra Omicron zone NICs: {:?}",
+                omicron_zone_nics.keys()
+            ))));
+        }
 
         // Load all the physical disks for each sled.
         {
@@ -981,11 +971,8 @@ impl DataStore {
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpOmicronPhysicalDisk::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
 
                 paginator = p.found_batch(&batch, &|d| d.id);
 
@@ -998,24 +985,24 @@ impl DataStore {
                         // record in bp_sled_omicron_physical_disks.  This
                         // should be impossible and reflects either a bug or
                         // database corruption.
-                        Error::internal_error(&format!(
+                        err.bail(Error::internal_error(&format!(
                             "disk {}: unknown sled: {}",
                             d.id, d.sled_id
-                        ))
+                        )))
                     })?;
                     let disk_id = d.id;
                     let disk = d.try_into().map_err(|e| {
-                        Error::internal_error(&format!(
+                        err.bail(Error::internal_error(&format!(
                             "Cannot convert BpOmicronPhysicalDisk {}: {e}",
                             disk_id
-                        ))
+                        )))
                     })?;
                     sled_config.disks.insert_unique(disk).map_err(|e| {
-                        Error::internal_error(&format!(
+                        err.bail(Error::internal_error(&format!(
                             "duplicate disk ID found, but \
                              database guarantees uniqueness: {}",
                             InlineErrorChain::new(&e),
-                        ))
+                        )))
                     })?;
                 }
             }
@@ -1039,11 +1026,8 @@ impl DataStore {
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpOmicronDataset::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
 
                 paginator = p.found_batch(&batch, &|d| d.id);
 
@@ -1056,26 +1040,26 @@ impl DataStore {
                         // bp_sled_omicron_datasets.  This should be
                         // impossible and reflects either a bug or database
                         // corruption.
-                        Error::internal_error(&format!(
+                        err.bail(Error::internal_error(&format!(
                             "dataset {}: unknown sled: {}",
                             d.id, d.sled_id
-                        ))
+                        )))
                     })?;
 
                     let dataset_id = d.id;
                     let dataset = d.try_into().map_err(|e| {
-                        Error::internal_error(&format!(
+                        err.bail(Error::internal_error(&format!(
                             "Cannot parse dataset {}: {e}",
                             dataset_id
-                        ))
+                        )))
                     })?;
                     sled_config.datasets.insert_unique(dataset).map_err(
                         |e| {
-                            Error::internal_error(&format!(
+                            err.bail(Error::internal_error(&format!(
                                 "duplicate dataset ID found, but \
                                  database guarantees uniqueness: {}",
                                 InlineErrorChain::new(&e),
-                            ))
+                            )))
                         },
                     )?;
                 }
@@ -1089,12 +1073,9 @@ impl DataStore {
             let res = dsl::bp_clickhouse_cluster_config
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpClickhouseClusterConfig::as_select())
-                .get_result_async(&*conn)
+                .get_result_async(conn)
                 .await
-                .optional()
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .optional()?;
 
             match res {
                 None => None,
@@ -1120,14 +1101,8 @@ impl DataStore {
                             .select(
                                 BpClickhouseKeeperZoneIdToNodeId::as_select(),
                             )
-                            .load_async(&*conn)
-                            .await
-                            .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            })?;
+                            .load_async(conn)
+                            .await?;
 
                             paginator =
                                 p.found_batch(&batch, &|k| k.omicron_zone_id);
@@ -1136,9 +1111,11 @@ impl DataStore {
                                 let keeper_id = KeeperId(
                                     u64::try_from(k.keeper_id).map_err(
                                         |_| {
-                                            Error::internal_error(&format!(
-                                                "keeper id is negative: {}",
-                                                k.keeper_id
+                                            err.bail(Error::internal_error(
+                                                &format!(
+                                                    "keeper id is negative: {}",
+                                                    k.keeper_id
+                                                ),
                                             ))
                                         },
                                     )?,
@@ -1173,14 +1150,8 @@ impl DataStore {
                             .select(
                                 BpClickhouseServerZoneIdToNodeId::as_select(),
                             )
-                            .load_async(&*conn)
-                            .await
-                            .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            })?;
+                            .load_async(conn)
+                            .await?;
 
                             paginator =
                                 p.found_batch(&batch, &|s| s.omicron_zone_id);
@@ -1189,9 +1160,11 @@ impl DataStore {
                                 let server_id = ServerId(
                                     u64::try_from(s.server_id).map_err(
                                         |_| {
-                                            Error::internal_error(&format!(
-                                                "server id is negative: {}",
-                                                s.server_id
+                                            err.bail(Error::internal_error(
+                                                &format!(
+                                                    "server id is negative: {}",
+                                                    s.server_id
+                                                ),
                                             ))
                                         },
                                     )?,
@@ -1210,19 +1183,19 @@ impl DataStore {
                         max_used_server_id: ServerId(
                             u64::try_from(bp_config.max_used_server_id)
                                 .map_err(|_| {
-                                    Error::internal_error(&format!(
+                                    err.bail(Error::internal_error(&format!(
                                         "max server id is negative: {}",
                                         bp_config.max_used_server_id
-                                    ))
+                                    )))
                                 })?,
                         ),
                         max_used_keeper_id: KeeperId(
                             u64::try_from(bp_config.max_used_keeper_id)
                                 .map_err(|_| {
-                                    Error::internal_error(&format!(
+                                    err.bail(Error::internal_error(&format!(
                                         "max keeper id is negative: {}",
                                         bp_config.max_used_keeper_id
-                                    ))
+                                    )))
                                 })?,
                         ),
                         cluster_name: bp_config.cluster_name,
@@ -1232,10 +1205,10 @@ impl DataStore {
                                 bp_config.highest_seen_keeper_leader_committed_log_index,
                             )
                             .map_err(|_| {
-                                Error::internal_error(&format!(
+                                err.bail(Error::internal_error(&format!(
                                     "max server id is negative: {}",
                                     bp_config.highest_seen_keeper_leader_committed_log_index
-                                ))
+                                )))
                             })?,
                         keepers,
                         servers,
@@ -1250,12 +1223,9 @@ impl DataStore {
             let res = dsl::bp_oximeter_read_policy
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpOximeterReadPolicy::as_select())
-                .get_result_async(&*conn)
+                .get_result_async(conn)
                 .await
-                .optional()
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .optional()?;
 
             match res {
                 // If policy is empty, we can safely assume we are at version 1 which defaults
@@ -1288,11 +1258,8 @@ impl DataStore {
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpPendingMgsUpdateRotBootloader::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
 
                 paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
                 for row in batch {
@@ -1318,11 +1285,8 @@ impl DataStore {
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpPendingMgsUpdateRot::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
 
                 paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
                 for row in batch {
@@ -1348,11 +1312,8 @@ impl DataStore {
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpPendingMgsUpdateSp::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
 
                 paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
                 for row in batch {
@@ -1379,11 +1340,8 @@ impl DataStore {
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpPendingMgsUpdateHostPhase1::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
 
                 paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
                 for row in batch {
@@ -1424,11 +1382,8 @@ impl DataStore {
                 )
                 .filter(dsl::id.eq_any(baseboard_id_ids.clone()))
                 .select(HwBaseboardId::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 bbs.extend(
                     batch
@@ -1448,7 +1403,8 @@ impl DataStore {
                 &baseboards_by_id,
                 &mut pending_mgs_updates,
                 &blueprint_id,
-            )?;
+            )
+            .map_err(|e| err.bail(e))?;
         }
         for row in pending_updates_rot {
             process_update_row(
@@ -1456,7 +1412,8 @@ impl DataStore {
                 &baseboards_by_id,
                 &mut pending_mgs_updates,
                 &blueprint_id,
-            )?;
+            )
+            .map_err(|e| err.bail(e))?;
         }
         for row in pending_updates_sp {
             process_update_row(
@@ -1464,7 +1421,8 @@ impl DataStore {
                 &baseboards_by_id,
                 &mut pending_mgs_updates,
                 &blueprint_id,
-            )?;
+            )
+            .map_err(|e| err.bail(e))?;
         }
         for row in pending_updates_host_phase_1 {
             process_update_row(
@@ -1472,7 +1430,8 @@ impl DataStore {
                 &baseboards_by_id,
                 &mut pending_mgs_updates,
                 &blueprint_id,
-            )?;
+            )
+            .map_err(|e| err.bail(e))?;
         }
 
         Ok(Blueprint {
@@ -1494,6 +1453,31 @@ impl DataStore {
             comment,
             source,
         })
+    }
+
+    /// Read a complete blueprint from the database
+    pub async fn blueprint_read(
+        &self,
+        opctx: &OpContext,
+        authz_blueprint: &authz::Blueprint,
+    ) -> Result<Blueprint, Error> {
+        opctx.authorize(authz::Action::Read, authz_blueprint).await?;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper("blueprint_read")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    Self::blueprint_read_in_txn(&conn, authz_blueprint, err)
+                        .await
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err,
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
     /// Delete a blueprint from the database
