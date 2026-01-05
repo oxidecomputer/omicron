@@ -24,7 +24,7 @@
 //!
 //! ## Multicast Types
 //!
-//! Multicast types are re-exported from [`v2025122300`](super::v2025122300).
+//! Multicast types are re-exported from `v2025122300`.
 //! Both versions use `NameOrId` for group references and have the same
 //! explicit create/update semantics.
 //!
