@@ -759,7 +759,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -782,7 +782,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -1745,7 +1745,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1773,7 +1773,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=67af48dcc230f98f8ae8019f323f04c19408f42e#67af48dcc230f98f8ae8019f323f04c19408f42e"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=579192b489982324643f95c231d7f9b8d3773314#579192b489982324643f95c231d7f9b8d3773314"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2983,7 +2983,7 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?branch=main#606c0be888f47d458c8e0465726358d92bc736e6"
+source = "git+https://github.com/oxidecomputer/dendrite?branch=main#82abfd43e7e5fbb73a5817906956bc2aadd8f8fa"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3007,11 +3007,11 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=67af48dcc230f98f8ae8019f323f04c19408f42e#67af48dcc230f98f8ae8019f323f04c19408f42e"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=579192b489982324643f95c231d7f9b8d3773314#579192b489982324643f95c231d7f9b8d3773314"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=67af48dcc230f98f8ae8019f323f04c19408f42e)",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=579192b489982324643f95c231d7f9b8d3773314)",
  "crc8",
  "futures",
  "http",
@@ -7457,7 +7457,7 @@ dependencies = [
  "crucible-agent-client",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=67af48dcc230f98f8ae8019f323f04c19408f42e)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=579192b489982324643f95c231d7f9b8d3773314)",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -8345,7 +8345,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=67af48dcc230f98f8ae8019f323f04c19408f42e)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=579192b489982324643f95c231d7f9b8d3773314)",
  "dropshot",
  "ereport-types",
  "expectorate",
@@ -8828,7 +8828,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=67af48dcc230f98f8ae8019f323f04c19408f42e)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=579192b489982324643f95c231d7f9b8d3773314)",
  "dropshot",
  "expectorate",
  "flate2",
@@ -9448,7 +9448,7 @@ dependencies = [
 [[package]]
 name = "oximeter"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#f41bd73be02538b43ab0c65585b703a1cb216d03"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#0c0bdf48d80e67b9c8c6938e35434affde962552"
 dependencies = [
  "anyhow",
  "chrono",
@@ -9472,7 +9472,7 @@ dependencies = [
  "dropshot-api-manager-types",
  "omicron-common",
  "omicron-workspace-hack",
- "oximeter-types-versions",
+ "oximeter-types-versions 0.1.0",
  "semver 1.0.27",
 ]
 
@@ -9646,7 +9646,7 @@ dependencies = [
 [[package]]
 name = "oximeter-macro-impl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#f41bd73be02538b43ab0c65585b703a1cb216d03"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#0c0bdf48d80e67b9c8c6938e35434affde962552"
 dependencies = [
  "omicron-workspace-hack",
  "proc-macro2",
@@ -9703,7 +9703,7 @@ dependencies = [
 [[package]]
 name = "oximeter-schema"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#f41bd73be02538b43ab0c65585b703a1cb216d03"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#0c0bdf48d80e67b9c8c6938e35434affde962552"
 dependencies = [
  "anyhow",
  "chrono",
@@ -9752,7 +9752,7 @@ dependencies = [
 [[package]]
 name = "oximeter-timeseries-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#f41bd73be02538b43ab0c65585b703a1cb216d03"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#0c0bdf48d80e67b9c8c6938e35434affde962552"
 dependencies = [
  "omicron-workspace-hack",
  "oximeter-schema 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
@@ -9775,7 +9775,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "oximeter-macro-impl 0.1.0",
- "oximeter-types-versions",
+ "oximeter-types-versions 0.1.0",
  "parse-display",
  "rand 0.9.2",
  "rand_distr",
@@ -9793,7 +9793,7 @@ dependencies = [
 [[package]]
 name = "oximeter-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#f41bd73be02538b43ab0c65585b703a1cb216d03"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#0c0bdf48d80e67b9c8c6938e35434affde962552"
 dependencies = [
  "bytes",
  "chrono",
@@ -9801,6 +9801,7 @@ dependencies = [
  "num",
  "omicron-common",
  "omicron-workspace-hack",
+ "oximeter-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "parse-display",
  "regex",
  "schemars 0.8.22",
@@ -9813,6 +9814,19 @@ dependencies = [
 [[package]]
 name = "oximeter-types-versions"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars 0.8.22",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "oximeter-types-versions"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#0c0bdf48d80e67b9c8c6938e35434affde962552"
 dependencies = [
  "chrono",
  "omicron-common",
@@ -10267,7 +10281,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "rand 0.8.5",
@@ -13538,7 +13552,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -16261,7 +16275,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=67af48dcc230f98f8ae8019f323f04c19408f42e)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=579192b489982324643f95c231d7f9b8d3773314)",
  "dropshot",
  "gateway-client",
  "gateway-types",
@@ -16321,7 +16335,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=67af48dcc230f98f8ae8019f323f04c19408f42e)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=579192b489982324643f95c231d7f9b8d3773314)",
  "dropshot",
  "either",
  "expectorate",
