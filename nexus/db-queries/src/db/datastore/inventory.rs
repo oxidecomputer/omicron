@@ -5,7 +5,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use nexus_db_errors::OptionalError;
 use crate::db::pagination::{Paginator, paginated, paginated_multicolumn};
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use anyhow::Context;
@@ -29,6 +28,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_model::ArtifactHash;
