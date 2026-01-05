@@ -195,12 +195,13 @@ impl From<String> for SvcState {
     }
 }
 
+// TODO-K: Ugh, I think this might need to be versioned and moved out of here?
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 /// Information about an SMF service that is enabled but not running
 pub struct SvcInMaintenance {
-    fmri: String,
-    zone: String,
+    pub fmri: String,
+    pub zone: String,
 }
 
 impl SvcInMaintenance {

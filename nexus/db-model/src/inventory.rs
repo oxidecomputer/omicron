@@ -27,14 +27,16 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use iddqd::IdOrdMap;
+use illumos_utils::svcs::SvcInMaintenance;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::inv_zone_manifest_non_boot;
 use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
-    inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
-    inv_internal_dns, inv_last_reconciliation_dataset_result,
+    inv_health_monitor_svc_in_maintenance, inv_host_phase_1_active_slot,
+    inv_host_phase_1_flash_hash, inv_internal_dns,
+    inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_mupdate_override_non_boot,
@@ -1011,6 +1013,46 @@ impl_enum_type!(
     Running => b"running"
     Idle => b"idle"
 );
+
+// TODO-K: add docs and move type elsewhere?
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_health_monitor_svc_in_maintenance)]
+pub struct InvSvcInMaintenance {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub fmri: Option<String>,
+    pub zone: Option<String>,
+    pub error_messages: Vec<String>,
+    // TODO-K: Check if this needs to be an option
+    pub time_of_status: Option<DateTime<Utc>>,
+}
+
+impl InvSvcInMaintenance {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        svc: Option<SvcInMaintenance>,
+        svc_errors: Vec<String>,
+        time_of_status: Option<DateTime<Utc>>,
+        // TODO-K: Does this need to be here? or is it OK to bunch up all the
+        // errors in one place?
+        //svcs_cmd_error: Option<String>,
+    ) -> Self {
+        let (fmri, zone) = match svc {
+            Some(svc) => (Some(svc.fmri), Some(svc.zone)),
+            None => (None, None),
+        };
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            fmri,
+            zone,
+            error_messages: svc_errors,
+            time_of_status,
+        }
+    }
+}
 
 /// See [`sled_agent_types::inventory::ConfigReconcilerInventory`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]

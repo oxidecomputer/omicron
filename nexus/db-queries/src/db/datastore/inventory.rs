@@ -60,6 +60,7 @@ use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledBootPartition;
 use nexus_db_model::InvSledConfigReconciler;
+use nexus_db_model::InvSvcInMaintenance;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
@@ -203,6 +204,33 @@ impl DataStore {
                             })?,
                         ),
                 }
+            }
+        }
+
+        // TODO-K: Clean up
+        // Pull services in maintenance out of all sled agents
+        let mut svcs_in_maintenance = vec![];
+
+        for sled_agent in &collection.sled_agents {
+            match &sled_agent.health_monitor.smf_services_in_maintenance {
+                Ok(svcs) => {
+                    for svc in &svcs.services {
+                        svcs_in_maintenance.push(InvSvcInMaintenance::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            Some(svc.clone()),
+                            svcs.errors.clone(),
+                            svcs.time_of_status,
+                        ));
+                    }
+                }
+                Err(e) => svcs_in_maintenance.push(InvSvcInMaintenance::new(
+                    collection_id,
+                    sled_agent.sled_id,
+                    None,
+                    vec![e.to_string()],
+                    None,
+                )),
             }
         }
 
@@ -1394,6 +1422,25 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the unhealthy services we found
+            {
+                use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut svcs_in_maintenance = svcs_in_maintenance.into_iter();
+                loop {
+                    let some_svcs_in_maintenance =
+                        svcs_in_maintenance.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_svcs_in_maintenance.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_health_monitor_svc_in_maintenance)
+                        .values(some_svcs_in_maintenance)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for the sled agents that we found.  In practice, we'd
             // expect these to all have baseboards (if using Oxide hardware) or
             // none have baseboards (if not).
@@ -2223,6 +2270,8 @@ impl DataStore {
                         .await?
                     };
 
+                    // TODO-K: Remove rows for health monitor
+
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
@@ -2299,6 +2348,7 @@ impl DataStore {
             "ncockroach_status" => ncockroach_status,
             "nntp_timesync" => nntp_timesync,
             "ninternal_dns" => ninternal_dns,
+            // TODO-K: add health monitor rows here too
         );
 
         Ok(())
@@ -2587,6 +2637,7 @@ impl DataStore {
             disk_firmware
         };
 
+        // TODO-K: Take inspiration here
         // Mapping of "Sled ID" -> "All disks reported by that sled"
         let physical_disks: BTreeMap<
             SledUuid,
