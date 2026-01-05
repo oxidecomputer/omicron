@@ -734,7 +734,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9#3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9"
+source = "git+https://github.com/oxidecomputer/propolis?rev=94a8c29b948e0ff49171a1e631584da965a6222e#94a8c29b948e0ff49171a1e631584da965a6222e"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -744,7 +744,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9#3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9"
+source = "git+https://github.com/oxidecomputer/propolis?rev=94a8c29b948e0ff49171a1e631584da965a6222e#94a8c29b948e0ff49171a1e631584da965a6222e"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -8436,7 +8436,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client 0.10.0",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=94a8c29b948e0ff49171a1e631584da965a6222e)",
  "qorb",
  "rand 0.9.2",
  "range-requests",
@@ -8874,7 +8874,7 @@ dependencies = [
  "oxnet",
  "pretty_assertions",
  "progenitor 0.10.0",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=94a8c29b948e0ff49171a1e631584da965a6222e)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand 0.9.2",
@@ -10959,7 +10959,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9#3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9"
+source = "git+https://github.com/oxidecomputer/propolis?rev=94a8c29b948e0ff49171a1e631584da965a6222e#94a8c29b948e0ff49171a1e631584da965a6222e"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -11004,7 +11004,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9#3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9"
+source = "git+https://github.com/oxidecomputer/propolis?rev=94a8c29b948e0ff49171a1e631584da965a6222e#94a8c29b948e0ff49171a1e631584da965a6222e"
 dependencies = [
  "anyhow",
  "atty",
@@ -11048,7 +11048,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9#3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9"
+source = "git+https://github.com/oxidecomputer/propolis?rev=94a8c29b948e0ff49171a1e631584da965a6222e#94a8c29b948e0ff49171a1e631584da965a6222e"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -11061,7 +11061,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9#3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9"
+source = "git+https://github.com/oxidecomputer/propolis?rev=94a8c29b948e0ff49171a1e631584da965a6222e#94a8c29b948e0ff49171a1e631584da965a6222e"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -13005,7 +13005,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.10.0",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=94a8c29b948e0ff49171a1e631584da965a6222e)",
  "regress",
  "reqwest",
  "schemars 0.8.22",
@@ -13106,7 +13106,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=94a8c29b948e0ff49171a1e631584da965a6222e)",
  "proptest",
  "rcgen",
  "schemars 0.8.22",
