@@ -26,7 +26,7 @@ use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::result::Error as DieselError;
-use diesel::sql_types::{BigInt, Nullable, SingleValue};
+use diesel::sql_types::{BigInt, Bool, Nullable, SingleValue};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DatastoreAttachTargetConfig;
 use std::fmt::Debug;
@@ -75,6 +75,22 @@ pub(crate) mod aliases {
         <ResourcePrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
     pub type SerializedResourceForeignKey<ResourceType, C> =
         <ResourceForeignKey<ResourceType, C> as diesel::Expression>::SqlType;
+
+    pub trait BooleanCondition:
+        super::Query<SqlType = super::Bool>
+        + super::QueryFragment<super::Pg>
+        + Send
+        + 'static
+    {
+    }
+
+    impl<T> BooleanCondition for T where
+        T: super::Query<SqlType = super::Bool>
+            + super::QueryFragment<super::Pg>
+            + Send
+            + 'static
+    {
+    }
 }
 
 use aliases::*;
@@ -181,6 +197,133 @@ pub trait DatastoreAttachTarget<ResourceType>:
         // Necessary to actually select the resource in the output type.
         ResourceType: Selectable<Pg>,
     {
+        Self::attach_resource_with_update_condition(
+            collection_id,
+            resource_id,
+            collection_query,
+            resource_query,
+            max_attached_resources,
+            update,
+            diesel::select(true.into_sql::<Bool>()),
+        )
+    }
+
+    /// Attach a reesource, conditional on extra user-supplied query results.
+    ///
+    /// This method is identical to `attach_resource` in most respects. However,
+    /// there are some cases where it might not be flexible enough; for example,
+    /// if you need to attach a resource, conditional on some other resource
+    /// having some property.
+    ///
+    /// Users can supply any executable SQL query that returns a boolean. It
+    /// _should_ return a single value, but there aren't great ways to express
+    /// that in Diesel's trait system. The query will be used in a CTE like:
+    ///
+    /// ```text
+    /// WITH user_supplied_update_condition AS (
+    ///     SELECT COALESCE(EVERY(<your conditional query>), FALSE)
+    /// )
+    /// ```
+    ///
+    /// That means:
+    ///
+    /// - If the condition query returns no rows, the result is `FALSE`.
+    /// - If the condition query returns one row, the result is the result of
+    ///   that row.
+    /// - If the query returns multiple rows, they will be joined with `AND`, so
+    ///   any false row will cause the update not to be applied.
+    ///
+    /// # Notes
+    ///
+    /// This is a bit of a hacky escape hatch. The `attach_resource` method is
+    /// pretty strict on its trait bounds (which is good), so we can't supply
+    /// any queries other than one directly on the resource or collection
+    /// tables. It also cannot be used in our transaction-retry wrappers, since
+    /// it returns a special error type that's incompatible with the retry
+    /// logic.
+    ///
+    /// Most folks shouldn't care about either of these, and so should stick
+    /// with the `attach_resource()` method. But this is a reasonably-safe
+    /// escape hatch should you need one.
+    fn attach_resource_with_update_condition<V, Cond>(
+        collection_id: Self::Id,
+        resource_id: Self::Id,
+
+        collection_query: BoxedQuery<CollectionTable<ResourceType, Self>>,
+        resource_query: BoxedQuery<ResourceTable<ResourceType, Self>>,
+
+        max_attached_resources: u32,
+
+        // We are intentionally picky about this update statement:
+        // - The second argument - the WHERE clause - must match the default
+        // for the table. This encourages the "resource_query" filter to be
+        // used instead, and makes it possible for the CTE to modify the
+        // filter here (ensuring "resource_id" is selected).
+        // - Additionally, UpdateStatement's fourth argument defaults to Ret =
+        // NoReturningClause. This enforces that the given input statement does
+        // not have a RETURNING clause, and also lets the CTE control this
+        // value.
+        update: UpdateStatement<
+            ResourceTable<ResourceType, Self>,
+            ResourceTableDefaultWhereClause<ResourceType, Self>,
+            V,
+        >,
+
+        update_condition: Cond,
+    ) -> AttachToCollectionStatement<ResourceType, V, Self>
+    where
+        // Treat the collection and resource as boxed tables.
+        CollectionTable<ResourceType, Self>: BoxableTable,
+        ResourceTable<ResourceType, Self>: BoxableTable,
+        // Allows treating "collection_exists_query" as a boxed "dyn QueryFragment<Pg>".
+        QueryFromClause<CollectionTable<ResourceType, Self>>:
+            QueryFragment<Pg> + Send,
+        // Allows treating "resource_exists_query" as a boxed "dyn QueryFragment<Pg>".
+        QueryFromClause<ResourceTable<ResourceType, Self>>:
+            QueryFragment<Pg> + Send,
+        // Allows sending "collection_exists_query" between threads.
+        QuerySqlType<CollectionTable<ResourceType, Self>>: Send,
+        // Allows sending "resource_exists_query" between threads.
+        QuerySqlType<ResourceTable<ResourceType, Self>>: Send,
+        // Allows calling ".filter()" on the boxed collection table.
+        BoxedQuery<CollectionTable<ResourceType, Self>>: FilterBy<Eq<CollectionPrimaryKey<ResourceType, Self>, Self::Id>>
+            + FilterBy<IsNull<Self::CollectionTimeDeletedColumn>>,
+        // Allows calling ".filter()" on the boxed resource table.
+        BoxedQuery<ResourceTable<ResourceType, Self>>: FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>>
+            + FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>>
+            + FilterBy<IsNull<Self::ResourceCollectionIdColumn>>
+            + FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
+        // Allows calling "update.into_boxed()"
+        UpdateStatement<
+            ResourceTable<ResourceType, Self>,
+            ResourceTableDefaultWhereClause<ResourceType, Self>,
+            V,
+        >: BoxableUpdateStatement<ResourceTable<ResourceType, Self>, V>,
+        // Allows calling
+        // ".filter(resource_table().primary_key().eq(resource_id)" on the
+        // boxed update statement.
+        BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, Self>, V>:
+            FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>>,
+        // Allows using "id" in expressions (e.g. ".eq(...)") with...
+        Self::Id: AsExpression<
+                // ... The Collection table's PK
+                SerializedCollectionPrimaryKey<ResourceType, Self>,
+            > + AsExpression<
+                // ... The Resource table's PK
+                SerializedResourcePrimaryKey<ResourceType, Self>,
+            > + AsExpression<
+                // ... The Resource table's FK to the Collection table
+                SerializedResourceForeignKey<ResourceType, Self>,
+            >,
+        ExprSqlType<CollectionPrimaryKey<ResourceType, Self>>: SingleValue,
+        ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
+        ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
+        // Necessary to actually select the resource in the output type.
+        ResourceType: Selectable<Pg>,
+        // The condition evaluates to a boolean and can be inserted in an actual
+        // SQL query.
+        Cond: BooleanCondition,
+    {
         let collection_table =
             || <CollectionTable<ResourceType, Self> as HasTable>::table();
         let resource_table =
@@ -254,15 +397,17 @@ pub trait DatastoreAttachTarget<ResourceType>:
             .filter(resource_table().primary_key().eq(resource_id));
 
         let resource_returning_clause = ResourceType::as_returning();
+        let update_condition = Box::new(update_condition);
         AttachToCollectionStatement {
             collection_exists_query,
             resource_exists_query,
             resource_count_query,
             collection_query,
             resource_query,
-            max_attached_resources,
+            max_attached_resources: i64::from(max_attached_resources),
             update_resource_statement,
             resource_returning_clause,
+            update_condition,
         }
     }
 }
@@ -289,13 +434,15 @@ where
     // A (mostly) user-provided query for validating the resource.
     resource_query: Box<dyn QueryFragment<Pg> + Send>,
     // The maximum number of resources which may be attached to the collection.
-    max_attached_resources: u32,
+    max_attached_resources: i64,
 
     // Update statement for the resource.
     update_resource_statement:
         BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>,
     // Describes what should be returned after UPDATE-ing the resource.
     resource_returning_clause: AsSelect<ResourceType, Pg>,
+    // Extra boolean condition gating the actual update.
+    update_condition: Box<dyn BooleanCondition>,
 }
 
 impl<ResourceType, V, C> QueryId
@@ -324,7 +471,12 @@ pub enum AttachError<ResourceType, C, E> {
     /// The unchanged resource and collection are returned as a part of this
     /// error; it is the responsibility of the caller to determine which
     /// condition was not met.
-    NoUpdate { attached_count: i64, resource: ResourceType, collection: C },
+    NoUpdate {
+        attached_count: i64,
+        update_condition_satisfied: bool,
+        resource: ResourceType,
+        collection: C,
+    },
     /// Other database error
     DatabaseError(E),
 }
@@ -332,7 +484,7 @@ pub enum AttachError<ResourceType, C, E> {
 /// Describes the type returned from the actual CTE, which is parsed
 /// and interpreted before propagating it to users of the Rust API.
 pub type RawOutput<ResourceType, C> =
-    (i64, Option<C>, Option<ResourceType>, Option<ResourceType>);
+    (i64, bool, Option<C>, Option<ResourceType>, Option<ResourceType>);
 
 impl<ResourceType, V, C> AttachToCollectionStatement<ResourceType, V, C>
 where
@@ -368,6 +520,7 @@ where
     ) -> Result<(C, ResourceType), AttachError<ResourceType, C, E>> {
         let (
             attached_count,
+            update_condition_satisfied,
             collection_before_update,
             resource_before_update,
             resource_after_update,
@@ -383,6 +536,7 @@ where
             Some(resource) => Ok((collection_before_update, resource)),
             None => Err(AttachError::NoUpdate {
                 attached_count,
+                update_condition_satisfied,
                 resource: resource_before_update,
                 collection: collection_before_update,
             }),
@@ -402,6 +556,8 @@ where
     type SqlType = (
         // The number of resources attached to the collection before update.
         BigInt,
+        // Whether the user-supplied update condition was satisifed.
+        Bool,
         // If the collection exists, the value before update.
         Nullable<SelectableSqlType<C>>,
         // If the resource exists, the value before update.
@@ -427,6 +583,10 @@ where
 ///    the collection exceeds a threshold.
 /// 3. (collection_info, resource_info): Checks for arbitrary user-provided
 ///    constraints on the collection and resource objects.
+/// 4. Check an additional, arbitrary user-supplied update condition. This can
+///    be on any tables or any SQL query, as long as it results in a boolean. If
+///    the query returns any rows (EXISTS() is TRUE), then the update condition
+///    is considered satisfied.
 /// 4. (do_update): IFF all previous checks succeeded, make a decision to perfom
 ///    an update.
 /// 5. (updated_resource): Apply user-provided updates on the resource -
@@ -467,12 +627,17 @@ where
 /// //              <FK> IS NULL AND <Additional user-supplied constraints>
 /// //          FOR UPDATE
 /// //      ),
+/// //      /* Check any user-supplied update conditions. */
+/// //      satisfies_update_conditions AS (SELECT COALESCE(EVERY((
+/// //          <user-supplied update condition query>
+/// //      )), FALSE)),
 /// //      /* Make a decision on whether or not to apply ANY updates */
 /// //      do_update AS (
 /// //          SELECT IF(
 /// //              EXISTS(SELECT id FROM collection_info) AND
 /// //              EXISTS(SELECT id FROM resource_info) AND
-/// //              (SELECT * FROM resource_count) < <CAPACITY>,
+/// //              (SELECT * FROM resource_count) < <CAPACITY> AND
+/// //              EVERY((SELECT * FROM satisfies_update_conditions)),
 /// //          TRUE, FALSE),
 /// //      ),
 /// //      /* Update the resource */
@@ -483,6 +648,7 @@ where
 /// //      )
 /// //  SELECT * FROM
 /// //      (SELECT * FROM resource_count)
+/// //      LEFT JOIN (SELECT * FROM satisfies_update_conditions) ON TRUE
 /// //      LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE
 /// //      LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE
 /// //      LEFT JOIN (SELECT * FROM updated_resource) ON TRUE;
@@ -521,13 +687,22 @@ where
         self.resource_query.walk_ast(out.reborrow())?;
         out.push_sql(" FOR UPDATE), ");
 
+        out.push_sql(
+            "user_supplied_update_condition AS (SELECT COALESCE(EVERY((",
+        );
+        self.update_condition.walk_ast(out.reborrow())?;
+        out.push_sql(")), FALSE)), ");
+
         out.push_sql("do_update AS (SELECT IF(EXISTS(SELECT ");
         out.push_identifier(CollectionIdColumn::<ResourceType, C>::NAME)?;
         out.push_sql(" FROM collection_info) AND EXISTS(SELECT ");
         out.push_identifier(ResourceIdColumn::<ResourceType, C>::NAME)?;
         out.push_sql(
-            &format!(" FROM resource_info) AND (SELECT * FROM resource_count) < {}, TRUE,FALSE)), ",
-            self.max_attached_resources)
+            " FROM resource_info) AND (SELECT * FROM resource_count) < ",
+        );
+        out.push_bind_param::<BigInt, _>(&self.max_attached_resources)?;
+        out.push_sql(
+            " AND EVERY((SELECT * FROM user_supplied_update_condition)), TRUE, FALSE)), "
         );
 
         out.push_sql("updated_resource AS (");
@@ -561,6 +736,7 @@ where
         out.push_sql(
             "SELECT * FROM \
             (SELECT * FROM resource_count) \
+            LEFT JOIN (SELECT * FROM user_supplied_update_condition) ON TRUE \
             LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE \
             LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE \
             LEFT JOIN (SELECT * FROM updated_resource) ON TRUE;",
@@ -827,21 +1003,25 @@ mod test {
                     (\"test_schema\".\"resource\".\"collection_id\" IS NULL)\
                 ) FOR UPDATE\
             ), \
+            user_supplied_update_condition AS (\
+                SELECT COALESCE(EVERY((SELECT $6)), FALSE)\
+            ), \
             do_update AS (\
                 SELECT IF(\
                     EXISTS(SELECT \"id\" FROM collection_info) AND \
                     EXISTS(SELECT \"id\" FROM resource_info) AND \
-                    (SELECT * FROM resource_count) < 12345, \
-                TRUE,\
+                    (SELECT * FROM resource_count) < $7 AND \
+                    EVERY((SELECT * FROM user_supplied_update_condition)), \
+                TRUE, \
                 FALSE)\
             ), \
             updated_resource AS (\
                 UPDATE \
                     \"test_schema\".\"resource\" \
                 SET \
-                    \"collection_id\" = $6 \
+                    \"collection_id\" = $8 \
                 WHERE \
-                    (\"test_schema\".\"resource\".\"id\" = $7) AND \
+                    (\"test_schema\".\"resource\".\"id\" = $9) AND \
                     (SELECT * FROM do_update) \
                 RETURNING \
                     \"test_schema\".\"resource\".\"id\", \
@@ -854,9 +1034,10 @@ mod test {
             ) \
             SELECT * FROM \
                 (SELECT * FROM resource_count) \
+                LEFT JOIN (SELECT * FROM user_supplied_update_condition) ON TRUE \
                 LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE \
                 LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE \
-                LEFT JOIN (SELECT * FROM updated_resource) ON TRUE; -- binds: [cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]";
+                LEFT JOIN (SELECT * FROM updated_resource) ON TRUE; -- binds: [cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, true, 12345, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]";
         assert_eq!(query, expected_query);
     }
 
@@ -1120,8 +1301,14 @@ mod test {
 
         let err = attach.expect_err("Should have failed to attach");
         match err {
-            AttachError::NoUpdate { attached_count, resource, collection } => {
+            AttachError::NoUpdate {
+                attached_count,
+                update_condition_satisfied,
+                resource,
+                collection,
+            } => {
                 assert_eq!(attached_count, 1);
+                assert!(update_condition_satisfied);
                 assert_eq!(resource, get_resource(resource_id2, &conn).await);
                 assert_eq!(
                     collection,
@@ -1184,8 +1371,14 @@ mod test {
         // is already set. This should provide enough context to identify "the
         // resource is already attached".
         match err {
-            AttachError::NoUpdate { attached_count, resource, collection } => {
+            AttachError::NoUpdate {
+                attached_count,
+                update_condition_satisfied,
+                resource,
+                collection,
+            } => {
                 assert_eq!(attached_count, 1);
+                assert!(update_condition_satisfied);
                 assert_eq!(
                     *resource
                         .collection_id
@@ -1218,8 +1411,14 @@ mod test {
         // Even when at capacity, the same information should be propagated back
         // to the caller.
         match err {
-            AttachError::NoUpdate { attached_count, resource, collection } => {
+            AttachError::NoUpdate {
+                attached_count,
+                update_condition_satisfied,
+                resource,
+                collection,
+            } => {
                 assert_eq!(attached_count, 1);
+                assert!(update_condition_satisfied);
                 assert_eq!(
                     *resource
                         .collection_id
@@ -1383,6 +1582,63 @@ mod test {
         );
         assert!(
             get_resource(resource_id2, &conn).await.collection_id.is_none()
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn fail_attach_if_update_condition_not_met() {
+        let logctx =
+            dev::test_setup_log("fail_attach_if_user_condition_not_met");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
+
+        let collection_id = uuid::Uuid::new_v4();
+        let resource_id = uuid::Uuid::new_v4();
+
+        // Create the collection and resource.
+        let _collection =
+            insert_collection(collection_id, "collection", &conn).await;
+        let _resource = insert_resource(resource_id, "resource", &conn).await;
+
+        // Attach the resource to the collection.
+        //
+        // Note that we are also filtering for specific conditions on the
+        // collection and resource - admittedly, just the name, but this could
+        // also be used to check the state of a disk, instance, etc.
+        let attach = Collection::attach_resource_with_update_condition(
+            collection_id,
+            resource_id,
+            collection::table
+                .filter(collection::name.eq("collection"))
+                .into_boxed(),
+            resource::table.filter(resource::name.eq("resource")).into_boxed(),
+            10,
+            // When actually performing the update, update the collection ID
+            // as well as an auxiliary field - the description.
+            //
+            // This provides an example of how one could attach an ID and update
+            // the state of a resource simultaneously.
+            diesel::update(resource::table).set((
+                resource::dsl::collection_id.eq(collection_id),
+                resource::dsl::description.eq("new description".to_string()),
+            )),
+            diesel::select(false.into_sql::<Bool>()),
+        )
+        .attach_and_get_result_async(&conn)
+        .await;
+
+        let err = attach.expect_err("Attach should have failed");
+        let AttachError::NoUpdate { update_condition_satisfied, .. } = &err
+        else {
+            panic!("Expected a NoUpdate error, found: {:#?}", err);
+        };
+        assert!(
+            !update_condition_satisfied,
+            "Update condition should not have been satisfied"
         );
 
         db.terminate().await;

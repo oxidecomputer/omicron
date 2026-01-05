@@ -11,7 +11,7 @@ use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Name;
-use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface as NetworkInterfaceV1;
+use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
@@ -705,12 +705,7 @@ pub struct ProbeInfo {
     #[schemars(with = "Uuid")]
     pub sled: SledUuid,
     pub external_ips: Vec<ProbeExternalIp>,
-    // NOTE: This type currently appears in both the external and internal APIs.
-    // It's not used in the internal API anymore, and we've not yet expanded the
-    // external API to support dual-stack NICs. When we do, this whole type
-    // needs a new version in the external API, and the internal API needs to
-    // continue to refer to this original version.
-    pub interface: NetworkInterfaceV1,
+    pub interface: NetworkInterface,
 }
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]

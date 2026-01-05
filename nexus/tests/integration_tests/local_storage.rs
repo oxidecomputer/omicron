@@ -10,7 +10,7 @@ use http::method::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, views};
@@ -38,7 +38,7 @@ fn get_disks_url() -> String {
 pub async fn create_project_and_pool(
     client: &ClientTestContext,
 ) -> views::Project {
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     create_project(client, PROJECT_NAME).await
 }
 
