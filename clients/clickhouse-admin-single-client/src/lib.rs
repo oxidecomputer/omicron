@@ -24,6 +24,6 @@ progenitor::generate_api!(
     },
     derives = [schemars::JsonSchema],
     replace = {
-        ServerConfigurableSettings = clickhouse_admin_types::ServerConfigurableSettings,
+        ServerConfigurableSettings = clickhouse_admin_types::server::ServerConfigurableSettings,
     }
 );

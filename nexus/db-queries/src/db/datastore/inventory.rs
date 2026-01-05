@@ -11,8 +11,8 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
-use cockroach_admin_types::NodeId as CockroachNodeId;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use cockroach_admin_types::node::InternalNodeId as CockroachNodeId;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
@@ -85,7 +85,6 @@ use nexus_db_schema::enums::{
     CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
 };
 use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
-use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -110,11 +109,13 @@ use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::ManifestNonBootInventory;
 use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::ZoneArtifactInventory;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -243,28 +244,27 @@ impl DataStore {
             .collect();
 
         // Pull zone manifest zones out of all sled agents.
-        let zone_manifest_zones: Vec<_> = collection
-            .sled_agents
-            .iter()
-            .filter_map(|sled_agent| {
-                sled_agent
-                    .zone_image_resolver
-                    .zone_manifest
-                    .boot_inventory
-                    .as_ref()
-                    .ok()
-                    .map(|artifacts| {
-                        artifacts.artifacts.iter().map(|artifact| {
-                            InvZoneManifestZone::new(
-                                collection_id,
-                                sled_agent.sled_id,
-                                artifact,
-                            )
-                        })
-                    })
-            })
-            .flatten()
-            .collect();
+        let mut zone_manifest_zones = Vec::new();
+        for sled_agent in &collection.sled_agents {
+            if let Some(artifacts) = sled_agent
+                .zone_image_resolver
+                .zone_manifest
+                .boot_inventory
+                .as_ref()
+                .ok()
+            {
+                for artifact in artifacts.artifacts.iter() {
+                    zone_manifest_zones.push(
+                        InvZoneManifestZone::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            artifact,
+                        )
+                        .map_err(|e| Error::internal_error(&e.to_string()))?,
+                    );
+                }
+            }
+        }
 
         // Pull zone manifest non-boot info out of all sled agents.
         let zone_manifest_non_boot: Vec<_> = collection
@@ -2743,12 +2743,11 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
-                bbs.extend(batch.into_iter().map(|bb| {
-                    (
-                        bb.id,
-                        Arc::new(nexus_types::inventory::BaseboardId::from(bb)),
-                    )
-                }));
+                bbs.extend(
+                    batch
+                        .into_iter()
+                        .map(|bb| (bb.id, Arc::new(BaseboardId::from(bb)))),
+                );
             }
 
             bbs
@@ -3632,7 +3631,11 @@ impl DataStore {
                     by_sled_id
                         .entry(row.sled_id.into())
                         .or_default()
-                        .insert_unique(row.into())
+                        .insert_unique(row.try_into().map_err(
+                            |e: anyhow::Error| {
+                                Error::internal_error(&e.to_string())
+                            },
+                        )?)
                         .expect("database ensures the row is unique");
                 }
             }
@@ -3999,6 +4002,9 @@ impl DataStore {
                 reconciler_status,
                 last_reconciliation,
                 zone_image_resolver,
+                // TODO-K[omicron#9516]: Actually query the DB when there is
+                // something there
+                health_monitor: HealthMonitorInventory::new(),
             };
             sled_agents
                 .insert_unique(sled_agent)
@@ -4464,7 +4470,7 @@ mod test {
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPageWhich;
-    use nexus_types::inventory::{BaseboardId, SpType};
+    use nexus_types::inventory::SpType;
     use omicron_common::api::external::Error;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
@@ -4487,6 +4493,7 @@ mod test {
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
         ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
     };
+    use sled_hardware_types::BaseboardId;
     use std::num::NonZeroU32;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;

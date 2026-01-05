@@ -38,7 +38,6 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
-use nexus_db_model::IpConfig;
 use nexus_db_model::IpVersion;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
@@ -52,6 +51,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::params as external_params;
+use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
@@ -540,13 +540,13 @@ impl DataStore {
         // TODO-completeness: Support dual-stack NICs for services. See
         // https://github.com/oxidecomputer/omicron/issues/9313.
         let extract_ip_config =
-            |nic: &NetworkInterface| -> Result<IpConfig, Error> {
+            |nic: &NetworkInterface| -> Result<PrivateIpStackCreate, Error> {
                 match &nic.ip_config {
                     PrivateIpConfig::V4(ipv4) => {
-                        Ok(IpConfig::from_ipv4(*ipv4.ip()))
+                        Ok(PrivateIpStackCreate::from_ipv4(*ipv4.ip()))
                     }
                     PrivateIpConfig::V6(ipv6) => {
-                        Ok(IpConfig::from_ipv6(*ipv6.ip()))
+                        Ok(PrivateIpStackCreate::from_ipv6(*ipv6.ip()))
                     }
                     PrivateIpConfig::DualStack { .. } => {
                         Err(Error::invalid_request(

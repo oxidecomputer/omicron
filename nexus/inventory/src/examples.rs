@@ -7,15 +7,14 @@
 use crate::CollectionBuilder;
 use crate::now_db_precision;
 use camino::Utf8Path;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
-use clickhouse_admin_types::KeeperId;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::KeeperId;
 use gateway_client::types::PowerState;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_types::rot::RotSlot;
 use iddqd::id_ord_map;
-use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
@@ -41,6 +40,7 @@ use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
@@ -75,6 +75,7 @@ use sled_agent_zone_images_examples::NON_BOOT_PATHS;
 use sled_agent_zone_images_examples::NON_BOOT_UUID;
 use sled_agent_zone_images_examples::WriteInstallDatasetContext;
 use sled_agent_zone_images_examples::dataset_missing_error;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -672,7 +673,7 @@ pub fn representative() -> Representative {
     );
 
     builder.found_cockroach_metrics(
-        cockroach_admin_types::NodeId::new("1".to_string()),
+        cockroach_admin_types::node::InternalNodeId::new("1".to_string()),
         PrometheusMetrics {
             metrics: BTreeMap::from([(
                 "ranges_underreplicated".to_string(),
@@ -1040,5 +1041,9 @@ pub fn sled_agent(
         reconciler_status,
         last_reconciliation,
         zone_image_resolver,
+        // TODO-K: We'll want to have the functionality to add some services
+        // here in a future PR. This will be more useful when we add this
+        // information to the DB.
+        health_monitor: HealthMonitorInventory::new(),
     }
 }

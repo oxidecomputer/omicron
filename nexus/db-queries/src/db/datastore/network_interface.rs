@@ -51,8 +51,6 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
-use oxnet::Ipv4Net;
-use oxnet::Ipv6Net;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -85,7 +83,9 @@ struct NicInfo {
     #[diesel(select_expression = nexus_db_schema::schema::network_interface::slot)]
     slot: SqlU8,
     #[diesel(select_expression = nexus_db_schema::schema::network_interface::transit_ips)]
-    transit_ips: Vec<ipnetwork::IpNetwork>,
+    transit_ips_v4: Vec<crate::db::model::Ipv4Net>,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::transit_ips_v6)]
+    transit_ips_v6: Vec<crate::db::model::Ipv6Net>,
 }
 
 impl TryFrom<NicInfo>
@@ -99,77 +99,47 @@ impl TryFrom<NicInfo>
         omicron_common::api::internal::shared::NetworkInterface,
         Self::Error,
     > {
-        let ip = match (nic.ipv4, nic.ipv6) {
+        let maybe_ipv4_config = match nic.ipv4 {
+            None => None,
+            Some(ipv4) => {
+                let transit_ips = nic
+                    .transit_ips_v4
+                    .iter()
+                    .copied()
+                    .map(Into::into)
+                    .collect();
+                Some(PrivateIpv4Config::new_with_transit_ips(
+                    *ipv4,
+                    *nic.ipv4_block,
+                    transit_ips,
+                )?)
+            }
+        };
+        let maybe_ipv6_config = match nic.ipv6 {
+            None => None,
+            Some(ipv6) => {
+                let transit_ips = nic
+                    .transit_ips_v6
+                    .iter()
+                    .copied()
+                    .map(Into::into)
+                    .collect();
+                Some(PrivateIpv6Config::new_with_transit_ips(
+                    *ipv6,
+                    *nic.ipv6_block,
+                    transit_ips,
+                )?)
+            }
+        };
+        let ip = match (maybe_ipv4_config, maybe_ipv6_config) {
             (None, None) => {
                 return Err(Error::internal_error(
                     "Found NIC with no VPC-private IP addresses at all",
                 ));
             }
-            (Some(ipv4), None) => {
-                let transit_ips = nic
-                    .transit_ips
-                    .iter()
-                    .map(|net| {
-                        let ipnetwork::IpNetwork::V4(net) = net else {
-                            return Err(Error::internal_error(
-                                "Found NIC with IPv4 address only, but \
-                                which has IPv6 transit IPs",
-                            ));
-                        };
-                        Ok(Ipv4Net::from(*net))
-                    })
-                    .collect::<Result<_, _>>()?;
-                PrivateIpConfig::V4(PrivateIpv4Config::new_with_transit_ips(
-                    *ipv4,
-                    *nic.ipv4_block,
-                    transit_ips,
-                )?)
-            }
-            (None, Some(ipv6)) => {
-                let transit_ips = nic
-                    .transit_ips
-                    .iter()
-                    .map(|net| {
-                        let ipnetwork::IpNetwork::V6(net) = net else {
-                            return Err(Error::internal_error(
-                                "Found NIC with IPv6 address only, but \
-                                which has IPv4 transit IPs",
-                            ));
-                        };
-                        Ok(Ipv6Net::from(*net))
-                    })
-                    .collect::<Result<_, _>>()?;
-                PrivateIpConfig::V6(PrivateIpv6Config::new_with_transit_ips(
-                    *ipv6,
-                    *nic.ipv6_block,
-                    transit_ips,
-                )?)
-            }
-            (Some(ipv4), Some(ipv6)) => {
-                let mut ipv4_transit_ips = Vec::new();
-                let mut ipv6_transit_ips = Vec::new();
-                for net in nic.transit_ips.iter() {
-                    match net {
-                        ipnetwork::IpNetwork::V4(net) => {
-                            ipv4_transit_ips.push(Ipv4Net::from(*net))
-                        }
-                        ipnetwork::IpNetwork::V6(net) => {
-                            ipv6_transit_ips.push(Ipv6Net::from(*net))
-                        }
-                    }
-                }
-                let v4 = PrivateIpv4Config::new_with_transit_ips(
-                    *ipv4,
-                    *nic.ipv4_block,
-                    ipv4_transit_ips,
-                )?;
-                let v6 = PrivateIpv6Config::new_with_transit_ips(
-                    *ipv6,
-                    *nic.ipv6_block,
-                    ipv6_transit_ips,
-                )?;
-                PrivateIpConfig::DualStack { v4, v6 }
-            }
+            (Some(v4), None) => PrivateIpConfig::V4(v4),
+            (None, Some(v6)) => PrivateIpConfig::V6(v6),
+            (Some(v4), Some(v6)) => PrivateIpConfig::DualStack { v4, v6 },
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
@@ -883,6 +853,7 @@ impl DataStore {
         #[derive(Debug)]
         enum NetworkInterfaceUpdateError {
             InstanceNotStopped,
+            CandidatePrimaryMissingIpStack(u8),
             FailedToUnsetPrimary(DieselError),
         }
 
@@ -923,6 +894,48 @@ impl DataStore {
                                     |e| NetworkInterfaceUpdateError::FailedToUnsetPrimary(e)
                                 ));
                             }
+
+                            // Ensure that the new secondary has VPC-private IP
+                            // addresses of the same family as any external IP
+                            // addresses.
+                            //
+                            // Fetch the IP versions for all external addresses
+                            // attached to this instance, and whether the
+                            // secondary we're trying to make into primary has
+                            // the private IP stacks to support those.
+                            let ip_versions = {
+                                use nexus_db_schema::schema::external_ip::dsl;
+                                dsl::external_ip
+                                    .filter(dsl::parent_id.eq(instance_id))
+                                    .filter(dsl::time_deleted.is_null())
+                                    // NOTE: We would like to use the `family()` function, but this
+                                    // confuses Diesel. It expects that to return an `i32`, but CRDB
+                                    // returns an `INT` which is an alias for an `i64`.
+                                    // Deserialization fails.
+                                    .select(diesel::dsl::sql::<diesel::sql_types::BigInt>(
+                                        "family(ip)",
+                                    ))
+                                    .distinct()
+                                    .get_results_async(&conn)
+                                    .await?
+                            };
+                            let (secondary_has_ipv4, secondary_has_ipv6): (bool, bool) = {
+                                use nexus_db_schema::schema::instance_network_interface::dsl;
+                                dsl::instance_network_interface
+                                    .find(interface_id)
+                                    .filter(dsl::time_deleted.is_null())
+                                    .select((dsl::ipv4.is_not_null(), dsl::ipv6.is_not_null()))
+                                    .get_result_async(&conn)
+                                    .await?
+                            };
+                            if ip_versions.contains(&4) && !secondary_has_ipv4 {
+                                return
+                                    Err(err.bail(NetworkInterfaceUpdateError::CandidatePrimaryMissingIpStack(4)));
+                            }
+                            if ip_versions.contains(&6) && !secondary_has_ipv6 {
+                                return
+                                    Err(err.bail(NetworkInterfaceUpdateError::CandidatePrimaryMissingIpStack(6)));
+                            }
                         }
 
                         // In any case, update the actual target
@@ -962,6 +975,15 @@ impl DataStore {
                             "Instance must be stopped to update its network interfaces",
                         );
                     },
+                    NetworkInterfaceUpdateError::CandidatePrimaryMissingIpStack(version) => {
+                        return Error::invalid_request(format!(
+                            "Interface cannot be made the primary for this instance, since \
+                            it does not have a private IPv{} address to handle traffic for \
+                            the instance's external IPv{} addresses",
+                            version,
+                            version,
+                        ));
+                    }
                     NetworkInterfaceUpdateError::FailedToUnsetPrimary(err) => {
                         return public_error_from_diesel(err, ErrorHandler::Server);
                     },
@@ -1046,7 +1068,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
-    use nexus_db_model::IpConfig;
+    use nexus_types::external_api::params::PrivateIpStackCreate;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;
     use std::collections::BTreeSet;
@@ -1098,7 +1120,7 @@ mod tests {
                     name: name.parse().unwrap(),
                     description: name,
                 },
-                IpConfig::from_ipv4(ip),
+                PrivateIpStackCreate::from_ipv4(ip),
                 macs.next().unwrap(),
                 0,
             )
