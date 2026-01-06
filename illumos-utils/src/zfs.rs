@@ -16,6 +16,7 @@ use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
+use rustix::fd::AsRawFd;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -333,6 +334,9 @@ pub enum DeleteDatasetVolumeErrorInner {
 
     #[error("created but not ready yet: {reason}")]
     NotReady { reason: String },
+
+    #[error("cannot cancel raw volume initialization, ioctl returned {err}")]
+    CancellingInitialization { err: i32 },
 }
 
 /// Error returned by [`Zfs::delete_dataset_volume`].
@@ -376,6 +380,15 @@ impl DeleteDatasetVolumeError {
                 name,
                 err: DeleteDatasetVolumeErrorInner::RustixErrno(e),
             }
+        }
+    }
+
+    pub fn cancelling_initialization(name: String, err: i32) -> Self {
+        DeleteDatasetVolumeError {
+            name,
+            err: DeleteDatasetVolumeErrorInner::CancellingInitialization {
+                err,
+            },
         }
     }
 }
@@ -1571,7 +1584,7 @@ impl Zfs {
 
         match execute_async(cmd).await {
             Ok(_) => {
-                // no-op
+                // Nothing to do
             }
 
             Err(crate::ExecutionError::CommandFailure(info))
@@ -1675,15 +1688,13 @@ impl Zfs {
         params: DatasetVolumeDeleteArgs<'_>,
     ) -> Result<(), DeleteDatasetVolumeError> {
         if params.raw {
-            // Open the raw zvol and read from it. If EINPROGRESS is seen from
-            // the read, then it's not done initializing yet. We can't delete it
-            // until it's fully done, so return the `NotReady` variant to signal
-            // upstack that it should poll.
+            // Open the raw zvol and check if it is still initializing. We can't
+            // delete it if it is, so stop the initialization before deleting.
             let path = format!("/dev/zvol/rdsk/{}", params.name);
 
             let fd = rustix::fs::open(
                 path,
-                rustix::fs::OFlags::RDONLY,
+                rustix::fs::OFlags::WRONLY,
                 rustix::fs::Mode::empty(),
             )
             .map_err(|e| {
@@ -1693,13 +1704,35 @@ impl Zfs {
                 )
             })?;
 
-            let mut buf = [0u8; 64];
-            rustix::io::read(fd, &mut buf).map_err(|e| {
-                DeleteDatasetVolumeError::from_raw_zvol_read(
-                    params.name.to_string(),
-                    e,
-                )
-            })?;
+            // XXX is there a way to pull this constant in from
+            // /usr/include/sys/dkio.h
+
+            const DKIOC: i32 = 0x04 << 8;
+            const DKIOCRAWVOLSTOP: i32 = DKIOC | 31;
+
+            match unsafe { libc::ioctl(fd.as_raw_fd(), DKIOCRAWVOLSTOP) } {
+                0 => {
+                    // DKIOCRAWVOLSTOP will stop the initialization and block
+                    // waiting for the initialization thread to exit
+                    //
+                    // The initialization thread has stopped and exited ok,
+                    // proceed with deletion.
+                }
+
+                libc::ENOENT => {
+                    // Raw volume was not initializing, proceed with deletion.
+                }
+
+                e => {
+                    // Unexpected error, return up the stack
+                    return Err(
+                        DeleteDatasetVolumeError::cancelling_initialization(
+                            params.name.to_string(),
+                            e,
+                        ),
+                    );
+                }
+            }
         }
 
         let mut command = Command::new(PFEXEC);
