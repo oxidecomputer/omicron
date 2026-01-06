@@ -27,6 +27,7 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use dropshot::PaginationOrder;
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
@@ -58,24 +59,22 @@ impl DataStore {
     ) -> Result<Option<fm::SitrepVersion>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        let version = self
-            .fm_current_sitrep_version_on_conn(&conn)
-            .await?
+        let version = Self::fm_current_sitrep_version_in_txn(&conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .map(Into::into);
         Ok(version)
     }
 
-    async fn fm_current_sitrep_version_on_conn(
-        &self,
+    async fn fm_current_sitrep_version_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<Option<model::SitrepVersion>, Error> {
+    ) -> Result<Option<model::SitrepVersion>, DieselError> {
         history_dsl::fm_sitrep_history
             .order_by(history_dsl::version.desc())
             .select(model::SitrepVersion::as_select())
             .first_async(conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Reads the [`fm::SitrepMetadata`] describing the sitrep with the given
@@ -86,26 +85,33 @@ impl DataStore {
         id: SitrepUuid,
     ) -> Result<fm::SitrepMetadata, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        let meta =
-            self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
+        let meta = Self::fm_sitrep_metadata_read_in_txn(id, &conn, &err)
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err,
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })?
+            .into();
         Ok(meta)
     }
 
-    async fn fm_sitrep_metadata_read_on_conn(
-        &self,
+    async fn fm_sitrep_metadata_read_in_txn(
         id: SitrepUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<model::SitrepMetadata, Error> {
+        err: &OptionalError<Error>,
+    ) -> Result<model::SitrepMetadata, DieselError> {
         sitrep_dsl::fm_sitrep
             .filter(sitrep_dsl::id.eq(id.into_untyped_uuid()))
             .select(model::SitrepMetadata::as_select())
             .first_async(conn)
             .await
-            .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .optional()?
             .ok_or_else(|| {
-                Error::non_resourcetype_not_found(format!("sitrep {id:?}"))
+                err.bail(Error::non_resourcetype_not_found(format!(
+                    "sitrep {id:?}"
+                )))
             })
     }
 
@@ -121,14 +127,32 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<Option<(fm::SitrepVersion, Sitrep)>, Error> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        let version: fm::SitrepVersion =
-            match self.fm_current_sitrep_version_on_conn(&conn).await? {
-                Some(version) => version.into(),
-                None => return Ok(None),
-            };
-        let sitrep = self.fm_sitrep_read_on_conn(version.id, &conn).await?;
-        Ok(Some((version, sitrep)))
+
+        self.transaction_retry_wrapper("fm_sitrep_read_current")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    let version: fm::SitrepVersion =
+                        match Self::fm_current_sitrep_version_in_txn(&conn)
+                            .await?
+                        {
+                            Some(version) => version.into(),
+                            None => return Ok(None),
+                        };
+                    let sitrep =
+                        Self::fm_sitrep_read_in_txn(version.id, &conn, &err)
+                            .await?;
+                    Ok(Some((version, sitrep)))
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err,
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
     /// Reads the entire content of the sitrep with the provided ID, if one
@@ -139,17 +163,28 @@ impl DataStore {
         id: SitrepUuid,
     ) -> Result<Sitrep, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.fm_sitrep_read_on_conn(id, &conn).await
+
+        self.transaction_retry_wrapper("fm_sitrep_read")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move { Self::fm_sitrep_read_in_txn(id, &conn, &err).await }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err,
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
-    async fn fm_sitrep_read_on_conn(
-        &self,
+    async fn fm_sitrep_read_in_txn(
         id: SitrepUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<Sitrep, Error> {
-        let metadata =
-            self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
+        err: &OptionalError<Error>,
+    ) -> Result<Sitrep, DieselError> {
+        let metadata: fm::SitrepMetadata =
+            Self::fm_sitrep_metadata_read_in_txn(id, conn, err).await?.into();
 
         // Fetch all ereports assigned to cases in this sitrep. We do this by
         // querying the `fm_ereport_in_case` table for all entries with this
@@ -186,13 +221,7 @@ impl DataStore {
                     &p.current_pagparams(),
                 )
                 .load_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to load case ereport assignments",
-                        )
-                })?;
+                .await?;
 
                 paginator =
                     p.found_batch(&batch, &|(assignment, _)| assignment.id);
@@ -206,8 +235,10 @@ impl DataStore {
                             entry.get().clone()
                         }
                         iddqd::id_ord_map::Entry::Vacant(entry) => {
-                            let ereport =
-                                Arc::new(fm::Ereport::try_from(ereport)?);
+                            let ereport = Arc::new(
+                                fm::Ereport::try_from(ereport)
+                                    .map_err(|e| err.bail(e))?,
+                            );
                             entry.insert(ereport.clone());
                             ereport
                         }
@@ -231,7 +262,7 @@ impl DataStore {
                                  should really not be possible, as the \
                                  assignment UUID is a primary key!",
                             );
-                            Error::InternalError { internal_message }
+                            err.bail(Error::InternalError { internal_message })
                         })?;
                 }
             }
@@ -245,16 +276,12 @@ impl DataStore {
             let mut paginator =
                 Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
             while let Some(p) = paginator.next() {
-                let batch = self
-                    .fm_sitrep_cases_list_on_conn(
-                        id,
-                        &p.current_pagparams(),
-                        &conn,
-                    )
-                    .await
-                    .map_err(|e| {
-                        e.internal_context("failed to list sitrep cases")
-                    })?;
+                let batch = Self::fm_sitrep_cases_list_in_txn(
+                    id,
+                    &p.current_pagparams(),
+                    conn,
+                )
+                .await?;
                 paginator = p.found_batch(&batch, &|case| case.id);
                 cases.extend(batch.into_iter().map(|case| {
                     let model::fm::CaseMetadata {
@@ -292,18 +319,16 @@ impl DataStore {
         Ok(Sitrep { metadata, cases })
     }
 
-    async fn fm_sitrep_cases_list_on_conn(
-        &self,
+    async fn fm_sitrep_cases_list_in_txn(
         sitrep_id: SitrepUuid,
         pagparams: &DataPageParams<'_, DbTypedUuid<CaseKind>>,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> ListResultVec<model::fm::CaseMetadata> {
+    ) -> Result<Vec<model::fm::CaseMetadata>, DieselError> {
         paginated(case_dsl::fm_case, case_dsl::id, &pagparams)
             .filter(case_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
             .select(model::fm::CaseMetadata::as_select())
             .load_async::<model::fm::CaseMetadata>(conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     fn fm_sitrep_read_ereports_query(
@@ -749,59 +774,62 @@ impl DataStore {
         opctx: &OpContext,
         ids: impl IntoIterator<Item = SitrepUuid>,
     ) -> Result<usize, Error> {
-        let conn = self.pool_connection_authorized(opctx).await?;
-
         // TODO(eliza): there should probably be an authz object for the fm sitrep?
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
+        let conn = self.pool_connection_authorized(opctx).await?;
         let ids = ids
             .into_iter()
             .map(|id| id.into_untyped_uuid())
             .collect::<Vec<_>>();
 
-        // Delete case ereport assignments
-        let case_ereports_deleted = diesel::delete(
-            case_ereport_dsl::fm_ereport_in_case
-                .filter(case_ereport_dsl::sitrep_id.eq_any(ids.clone())),
-        )
-        .execute_async(&*conn)
-        .await
-        .map_err(|e| {
-            public_error_from_diesel(e, ErrorHandler::Server)
-                .internal_context("failed to delete case ereport assignments")
-        })?;
+        let (sitreps_deleted, cases_deleted, case_ereports_deleted) = self
+            .transaction_retry_wrapper("fm_sitrep_delete_all")
+            .transaction(&conn, |conn| {
+                let ids = ids.clone();
+                async move {
+                    // Delete case ereport assignments
+                    let case_ereports_deleted = diesel::delete(
+                        case_ereport_dsl::fm_ereport_in_case.filter(
+                            case_ereport_dsl::sitrep_id.eq_any(ids.clone()),
+                        ),
+                    )
+                    .execute_async(&conn)
+                    .await?;
 
-        // Delete case metadata records.
-        let cases_deleted = diesel::delete(
-            case_dsl::fm_case.filter(case_dsl::sitrep_id.eq_any(ids.clone())),
-        )
-        .execute_async(&*conn)
-        .await
-        .map_err(|e| {
-            public_error_from_diesel(e, ErrorHandler::Server)
-                .internal_context("failed to delete case metadata")
-        })?;
+                    // Delete case metadata records.
+                    let cases_deleted = diesel::delete(
+                        case_dsl::fm_case
+                            .filter(case_dsl::sitrep_id.eq_any(ids.clone())),
+                    )
+                    .execute_async(&conn)
+                    .await?;
 
-        // Delete the sitrep metadata entries *last*. This is necessary because
-        // the rest of the delete operation is unsynchronized, and it is
-        // possible for a Nexus to die before it has "fully deleted" a sitrep,
-        // but deleted some of its records. The `fm_sitrep` (metadata) table is
-        // the one that is used to determine whether a sitrep "exists" so that
-        // the sitrep GC task can determine if it needs to be deleted, so don't
-        // touch it until all the other records are gone.
-        let sitreps_deleted = diesel::delete(
-            sitrep_dsl::fm_sitrep.filter(sitrep_dsl::id.eq_any(ids.clone())),
-        )
-        .execute_async(&*conn)
-        .await
-        .map_err(|e| {
-            public_error_from_diesel(e, ErrorHandler::Server)
-                .internal_context("failed to delete sitrep metadata")
-        })?;
+                    // Delete the sitrep metadata entries *last*. This is
+                    // necessary because the rest of the delete operation is
+                    // unsynchronized, and it is possible for a Nexus to die
+                    // before it has "fully deleted" a sitrep, but deleted some
+                    // of its records. The `fm_sitrep` (metadata) table is the
+                    // one that is used to determine whether a sitrep "exists"
+                    // so that the sitrep GC task can determine if it needs to
+                    // be deleted, so don't touch it until all the other records
+                    // are gone.
+                    let sitreps_deleted = diesel::delete(
+                        sitrep_dsl::fm_sitrep
+                            .filter(sitrep_dsl::id.eq_any(ids.clone())),
+                    )
+                    .execute_async(&conn)
+                    .await?;
+
+                    Ok((sitreps_deleted, cases_deleted, case_ereports_deleted))
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         slog::debug!(
             &opctx.log,
-            "deleted {sitreps_deleted} of {} sitreps sitreps", ids.len();
+            "deleted {sitreps_deleted} of {} sitreps", ids.len();
             "ids" => ?ids,
             "sitreps_deleted" => sitreps_deleted,
             "cases_deleted" => cases_deleted,
