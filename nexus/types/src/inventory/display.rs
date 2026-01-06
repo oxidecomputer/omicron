@@ -1152,6 +1152,7 @@ fn display_health_monitor(
                     }
                 }
             } else {
+                // TODO-K: Should we record time even if no svcs in maintenance were found?
                 writeln!(
                     indented,
                     "no data on SMF services in maintenance has been collected"

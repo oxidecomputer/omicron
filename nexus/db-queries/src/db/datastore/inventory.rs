@@ -2793,48 +2793,15 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator =
-                    p.found_batch(&batch, &|row| (row.sled_id, row.id.clone()));
+                    p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for svc in batch {
                     svcs.entry(svc.sled_id.into_untyped_uuid())
                         .or_default()
-                        .push(svc.into());
+                        .push(svc);
                 }
             }
             svcs
         };
-        //
-        // TODO-K: This is wrong. We want a vector of services, not just one
-        //        let mut svcs_in_maintenance_by_sled = {
-        //            use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
-        //
-        //            let mut results: BTreeMap<SledUuid, _> = BTreeMap::new();
-        //
-        //            let mut paginator = Paginator::new(
-        //                batch_size,
-        //                dropshot::PaginationOrder::Ascending,
-        //            );
-        //            while let Some(p) = paginator.next() {
-        //                let batch = paginated(
-        //                    dsl::inv_health_monitor_svc_in_maintenance,
-        //                    dsl::sled_id,
-        //                    &p.current_pagparams(),
-        //                )
-        //                .filter(dsl::inv_collection_id.eq(db_id))
-        //                .select(InvSvcInMaintenance::as_select())
-        //                .load_async(&*conn)
-        //                .await
-        //                .map_err(|e| {
-        //                    public_error_from_diesel(e, ErrorHandler::Server)
-        //                })?;
-        //                paginator = p.found_batch(&batch, &|row| row.sled_id);
-        //
-        //                for row in batch {
-        //                    results.insert(row.sled_id.into(), row);
-        //                }
-        //            }
-        //
-        //            results
-        //        };
 
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
         // Agents.
@@ -4127,6 +4094,7 @@ impl DataStore {
                 });
 
             if let Some(svcs) = svcs_in_maintenance {
+                // TODO-K: removeme
                 println!("DEBUG {svcs:?}");
                 health_monitor.smf_services_in_maintenance = svcs
             };
