@@ -1024,6 +1024,7 @@ impl_enum_type!(
 pub struct InvSvcInMaintenance {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
+    // TODO-K: Is this ID necessary?
     pub id: DbTypedUuid<SvcInMaintenanceKind>,
     pub fmri: Option<String>,
     pub zone: Option<String>,

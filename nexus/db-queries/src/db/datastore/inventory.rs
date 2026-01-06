@@ -27,6 +27,8 @@ use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use illumos_utils::svcs::SvcInMaintenance;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
@@ -2766,44 +2768,73 @@ impl DataStore {
         };
 
         // TODO-K: fix
-//        // Mapping of "Sled ID" -> "All SMF services in maintenance reported by
-//        // that sled"
-//        let svcs_in_maintenance: BTreeMap<
-//            Uuid,
-//            Vec<nexus_types::inventory::Dataset>,
-//        > = {
-//            use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
-//
-//            let mut svcs =
-//                BTreeMap::<Uuid, Vec<nexus_types::inventory::Dataset>>::new();
-//            let mut paginator = Paginator::new(
-//                batch_size,
-//                dropshot::PaginationOrder::Ascending,
-//            );
-//            while let Some(p) = paginator.next() {
-//                let batch = paginated_multicolumn(
-//                    dsl::inv_health_monitor_svc_in_maintenance,
-//                    (dsl::sled_id, dsl::id),
-//                    &p.current_pagparams(),
-//                )
-//                .filter(dsl::inv_collection_id.eq(db_id))
-//                .select(InvDataset::as_select())
-//                .load_async(&*conn)
-//                .await
-//                .map_err(|e| {
-//                    public_error_from_diesel(e, ErrorHandler::Server)
-//                })?;
-//                paginator = p.found_batch(&batch, &|row| {
-//                    (row.sled_id, row.name.clone())
-//                });
-//                for svc in batch {
-//                    svcs.entry(svc.sled_id.into_untyped_uuid())
-//                        .or_default()
-//                        .push(svc.into());
-//                }
-//            }
-//            svcs
-//        };
+        // Mapping of "Sled ID" -> "All SMF services in maintenance reported by
+        // that sled"
+        let mut svcs_in_maintenance_by_sled = {
+            use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
+
+            let mut svcs = BTreeMap::<Uuid, Vec<InvSvcInMaintenance>>::new();
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                // TODO-K: Do I actually need paginated multicolumn?
+                let batch: Vec<InvSvcInMaintenance> = paginated_multicolumn(
+                    dsl::inv_health_monitor_svc_in_maintenance,
+                    (dsl::sled_id, dsl::id),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvSvcInMaintenance::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_id, row.id.clone()));
+                for svc in batch {
+                    svcs.entry(svc.sled_id.into_untyped_uuid())
+                        .or_default()
+                        .push(svc.into());
+                }
+            }
+            svcs
+        };
+        //
+        // TODO-K: This is wrong. We want a vector of services, not just one
+        //        let mut svcs_in_maintenance_by_sled = {
+        //            use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
+        //
+        //            let mut results: BTreeMap<SledUuid, _> = BTreeMap::new();
+        //
+        //            let mut paginator = Paginator::new(
+        //                batch_size,
+        //                dropshot::PaginationOrder::Ascending,
+        //            );
+        //            while let Some(p) = paginator.next() {
+        //                let batch = paginated(
+        //                    dsl::inv_health_monitor_svc_in_maintenance,
+        //                    dsl::sled_id,
+        //                    &p.current_pagparams(),
+        //                )
+        //                .filter(dsl::inv_collection_id.eq(db_id))
+        //                .select(InvSvcInMaintenance::as_select())
+        //                .load_async(&*conn)
+        //                .await
+        //                .map_err(|e| {
+        //                    public_error_from_diesel(e, ErrorHandler::Server)
+        //                })?;
+        //                paginator = p.found_batch(&batch, &|row| row.sled_id);
+        //
+        //                for row in batch {
+        //                    results.insert(row.sled_id.into(), row);
+        //                }
+        //            }
+        //
+        //            results
+        //        };
 
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
         // Agents.
@@ -4060,6 +4091,48 @@ impl DataStore {
                     ))
                 })?;
 
+            // TODO-K; Clean up
+            // Convert all health checks into a full `HealthMonitorInventory`
+            let mut health_monitor = HealthMonitorInventory::new();
+
+            let svcs_in_maintenance = svcs_in_maintenance_by_sled
+                .remove(&sled_id.into_untyped_uuid())
+                .map(|svcs| {
+                    // TODO-K: Clean up
+                    if let Some(e) = svcs[0].svcs_cmd_error.clone() {
+                        return Err(e);
+                    }
+                    let mut services = vec![];
+                    for svc in &svcs {
+                        let fmri = if let Some(f) = svc.fmri.clone() {
+                            f
+                        } else {
+                            "".to_string()
+                        };
+                        let zone = if let Some(z) = svc.zone.clone() {
+                            z
+                        } else {
+                            "".to_string()
+                        };
+
+                        let service = SvcInMaintenance { fmri, zone };
+                        services.push(service)
+                    }
+
+                    Ok(SvcsInMaintenanceResult {
+                        services,
+                        errors: svcs[0].error_messages.clone(),
+                        time_of_status: svcs[0].time_of_status,
+                    })
+                });
+
+            if let Some(svcs) = svcs_in_maintenance {
+                println!("DEBUG {svcs:?}");
+                health_monitor.smf_services_in_maintenance = svcs
+            };
+
+            // TODO-K: End of clean up bit
+
             let sled_agent = nexus_types::inventory::SledAgent {
                 time_collected: s.time_collected,
                 source: s.source,
@@ -4098,7 +4171,7 @@ impl DataStore {
                 zone_image_resolver,
                 // TODO-K[omicron#9516]: Actually query the DB when there is
                 // something there
-                health_monitor: HealthMonitorInventory::new(),
+                health_monitor,
             };
             sled_agents
                 .insert_unique(sled_agent)

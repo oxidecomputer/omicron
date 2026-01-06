@@ -1724,7 +1724,7 @@ table! {
         fmri -> Nullable<Text>,
         zone -> Nullable<Text>,
 
-        error_messages -> Nullable<Array<Text>>,
+        error_messages -> Array<Text>,
         svcs_cmd_error -> Nullable<Text>,
         time_of_status -> Nullable<Timestamptz>,
     }
