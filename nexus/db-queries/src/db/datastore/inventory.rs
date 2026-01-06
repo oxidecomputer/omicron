@@ -2792,8 +2792,7 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator =
-                    p.found_batch(&batch, &|row| (row.sled_id, row.id));
+                paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for svc in batch {
                     svcs.entry(svc.sled_id.into_untyped_uuid())
                         .or_default()
