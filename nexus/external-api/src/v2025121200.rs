@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2025121200 to 2025601010.
+//! Nexus external types that changed from 2025121200 to 2026010100.
 //!
 //! Version 2025121200 types (before `ip_version` preference was added for
 //! default IP pool selection).
@@ -40,7 +40,11 @@ pub struct EphemeralIpCreate {
 
 impl From<EphemeralIpCreate> for params::EphemeralIpCreate {
     fn from(old: EphemeralIpCreate) -> params::EphemeralIpCreate {
-        params::EphemeralIpCreate { pool: old.pool, ip_version: None }
+        let pool_selection = match old.pool {
+            Some(pool) => params::PoolSelection::Named { pool },
+            None => params::PoolSelection::Default { ip_version: None },
+        };
+        params::EphemeralIpCreate { pool_selection }
     }
 }
 
@@ -67,7 +71,11 @@ impl From<ExternalIpCreate> for params::ExternalIpCreate {
     fn from(old: ExternalIpCreate) -> params::ExternalIpCreate {
         match old {
             ExternalIpCreate::Ephemeral { pool } => {
-                params::ExternalIpCreate::Ephemeral { pool, ip_version: None }
+                let pool_selection = match pool {
+                    Some(pool) => params::PoolSelection::Named { pool },
+                    None => params::PoolSelection::Default { ip_version: None },
+                };
+                params::ExternalIpCreate::Ephemeral { pool_selection }
             }
             ExternalIpCreate::Floating { floating_ip } => {
                 params::ExternalIpCreate::Floating { floating_ip }
@@ -93,12 +101,20 @@ pub struct FloatingIpCreate {
 
 impl From<FloatingIpCreate> for params::FloatingIpCreate {
     fn from(old: FloatingIpCreate) -> params::FloatingIpCreate {
-        params::FloatingIpCreate {
-            identity: old.identity,
-            ip: old.ip,
-            pool: old.pool,
-            ip_version: None,
-        }
+        let allocation = match (old.ip, old.pool) {
+            (Some(ip), pool) => {
+                params::FloatingIpAllocation::Explicit { ip, pool }
+            }
+            (None, Some(pool)) => params::FloatingIpAllocation::Auto {
+                pool_selection: params::PoolSelection::Named { pool },
+            },
+            (None, None) => params::FloatingIpAllocation::Auto {
+                pool_selection: params::PoolSelection::Default {
+                    ip_version: None,
+                },
+            },
+        };
+        params::FloatingIpCreate { identity: old.identity, allocation }
     }
 }
 
@@ -120,6 +136,8 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub network_interfaces: v2026010100::InstanceNetworkInterfaceAttachment,
     /// The external IP addresses provided to this instance.
+    // Uses local ExternalIpCreate (no ip_version field) → params::ExternalIpCreate
+    // (defaults ip_version to None in From impl)
     #[serde(default)]
     pub external_ips: Vec<ExternalIpCreate>,
     /// The multicast groups this instance should join.

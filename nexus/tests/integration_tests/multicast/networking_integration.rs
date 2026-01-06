@@ -20,7 +20,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
     EphemeralIpCreate, ExternalIpCreate, FloatingIpAttach, InstanceCreate,
     InstanceNetworkInterfaceAttachment, MulticastGroupCreate,
-    MulticastGroupMemberAdd,
+    MulticastGroupMemberAdd, PoolSelection,
 };
 use nexus_types::external_api::views::{
     FloatingIp, MulticastGroup, MulticastGroupMember,
@@ -157,8 +157,9 @@ async fn test_multicast_with_external_ip_basic(
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
             .body(Some(&EphemeralIpCreate {
-                pool: Some(v4_pool.identity.name.clone().into()),
-                ip_version: None,
+                pool_selection: PoolSelection::Named {
+                    pool: v4_pool.identity.name.clone().into(),
+                },
             }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
@@ -344,8 +345,9 @@ async fn test_multicast_external_ip_lifecycle(
         NexusRequest::new(
             RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
                 .body(Some(&EphemeralIpCreate {
-                    pool: Some(v4_pool.identity.name.clone().into()),
-                    ip_version: None,
+                    pool_selection: PoolSelection::Named {
+                        pool: v4_pool.identity.name.clone().into(),
+                    },
                 }))
                 .expect_status(Some(StatusCode::ACCEPTED)),
         )
@@ -463,8 +465,9 @@ async fn test_multicast_with_external_ip_at_creation(
 
     // Create instance with external IP specified at creation
     let external_ip_param = ExternalIpCreate::Ephemeral {
-        pool: Some(v4_pool.identity.name.clone().into()),
-        ip_version: None,
+        pool_selection: PoolSelection::Named {
+            pool: v4_pool.identity.name.clone().into(),
+        },
     };
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {

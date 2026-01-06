@@ -660,8 +660,9 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         network_interfaces:
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
-            ip_version: None,
+            pool_selection: params::PoolSelection::Named {
+                pool: DEMO_IP_POOL_NAME.clone().into(),
+            },
         }],
         disks: vec![],
         boot_disk: None,
@@ -685,8 +686,9 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         network_interfaces:
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
-            ip_version: None,
+            pool_selection: params::PoolSelection::Named {
+                pool: DEMO_IP_POOL_NAME.clone().into(),
+            },
         }],
         disks: vec![],
         boot_disk: None,
@@ -1178,9 +1180,10 @@ pub static DEMO_FLOAT_IP_CREATE: LazyLock<params::FloatingIpCreate> =
             name: DEMO_FLOAT_IP_NAME.clone(),
             description: String::from("a new IP pool"),
         },
-        ip: Some(Ipv4Addr::new(10, 0, 0, 141).into()),
-        pool: None,
-        ip_version: None,
+        allocation: params::FloatingIpAllocation::Explicit {
+            ip: Ipv4Addr::new(10, 0, 0, 141).into(),
+            pool: None,
+        },
     });
 
 pub static DEMO_FLOAT_IP_UPDATE: LazyLock<params::FloatingIpUpdate> =
@@ -1198,8 +1201,7 @@ pub static DEMO_FLOAT_IP_ATTACH: LazyLock<params::FloatingIpAttach> =
     });
 pub static DEMO_EPHEMERAL_IP_ATTACH: LazyLock<params::EphemeralIpCreate> =
     LazyLock::new(|| params::EphemeralIpCreate {
-        pool: None,
-        ip_version: None,
+        pool_selection: params::PoolSelection::Default { ip_version: None },
     });
 // Identity providers
 pub const IDENTITY_PROVIDERS_URL: &'static str =

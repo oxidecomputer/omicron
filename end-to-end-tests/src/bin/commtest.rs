@@ -8,8 +8,8 @@ use oxide_client::{
     ClientVpcsExt,
     types::{
         IpPoolCreate, IpPoolLinkSilo, IpPoolType, IpRange, IpVersion, Name,
-        NameOrId, PingStatus, ProbeCreate, ProbeInfo, ProjectCreate,
-        UsernamePasswordCredentials,
+        NameOrId, PingStatus, PoolSelection, ProbeCreate, ProbeInfo,
+        ProjectCreate, UsernamePasswordCredentials,
     },
 };
 use std::{
@@ -389,7 +389,9 @@ async fn launch_probes(
                     .project(Name::try_from("classone").unwrap())
                     .body(ProbeCreate {
                         description: format!("probe {i}"),
-                        ip_pool: Some("default".parse().unwrap()),
+                        pool_selection: PoolSelection::Named {
+                            pool: "default".parse().unwrap(),
+                        },
                         name: format!("probe{i}").parse().unwrap(),
                         sled,
                     })
