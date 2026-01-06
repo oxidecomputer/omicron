@@ -1704,33 +1704,36 @@ impl Zfs {
                 )
             })?;
 
+            // The numeric type of these constants is not specified due to being
+            // different for illumos and linux. They are also `let dkioc` and
+            // not `const DKIOC` because `const` requires a type.
+            //
             // XXX is there a way to pull this constant in from
             // /usr/include/sys/dkio.h
+            let dkioc = 0x04 << 8;
+            let dkiocrawvolstop = dkioc | 31;
 
-            const DKIOC: i32 = 0x04 << 8;
-            const DKIOCRAWVOLSTOP: i32 = DKIOC | 31;
+            // DKIOCRAWVOLSTOP will stop the initialization and block waiting
+            // for the initialization thread to exit. If this returns 0, the
+            // initialization thread has stopped and exited ok, proceed with
+            // deletion.
+            if unsafe { libc::ioctl(fd.as_raw_fd(), dkiocrawvolstop) } == -1 {
+                let err = std::io::Error::last_os_error();
+                match err.raw_os_error().unwrap() {
+                    libc::ENOENT => {
+                        // The raw volume was not initializing, proceed with
+                        // deletion.
+                    }
 
-            match unsafe { libc::ioctl(fd.as_raw_fd(), DKIOCRAWVOLSTOP) } {
-                0 => {
-                    // DKIOCRAWVOLSTOP will stop the initialization and block
-                    // waiting for the initialization thread to exit
-                    //
-                    // The initialization thread has stopped and exited ok,
-                    // proceed with deletion.
-                }
-
-                libc::ENOENT => {
-                    // Raw volume was not initializing, proceed with deletion.
-                }
-
-                e => {
-                    // Unexpected error, return up the stack
-                    return Err(
-                        DeleteDatasetVolumeError::cancelling_initialization(
-                            params.name.to_string(),
-                            e,
-                        ),
-                    );
+                    e => {
+                        // Unexpected error, return up the stack
+                        return Err(
+                            DeleteDatasetVolumeError::cancelling_initialization(
+                                params.name.to_string(),
+                                e,
+                            ),
+                        );
+                    }
                 }
             }
         }
