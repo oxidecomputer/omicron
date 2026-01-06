@@ -5683,11 +5683,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let params::EphemeralIpCreate { pool_selection } =
+            let params::EphemeralIpCreate { pool_selector } =
                 ip_to_create.into_inner();
-            let (pool, ip_version) = match pool_selection {
-                params::PoolSelection::Named { pool } => (Some(pool), None),
-                params::PoolSelection::Default { ip_version } => {
+            let (pool, ip_version) = match pool_selector {
+                params::PoolSelector::Named { pool } => (Some(pool), None),
+                params::PoolSelector::Default { ip_version } => {
                     (None, ip_version)
                 }
             };

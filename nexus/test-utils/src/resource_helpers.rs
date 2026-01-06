@@ -381,18 +381,18 @@ pub async fn create_floating_ip(
     ip: Option<IpAddr>,
     parent_pool_name: Option<&str>,
 ) -> FloatingIp {
-    let allocation = match (ip, parent_pool_name) {
-        (Some(ip), pool) => params::FloatingIpAllocation::Explicit {
+    let address_selector = match (ip, parent_pool_name) {
+        (Some(ip), pool) => params::AddressSelector::Explicit {
             ip,
             pool: pool.map(|v| NameOrId::Name(v.parse().unwrap())),
         },
-        (None, Some(pool)) => params::FloatingIpAllocation::Auto {
-            pool_selection: params::PoolSelection::Named {
+        (None, Some(pool)) => params::AddressSelector::Auto {
+            pool_selector: params::PoolSelector::Named {
                 pool: NameOrId::Name(pool.parse().unwrap()),
             },
         },
-        (None, None) => params::FloatingIpAllocation::Auto {
-            pool_selection: params::PoolSelection::Default { ip_version: None },
+        (None, None) => params::AddressSelector::Auto {
+            pool_selector: params::PoolSelector::Default { ip_version: None },
         },
     };
     object_create(
@@ -403,7 +403,7 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            allocation,
+            address_selector,
         },
     )
     .await

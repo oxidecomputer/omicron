@@ -10,14 +10,14 @@
 //! Key differences from newer API versions:
 //! - [`FloatingIpCreate`], [`EphemeralIpCreate`], and [`ExternalIpCreate`]
 //!   use flat structures with `pool` and `ip_version` fields. Newer versions
-//!   use tagged enums ([`FloatingIpAllocation`] and [`PoolSelection`]) that
+//!   use tagged enums ([`AddressSelector`] and [`PoolSelector`]) that
 //!   make invalid states unrepresentable.
 //!
 //! [`FloatingIpCreate`]: self::FloatingIpCreate
 //! [`EphemeralIpCreate`]: self::EphemeralIpCreate
 //! [`ExternalIpCreate`]: self::ExternalIpCreate
-//! [`FloatingIpAllocation`]: nexus_types::external_api::params::FloatingIpAllocation
-//! [`PoolSelection`]: nexus_types::external_api::params::PoolSelection
+//! [`AddressSelector`]: nexus_types::external_api::params::AddressSelector
+//! [`PoolSelector`]: nexus_types::external_api::params::PoolSelector
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -49,9 +49,9 @@ impl TryFrom<EphemeralIpCreate> for params::EphemeralIpCreate {
     fn try_from(
         old: EphemeralIpCreate,
     ) -> Result<params::EphemeralIpCreate, Error> {
-        let pool_selection = match (old.pool, old.ip_version) {
+        let pool_selector = match (old.pool, old.ip_version) {
             // Named pool specified -> ip_version must not be set
-            (Some(pool), None) => params::PoolSelection::Named { pool },
+            (Some(pool), None) => params::PoolSelector::Named { pool },
             // Named pool & ip_version is an invalid combination
             (Some(_), Some(_)) => {
                 return Err(Error::invalid_request(
@@ -60,9 +60,9 @@ impl TryFrom<EphemeralIpCreate> for params::EphemeralIpCreate {
                 ));
             }
             // Default pool with optional ip_version preference
-            (None, ip_version) => params::PoolSelection::Default { ip_version },
+            (None, ip_version) => params::PoolSelector::Default { ip_version },
         };
-        Ok(params::EphemeralIpCreate { pool_selection })
+        Ok(params::EphemeralIpCreate { pool_selector })
     }
 }
 
@@ -98,9 +98,9 @@ impl TryFrom<ExternalIpCreate> for params::ExternalIpCreate {
     ) -> Result<params::ExternalIpCreate, Error> {
         match old {
             ExternalIpCreate::Ephemeral { pool, ip_version } => {
-                let pool_selection = match (pool, ip_version) {
+                let pool_selector = match (pool, ip_version) {
                     // Named pool specified -> ip_version must not be set
-                    (Some(pool), None) => params::PoolSelection::Named { pool },
+                    (Some(pool), None) => params::PoolSelector::Named { pool },
                     // Named pool & ip_version is an invalid combination
                     (Some(_), Some(_)) => {
                         return Err(Error::invalid_request(
@@ -110,10 +110,10 @@ impl TryFrom<ExternalIpCreate> for params::ExternalIpCreate {
                     }
                     // Default pool with optional ip_version preference
                     (None, ip_version) => {
-                        params::PoolSelection::Default { ip_version }
+                        params::PoolSelector::Default { ip_version }
                     }
                 };
-                Ok(params::ExternalIpCreate::Ephemeral { pool_selection })
+                Ok(params::ExternalIpCreate::Ephemeral { pool_selector })
             }
             ExternalIpCreate::Floating { floating_ip } => {
                 Ok(params::ExternalIpCreate::Floating { floating_ip })
@@ -161,10 +161,10 @@ impl TryFrom<FloatingIpCreate> for params::FloatingIpCreate {
     fn try_from(
         old: FloatingIpCreate,
     ) -> Result<params::FloatingIpCreate, Error> {
-        let allocation = match (old.ip, old.pool, old.ip_version) {
+        let address_selector = match (old.ip, old.pool, old.ip_version) {
             // Explicit IP address provided -> ip_version must not be set
             (Some(ip), pool, None) => {
-                params::FloatingIpAllocation::Explicit { ip, pool }
+                params::AddressSelector::Explicit { ip, pool }
             }
             // Explicit IP and ip_version is an invalid combination
             (Some(_), _, Some(_)) => {
@@ -174,8 +174,8 @@ impl TryFrom<FloatingIpCreate> for params::FloatingIpCreate {
                 ));
             }
             // No explicit IP, but named pool specified -> ip_version must not be set
-            (None, Some(pool), None) => params::FloatingIpAllocation::Auto {
-                pool_selection: params::PoolSelection::Named { pool },
+            (None, Some(pool), None) => params::AddressSelector::Auto {
+                pool_selector: params::PoolSelector::Named { pool },
             },
             // Named pool and ip_version is an invalid combination
             (None, Some(_), Some(_)) => {
@@ -185,11 +185,14 @@ impl TryFrom<FloatingIpCreate> for params::FloatingIpCreate {
                 ));
             }
             // Allocate from default pool with optional IP version preference
-            (None, None, ip_version) => params::FloatingIpAllocation::Auto {
-                pool_selection: params::PoolSelection::Default { ip_version },
+            (None, None, ip_version) => params::AddressSelector::Auto {
+                pool_selector: params::PoolSelector::Default { ip_version },
             },
         };
-        Ok(params::FloatingIpCreate { identity: old.identity, allocation })
+        Ok(params::FloatingIpCreate {
+            identity: old.identity,
+            address_selector,
+        })
     }
 }
 
@@ -281,14 +284,14 @@ pub struct ProbeCreate {
 
 impl From<ProbeCreate> for params::ProbeCreate {
     fn from(old: ProbeCreate) -> params::ProbeCreate {
-        let pool_selection = match old.ip_pool {
-            Some(pool) => params::PoolSelection::Named { pool },
-            None => params::PoolSelection::Default { ip_version: None },
+        let pool_selector = match old.ip_pool {
+            Some(pool) => params::PoolSelector::Named { pool },
+            None => params::PoolSelector::Default { ip_version: None },
         };
         params::ProbeCreate {
             identity: old.identity,
             sled: old.sled,
-            pool_selection,
+            pool_selector,
         }
     }
 }

@@ -8,7 +8,7 @@ use oxide_client::types::{
     ByteCount, DiskBackend, DiskCreate, DiskSource, ExternalIp,
     ExternalIpCreate, InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
     InstanceNetworkInterfaceAttachment, InstanceState, IpVersion,
-    PoolSelection, SshKeyCreate,
+    PoolSelector, SshKeyCreate,
 };
 use oxide_client::{ClientCurrentUserExt, ClientDisksExt, ClientInstancesExt};
 use russh::{ChannelMsg, Disconnect};
@@ -74,7 +74,7 @@ async fn instance_launch() -> Result<()> {
             network_interfaces:
                 InstanceNetworkInterfaceAttachment::DefaultDualStack,
             external_ips: vec![ExternalIpCreate::Ephemeral {
-                pool_selection: PoolSelection::Default {
+                pool_selector: PoolSelector::Default {
                     ip_version: Some(IpVersion::V4),
                 },
             }],

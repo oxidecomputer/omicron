@@ -276,7 +276,7 @@ mod test {
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
             external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                pool_selection: params::PoolSelection::Default {
+                pool_selector: params::PoolSelector::Default {
                     ip_version: Some(IpVersion::V4),
                 },
             }],

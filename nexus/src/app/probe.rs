@@ -53,12 +53,10 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        // Destructure pool_selection to get pool and ip_version
-        let (pool, ip_version) = match &new_probe_params.pool_selection {
-            params::PoolSelection::Named { pool } => (Some(pool.clone()), None),
-            params::PoolSelection::Default { ip_version } => {
-                (None, *ip_version)
-            }
+        // Destructure pool_selector to get pool and ip_version
+        let (pool, ip_version) = match &new_probe_params.pool_selector {
+            params::PoolSelector::Named { pool } => (Some(pool.clone()), None),
+            params::PoolSelector::Default { ip_version } => (None, *ip_version),
         };
 
         // resolve NameOrId into authz::IpPool

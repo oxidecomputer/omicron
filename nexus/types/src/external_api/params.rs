@@ -1365,7 +1365,7 @@ pub struct IpPoolSiloUpdate {
 /// The `ip_version` preference is only available when auto-allocating.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum FloatingIpAllocation {
+pub enum AddressSelector {
     /// Reserve a specific IP address.
     Explicit {
         /// The specific IP address to reserve. Must be available in the pool.
@@ -1378,13 +1378,13 @@ pub enum FloatingIpAllocation {
     Auto {
         /// How to select the pool for allocation.
         #[serde(default)]
-        pool_selection: PoolSelection,
+        pool_selector: PoolSelector,
     },
 }
 
-impl Default for FloatingIpAllocation {
+impl Default for AddressSelector {
     fn default() -> Self {
-        FloatingIpAllocation::Auto { pool_selection: PoolSelection::default() }
+        AddressSelector::Auto { pool_selector: PoolSelector::default() }
     }
 }
 
@@ -1396,7 +1396,7 @@ pub struct FloatingIpCreate {
 
     /// How to allocate the floating IP address.
     #[serde(default)]
-    pub allocation: FloatingIpAllocation,
+    pub address_selector: AddressSelector,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1506,7 +1506,7 @@ pub struct InstanceDiskAttach {
 /// relevant when using the default pool.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum PoolSelection {
+pub enum PoolSelector {
     /// Use the specified pool by name or ID.
     Named {
         /// The pool to allocate from.
@@ -1521,9 +1521,9 @@ pub enum PoolSelection {
     },
 }
 
-impl Default for PoolSelection {
+impl Default for PoolSelector {
     fn default() -> Self {
-        PoolSelection::Default { ip_version: None }
+        PoolSelector::Default { ip_version: None }
     }
 }
 
@@ -1536,7 +1536,7 @@ pub enum ExternalIpCreate {
     Ephemeral {
         /// Pool to allocate from.
         #[serde(default)]
-        pool_selection: PoolSelection,
+        pool_selector: PoolSelector,
     },
     /// An IP address providing both inbound and outbound access. The address is
     /// an existing floating IP object assigned to the current project.
@@ -1550,7 +1550,7 @@ pub enum ExternalIpCreate {
 pub struct EphemeralIpCreate {
     /// Pool to allocate from.
     #[serde(default)]
-    pub pool_selection: PoolSelection,
+    pub pool_selector: PoolSelector,
 }
 
 /// Parameters for detaching an external IP from an instance.
@@ -2845,7 +2845,7 @@ pub struct ProbeCreate {
     pub sled: SledUuid,
     /// Pool selection for allocating an ephemeral IP to the probe.
     #[serde(default)]
-    pub pool_selection: PoolSelection,
+    pub pool_selector: PoolSelector,
 }
 
 /// List probes with an optional name or id.

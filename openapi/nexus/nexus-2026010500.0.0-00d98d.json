@@ -14521,6 +14521,68 @@
           "lot"
         ]
       },
+      "AddressSelector": {
+        "description": "How to allocate a floating IP address.\n\nThis enum makes invalid states unrepresentable: when specifying an explicit IP, there's no `ip_version` field (the IP determines its version). The `ip_version` preference is only available when auto-allocating.",
+        "oneOf": [
+          {
+            "description": "Reserve a specific IP address.",
+            "type": "object",
+            "properties": {
+              "ip": {
+                "description": "The specific IP address to reserve. Must be available in the pool.",
+                "type": "string",
+                "format": "ip"
+              },
+              "pool": {
+                "nullable": true,
+                "description": "The pool containing this address. If not specified, the default pool for this IP's version is used.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NameOrId"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "type"
+            ]
+          },
+          {
+            "description": "Automatically allocate an IP address based on pool selection.",
+            "type": "object",
+            "properties": {
+              "pool_selector": {
+                "description": "How to select the pool for allocation.",
+                "default": {
+                  "ip_version": null,
+                  "type": "default"
+                },
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PoolSelector"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "auto"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "AffinityGroup": {
         "description": "View of an Affinity Group",
         "type": "object",
@@ -18947,7 +19009,7 @@
         "description": "Parameters for creating an ephemeral IP address for an instance.",
         "type": "object",
         "properties": {
-          "pool_selection": {
+          "pool_selector": {
             "description": "Pool to allocate from.",
             "default": {
               "ip_version": null,
@@ -18955,7 +19017,7 @@
             },
             "allOf": [
               {
-                "$ref": "#/components/schemas/PoolSelection"
+                "$ref": "#/components/schemas/PoolSelector"
               }
             ]
           }
@@ -19127,7 +19189,7 @@
             "description": "An IP address providing both inbound and outbound access. The address is automatically assigned from a pool.",
             "type": "object",
             "properties": {
-              "pool_selection": {
+              "pool_selector": {
                 "description": "Pool to allocate from.",
                 "default": {
                   "ip_version": null,
@@ -19135,7 +19197,7 @@
                 },
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/PoolSelection"
+                    "$ref": "#/components/schemas/PoolSelector"
                   }
                 ]
               },
@@ -19613,68 +19675,6 @@
           "time_modified"
         ]
       },
-      "FloatingIpAllocation": {
-        "description": "How to allocate a floating IP address.\n\nThis enum makes invalid states unrepresentable: when specifying an explicit IP, there's no `ip_version` field (the IP determines its version). The `ip_version` preference is only available when auto-allocating.",
-        "oneOf": [
-          {
-            "description": "Reserve a specific IP address.",
-            "type": "object",
-            "properties": {
-              "ip": {
-                "description": "The specific IP address to reserve. Must be available in the pool.",
-                "type": "string",
-                "format": "ip"
-              },
-              "pool": {
-                "nullable": true,
-                "description": "The pool containing this address. If not specified, the default pool for this IP's version is used.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NameOrId"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "explicit"
-                ]
-              }
-            },
-            "required": [
-              "ip",
-              "type"
-            ]
-          },
-          {
-            "description": "Automatically allocate an IP address based on pool selection.",
-            "type": "object",
-            "properties": {
-              "pool_selection": {
-                "description": "How to select the pool for allocation.",
-                "default": {
-                  "ip_version": null,
-                  "type": "default"
-                },
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/PoolSelection"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "auto"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
-        ]
-      },
       "FloatingIpAttach": {
         "description": "Parameters for attaching a floating IP address to another resource",
         "type": "object",
@@ -19705,10 +19705,10 @@
         "description": "Parameters for creating a new floating IP address for instances.",
         "type": "object",
         "properties": {
-          "allocation": {
+          "address_selector": {
             "description": "How to allocate the floating IP address.",
             "default": {
-              "pool_selection": {
+              "pool_selector": {
                 "ip_version": null,
                 "type": "default"
               },
@@ -19716,7 +19716,7 @@
             },
             "allOf": [
               {
-                "$ref": "#/components/schemas/FloatingIpAllocation"
+                "$ref": "#/components/schemas/AddressSelector"
               }
             ]
           },
@@ -23884,7 +23884,7 @@
           "values"
         ]
       },
-      "PoolSelection": {
+      "PoolSelector": {
         "description": "Pool selection for IP address allocation.\n\nThis enum makes invalid states unrepresentable: `ip_version` is only relevant when using the default pool.",
         "oneOf": [
           {
@@ -24381,7 +24381,7 @@
           "name": {
             "$ref": "#/components/schemas/Name"
           },
-          "pool_selection": {
+          "pool_selector": {
             "description": "Pool selection for allocating an ephemeral IP to the probe.",
             "default": {
               "ip_version": null,
@@ -24389,7 +24389,7 @@
             },
             "allOf": [
               {
-                "$ref": "#/components/schemas/PoolSelection"
+                "$ref": "#/components/schemas/PoolSelector"
               }
             ]
           },

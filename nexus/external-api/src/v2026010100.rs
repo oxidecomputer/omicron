@@ -83,7 +83,7 @@ impl TryFrom<InstanceNetworkInterfaceAttachment>
                 .collect::<Result<_, _>>()
                 .map(Self::Create),
             InstanceNetworkInterfaceAttachment::Default => {
-                Ok(Self::DefaultDualStack)
+                Ok(Self::DefaultIpv4)
             }
             InstanceNetworkInterfaceAttachment::None => Ok(Self::None),
         }
@@ -257,7 +257,7 @@ impl TryFrom<InstanceNetworkInterfaceCreate>
                         transit_ips: ipv6_transit_ips,
                     })
                 } else {
-                    PrivateIpStackCreate::auto_dual_stack()
+                    PrivateIpStackCreate::auto_ipv4()
                 }
             }
             Some(IpAddr::V4(ipv4)) => {

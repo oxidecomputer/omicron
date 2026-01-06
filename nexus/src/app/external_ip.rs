@@ -114,19 +114,19 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        let params::FloatingIpCreate { identity, allocation } = params;
+        let params::FloatingIpCreate { identity, address_selector } = params;
 
-        // Destructure allocation enum to get pool, ip, and ip_version
-        let (pool, ip, ip_version) = match allocation {
-            params::FloatingIpAllocation::Explicit { ip, pool } => {
+        // Destructure address_selector enum to get pool, ip, and ip_version
+        let (pool, ip, ip_version) = match address_selector {
+            params::AddressSelector::Explicit { ip, pool } => {
                 (pool, Some(ip), None)
             }
-            params::FloatingIpAllocation::Auto { pool_selection } => {
-                match pool_selection {
-                    params::PoolSelection::Named { pool } => {
+            params::AddressSelector::Auto { pool_selector } => {
+                match pool_selector {
+                    params::PoolSelector::Named { pool } => {
                         (Some(pool), None, None)
                     }
-                    params::PoolSelection::Default { ip_version } => {
+                    params::PoolSelector::Default { ip_version } => {
                         (None, None, ip_version)
                     }
                 }

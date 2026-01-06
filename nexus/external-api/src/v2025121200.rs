@@ -40,11 +40,11 @@ pub struct EphemeralIpCreate {
 
 impl From<EphemeralIpCreate> for params::EphemeralIpCreate {
     fn from(old: EphemeralIpCreate) -> params::EphemeralIpCreate {
-        let pool_selection = match old.pool {
-            Some(pool) => params::PoolSelection::Named { pool },
-            None => params::PoolSelection::Default { ip_version: None },
+        let pool_selector = match old.pool {
+            Some(pool) => params::PoolSelector::Named { pool },
+            None => params::PoolSelector::Default { ip_version: None },
         };
-        params::EphemeralIpCreate { pool_selection }
+        params::EphemeralIpCreate { pool_selector }
     }
 }
 
@@ -71,11 +71,11 @@ impl From<ExternalIpCreate> for params::ExternalIpCreate {
     fn from(old: ExternalIpCreate) -> params::ExternalIpCreate {
         match old {
             ExternalIpCreate::Ephemeral { pool } => {
-                let pool_selection = match pool {
-                    Some(pool) => params::PoolSelection::Named { pool },
-                    None => params::PoolSelection::Default { ip_version: None },
+                let pool_selector = match pool {
+                    Some(pool) => params::PoolSelector::Named { pool },
+                    None => params::PoolSelector::Default { ip_version: None },
                 };
-                params::ExternalIpCreate::Ephemeral { pool_selection }
+                params::ExternalIpCreate::Ephemeral { pool_selector }
             }
             ExternalIpCreate::Floating { floating_ip } => {
                 params::ExternalIpCreate::Floating { floating_ip }
@@ -101,20 +101,18 @@ pub struct FloatingIpCreate {
 
 impl From<FloatingIpCreate> for params::FloatingIpCreate {
     fn from(old: FloatingIpCreate) -> params::FloatingIpCreate {
-        let allocation = match (old.ip, old.pool) {
-            (Some(ip), pool) => {
-                params::FloatingIpAllocation::Explicit { ip, pool }
-            }
-            (None, Some(pool)) => params::FloatingIpAllocation::Auto {
-                pool_selection: params::PoolSelection::Named { pool },
+        let address_selector = match (old.ip, old.pool) {
+            (Some(ip), pool) => params::AddressSelector::Explicit { ip, pool },
+            (None, Some(pool)) => params::AddressSelector::Auto {
+                pool_selector: params::PoolSelector::Named { pool },
             },
-            (None, None) => params::FloatingIpAllocation::Auto {
-                pool_selection: params::PoolSelection::Default {
+            (None, None) => params::AddressSelector::Auto {
+                pool_selector: params::PoolSelector::Default {
                     ip_version: None,
                 },
             },
         };
-        params::FloatingIpCreate { identity: old.identity, allocation }
+        params::FloatingIpCreate { identity: old.identity, address_selector }
     }
 }
 

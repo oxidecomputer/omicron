@@ -920,12 +920,12 @@ async fn sic_allocate_instance_external_ip(
     // Runtime state should never be able to make 'complete_op' fallible.
     let ip = match ip_params {
         // Allocate a new IP address from the target, possibly default, pool
-        params::ExternalIpCreate::Ephemeral { pool_selection } => {
-            let (pool, ip_version) = match pool_selection {
-                params::PoolSelection::Named { pool } => {
+        params::ExternalIpCreate::Ephemeral { pool_selector } => {
+            let (pool, ip_version) = match pool_selector {
+                params::PoolSelector::Named { pool } => {
                     (Some(pool.clone()), None)
                 }
-                params::PoolSelection::Default { ip_version } => {
+                params::PoolSelector::Default { ip_version } => {
                     (None, *ip_version)
                 }
             };
@@ -1555,7 +1555,7 @@ pub mod test {
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                    pool_selection: params::PoolSelection::Default {
+                    pool_selector: params::PoolSelector::Default {
                         ip_version: Some(IpVersion::V4),
                     },
                 }],
