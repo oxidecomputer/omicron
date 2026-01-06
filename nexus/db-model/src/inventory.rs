@@ -9,6 +9,7 @@ use crate::Generation;
 use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
+use crate::to_db_typed_uuid;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -63,6 +64,7 @@ use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InternalZpoolKind;
 use omicron_uuid_kinds::MupdateKind;
 use omicron_uuid_kinds::MupdateOverrideKind;
@@ -72,6 +74,8 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::SvcInMaintenanceKind;
+use omicron_uuid_kinds::SvcInMaintenanceUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
@@ -1020,9 +1024,11 @@ impl_enum_type!(
 pub struct InvSvcInMaintenance {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<SvcInMaintenanceKind>,
     pub fmri: Option<String>,
     pub zone: Option<String>,
     pub error_messages: Vec<String>,
+    pub svcs_cmd_error: Option<String>,
     // TODO-K: Check if this needs to be an option
     pub time_of_status: Option<DateTime<Utc>>,
 }
@@ -1033,22 +1039,27 @@ impl InvSvcInMaintenance {
         sled_id: SledUuid,
         svc: Option<SvcInMaintenance>,
         svc_errors: Vec<String>,
+        svcs_cmd_error: Option<String>,
         time_of_status: Option<DateTime<Utc>>,
-        // TODO-K: Does this need to be here? or is it OK to bunch up all the
-        // errors in one place?
-        //svcs_cmd_error: Option<String>,
     ) -> Self {
         let (fmri, zone) = match svc {
             Some(svc) => (Some(svc.fmri), Some(svc.zone)),
             None => (None, None),
         };
 
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcInMaintenanceUuid::from_untyped_uuid(
+            Uuid::new_v4(),
+        ));
+
         Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
+            id,
             fmri,
             zone,
             error_messages: svc_errors,
+            svcs_cmd_error,
             time_of_status,
         }
     }

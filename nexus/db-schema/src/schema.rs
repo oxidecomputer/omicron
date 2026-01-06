@@ -1717,13 +1717,15 @@ table! {
 }
 
 table! {
-    inv_health_monitor_svc_in_maintenance (inv_collection_id, sled_id) {
+    inv_health_monitor_svc_in_maintenance (inv_collection_id, sled_id, id) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
+        id -> Uuid,
         fmri -> Nullable<Text>,
         zone -> Nullable<Text>,
 
         error_messages -> Nullable<Array<Text>>,
+        svcs_cmd_error -> Nullable<Text>,
         time_of_status -> Nullable<Timestamptz>,
     }
 }

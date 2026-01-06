@@ -220,6 +220,7 @@ impl DataStore {
                             sled_agent.sled_id,
                             Some(svc.clone()),
                             svcs.errors.clone(),
+                            None,
                             svcs.time_of_status,
                         ));
                     }
@@ -228,7 +229,8 @@ impl DataStore {
                     collection_id,
                     sled_agent.sled_id,
                     None,
-                    vec![e.to_string()],
+                    vec![],
+                    Some(e.to_string()),
                     None,
                 )),
             }
@@ -2692,6 +2694,7 @@ impl DataStore {
             disks
         };
 
+        // TODO-K: get inspiration ID here
         // Mapping of "Sled ID" -> "All zpools reported by that sled"
         let zpools: BTreeMap<Uuid, Vec<nexus_types::inventory::Zpool>> = {
             use nexus_db_schema::schema::inv_zpool::dsl;
@@ -2761,6 +2764,46 @@ impl DataStore {
             }
             datasets
         };
+
+        // TODO-K: fix
+//        // Mapping of "Sled ID" -> "All SMF services in maintenance reported by
+//        // that sled"
+//        let svcs_in_maintenance: BTreeMap<
+//            Uuid,
+//            Vec<nexus_types::inventory::Dataset>,
+//        > = {
+//            use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
+//
+//            let mut svcs =
+//                BTreeMap::<Uuid, Vec<nexus_types::inventory::Dataset>>::new();
+//            let mut paginator = Paginator::new(
+//                batch_size,
+//                dropshot::PaginationOrder::Ascending,
+//            );
+//            while let Some(p) = paginator.next() {
+//                let batch = paginated_multicolumn(
+//                    dsl::inv_health_monitor_svc_in_maintenance,
+//                    (dsl::sled_id, dsl::id),
+//                    &p.current_pagparams(),
+//                )
+//                .filter(dsl::inv_collection_id.eq(db_id))
+//                .select(InvDataset::as_select())
+//                .load_async(&*conn)
+//                .await
+//                .map_err(|e| {
+//                    public_error_from_diesel(e, ErrorHandler::Server)
+//                })?;
+//                paginator = p.found_batch(&batch, &|row| {
+//                    (row.sled_id, row.name.clone())
+//                });
+//                for svc in batch {
+//                    svcs.entry(svc.sled_id.into_untyped_uuid())
+//                        .or_default()
+//                        .push(svc.into());
+//                }
+//            }
+//            svcs
+//        };
 
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
         // Agents.
