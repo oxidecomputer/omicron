@@ -1,0 +1,27 @@
+[package]
+name = "sled-agent-health-monitor"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+derive_more.workspace = true
+dropshot.workspace = true
+futures.workspace = true
+illumos-utils.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+serde.workspace = true
+sled-agent-api.workspace = true
+sled-agent-types.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+omicron-workspace-hack.workspace = true

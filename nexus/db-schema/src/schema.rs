@@ -601,7 +601,9 @@ table! {
         ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
+        // NOTE: These are the IPv4 transit IPs specifically.
         transit_ips -> Array<Inet>,
+        transit_ips_v6 -> Array<Inet>,
     }
 }
 
@@ -621,7 +623,8 @@ table! {
         ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
-        transit_ips -> Array<Inet>,
+        transit_ips_v4 -> Array<Inet>,
+        transit_ips_v6 -> Array<Inet>,
     }
 }
 joinable!(instance_network_interface -> instance (instance_id));
@@ -666,6 +669,8 @@ table! {
         resource_type -> crate::enums::IpPoolResourceTypeEnum,
         resource_id -> Uuid,
         is_default -> Bool,
+        pool_type -> crate::enums::IpPoolTypeEnum,
+        ip_version -> crate::enums::IpVersionEnum,
     }
 }
 
@@ -1850,6 +1855,9 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(zpool, inv_zpool);
+allow_tables_to_appear_in_same_query!(inv_zpool, physical_disk);
+
 table! {
     inv_dataset (inv_collection_id, sled_id, name) {
         inv_collection_id -> Uuid,
@@ -2954,3 +2962,66 @@ allow_tables_to_appear_in_same_query!(
     rendezvous_local_storage_dataset,
     local_storage_dataset_allocation
 );
+
+table! {
+    fm_case (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        de -> crate::enums::DiagnosisEngineEnum,
+
+        created_sitrep_id -> Uuid,
+        closed_sitrep_id -> Nullable<Uuid>,
+
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_ereport_in_case (sitrep_id, id) {
+        id -> Uuid,
+        restart_id -> Uuid,
+        ena -> Int8,
+        case_id -> Uuid,
+        sitrep_id -> Uuid,
+        assigned_sitrep_id -> Uuid,
+
+        comment -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
+
+table! {
+    trust_quorum_configuration (rack_id, epoch) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        last_committed_epoch -> Nullable<Int8>,
+        state -> crate::enums::TrustQuorumConfigurationStateEnum,
+        threshold -> Int2,
+        commit_crash_tolerance -> Int2,
+        coordinator -> Uuid,
+        encrypted_rack_secrets_salt -> Nullable<Text>,
+        encrypted_rack_secrets -> Nullable<Binary>,
+        time_created -> Timestamptz,
+        time_committing -> Nullable<Timestamptz>,
+        time_committed -> Nullable<Timestamptz>,
+        time_aborted -> Nullable<Timestamptz>,
+        abort_reason -> Nullable<Text>,
+    }
+}
+
+table! {
+    trust_quorum_member (rack_id, epoch, hw_baseboard_id) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        hw_baseboard_id -> Uuid,
+        state -> crate::enums::TrustQuorumMemberStateEnum,
+        share_digest -> Nullable<Text>,
+        time_prepared -> Nullable<Timestamptz>,
+        time_committed -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(trust_quorum_member, hw_baseboard_id);
+joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));

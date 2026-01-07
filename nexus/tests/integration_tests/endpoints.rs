@@ -20,6 +20,7 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::IpVersion;
@@ -656,9 +657,11 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         hostname: "demo-instance".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: Some(Vec::new()),
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces:
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool: Some(DEMO_IP_POOL_NAME.clone().into()),
+            ip_version: None,
         }],
         disks: vec![],
         boot_disk: None,
@@ -679,9 +682,11 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         hostname: "demo-instance".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: Some(Vec::new()),
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces:
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool: Some(DEMO_IP_POOL_NAME.clone().into()),
+            ip_version: None,
         }],
         disks: vec![],
         boot_disk: None,
@@ -719,8 +724,7 @@ pub static DEMO_INSTANCE_NIC_CREATE: LazyLock<
     },
     vpc_name: DEMO_VPC_NAME.clone(),
     subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
-    ip: None,
-    transit_ips: vec![],
+    ip_config: PrivateIpStackCreate::auto_ipv4(),
 });
 pub static DEMO_INSTANCE_NIC_PUT: LazyLock<
     params::InstanceNetworkInterfaceUpdate,
@@ -1176,6 +1180,7 @@ pub static DEMO_FLOAT_IP_CREATE: LazyLock<params::FloatingIpCreate> =
         },
         ip: Some(Ipv4Addr::new(10, 0, 0, 141).into()),
         pool: None,
+        ip_version: None,
     });
 
 pub static DEMO_FLOAT_IP_UPDATE: LazyLock<params::FloatingIpUpdate> =
@@ -1192,7 +1197,10 @@ pub static DEMO_FLOAT_IP_ATTACH: LazyLock<params::FloatingIpAttach> =
         parent: DEMO_FLOAT_IP_NAME.clone().into(),
     });
 pub static DEMO_EPHEMERAL_IP_ATTACH: LazyLock<params::EphemeralIpCreate> =
-    LazyLock::new(|| params::EphemeralIpCreate { pool: None });
+    LazyLock::new(|| params::EphemeralIpCreate {
+        pool: None,
+        ip_version: None,
+    });
 // Identity providers
 pub const IDENTITY_PROVIDERS_URL: &'static str =
     "/v1/system/identity-providers?silo=demo-silo";

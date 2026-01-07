@@ -333,11 +333,6 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
-    use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-    use nexus_sled_agent_shared::inventory::OmicronZoneType;
-    use nexus_sled_agent_shared::inventory::SledRole;
-    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
@@ -384,6 +379,11 @@ mod test {
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::OmicronZoneConfig;
+    use sled_agent_types::inventory::OmicronZoneImageSource;
+    use sled_agent_types::inventory::OmicronZoneType;
+    use sled_agent_types::inventory::SledRole;
+    use sled_agent_types::inventory::ZoneKind;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -822,7 +822,7 @@ mod test {
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
         let omicron_zones_by_ip: BTreeMap<_, _> = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .map(|(_, zone)| (zone.underlay_ip(), zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
@@ -1554,11 +1554,11 @@ mod test {
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .in_service_zones()
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let zones_after = blueprint2
-            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .in_service_zones()
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let new_zones: Vec<_> = zones_after.difference(&zones_before).collect();

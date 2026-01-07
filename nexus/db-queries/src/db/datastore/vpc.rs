@@ -438,7 +438,7 @@ impl DataStore {
                 }
                 Err(e) => return Err(e),
                 Ok(None) => {
-                    crate::probes::vni__search__range__empty!(|| (&id));
+                    crate::probes::vni__search__range__empty!(|| &id);
                     debug!(
                         opctx.log,
                         "No VNIs available within current search range, retrying";
@@ -2977,7 +2977,6 @@ mod tests {
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_db_model::IncompleteNetworkInterface;
-    use nexus_db_model::IpConfig;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::planner::Planner;
@@ -2991,6 +2990,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::external_api::params;
+    use nexus_types::external_api::params::PrivateIpStackCreate;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
@@ -3303,7 +3303,7 @@ mod tests {
                     name: nic.name.clone(),
                     description: nic.name.to_string(),
                 },
-                IpConfig::from_ipv4(*ip),
+                PrivateIpStackCreate::from_ipv4(*ip),
                 nic.mac,
                 nic.slot,
             )
@@ -3907,10 +3907,10 @@ mod tests {
             assert!(resolved.iter().any(|x| {
                 let k = &x.dest;
                 let v = &x.target;
-                *k == subnet.ipv4_block.0.into()
+                *k == IpNet::from(subnet.ipv4_block.0)
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
-                            *ip == subnet.ipv4_block.0.into()
+                            *ip == IpNet::from(subnet.ipv4_block.0)
                         }
                         _ => false,
                     }
@@ -3918,10 +3918,10 @@ mod tests {
             assert!(resolved.iter().any(|x| {
                 let k = &x.dest;
                 let v = &x.target;
-                *k == subnet.ipv6_block.0.into()
+                *k == IpNet::from(subnet.ipv6_block.0)
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
-                            *ip == subnet.ipv6_block.0.into()
+                            *ip == IpNet::from(subnet.ipv6_block.0)
                         }
                         _ => false,
                     }
@@ -4059,7 +4059,7 @@ mod tests {
                         name: "nic".parse().unwrap(),
                         description: "A NIC...".into(),
                     },
-                    IpConfig::auto_ipv4(),
+                    PrivateIpStackCreate::auto_ipv4(),
                 )
                 .unwrap(),
             )

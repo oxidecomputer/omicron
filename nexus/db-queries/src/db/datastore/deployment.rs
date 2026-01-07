@@ -17,7 +17,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::{KeeperId, ServerId};
+use clickhouse_admin_types::keeper::KeeperId;
+use clickhouse_admin_types::server::ServerId;
 use core::future::Future;
 use core::pin::Pin;
 use diesel::BoolExpressionMethods;
@@ -75,6 +76,7 @@ use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSource;
@@ -90,7 +92,7 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::inventory::BaseboardId;
+use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
@@ -104,6 +106,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TypedUuid;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -210,7 +213,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(txn_error) => txn_error.into(),
+                Some(txn_error) => txn_error.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })?;
         Ok(r)
@@ -632,7 +635,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(err) => err.into(),
+                Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })?;
 
@@ -1828,7 +1831,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(err) => err.into(),
+                Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })?;
 
@@ -1955,25 +1958,32 @@ impl DataStore {
                 self.ensure_zone_external_networking_deallocated_on_connection(
                     &conn,
                     &opctx.log,
+                    // TODO-correctness Currently the planner _does not wait_
+                    // for zones using external IPs to be ready for cleanup
+                    // before reassigning the external IP to a new zone, so we
+                    // have to deallocate IPs for both "ready for cleanup" and
+                    // "not ready for cleanup" zones. We should fix the planner,
+                    // at which point we can operate on only "ready for cleanup"
+                    // zones here.
+                    //
+                    // <https://github.com/oxidecomputer/omicron/issues/9506>
                     blueprint
-                        .all_omicron_zones(|disposition| {
-                            !disposition.is_in_service()
-                        })
+                        .expunged_zones(
+                            ZoneRunningStatus::Any,
+                            BlueprintExpungedZoneAccessReason
+                                ::DeallocateExternalNetworkingResources
+                        )
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .map_err(|e| err.bail(e.into()))?;
+                .map_err(|e| err.bail(e))?;
                 self.ensure_zone_external_networking_allocated_on_connection(
                     &conn,
                     opctx,
-                    blueprint
-                        .all_omicron_zones(|disposition| {
-                            disposition.is_in_service()
-                        })
-                        .map(|(_sled_id, zone)| zone),
+                    blueprint.in_service_zones().map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .map_err(|e| err.bail(e.into()))?;
+                .map_err(|e| err.bail(e))?;
 
                 Ok(())
             }
@@ -1981,7 +1991,7 @@ impl DataStore {
         .await
         .map_err(|e| {
             if let Some(err) = err.take() {
-                err.into()
+                err.into_public_ignore_retries()
             } else {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
@@ -2132,7 +2142,9 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let target = Self::blueprint_current_target_only(&conn).await?;
+        let target = Self::blueprint_current_target_only(&conn)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
 
         // The blueprint for the current target cannot be deleted while it is
         // the current target, but it's possible someone else (a) made a new
@@ -2162,7 +2174,9 @@ impl DataStore {
     ) -> Result<BlueprintTarget, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::blueprint_current_target_only(&conn).await.map_err(|e| e.into())
+        Self::blueprint_current_target_only(&conn)
+            .await
+            .map_err(|e| e.into_public_ignore_retries())
     }
 
     // Helper to fetch the current blueprint target (without fetching the entire
@@ -3092,7 +3106,6 @@ mod tests {
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledState;
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Collection;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
@@ -3111,6 +3124,7 @@ mod tests {
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
     use rand::Rng;
+    use sled_hardware_types::BaseboardId;
     use std::collections::BTreeSet;
     use std::mem;
     use std::net::Ipv6Addr;
@@ -3308,7 +3322,7 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len(), collection.sled_agents.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
+            blueprint1.in_service_zones().count(),
             collection.all_ledgered_omicron_zones().count()
         );
         // All zones should be in service.
@@ -3640,9 +3654,8 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len() + 1, blueprint2.sleds.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count()
-                + num_new_sled_zones,
-            blueprint2.all_omicron_zones(BlueprintZoneDisposition::any).count()
+            blueprint1.in_service_zones().count() + num_new_sled_zones,
+            blueprint2.in_service_zones().count()
         );
 
         // All zones should be in service.
@@ -4292,7 +4305,7 @@ mod tests {
 
         // Insert an IP pool range covering the one Nexus IP.
         let nexus_ip = blueprint1
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .find_map(|(_, zone_config)| {
                 zone_config
                     .zone_type
@@ -4512,7 +4525,10 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .all_omicron_zones(|disposition| !disposition.is_in_service())
+            .expunged_zones(
+                ZoneRunningStatus::Any,
+                BlueprintExpungedZoneAccessReason::Test,
+            )
             .collect::<Vec<_>>();
         assert!(
             not_in_service.is_empty(),

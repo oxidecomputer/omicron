@@ -10,15 +10,15 @@
 
 use super::OmicronZoneExternalIp;
 use daft::Diffable;
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DatasetName;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
+use sled_agent_types_versions::latest::inventory::OmicronZoneType;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use std::net::Ipv6Addr;
 
 #[derive(
@@ -202,6 +202,11 @@ impl BlueprintZoneType {
         matches!(self, BlueprintZoneType::Clickhouse(_))
     }
 
+    /// Identifies whether this is an Oximeter zone
+    pub fn is_oximeter(&self) -> bool {
+        matches!(self, BlueprintZoneType::Oximeter(_))
+    }
+
     /// Returns the durable dataset associated with this zone, if any exists.
     pub fn durable_dataset(&self) -> Option<DurableDataset<'_>> {
         let (dataset, kind) = match self {
@@ -343,12 +348,12 @@ pub mod blueprint_zone_type {
     use crate::deployment::OmicronZoneExternalFloatingIp;
     use crate::deployment::OmicronZoneExternalSnatIp;
     use daft::Diffable;
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::NetworkInterface;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;
+    use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;

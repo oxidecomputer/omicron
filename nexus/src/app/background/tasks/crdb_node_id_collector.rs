@@ -24,6 +24,7 @@
 //! whether a zone without a known node ID ever existed.
 
 use crate::app::background::BackgroundTask;
+use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
 use anyhow::Context;
 use anyhow::ensure;
 use futures::FutureExt;
@@ -33,8 +34,6 @@ use futures::stream;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintTarget;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
@@ -46,15 +45,13 @@ use tokio::sync::watch;
 
 pub struct CockroachNodeIdCollector {
     datastore: Arc<DataStore>,
-    rx_blueprint: watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
+    rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
 }
 
 impl CockroachNodeIdCollector {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_blueprint: watch::Receiver<
-            Option<(BlueprintTarget, Arc<Blueprint>)>,
-        >,
+        rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
     ) -> Self {
         Self { datastore, rx_blueprint }
     }
@@ -74,7 +71,8 @@ impl CockroachNodeIdCollector {
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
 
-        let Some((_bp_target, blueprint)) = update else {
+        let Some(LoadedTargetBlueprint { blueprint, target: _ }) = update
+        else {
             warn!(
                 &opctx.log, "Blueprint execution: skipped";
                 "reason" => "no blueprint",
@@ -144,23 +142,21 @@ impl CockroachAdminFromBlueprint for CockroachAdminFromBlueprintViaFixedPort {
         &'a self,
         blueprint: &'a Blueprint,
     ) -> impl Iterator<Item = (OmicronZoneUuid, SocketAddrV6)> + 'a {
-        // We can only actively collect from zones that should be running; if
+        // We can only actively collect from zones that should be in-service; if
         // there are CRDB zones in other states that still need their node ID
         // collected, we have to wait until they're running.
-        let zone_filter = BlueprintZoneDisposition::is_in_service;
-
-        blueprint.all_omicron_zones(zone_filter).filter_map(
-            |(_sled_id, zone)| match &zone.zone_type {
-                BlueprintZoneType::CockroachDb(
-                    blueprint_zone_type::CockroachDb { address, .. },
-                ) => {
-                    let mut admin_addr = *address;
-                    admin_addr.set_port(COCKROACH_ADMIN_PORT);
-                    Some((zone.id, admin_addr))
-                }
-                _ => None,
-            },
-        )
+        blueprint.in_service_zones().filter_map(|(_sled_id, zone)| match &zone
+            .zone_type
+        {
+            BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { address, .. },
+            ) => {
+                let mut admin_addr = *address;
+                admin_addr.set_port(COCKROACH_ADMIN_PORT);
+                Some((zone.id, admin_addr))
+            }
+            _ => None,
+        })
     }
 }
 
@@ -243,6 +239,7 @@ mod tests {
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_types::deployment::BlueprintSource;
+    use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use omicron_common::api::external::Generation;
@@ -269,7 +266,7 @@ mod tests {
         // `ExampleSystemBuilder` doesn't place any cockroach nodes; assert so
         // we bail out early if that changes.
         let ncockroach = bp0
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| z.zone_type.is_cockroach())
             .count();
         assert_eq!(ncockroach, 0);
@@ -378,7 +375,10 @@ mod tests {
         };
 
         let (_tx_blueprint, rx_blueprint) =
-            watch::channel(Some((blueprint_target, Arc::new(blueprint))));
+            watch::channel(Some(LoadedTargetBlueprint {
+                target: blueprint_target,
+                blueprint: Arc::new(blueprint),
+            }));
         let mut collector =
             CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
 
@@ -438,7 +438,10 @@ mod tests {
         };
 
         let (_tx_blueprint, rx_blueprint) =
-            watch::channel(Some((blueprint_target, Arc::new(blueprint))));
+            watch::channel(Some(LoadedTargetBlueprint {
+                target: blueprint_target,
+                blueprint: Arc::new(blueprint),
+            }));
         let mut collector =
             CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
 

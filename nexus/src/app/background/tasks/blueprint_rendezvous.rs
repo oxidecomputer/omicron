@@ -5,36 +5,34 @@
 //! Background task for reconciling blueprints and inventory, updating
 //! Reconfigurator rendezvous tables
 
-use crate::app::background::BackgroundTask;
+use crate::app::background::{
+    BackgroundTask, tasks::blueprint_load::LoadedTargetBlueprint,
+};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_rendezvous::reconcile_blueprint_rendezvous_tables;
 use nexus_types::{
-    deployment::{Blueprint, BlueprintTarget},
-    internal_api::background::BlueprintRendezvousStatus,
-    inventory::Collection,
+    internal_api::background::BlueprintRendezvousStatus, inventory::Collection,
 };
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
 
-/// Background task that takes a [`Blueprint`] and an inventory `Collection`
+/// Background task that takes a `Blueprint` and an inventory `Collection`
 /// and updates any rendezvous tables to track resources under Reconfigurator's
 /// control for other parts of Nexus to consume.
 pub struct BlueprintRendezvous {
     datastore: Arc<DataStore>,
-    rx_blueprint: watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
+    rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
     rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
 }
 
 impl BlueprintRendezvous {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_blueprint: watch::Receiver<
-            Option<(BlueprintTarget, Arc<Blueprint>)>,
-        >,
+        rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
         rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
     ) -> Self {
         Self { datastore, rx_blueprint, rx_inventory }
@@ -50,7 +48,8 @@ impl BlueprintRendezvous {
         // Get the latest blueprint, cloning to prevent holding a read lock
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
-        let Some((_, blueprint)) = update else {
+        let Some(LoadedTargetBlueprint { blueprint, target: _ }) = update
+        else {
             warn!(
                 &opctx.log, "Blueprint rendezvous: skipped";
                 "reason" => "no blueprint",

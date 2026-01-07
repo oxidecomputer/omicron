@@ -4,11 +4,14 @@
 
 use crate::context::{KeeperServerContext, ServerContext};
 use clickhouse_admin_api::*;
-use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, DistributedDdlQueue,
-    GenerateConfigResult, KeeperConf, KeeperConfigurableSettings, Lgif,
-    MetricInfoPath, RaftConfig, ServerConfigurableSettings, SystemTimeSeries,
-    SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
+use clickhouse_admin_types::config::GenerateConfigResult;
+use clickhouse_admin_types::keeper::{
+    ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfigurableSettings,
+    Lgif, RaftConfig,
+};
+use clickhouse_admin_types::server::{
+    DistributedDdlQueue, MetricInfoPath, ServerConfigurableSettings,
+    SystemTimeSeries, SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
 };
 use dropshot::{
     ApiDescription, ClientErrorStatusCode, HttpError, HttpResponseCreated,

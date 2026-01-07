@@ -603,15 +603,14 @@ async fn sdc_regions_ensure(
 
     // Each ID should be unique to this disk
     if let Some(read_only_parent) = &mut read_only_parent {
-        *read_only_parent = Box::new(
+        **read_only_parent =
             randomize_volume_construction_request_ids(&read_only_parent)
                 .map_err(|e| {
                     ActionError::action_failed(Error::internal_error(&format!(
                         "failed to randomize ids: {}",
                         e,
                     )))
-                })?,
-        );
+                })?;
     }
 
     // Create volume construction request for this disk

@@ -14,6 +14,7 @@ use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::NexusSaga;
+use crate::db::datastore::Disk;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
@@ -39,6 +40,7 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
 use nexus_types::external_api::views;
+use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -48,6 +50,7 @@ use omicron_common::api::external::Hostname;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
@@ -57,7 +60,6 @@ use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
 use omicron_common::api::internal::shared::ExternalIps;
-use omicron_common::api::internal::shared::external_ip::ConcreteIp;
 use omicron_common::api::internal::shared::external_ip::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -73,6 +75,7 @@ use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use sagas::instance_common::ExternalIpAttach;
 use sagas::instance_start;
 use sagas::instance_update;
+use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
 use std::collections::HashSet;
@@ -1369,6 +1372,35 @@ impl super::Nexus {
             )
             .await?;
 
+        // Each Disk::LocalStorage will require a delegated zvol entry.
+        let mut delegated_zvols: Vec<DelegatedZvol> =
+            Vec::with_capacity(disks.len());
+
+        for disk in &disks {
+            let local_storage_disk = match disk {
+                Disk::Crucible(_) => {
+                    continue;
+                }
+
+                Disk::LocalStorage(local_storage_disk) => local_storage_disk,
+            };
+
+            let Some(local_storage_dataset_allocation) =
+                &local_storage_disk.local_storage_dataset_allocation
+            else {
+                return Err(Error::internal_error(&format!(
+                    "local storage disk {} allocation is None!",
+                    disk.id()
+                ))
+                .into());
+            };
+
+            delegated_zvols.push(DelegatedZvol::LocalStorage {
+                zpool_id: local_storage_dataset_allocation.pool_id(),
+                dataset_id: local_storage_dataset_allocation.id(),
+            });
+        }
+
         let nics = self
             .db_datastore
             .derive_guest_network_interface_info(&opctx, &authz_instance)
@@ -1496,7 +1528,7 @@ impl super::Nexus {
                 host_domain: None,
                 search_domains: Vec::new(),
             },
-            delegated_zvols: vec![],
+            delegated_zvols,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
@@ -2159,7 +2191,29 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         pool: Option<NameOrId>,
+        ip_version: Option<IpVersion>,
     ) -> UpdateResult<views::ExternalIp> {
+        // Validate pool/ip_version compatibility upfront for clear error
+        // communication.
+        //
+        // The saga will look up the pool again, but this ensures the user gets
+        // a direct error before any saga machinery starts, and without changing
+        // the `Ephemeral` type fields.
+        if let (Some(pool_id), Some(requested_version)) = (&pool, ip_version) {
+            let (_, db_pool) = self
+                .ip_pool_lookup(opctx, pool_id)?
+                .fetch_for(authz::Action::CreateChild)
+                .await?;
+            let db_version: IpVersion = db_pool.ip_version.into();
+            if db_version != requested_version {
+                return Err(Error::invalid_request(format!(
+                    "requested IP version ({requested_version}) does not match \
+                     pool '{}' version ({db_version})",
+                    db_pool.name().as_str(),
+                )));
+            }
+        }
+
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -2167,17 +2221,18 @@ impl super::Nexus {
             opctx,
             authz_instance,
             authz_project.id(),
-            ExternalIpAttach::Ephemeral { pool },
+            ExternalIpAttach::Ephemeral { pool, ip_version },
         )
         .await
     }
 
-    /// Attach an ephemeral IP to an instance.
+    /// Attach a Floating IP to an instance.
     pub(crate) async fn instance_attach_floating_ip(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         authz_fip: authz::FloatingIp,
+        ip_version: IpVersion,
         authz_fip_project: authz::Project,
     ) -> UpdateResult<views::ExternalIp> {
         let (.., authz_project, authz_instance) =
@@ -2193,7 +2248,7 @@ impl super::Nexus {
             opctx,
             authz_instance,
             authz_project.id(),
-            ExternalIpAttach::Floating { floating_ip: authz_fip },
+            ExternalIpAttach::Floating { floating_ip: authz_fip, ip_version },
         )
         .await
     }
@@ -2559,7 +2614,10 @@ fn check_instance_cpu_memory_sizes(
 
     // Reject instances where the memory is not divisible by
     // MIN_MEMORY_BYTES_PER_INSTANCE
-    if (memory.to_bytes() % u64::from(MIN_MEMORY_BYTES_PER_INSTANCE)) != 0 {
+    if !memory
+        .to_bytes()
+        .is_multiple_of(u64::from(MIN_MEMORY_BYTES_PER_INSTANCE))
+    {
         return Err(Error::invalid_value(
             "size",
             format!(

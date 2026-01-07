@@ -11,15 +11,14 @@ use crate::SledAgentArtifactStore;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use installinator_common::RawDiskWriter;
-use nexus_sled_agent_shared::inventory::BootPartitionContents as BootPartitionContentsInventory;
-use nexus_sled_agent_shared::inventory::BootPartitionDetails;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use omicron_common::disk::M2Slot;
+use sled_agent_types::inventory::BootPartitionContents as BootPartitionContentsInventory;
+use sled_agent_types::inventory::BootPartitionDetails;
+use sled_agent_types::inventory::HostPhase2DesiredContents;
+use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::zone_images::ResolverStatus;
 use sled_hardware::PooledDiskError;
 use slog::Logger;
-use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
@@ -488,7 +487,7 @@ mod boot_partition_details {
         // `MediaInfoExtended`; we'll allocate a buffer of this size when we
         // read, so if we get back something wild as the logical block size,
         // we'll assume that's wrong and cap it at 128 MiB.
-        if block_size < ONE_MIB && ONE_MIB % block_size == 0 {
+        if block_size < ONE_MIB && ONE_MIB.is_multiple_of(block_size) {
             block_size = ONE_MIB;
         } else if block_size > 128 * ONE_MIB {
             block_size = 128 * ONE_MIB;
@@ -596,7 +595,7 @@ pub enum ImageHeaderParseError {
 mod boot_image_header {
     use super::ImageHeaderParseError;
     use bytes::Buf as _;
-    use nexus_sled_agent_shared::inventory::BootImageHeader;
+    use sled_agent_types::inventory::BootImageHeader;
 
     pub(super) const SIZE: usize = 4096;
     pub(super) const DATASET_NAME_SIZE: usize = 128;

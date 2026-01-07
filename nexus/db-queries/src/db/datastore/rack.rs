@@ -29,10 +29,8 @@ use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
-use nexus_db_errors::MaybeRetryable::*;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
-use nexus_db_errors::retryable;
 use nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET;
@@ -40,7 +38,6 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
-use nexus_db_model::IpConfig;
 use nexus_db_model::IpVersion;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
@@ -50,15 +47,16 @@ use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::params as external_params;
+use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
+use nexus_types::internal_api::params::InitialTrustQuorumConfig;
 use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
@@ -72,6 +70,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -98,6 +97,7 @@ pub struct RackInit {
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
     pub allowed_source_ips: AllowedSourceIps,
+    pub initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
 }
 
 /// Possible errors while trying to initialize rack
@@ -115,19 +115,15 @@ enum RackInitError {
     DnsSerialization(Error),
     Silo(Error),
     RoleAssignment(Error),
-    // Retryable database error
-    Retryable(DieselError),
-    // Other non-retryable database error
     Database(DieselError),
     // Error adding initial allowed source IP list
     AllowedSourceIpError(Error),
+    TrustQuorum(Error),
 }
 
-// Catch-all for Diesel error conversion into RackInitError, which
-// can also label errors as retryable.
 impl From<DieselError> for RackInitError {
     fn from(e: DieselError) -> Self {
-        if retryable(&e) { Self::Retryable(e) } else { Self::Database(e) }
+        Self::Database(e)
     }
 }
 
@@ -179,15 +175,14 @@ impl From<RackInitError> for Error {
             RackInitError::RoleAssignment(err) => {
                 err.internal_context("failed to assign role to initial user")
             }
-            RackInitError::Retryable(err) => Error::unavail(&format!(
-                "failed operation due to database contention: {:#}",
-                err
-            )),
             RackInitError::Database(err) => Error::internal_error(&format!(
                 "failed operation due to database error: {:#}",
                 err
             )),
             RackInitError::AllowedSourceIpError(err) => err,
+            RackInitError::TrustQuorum(err) => err.internal_context(
+                "failed to insert initial trust quorum configuration",
+            ),
         }
     }
 }
@@ -464,9 +459,8 @@ impl DataStore {
                 dns_update,
             )
             .await
-            .map_err(|err| match err.retryable() {
-                NotRetryable(err) => RackInitError::Silo(err.into()),
-                Retryable(err) => RackInitError::Retryable(err),
+            .map_err(|err| {
+                RackInitError::Silo(err.into_public_ignore_retries())
             })?;
         info!(log, "Created recovery silo");
 
@@ -553,13 +547,13 @@ impl DataStore {
         // TODO-completeness: Support dual-stack NICs for services. See
         // https://github.com/oxidecomputer/omicron/issues/9313.
         let extract_ip_config =
-            |nic: &NetworkInterface| -> Result<IpConfig, Error> {
+            |nic: &NetworkInterface| -> Result<PrivateIpStackCreate, Error> {
                 match &nic.ip_config {
                     PrivateIpConfig::V4(ipv4) => {
-                        Ok(IpConfig::from_ipv4(*ipv4.ip()))
+                        Ok(PrivateIpStackCreate::from_ipv4(*ipv4.ip()))
                     }
                     PrivateIpConfig::V6(ipv6) => {
-                        Ok(IpConfig::from_ipv6(*ipv6.ip()))
+                        Ok(PrivateIpStackCreate::from_ipv6(*ipv6.ip()))
                     }
                     PrivateIpConfig::DualStack { .. } => {
                         Err(Error::invalid_request(
@@ -679,10 +673,7 @@ impl DataStore {
                      zone_report_str;
                     "err" => %err,
                 );
-                match err.retryable() {
-                    Retryable(e) => RackInitError::Retryable(e),
-                    NotRetryable(e) => RackInitError::AddingIp(e.into()),
-                }
+                RackInitError::AddingIp(err.into_public_ignore_retries())
             },
         )?;
 
@@ -692,14 +683,18 @@ impl DataStore {
             .or_else(|e| {
                 use db::queries::network_interface::InsertError;
                 match e {
-                    InsertError::InterfaceAlreadyExists(
-                        _,
-                        db::model::NetworkInterfaceKind::Service,
+                    TransactionError::CustomError(
+                        InsertError::InterfaceAlreadyExists(
+                            _,
+                            db::model::NetworkInterfaceKind::Service,
+                        ),
                     ) => Ok(()),
-                    InsertError::Retryable(err) => {
-                        Err(RackInitError::Retryable(err))
+                    TransactionError::CustomError(e) => {
+                        Err(RackInitError::AddingNic(e.into_external()))
                     }
-                    _ => Err(RackInitError::AddingNic(e.into_external())),
+                    TransactionError::Database(err) => {
+                        Err(RackInitError::Database(err))
+                    }
                 }
             })?;
         info!(
@@ -853,7 +848,7 @@ impl DataStore {
                     // Insert Nexus database access records
                     self.initialize_nexus_access_from_blueprint_on_connection(
                         &conn,
-                        blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                        blueprint.in_service_zones()
                             .filter_map(|(_sled, zone_cfg)| {
                                 if zone_cfg.zone_type.is_nexus() {
                                     Some(zone_cfg.id)
@@ -867,7 +862,7 @@ impl DataStore {
                     })?;
 
                     // Allocate networking records for all services.
-                    for (_, zone_config) in blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service) {
+                    for (_, zone_config) in blueprint.in_service_zones() {
                         self.rack_populate_service_networking_records(
                             &conn,
                             &log,
@@ -889,7 +884,7 @@ impl DataStore {
                             .await {
                             if !matches!(e, TransactionError::CustomError(Error::ObjectAlreadyExists { .. })) {
                                 error!(log, "Failed to upsert physical disk"; "err" => #%e);
-                                err.set(RackInitError::PhysicalDiskInsert(e.into()))
+                                err.set(RackInitError::PhysicalDiskInsert(e.into_public_ignore_retries()))
                                     .unwrap();
                                 return Err(DieselError::RollbackTransaction);
                             }
@@ -902,7 +897,7 @@ impl DataStore {
                         if let Err(e) = Self::zpool_insert_on_connection(&conn, &opctx, zpool).await {
                             if !matches!(e, TransactionError::CustomError(Error::ObjectAlreadyExists { .. })) {
                                 error!(log, "Failed to upsert zpool"; "err" => #%e);
-                                err.set(RackInitError::ZpoolInsert(e.into())).unwrap();
+                                err.set(RackInitError::ZpoolInsert(e.into_public_ignore_retries())).unwrap();
                                 return Err(DieselError::RollbackTransaction);
                             }
                         }
@@ -971,12 +966,9 @@ impl DataStore {
                         rack_init.dns_update,
                     )
                     .await
-                    .map_err(|e| match e {
-                        RackInitError::Retryable(e) => e,
-                        _ => {
-                            err.set(e).unwrap();
-                            DieselError::RollbackTransaction
-                        }
+                    .map_err(|e| {
+                        err.set(e).unwrap();
+                        DieselError::RollbackTransaction
                     })?;
 
                     // Insert the initial source IP allowlist for requests to
@@ -990,6 +982,20 @@ impl DataStore {
                         DieselError::RollbackTransaction
                     })?;
 
+                    // Insert the initial trust quorum configuration
+                    if let Some(tq_config) = rack_init.initial_trust_quorum_configuration {
+                        Self::tq_insert_rss_config_after_handoff(
+                            opctx,
+                            &conn,
+                            RackUuid::from_untyped_uuid(rack_id),
+                            tq_config.members,
+                            tq_config.coordinator
+                        ).await.map_err(|e| {
+                            err.set(RackInitError::TrustQuorum(e)).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
+                    }
+
                     let rack = diesel::update(rack_dsl::rack)
                         .filter(rack_dsl::id.eq(rack_id))
                         .set((
@@ -1000,9 +1006,6 @@ impl DataStore {
                         .get_result_async::<Rack>(&conn)
                         .await
                         .map_err(|e| {
-                            if retryable(&e) {
-                                return e;
-                            }
                             err.set(RackInitError::RackUpdate {
                                 err: e,
                                 rack_id,
@@ -1085,9 +1088,7 @@ mod test {
     use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
-    use nexus_types::deployment::{
-        BlueprintZoneDisposition, BlueprintZoneImageSource, OximeterReadMode,
-    };
+    use nexus_types::deployment::{BlueprintZoneImageSource, OximeterReadMode};
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
@@ -1184,6 +1185,7 @@ mod test {
                     "test suite".to_string(),
                 ),
                 allowed_source_ips: AllowedSourceIps::Any,
+                initial_trust_quorum_configuration: None
             }
         }
     }
@@ -1520,9 +1522,7 @@ mod test {
         let mut ntp1_id = None;
         let mut ntp2_id = None;
         let mut ntp3_id = None;
-        for (sled_id, zone) in
-            blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (sled_id, zone) in blueprint.in_service_zones() {
             match &zone.zone_type {
                 BlueprintZoneType::BoundaryNtp(_) => {
                     let which = if sled_id == sled1.id() {
@@ -1767,10 +1767,8 @@ mod test {
         assert_eq!(observed_blueprint, blueprint);
 
         // We should see both of the Nexus services we provisioned.
-        let mut observed_zones: Vec<_> = observed_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .map(|(_, z)| z)
-            .collect();
+        let mut observed_zones: Vec<_> =
+            observed_blueprint.in_service_zones().map(|(_, z)| z).collect();
         observed_zones.sort_by_key(|z| z.id);
         assert_eq!(observed_zones.len(), 2);
 
@@ -1795,12 +1793,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::any)
-                .next()
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().next().unwrap().1.zone_type
             {
                 external_ip.ip
             } else {
@@ -1814,12 +1807,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::any)
-                .nth(1)
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().nth(1).unwrap().1.zone_type
             {
                 external_ip.ip
             } else {
@@ -1972,10 +1960,8 @@ mod test {
         assert_eq!(observed_blueprint, blueprint);
 
         // We should see the Nexus service we provisioned.
-        let mut observed_zones: Vec<_> = observed_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .map(|(_, z)| z)
-            .collect();
+        let mut observed_zones: Vec<_> =
+            observed_blueprint.in_service_zones().map(|(_, z)| z).collect();
         observed_zones.sort_by_key(|z| z.id);
         assert_eq!(observed_zones.len(), 1);
 
@@ -2002,12 +1988,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::any)
-                .next()
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().next().unwrap().1.zone_type
             {
                 external_ip.ip
             } else {

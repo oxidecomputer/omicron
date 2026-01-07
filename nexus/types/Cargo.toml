@@ -41,6 +41,7 @@ schemars = { workspace = true, features = ["chrono", "uuid1", "url"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
+sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
@@ -51,7 +52,10 @@ test-strategy.workspace = true
 textwrap.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+trust-quorum-protocol.workspace = true
+trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
+
 newtype-uuid.workspace = true
 update-engine.workspace = true
 unicode-width.workspace = true
@@ -62,24 +66,22 @@ api_identity.workspace = true
 gateway-client.workspace = true
 gateway-types.workspace = true
 internal-dns-types.workspace = true
-nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
+sled-agent-types-versions.workspace = true
 swrite.workspace = true
 tough.workspace = true
-# Note: we're trying to avoid a dependency from nexus-types to sled-agent-types
-# because the correct direction of dependency is unclear. If there are types
-# common to both, put them in `omicron-common` or `nexus-sled-agent-shared`.
 
 [dev-dependencies]
 expectorate.workspace = true
 gateway-types = { workspace = true, features = ["testing"] }
 iddqd = { workspace = true, features = ["proptest"] }
 newtype-uuid = { workspace = true, features = ["proptest1"] }
-nexus-sled-agent-shared = { workspace = true, features = ["testing"] }
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
+sled-agent-types-versions = { workspace = true, features = ["testing"] }
+sled-hardware-types = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true

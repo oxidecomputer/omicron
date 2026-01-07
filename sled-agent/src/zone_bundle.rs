@@ -1522,7 +1522,7 @@ async fn run_cleanup(
 
         // Sort all the bundles in the current directory, using the priority
         // described in `context.priority`.
-        info.sort_by(|lhs, rhs| context.priority.compare_bundles(lhs, rhs));
+        info.sort_by(|lhs, rhs| compare_bundles(&context.priority, lhs, rhs));
         let current_usage = usages.get(&dir).unwrap();
 
         // Remove bundles until we fall below the threshold.

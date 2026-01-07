@@ -6,6 +6,8 @@
 
 pub mod v1;
 
+use crate::address::ConcreteIp;
+use crate::address::Ip;
 use crate::address::NUM_SOURCE_NAT_PORTS;
 use daft::Diffable;
 use itertools::Either;
@@ -16,28 +18,6 @@ use serde::Serialize;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-
-/// Trait for any IP address type.
-///
-/// This is used to constrain the external addressing types below.
-pub trait Ip:
-    Clone
-    + Copy
-    + std::fmt::Debug
-    + Diffable
-    + Eq
-    + JsonSchema
-    + std::hash::Hash
-    + PartialOrd
-    + PartialEq
-    + Ord
-    + Serialize
-    + SnatSchema
-{
-}
-impl Ip for Ipv4Addr {}
-impl Ip for Ipv6Addr {}
-impl Ip for IpAddr {}
 
 /// Helper trait specifying the name of the JSON Schema for a `SourceNatConfig`.
 ///
@@ -62,23 +42,6 @@ impl SnatSchema for Ipv6Addr {
 impl SnatSchema for IpAddr {
     fn json_schema_name() -> String {
         String::from("SourceNatConfigGeneric")
-    }
-}
-
-/// An IP address of a specific version, IPv4 or IPv6.
-pub trait ConcreteIp: Ip {
-    fn into_ipaddr(self) -> IpAddr;
-}
-
-impl ConcreteIp for Ipv4Addr {
-    fn into_ipaddr(self) -> IpAddr {
-        IpAddr::V4(self)
-    }
-}
-
-impl ConcreteIp for Ipv6Addr {
-    fn into_ipaddr(self) -> IpAddr {
-        IpAddr::V6(self)
     }
 }
 
@@ -140,7 +103,7 @@ pub struct SourceNatConfig<T: Ip> {
 // should be fine as long as we're using JSON or similar formats.)
 #[derive(Deserialize, JsonSchema)]
 #[serde(remote = "SourceNatConfig")]
-struct SourceNatConfigShadow<T: Ip> {
+struct SourceNatConfigShadow<T: Ip + SnatSchema> {
     /// The external address provided to the instance or service.
     ip: T,
     /// The first port used for source NAT, inclusive.
@@ -155,7 +118,7 @@ pub type SourceNatConfigGeneric = SourceNatConfig<IpAddr>;
 
 impl<T> JsonSchema for SourceNatConfig<T>
 where
-    T: Ip,
+    T: Ip + SnatSchema,
 {
     fn schema_name() -> String {
         <T as SnatSchema>::json_schema_name()
@@ -170,7 +133,10 @@ where
 
 // We implement `Deserialize` manually to add validity checking on the port
 // range.
-impl<'de, T: Ip + Deserialize<'de>> Deserialize<'de> for SourceNatConfig<T> {
+impl<'de, T> Deserialize<'de> for SourceNatConfig<T>
+where
+    T: Ip + SnatSchema + Deserialize<'de>,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -195,7 +161,7 @@ impl<T: Ip> SourceNatConfig<T> {
         first_port: u16,
         last_port: u16,
     ) -> Result<Self, SourceNatConfigError> {
-        if first_port % NUM_SOURCE_NAT_PORTS == 0
+        if first_port.is_multiple_of(NUM_SOURCE_NAT_PORTS)
             && last_port
                 .checked_sub(first_port)
                 .and_then(|diff| diff.checked_add(1))
@@ -346,7 +312,7 @@ pub type ExternalIpv6Config = ExternalIps<Ipv6Addr>;
 #[serde(remote = "ExternalIps")]
 struct ExternalIpsShadow<T>
 where
-    T: ConcreteIp,
+    T: ConcreteIp + SnatSchema + ExternalIpSchema,
 {
     /// Source NAT configuration, for outbound-only connectivity.
     source_nat: Option<SourceNatConfig<T>>,
@@ -384,7 +350,7 @@ impl JsonSchema for ExternalIpv6Config {
 // SNAT, ephemeral, and floating IPs in the input data.
 impl<'de, T> Deserialize<'de> for ExternalIps<T>
 where
-    T: ConcreteIp + Deserialize<'de>,
+    T: ConcreteIp + SnatSchema + ExternalIpSchema + Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

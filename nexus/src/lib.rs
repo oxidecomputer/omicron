@@ -29,7 +29,6 @@ use nexus_config::NexusConfig;
 use nexus_db_model::RendezvousDebugDataset;
 use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::internal_api::params::{
@@ -342,7 +341,7 @@ impl nexus_test_interface::NexusServer for Server {
         >,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
+        recovery_silo: sled_agent_types::rack_init::RecoverySiloConfig,
         certs: Vec<omicron_common::api::internal::nexus::Certificate>,
     ) -> Self {
         // Perform the "handoff from RSS".
@@ -358,7 +357,7 @@ impl nexus_test_interface::NexusServer for Server {
         // system services.  But here, we fake up IP pool ranges based on the
         // external addresses of services that we start or mock.
         let internal_services_ip_pool_ranges = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter_map(|(_, zc)| match &zc.zone_type {
                 BlueprintZoneType::BoundaryNtp(
                     blueprint_zone_type::BoundaryNtp { external_ip, .. },
@@ -414,6 +413,7 @@ impl nexus_test_interface::NexusServer for Server {
                         bfd: Vec::new(),
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
+                    initial_trust_quorum_configuration: None,
                 },
                 false, // blueprint_execution_enabled
             )

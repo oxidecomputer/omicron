@@ -22,6 +22,7 @@ diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_js
 hex.workspace = true
 iddqd.workspace = true
 ipnetwork.workspace = true
+itertools.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
 omicron-cockroach-metrics.workspace = true
@@ -36,11 +37,13 @@ schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
 thiserror.workspace = true
+trust-quorum-protocol.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 
@@ -51,10 +54,10 @@ omicron-common.workspace = true
 nexus-config.workspace = true
 nexus-db-schema.workspace = true
 nexus-defaults.workspace = true
-nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-passwords.workspace = true
 sled-agent-client.workspace = true
+sled-agent-types.workspace = true
 omicron-workspace-hack.workspace = true
 tufaceous-artifact.workspace = true
 

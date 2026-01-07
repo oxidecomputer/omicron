@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-recursion.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 camino.workspace = true
@@ -24,7 +25,7 @@ iddqd.workspace = true
 illumos-utils.workspace = true
 installinator-common.workspace = true
 key-manager.workspace = true
-nexus-sled-agent-shared.workspace = true
+sled-agent-types-versions.workspace = true
 ntp-admin-client.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
@@ -46,6 +47,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+camino-tempfile-ext.workspace = true
 expectorate.workspace = true
 illumos-utils = { workspace = true, features = ["testing"] }
 omicron-common = { workspace = true, features = ["testing"] }

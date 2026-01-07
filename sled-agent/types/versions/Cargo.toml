@@ -1,0 +1,46 @@
+[package]
+name = "sled-agent-types-versions"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+camino.workspace = true
+chrono.workspace = true
+daft.workspace = true
+iddqd.workspace = true
+illumos-utils.workspace = true
+indent_write.workspace = true
+async-trait.workspace = true
+bootstore.workspace = true
+omicron-common.workspace = true
+omicron-passwords.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+oxnet.workspace = true
+slog.workspace = true
+propolis_api_types.workspace = true
+proptest = { workspace = true, optional = true }
+schemars.workspace = true
+serde.workspace = true
+serde_with = { workspace = true, features = ["hex", "schemars_0_8"] }
+serde_json.workspace = true
+sha3.workspace = true
+sled-hardware-types.workspace = true
+strum.workspace = true
+test-strategy = { workspace = true, optional = true }
+thiserror.workspace = true
+trust-quorum-types-versions.workspace = true
+tufaceous-artifact.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+omicron-test-utils.workspace = true
+proptest.workspace = true
+test-strategy.workspace = true
+
+[features]
+testing = ["dep:proptest", "dep:test-strategy"]

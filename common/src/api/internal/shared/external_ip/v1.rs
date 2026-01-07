@@ -77,7 +77,7 @@ impl SourceNatConfig {
         first_port: u16,
         last_port: u16,
     ) -> Result<Self, SourceNatConfigError> {
-        if first_port % NUM_SOURCE_NAT_PORTS == 0
+        if first_port.is_multiple_of(NUM_SOURCE_NAT_PORTS)
             && last_port
                 .checked_sub(first_port)
                 .and_then(|diff| diff.checked_add(1))

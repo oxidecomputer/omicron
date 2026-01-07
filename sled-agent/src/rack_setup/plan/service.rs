@@ -15,9 +15,6 @@ use internal_dns_types::config::{
     DnsConfigBuilder, DnsConfigParams, Host, Zone,
 };
 use internal_dns_types::names::ServiceName;
-use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronZoneDataset, SledRole,
-};
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintHostPhase2DesiredSlots, BlueprintPhysicalDiskConfig,
@@ -63,6 +60,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
+use sled_agent_types::inventory::{Inventory, OmicronZoneDataset, SledRole};
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
@@ -1301,14 +1299,15 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-    use nexus_sled_agent_shared::inventory::SledCpuFamily;
-    use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use oxnet::Ipv6Net;
+    use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HealthMonitorInventory;
+    use sled_agent_types::inventory::SledCpuFamily;
+    use sled_agent_types::inventory::ZoneImageResolverInventory;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
     use sled_agent_types::rack_init::RecoverySiloConfig;
     use sled_hardware_types::Baseboard;
@@ -1493,7 +1492,7 @@ mod tests {
 
         const DISK_COUNT: usize = 10;
         let disks: Vec<_> = (0..DISK_COUNT)
-            .map(|i| nexus_sled_agent_shared::inventory::InventoryDisk {
+            .map(|i| sled_agent_types::inventory::InventoryDisk {
                 identity: omicron_common::disk::DiskIdentity {
                     vendor: "vendor".to_string(),
                     model: "model".to_string(),
@@ -1529,6 +1528,7 @@ mod tests {
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                health_monitor: HealthMonitorInventory::new(),
             },
             is_scrimlet,
         )];
