@@ -1392,7 +1392,6 @@ pub(crate) async fn lldpd_clients(
     Ok(mappings)
 }
 
-
 /// Look up Dendrite addresses in DNS then determine the switch location of
 /// any addresses we're able to resolve the SwitchLocation for. If a switch
 /// zone is down, the resolution process will fail and the entry will be
