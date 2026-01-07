@@ -670,61 +670,6 @@ impl DataStore {
         let blueprint_id =
             BlueprintUuid::from_untyped_uuid(authz_blueprint.id());
 
-        // Read the metadata from the primary blueprint row, and ensure that it
-        // exists.
-        let (
-            parent_blueprint_id,
-            internal_dns_version,
-            external_dns_version,
-            target_release_minimum_generation,
-            nexus_generation,
-            cockroachdb_fingerprint,
-            cockroachdb_setting_preserve_downgrade,
-            time_created,
-            creator,
-            comment,
-            source,
-        ) = {
-            use nexus_db_schema::schema::blueprint::dsl;
-
-            let Some(blueprint) = dsl::blueprint
-                .filter(dsl::id.eq(to_db_typed_uuid(blueprint_id)))
-                .select(DbBlueprint::as_select())
-                .get_result_async(&*conn)
-                .await
-                .optional()
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?
-            else {
-                return Err(authz_blueprint.not_found());
-            };
-
-            (
-                blueprint.parent_blueprint_id.map(From::from),
-                *blueprint.internal_dns_version,
-                *blueprint.external_dns_version,
-                *blueprint.target_release_minimum_generation,
-                *blueprint.nexus_generation,
-                blueprint.cockroachdb_fingerprint,
-                blueprint.cockroachdb_setting_preserve_downgrade,
-                blueprint.time_created,
-                blueprint.creator,
-                blueprint.comment,
-                BlueprintSource::from(blueprint.source),
-            )
-        };
-        let cockroachdb_setting_preserve_downgrade =
-            CockroachDbPreserveDowngrade::from_optional_string(
-                &cockroachdb_setting_preserve_downgrade,
-            )
-            .map_err(|_| {
-                Error::internal_error(&format!(
-                    "unrecognized cluster version {:?}",
-                    cockroachdb_setting_preserve_downgrade
-                ))
-            })?;
-
         // Load the sled metadata for this blueprint. We use this to prime our
         // primary map of sled configs, but we leave the zones / disks /
         // datasets maps empty (to be filled in when we query those tables
@@ -1474,6 +1419,69 @@ impl DataStore {
                 &blueprint_id,
             )?;
         }
+
+        // Read the metadata from the primary blueprint row last. We do this at
+        // the end (rather than the beginning) so that if a concurrent delete
+        // operation has started, we will observe that the top-level blueprint
+        // record is missing and return "not found". This prevents returning a
+        // partially-torn blueprint where child rows have been deleted but we
+        // still return an incomplete result.
+        //
+        // The blueprint insert and delete operations are transactional, so if
+        // this read succeeds, we know the blueprint exists and hasn't been
+        // deleted.
+        let (
+            parent_blueprint_id,
+            internal_dns_version,
+            external_dns_version,
+            target_release_minimum_generation,
+            nexus_generation,
+            cockroachdb_fingerprint,
+            cockroachdb_setting_preserve_downgrade,
+            time_created,
+            creator,
+            comment,
+            source,
+        ) = {
+            use nexus_db_schema::schema::blueprint::dsl;
+
+            let Some(blueprint) = dsl::blueprint
+                .filter(dsl::id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(DbBlueprint::as_select())
+                .get_result_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+            else {
+                return Err(authz_blueprint.not_found());
+            };
+
+            (
+                blueprint.parent_blueprint_id.map(From::from),
+                *blueprint.internal_dns_version,
+                *blueprint.external_dns_version,
+                *blueprint.target_release_minimum_generation,
+                *blueprint.nexus_generation,
+                blueprint.cockroachdb_fingerprint,
+                blueprint.cockroachdb_setting_preserve_downgrade,
+                blueprint.time_created,
+                blueprint.creator,
+                blueprint.comment,
+                BlueprintSource::from(blueprint.source),
+            )
+        };
+        let cockroachdb_setting_preserve_downgrade =
+            CockroachDbPreserveDowngrade::from_optional_string(
+                &cockroachdb_setting_preserve_downgrade,
+            )
+            .map_err(|_| {
+                Error::internal_error(&format!(
+                    "unrecognized cluster version {:?}",
+                    cockroachdb_setting_preserve_downgrade
+                ))
+            })?;
 
         Ok(Blueprint {
             id: blueprint_id,
