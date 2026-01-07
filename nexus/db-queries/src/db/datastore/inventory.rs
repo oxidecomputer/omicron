@@ -1850,8 +1850,9 @@ impl DataStore {
         // transaction for simplicity.  Similar considerations apply.  We could
         // break it up if these transactions become too big.  But we'd need a
         // way to stop other clients from discovering a collection after we
-        // start removing it and we'd also need to make sure we didn't leak a
-        // collection if we crash while deleting it.
+        // start removing it (see: inventory_collection_read_batched, which
+        // reads the inventory non-transactionally) and we'd also need to make
+        // sure we didn't leak a collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
         let db_collection_id = to_db_typed_uuid(collection_id);
 
@@ -2396,26 +2397,6 @@ impl DataStore {
     ) -> Result<Collection, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         let db_id = to_db_typed_uuid(id);
-        let (time_started, time_done, collector) = {
-            use nexus_db_schema::schema::inv_collection::dsl;
-
-            let collections = dsl::inv_collection
-                .filter(dsl::id.eq(db_id))
-                .limit(2)
-                .select(InvCollection::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-            bail_unless!(collections.len() == 1);
-            let collection = collections.into_iter().next().unwrap();
-            (
-                collection.time_started,
-                collection.time_done,
-                collection.collector,
-            )
-        };
 
         let errors: Vec<String> = {
             use nexus_db_schema::schema::inv_collection_error::dsl;
@@ -4068,6 +4049,37 @@ impl DataStore {
             "found extra mupdate override non-boot entries: {:?}",
             mupdate_override_non_boot_by_sled_id.keys()
         );
+
+        // Read the top-level collection metadata last. We do this at the end
+        // (rather than the beginning) so that if a concurrent delete operation
+        // has started, we will observe that the top-level collection record is
+        // missing and return an error. This prevents returning a partially-torn
+        // inventory collection where child rows have been deleted but we still
+        // return an incomplete result.
+        //
+        // The inventory insert and delete operations are transactional, so if
+        // this read succeeds, we know the collection exists and hasn't been
+        // deleted.
+        let (time_started, time_done, collector) = {
+            use nexus_db_schema::schema::inv_collection::dsl;
+
+            let collections = dsl::inv_collection
+                .filter(dsl::id.eq(db_id))
+                .limit(2)
+                .select(InvCollection::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            bail_unless!(collections.len() == 1);
+            let collection = collections.into_iter().next().unwrap();
+            (
+                collection.time_started,
+                collection.time_done,
+                collection.collector,
+            )
+        };
 
         Ok(Collection {
             id,
