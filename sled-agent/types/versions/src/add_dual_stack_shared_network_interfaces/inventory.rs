@@ -115,19 +115,15 @@ pub struct OmicronSledConfig {
     pub host_phase_2: HostPhase2DesiredSlots,
 }
 
-impl Default for OmicronSledConfig {
-    fn default() -> Self {
-        Self {
-            generation: Generation::new(),
-            disks: IdOrdMap::default(),
-            datasets: IdOrdMap::default(),
-            zones: IdOrdMap::default(),
-            remove_mupdate_override: None,
-            host_phase_2: HostPhase2DesiredSlots::current_contents(),
-        }
-    }
-}
-
+// NOTE: Most trait impls live in the `impls` module of this crate and are only
+// implemented for the `latest` version of each type. However,
+// `OmicronSledConfig` is special: it's not only used in the sled-agent API
+// (which would only require trait impls on `latest`); it's also ledgered to
+// disk to support cold boot of the rack. In the ledgering case, we have to be
+// able to handle reading older versions, which means all the old versions we
+// support also need to implement `Ledgerable`. Therefore, we implement this
+// trait for this specific version (and do so for every other version of
+// `OmicronSledConfig` too).
 impl Ledgerable for OmicronSledConfig {
     fn is_newer_than(&self, other: &Self) -> bool {
         self.generation > other.generation
@@ -158,11 +154,6 @@ pub struct OmicronZonesConfig {
 
     /// list of running zones
     pub zones: Vec<OmicronZoneConfig>,
-}
-
-impl OmicronZonesConfig {
-    /// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
-    pub const INITIAL_GENERATION: Generation = Generation::from_u32(1);
 }
 
 /// Describes one Omicron-managed zone running on a sled

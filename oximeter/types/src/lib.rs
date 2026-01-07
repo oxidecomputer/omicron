@@ -12,7 +12,9 @@
 // lots of related issues and discussion.
 extern crate self as oximeter;
 
+pub mod collector;
 pub mod histogram;
+pub mod producer;
 pub mod quantile;
 pub mod schema;
 pub mod traits;

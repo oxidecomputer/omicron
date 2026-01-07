@@ -41,6 +41,7 @@ use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronSledConfig;
@@ -1369,6 +1370,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 ConfigReconcilerInventoryStatus::NotYetRun,
                             zone_image_resolver:
                                 ZoneImageResolverInventory::new_fake(),
+                            health_monitor: HealthMonitorInventory::new(),
                         },
                     )
                     .unwrap();

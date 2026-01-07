@@ -18,20 +18,19 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     replace = {
-        DnsConfig = internal_dns_types::config::DnsConfig,
-        DnsConfigParams = internal_dns_types::config::DnsConfigParams,
-        DnsConfigZone = internal_dns_types::config::DnsConfigZone,
-        DnsRecord = internal_dns_types::config::DnsRecord,
-        Srv = internal_dns_types::config::Srv,
+        DnsConfig = internal_dns_types_versions::latest::config::DnsConfig,
+        DnsConfigParams = internal_dns_types_versions::latest::config::DnsConfigParams,
+        DnsConfigZone = internal_dns_types_versions::latest::config::DnsConfigZone,
+        DnsRecord = internal_dns_types_versions::latest::config::DnsRecord,
+        Srv = internal_dns_types_versions::latest::config::Srv,
     }
 );
 
-pub type DnsError = crate::Error<crate::types::Error>;
+pub use internal_dns_types_versions::latest::config::{
+    ERROR_CODE_BAD_UPDATE_GENERATION, ERROR_CODE_UPDATE_IN_PROGRESS,
+};
 
-pub const ERROR_CODE_UPDATE_IN_PROGRESS: &'static str = "UpdateInProgress";
-pub const ERROR_CODE_BAD_UPDATE_GENERATION: &'static str =
-    "BadUpdateGeneration";
-pub const ERROR_CODE_INCOMPATIBLE_RECORD: &'static str = "IncompatibleRecord";
+pub type DnsError = crate::Error<crate::types::Error>;
 
 /// Returns whether an error from this client should be retried
 pub fn is_retryable(error: &DnsError) -> bool {

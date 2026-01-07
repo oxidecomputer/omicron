@@ -9,6 +9,7 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
+use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
@@ -27,6 +28,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{self, Visitor},
 };
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
@@ -79,6 +81,12 @@ macro_rules! id_path_param {
 pub struct UninitializedSledId {
     pub serial: String,
     pub part: String,
+}
+
+impl From<UninitializedSledId> for BaseboardId {
+    fn from(value: UninitializedSledId) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
 }
 
 path_param!(AffinityGroupPath, affinity_group, "affinity group");
@@ -948,12 +956,12 @@ pub struct InstanceNetworkInterfaceCreate {
     pub vpc_name: Name,
     /// The VPC Subnet in which to create the interface.
     pub subnet_name: Name,
-    /// The IP address for the interface. One will be auto-assigned if not provided.
-    pub ip: Option<IpAddr>,
-    /// A set of additional networks that this interface may send and
-    /// receive traffic on.
-    #[serde(default)]
-    pub transit_ips: Vec<IpNet>,
+    /// The IP stack configuration for this interface.
+    ///
+    /// If not provided, a default configuration will be used, which creates a
+    /// dual-stack IPv4 / IPv6 interface.
+    #[serde(default = "PrivateIpStackCreate::auto_dual_stack")]
+    pub ip_config: PrivateIpStackCreate,
 }
 
 /// Parameters for updating an `InstanceNetworkInterface`
@@ -981,10 +989,265 @@ pub struct InstanceNetworkInterfaceUpdate {
     #[serde(default)]
     pub primary: bool,
 
-    /// A set of additional networks that this interface may send and
-    /// receive traffic on.
+    /// A set of additional networks that this interface may send and receive
+    /// traffic on
     #[serde(default)]
     pub transit_ips: Vec<IpNet>,
+}
+
+/// How a VPC-private IP address is assigned to a network interface.
+//
+// NOTE: This type is used as a layer of indirection for generating the JSON
+// Schema we want for `IpAssignment`. In particular, we use most of its
+// contents, but let the real type set the _name_ of the schema based on the
+// `ConcreteIp` type being used.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+enum IpAssignmentShadow<T: ConcreteIp> {
+    /// Automatically assign an IP address from the VPC Subnet.
+    #[default]
+    Auto,
+    /// Explicitly assign a specific address, if available.
+    Explicit(T),
+}
+
+trait IpAssignmentSchema {
+    fn ip_assignment_schema_name() -> String;
+}
+
+impl IpAssignmentSchema for Ipv4Addr {
+    fn ip_assignment_schema_name() -> String {
+        String::from("Ipv4Assignment")
+    }
+}
+
+impl IpAssignmentSchema for Ipv6Addr {
+    fn ip_assignment_schema_name() -> String {
+        String::from("Ipv6Assignment")
+    }
+}
+
+/// How a VPC-private IP address is assigned to a network interface.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum IpAssignment<T: ConcreteIp> {
+    /// Automatically assign an IP address from the VPC Subnet.
+    #[default]
+    Auto,
+    /// Explicitly assign a specific address, if available.
+    Explicit(T),
+}
+
+impl<T> JsonSchema for IpAssignment<T>
+where
+    T: ConcreteIp + IpAssignmentSchema,
+{
+    fn schema_name() -> String {
+        <T as IpAssignmentSchema>::ip_assignment_schema_name()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        IpAssignmentShadow::<T>::json_schema(generator)
+    }
+}
+
+impl<T: ConcreteIp> From<T> for IpAssignment<T> {
+    fn from(ip: T) -> Self {
+        Self::Explicit(ip)
+    }
+}
+
+/// How to assign an IPv4 address.
+pub type Ipv4Assignment = IpAssignment<std::net::Ipv4Addr>;
+
+/// How to assign an IPv6 address.
+pub type Ipv6Assignment = IpAssignment<std::net::Ipv6Addr>;
+
+/// Configuration for a network interface's IPv4 addressing.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
+pub struct PrivateIpv4StackCreate {
+    /// The VPC-private address to assign to the interface.
+    pub ip: Ipv4Assignment,
+    /// Additional IP networks the interface can send / receive on.
+    #[serde(default)]
+    pub transit_ips: Vec<Ipv4Net>,
+}
+
+/// Configuration for a network interface's IPv6 addressing.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
+pub struct PrivateIpv6StackCreate {
+    /// The VPC-private address to assign to the interface.
+    pub ip: Ipv6Assignment,
+    /// Additional IP networks the interface can send / receive on.
+    #[serde(default)]
+    pub transit_ips: Vec<Ipv6Net>,
+}
+
+/// Create parameters for a network interface's IP stack.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum PrivateIpStackCreate {
+    /// The interface has only an IPv4 stack.
+    V4(PrivateIpv4StackCreate),
+    /// The interface has only an IPv6 stack.
+    V6(PrivateIpv6StackCreate),
+    /// The interface has both an IPv4 and IPv6 stack.
+    DualStack { v4: PrivateIpv4StackCreate, v6: PrivateIpv6StackCreate },
+}
+
+impl PrivateIpStackCreate {
+    /// Construct an IPv4 configuration with no transit IPs.
+    pub fn from_ipv4(addr: std::net::Ipv4Addr) -> Self {
+        PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
+            ip: Ipv4Assignment::Explicit(addr),
+            transit_ips: vec![],
+        })
+    }
+
+    /// Construct an IP configuration with only an automatic IPv4 address.
+    pub fn auto_ipv4() -> Self {
+        PrivateIpStackCreate::V4(PrivateIpv4StackCreate::default())
+    }
+
+    /// Return the IPv4 create parameters, if they exist.
+    pub fn as_ipv4_create(&self) -> Option<&PrivateIpv4StackCreate> {
+        match self {
+            PrivateIpStackCreate::V4(v4)
+            | PrivateIpStackCreate::DualStack { v4, .. } => Some(v4),
+            PrivateIpStackCreate::V6(_) => None,
+        }
+    }
+
+    /// Return the IPv4 address assignment.
+    pub fn ipv4_assignment(&self) -> Option<&Ipv4Assignment> {
+        self.as_ipv4_create().map(|c| &c.ip)
+    }
+
+    /// Return the IPv4 address explicitly requested, if one exists.
+    pub fn ipv4_addr(&self) -> Option<&std::net::Ipv4Addr> {
+        self.ipv4_assignment().and_then(|assignment| match assignment {
+            IpAssignment::Auto => None,
+            IpAssignment::Explicit(addr) => Some(addr),
+        })
+    }
+
+    /// Return the IPv4 transit IPs, if they exist.
+    pub fn ipv4_transit_ips(&self) -> Option<&[Ipv4Net]> {
+        self.as_ipv4_create().map(|c| c.transit_ips.as_slice())
+    }
+
+    /// Construct an IPv6 configuration with no transit IPs.
+    pub fn from_ipv6(addr: std::net::Ipv6Addr) -> Self {
+        PrivateIpStackCreate::V6(PrivateIpv6StackCreate {
+            ip: Ipv6Assignment::Explicit(addr),
+            transit_ips: vec![],
+        })
+    }
+
+    /// Construct an IP configuration with only an automatic IPv6 address.
+    pub fn auto_ipv6() -> Self {
+        PrivateIpStackCreate::V6(PrivateIpv6StackCreate::default())
+    }
+
+    /// Return the IPv6 create parameters, if they exist.
+    pub fn as_ipv6_create(&self) -> Option<&PrivateIpv6StackCreate> {
+        match self {
+            PrivateIpStackCreate::V6(v6)
+            | PrivateIpStackCreate::DualStack { v6, .. } => Some(v6),
+            PrivateIpStackCreate::V4(_) => None,
+        }
+    }
+
+    /// Return the IPv6 address assignment.
+    pub fn ipv6_assignment(&self) -> Option<&Ipv6Assignment> {
+        self.as_ipv6_create().map(|c| &c.ip)
+    }
+
+    /// Return the IPv6 address explicitly requested, if one exists.
+    pub fn ipv6_addr(&self) -> Option<&std::net::Ipv6Addr> {
+        self.ipv6_assignment().and_then(|assignment| match assignment {
+            IpAssignment::Auto => None,
+            IpAssignment::Explicit(addr) => Some(addr),
+        })
+    }
+
+    /// Return the IPv6 transit IPs, if they exist.
+    pub fn ipv6_transit_ips(&self) -> Option<&[Ipv6Net]> {
+        self.as_ipv6_create().map(|c| c.transit_ips.as_slice())
+    }
+
+    /// Return the transit IPs requested in this configuration.
+    pub fn transit_ips(&self) -> Vec<IpNet> {
+        self.ipv4_transit_ips()
+            .unwrap_or_default()
+            .iter()
+            .copied()
+            .map(Into::into)
+            .chain(
+                self.ipv6_transit_ips()
+                    .unwrap_or_default()
+                    .iter()
+                    .copied()
+                    .map(Into::into),
+            )
+            .collect()
+    }
+
+    /// Construct a dual-stack IP configuration with explicit IP addresses.
+    pub fn new_dual_stack(
+        ipv4: std::net::Ipv4Addr,
+        ipv6: std::net::Ipv6Addr,
+    ) -> Self {
+        PrivateIpStackCreate::DualStack {
+            v4: PrivateIpv4StackCreate {
+                ip: Ipv4Assignment::Explicit(ipv4),
+                transit_ips: Vec::new(),
+            },
+            v6: PrivateIpv6StackCreate {
+                ip: Ipv6Assignment::Explicit(ipv6),
+                transit_ips: Vec::new(),
+            },
+        }
+    }
+
+    /// Construct an IP configuration with both IPv4 / IPv6 addresses and no
+    /// transit IPs.
+    pub fn auto_dual_stack() -> Self {
+        PrivateIpStackCreate::DualStack {
+            v4: PrivateIpv4StackCreate::default(),
+            v6: PrivateIpv6StackCreate::default(),
+        }
+    }
+
+    /// Return true if this config has any transit IPs
+    pub fn has_transit_ips(&self) -> bool {
+        match self {
+            PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
+                transit_ips,
+                ..
+            }) => !transit_ips.is_empty(),
+            PrivateIpStackCreate::V6(PrivateIpv6StackCreate {
+                transit_ips,
+                ..
+            }) => !transit_ips.is_empty(),
+            PrivateIpStackCreate::DualStack {
+                v4: PrivateIpv4StackCreate { transit_ips: ipv4_addrs, .. },
+                v6: PrivateIpv6StackCreate { transit_ips: ipv6_addrs, .. },
+            } => !ipv4_addrs.is_empty() || !ipv6_addrs.is_empty(),
+        }
+    }
+
+    /// Return true if this IP configuration has an IPv4 stack.
+    pub fn has_ipv4_stack(&self) -> bool {
+        self.ipv4_assignment().is_some()
+    }
+
+    /// Return true if this IP configuration has an IPv6 stack.
+    pub fn has_ipv6_stack(&self) -> bool {
+        self.ipv6_assignment().is_some()
+    }
 }
 
 // CERTIFICATES
@@ -1073,7 +1336,10 @@ pub struct IpPoolLinkSilo {
     pub silo: NameOrId,
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
 }
 
@@ -1081,9 +1347,12 @@ pub struct IpPoolLinkSilo {
 pub struct IpPoolSiloUpdate {
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo, so when a pool is
-    /// made default, an existing default will remain linked but will no longer
-    /// be the default.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total. When a pool is made default, an existing default
+    /// of the same type and version will remain linked but will no longer be
+    /// the default.
     pub is_default: bool,
 }
 
@@ -1102,6 +1371,13 @@ pub struct FloatingIpCreate {
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
     pub pool: Option<NameOrId>,
+
+    /// IP version to use when allocating from the default pool.
+    /// Only used when both `ip` and `pool` are not specified. Required if
+    /// multiple default pools of different IP versions exist. Allocation
+    /// fails if no pool of the requested version is available.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1147,6 +1423,7 @@ pub struct FloatingIpAttach {
 // in the path of endpoints handling instance operations.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "params", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum InstanceNetworkInterfaceAttachment {
     /// Create one or more `InstanceNetworkInterface`s for the `Instance`.
     ///
@@ -1154,19 +1431,27 @@ pub enum InstanceNetworkInterfaceAttachment {
     /// designated the primary interface for the instance.
     Create(Vec<InstanceNetworkInterfaceCreate>),
 
-    /// The default networking configuration for an instance is to create a
-    /// single primary interface with an automatically-assigned IP address. The
-    /// IP will be pulled from the Project's default VPC / VPC Subnet.
-    Default,
+    /// Create a single primary interface with an automatically-assigned IPv4
+    /// address.
+    ///
+    /// The IP will be pulled from the Project's default VPC / VPC Subnet.
+    DefaultIpv4,
+
+    /// Create a single primary interface with an automatically-assigned IPv6
+    /// address.
+    ///
+    /// The IP will be pulled from the Project's default VPC / VPC Subnet.
+    DefaultIpv6,
+
+    /// Create a single primary interface with automatically-assigned IPv4 and
+    /// IPv6 addresses.
+    ///
+    /// The IPs will be pulled from the Project's default VPC / VPC Subnet.
+    #[default]
+    DefaultDualStack,
 
     /// No network interfaces at all will be created for the instance.
     None,
-}
-
-impl Default for InstanceNetworkInterfaceAttachment {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 /// Describe the instance's disks at creation time
@@ -1203,7 +1488,15 @@ pub enum ExternalIpCreate {
     /// An IP address providing both inbound and outbound access. The address is
     /// automatically assigned from the provided IP pool or the default IP pool
     /// if not specified.
-    Ephemeral { pool: Option<NameOrId> },
+    Ephemeral {
+        pool: Option<NameOrId>,
+        /// IP version to use when allocating from the default pool.
+        /// Only used when `pool` is not specified. Required if multiple default
+        /// pools of different IP versions exist. Allocation fails if no pool
+        /// of the requested version is available.
+        #[serde(default)]
+        ip_version: Option<IpVersion>,
+    },
     /// An IP address providing both inbound and outbound access. The address is
     /// an existing floating IP object assigned to the current project.
     ///
@@ -1218,6 +1511,13 @@ pub struct EphemeralIpCreate {
     /// Name or ID of the IP pool used to allocate an address. If unspecified,
     /// the default IP pool will be used.
     pub pool: Option<NameOrId>,
+
+    /// IP version to use when allocating from the default pool.
+    /// Only used when `pool` is not specified. Required if multiple default
+    /// pools of different IP versions exist. Allocation fails if no pool
+    /// of the requested version is available.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 /// Parameters for detaching an external IP from an instance.

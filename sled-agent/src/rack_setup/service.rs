@@ -81,6 +81,7 @@ use dns_service_client::DnsError;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
+use nexus_lockstep_client::types::InitialTrustQuorumConfig;
 use nexus_lockstep_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
@@ -118,8 +119,7 @@ use sled_agent_types::rack_init::{
     RackInitializeRequestParams,
 };
 use sled_agent_types::rack_ops::RssStep;
-use sled_agent_types::sled::BaseboardId;
-use sled_agent_types::sled::StartSledAgentRequest;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -132,6 +132,7 @@ use thiserror::Error;
 use tokio::sync::watch;
 use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
+use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 
 pub(crate) use crate::rack_setup::plan::service::Plan as ServicePlan;
 pub(crate) use crate::rack_setup::plan::service::PlannedSledDescription;
@@ -250,12 +251,6 @@ pub enum SetupServiceError {
 
     #[error("Trust quorum proxy commit incorrectly 'pending' from {0}")]
     TrustQuorumProxyCommitPending(BaseboardId),
-}
-
-// The workload / information allocated to a single sled.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-struct SledAllocation {
-    initialization_request: StartSledAgentRequest,
 }
 
 /// The interface to the Rack Setup Service.
@@ -777,6 +772,7 @@ impl ServiceInner {
         service_plan: &ServicePlan,
         port_discovery_mode: ExternalPortDiscovery,
         nexus_lockstep_address: SocketAddrV6,
+        initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
@@ -1056,6 +1052,7 @@ impl ServiceInner {
             rack_network_config,
             external_port_count: port_discovery_mode.into(),
             allowed_source_ips,
+            initial_trust_quorum_configuration,
         };
 
         let notify_nexus = || async {
@@ -1288,7 +1285,10 @@ impl ServiceInner {
 
         rss_step.update(RssStep::InitTrustQuorum);
         // Initialize the trust quorum if there are peers configured.
-        if let Some(peers) = &config.trust_quorum_peers {
+
+        let initial_trust_quorum_configuration = if let Some(peers) =
+            &config.trust_quorum_peers
+        {
             let initial_membership: BTreeSet<_> =
                 peers.iter().cloned().collect();
             bootstore
@@ -1303,10 +1303,24 @@ impl ServiceInner {
                     .collect();
                 let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
 
-                init_trust_quorum(&self.log, trust_quorum, tq_members, rack_id)
-                    .await?;
+                init_trust_quorum(
+                    &self.log,
+                    trust_quorum.clone(),
+                    tq_members.clone(),
+                    rack_id,
+                )
+                .await?;
+
+                Some(InitialTrustQuorumConfig {
+                    members: tq_members.into_iter().collect(),
+                    coordinator: trust_quorum.baseboard_id().clone(),
+                })
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
 
         // Save the relevant network config in the bootstore. We want this to
         // happen before we `initialize_sleds` so each scrimlet (including us)
@@ -1485,6 +1499,7 @@ impl ServiceInner {
             &service_plan,
             ExternalPortDiscovery::Auto(switch_mgmt_addrs),
             nexus_lockstep_address,
+            initial_trust_quorum_configuration,
         )
         .await?;
 
@@ -1506,13 +1521,13 @@ async fn init_trust_quorum(
     members: BTreeSet<BaseboardId>,
     rack_id: RackUuid,
 ) -> Result<(), SetupServiceError> {
-    let threshold = trust_quorum_protocol::Threshold(
+    let threshold = trust_quorum_types::types::Threshold(
         u8::try_from(members.len()).unwrap() / 2 + 1,
     );
 
-    let initial_epoch = trust_quorum_protocol::Epoch(1);
+    let initial_epoch = trust_quorum_types::types::Epoch(1);
 
-    let msg = trust_quorum_protocol::ReconfigureMsg {
+    let msg = TqReconfigureMsg {
         rack_id,
         epoch: initial_epoch,
         last_committed_epoch: None,
@@ -1571,11 +1586,11 @@ async fn init_trust_quorum(
     {
         info!(log, "RSS: Attempting to commit initial trust quorum at {id}");
         match proxy.commit(id.clone(), rack_id, initial_epoch).await? {
-            trust_quorum::CommitStatus::Committed => {
+            trust_quorum_types::status::CommitStatus::Committed => {
                 info!(log, "RSS: Committed initial trust quorum at {id}");
                 let _ = acked.insert(id.clone());
             }
-            trust_quorum::CommitStatus::Pending => {
+            trust_quorum_types::status::CommitStatus::Pending => {
                 error!(
                     log,
                     "RSS: Failed to commit {id} to trust quorum: Pending"
@@ -1730,8 +1745,9 @@ mod test {
     };
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        OmicronZoneType, SledCpuFamily, SledRole, ZoneImageResolverInventory,
+        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
+        Inventory, InventoryDisk, OmicronZoneType, SledCpuFamily, SledRole,
+        ZoneImageResolverInventory,
     };
 
     fn make_sled_info(
@@ -1775,6 +1791,7 @@ mod test {
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                health_monitor: HealthMonitorInventory::new(),
             },
             true,
         )

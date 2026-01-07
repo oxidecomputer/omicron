@@ -240,15 +240,16 @@ mod api_impl {
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::ConfigReconcilerInventory;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HealthMonitorInventory;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::Inventory;
+    use sled_agent_types::inventory::ManifestInventory;
     use sled_agent_types::inventory::MupdateOverrideInventory;
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
     use sled_agent_types::inventory::ZoneImageResolverInventory;
-    use sled_agent_types::inventory::ZoneManifestInventory;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::support_bundle::RangeRequestHeaders;
@@ -368,7 +369,7 @@ mod api_impl {
                     boot_partitions,
                 }),
                 zone_image_resolver: ZoneImageResolverInventory {
-                    zone_manifest: ZoneManifestInventory {
+                    zone_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
                         boot_inventory: Err(
                             "not implemented by HostPhase2SledAgentImpl"
@@ -385,6 +386,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
+                health_monitor: HealthMonitorInventory::new(),
             }))
         }
 
@@ -932,6 +934,81 @@ mod api_impl {
             _request_context: RequestContext<Self::Context>,
             _path_params: Path<LocalStoragePathParam>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_reconfigure(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<trust_quorum_types::messages::ReconfigureMsg>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_upgrade_from_lrtq(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<trust_quorum_types::messages::LrtqUpgradeMsg>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<trust_quorum_types::messages::CommitRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_coordinator_status(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<
+                Option<trust_quorum_types::status::CoordinatorStatus>,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_prepare_and_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                trust_quorum_types::messages::PrepareAndCommitRequest,
+            >,
+        ) -> Result<
+            HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_proxy_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::ProxyCommitRequest,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_proxy_prepare_and_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::ProxyPrepareAndCommitRequest,
+            >,
+        ) -> Result<
+            HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_proxy_status(
+            _request_context: RequestContext<Self::Context>,
+            _query_params: Query<sled_hardware_types::BaseboardId>,
+        ) -> Result<
+            HttpResponseOk<trust_quorum_types::status::NodeStatus>,
+            HttpError,
+        > {
             unimplemented!()
         }
     }

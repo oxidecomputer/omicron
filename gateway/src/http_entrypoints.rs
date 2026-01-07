@@ -30,8 +30,13 @@ use gateway_messages::SpError;
 use gateway_sp_comms::HostPhase2Provider;
 use gateway_sp_comms::VersionedSpState;
 use gateway_sp_comms::error::CommunicationError;
+use gateway_types::caboose::ComponentCabooseSlot;
 use gateway_types::caboose::SpComponentCaboose;
+use gateway_types::component::PathSp;
+use gateway_types::component::PathSpComponent;
+use gateway_types::component::PathSpComponentFirmwareSlot;
 use gateway_types::component::PowerState;
+use gateway_types::component::SetComponentActiveSlotParams;
 use gateway_types::component::SpComponentFirmwareSlot;
 use gateway_types::component::SpComponentInfo;
 use gateway_types::component::SpComponentList;
@@ -40,19 +45,25 @@ use gateway_types::component::SpState;
 use gateway_types::component_details::SpComponentDetails;
 use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
-use gateway_types::ignition;
+use gateway_types::ignition::PathSpIgnitionCommand;
 use gateway_types::ignition::SpIgnitionInfo;
+use gateway_types::rot::GetCfpaParams;
+use gateway_types::rot::GetRotBootInfoParams;
 use gateway_types::rot::RotCfpa;
 use gateway_types::rot::RotCfpaSlot;
 use gateway_types::rot::RotCmpa;
 use gateway_types::rot::RotState;
+use gateway_types::sensor::PathSpSensorId;
 use gateway_types::sensor::SpSensorReading;
+use gateway_types::task_dump::PathSpTaskDumpIndex;
 use gateway_types::task_dump::TaskDump;
+use gateway_types::update::ComponentUpdateIdSlot;
 use gateway_types::update::HostPhase2Progress;
 use gateway_types::update::HostPhase2RecoveryImageId;
 use gateway_types::update::InstallinatorImageId;
 use gateway_types::update::SpComponentResetError;
 use gateway_types::update::SpUpdateStatus;
+use gateway_types::update::UpdateAbortBody;
 use omicron_uuid_kinds::GenericUuid;
 use std::io::Cursor;
 use std::num::NonZeroU8;
@@ -830,19 +841,6 @@ impl GatewayApi for GatewayImpl {
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
-    async fn ignition_list_v1(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<ignition::v1::SpIgnitionInfo>>, HttpError>
-    {
-        let HttpResponseOk(v2_info) = Self::ignition_list(rqctx).await?;
-        Ok(HttpResponseOk(
-            v2_info
-                .into_iter()
-                .map(|x| ignition::v1::SpIgnitionInfo::from(x))
-                .collect(),
-        ))
-    }
-
     async fn ignition_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
@@ -861,14 +859,6 @@ impl GatewayApi for GatewayImpl {
             Ok(HttpResponseOk(out))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
-    }
-
-    async fn ignition_get_v1(
-        rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<ignition::v1::SpIgnitionInfo>, HttpError> {
-        let HttpResponseOk(v2_info) = Self::ignition_get(rqctx, path).await?;
-        Ok(HttpResponseOk(ignition::v1::SpIgnitionInfo::from(v2_info)))
     }
 
     async fn ignition_get(

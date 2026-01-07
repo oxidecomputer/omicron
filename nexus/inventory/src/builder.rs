@@ -12,12 +12,11 @@ use anyhow::Context;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
-use cockroach_admin_types::NodeId;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use cockroach_admin_types::node::InternalNodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use iddqd::IdOrdMap;
-use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
@@ -41,6 +40,7 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::Inventory;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -128,7 +128,7 @@ pub struct CollectionBuilder {
     sleds: IdOrdMap<SledAgent>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
-    cockroach_status: BTreeMap<NodeId, CockroachStatus>,
+    cockroach_status: BTreeMap<InternalNodeId, CockroachStatus>,
     ntp_timesync: IdOrdMap<TimeSync>,
     internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
@@ -675,6 +675,7 @@ impl CollectionBuilder {
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
             zone_image_resolver: inventory.zone_image_resolver,
+            health_monitor: inventory.health_monitor,
         };
 
         self.sleds
@@ -708,7 +709,7 @@ impl CollectionBuilder {
     /// Record metrics from a CockroachDB node
     pub fn found_cockroach_metrics(
         &mut self,
-        node_id: NodeId,
+        node_id: InternalNodeId,
         metrics: PrometheusMetrics,
     ) {
         let mut status = CockroachStatus::default();
@@ -796,7 +797,6 @@ mod test {
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
     use gateway_types::rot::RotSlot;
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;
@@ -804,6 +804,7 @@ mod test {
     use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
     use sled_agent_types::inventory::SledRole;
+    use sled_hardware_types::BaseboardId;
 
     // Verify the contents of an empty collection.
     #[test]

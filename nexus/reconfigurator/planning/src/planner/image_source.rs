@@ -18,8 +18,8 @@ use nexus_types::{
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_uuid_kinds::{MupdateOverrideUuid, OmicronZoneUuid, SledUuid};
 use sled_agent_types::inventory::{
-    BootPartitionContents, BootPartitionDetails, ZoneKind,
-    ZoneManifestBootInventory,
+    BootPartitionContents, BootPartitionDetails, ManifestBootInventory,
+    ZoneKind,
 };
 use slog::{debug, info, o, warn};
 use tufaceous_artifact::ArtifactHash;
@@ -422,7 +422,7 @@ pub(crate) struct NoopConvertZoneInfo {
 impl NoopConvertZoneInfo {
     fn new(
         zone: &BlueprintZoneConfig,
-        zone_manifest: &ZoneManifestBootInventory,
+        zone_manifest: &ManifestBootInventory,
         artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
     ) -> Self {
         let file_name = zone.kind().artifact_in_install_dataset();

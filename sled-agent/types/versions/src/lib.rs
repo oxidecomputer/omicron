@@ -31,6 +31,7 @@
 
 #[path = "bootstrap_initial/mod.rs"]
 pub mod bootstrap_v1;
+mod impls;
 pub mod latest;
 #[path = "initial/mod.rs"]
 pub mod v1;
@@ -38,6 +39,10 @@ pub mod v1;
 pub mod v10;
 #[path = "add_dual_stack_external_ip_config/mod.rs"]
 pub mod v11;
+#[path = "add_health_monitor/mod.rs"]
+pub mod v12;
+#[path = "add_trust_quorum/mod.rs"]
+pub mod v13;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
