@@ -15,6 +15,7 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackUuid;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
+use std::time::Duration;
 use trust_quorum_types::types::Epoch;
 
 impl super::Nexus {
@@ -31,27 +32,96 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         let (latest_committed_config, latest_epoch) =
             self.load_latest_possible_committed_config(opctx, rack_id).await?;
+        let new_epoch = latest_epoch.next();
         let proposed = self
             .add_sleds_proposed_config(
                 latest_committed_config,
-                latest_epoch,
+                new_epoch,
                 new_sleds,
             )
             .await?;
-        self.db_datastore.tq_insert_latest_config(opctx, proposed).await
+        self.db_datastore.tq_insert_latest_config(opctx, proposed).await?;
 
         // Read back the real configuration from the database. Importantly this
         // includes a chosen coordinator.
+        // Load the configuration for the last commmitted epoch
+        let Some(new_config) =
+            self.db_datastore.tq_get_config(opctx, rack_id, new_epoch).await?
+        else {
+            return Err(Error::internal_error(&format!(
+                "Cannot retrieve newly inserted trust quorum \
+                    configuration for rack {rack_id}, epoch {new_epoch}."
+            )));
+        };
+
+        // Retrieve the sled for the coordinator
+        let Some(sled) = self
+            .db_datastore
+            .sled_get_commissioned_by_baseboard_and_rack_id(
+                opctx,
+                rack_id,
+                &new_config.coordinator,
+            )
+            .await?
+        else {
+            let msg = format!(
+                "Coordinator sled for trust quorum reconfiguration is no \
+                longer commissioned or is present in another rack. \
+                Configuration stored in database for this configuration will \
+                be aborted. Expected rack_id: {rack_id}, baseboard_id: {}.",
+                new_config.coordinator
+            );
+
+            self.db_datastore
+                .tq_abort_config(opctx, rack_id, new_epoch, msg.clone())
+                .await
+                .map_err(|e| {
+                    Error::conflict(format!(
+                        "{}. Unfortunately, writing \
+                        the abort to the database also failed with error: {e}. \
+                        Abort will have to be performed explicitly by the \
+                        operator.",
+                        msg.clone()
+                    ))
+                })?;
+
+            return Err(Error::conflict(msg));
+        };
+
+        // Construct a sled agent client to talk to the coordinator
+        let timeout = Duration::from_secs(60);
+        let url = format!("http://{}", sled.address());
+        let log = self.log.new(o!("SledAgent" => url.clone()));
+        let reqwest_client = reqwest::ClientBuilder::new()
+            .connect_timeout(timeout)
+            .timeout(timeout)
+            .build()
+            .unwrap();
+        let client = sled_agent_client::Client::new_with_client(
+            &url,
+            reqwest_client,
+            log,
+        );
 
         // Now send the reconfiguration request to the coordinator. We do
         // this directly in the API handler because this is a non-idempotent
         // operation and we only want to issue it once.
+        let req = trust_quorum_types::messages::ReconfigureMsg {
+            rack_id: new_config.rack_id,
+            epoch: new_config.epoch,
+            last_committed_epoch: new_config.last_committed_epoch,
+            members: new_config.members.keys().cloned().collect(),
+            threshold: new_config.threshold,
+        };
+        client.trust_quorum_reconfigure(&req).await?;
+
+        Ok(())
     }
 
     async fn add_sleds_proposed_config(
         &self,
         latest_committed_config: TrustQuorumConfig,
-        latest_epoch: Epoch,
+        new_epoch: Epoch,
         new_sleds: BTreeSet<UninitializedSledId>,
     ) -> Result<ProposedTrustQuorumConfig, Error> {
         let rack_id = latest_committed_config.rack_id;
@@ -71,7 +141,7 @@ impl super::Nexus {
 
         Ok(ProposedTrustQuorumConfig {
             rack_id,
-            epoch: latest_epoch.next(),
+            epoch: new_epoch,
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: latest_committed_config.epoch,
             },

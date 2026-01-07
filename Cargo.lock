@@ -13019,6 +13019,7 @@ dependencies = [
  "sled-agent-types",
  "sled-agent-types-versions",
  "slog",
+ "trust-quorum-types",
  "uuid",
 ]
 
