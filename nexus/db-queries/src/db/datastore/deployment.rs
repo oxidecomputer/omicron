@@ -4767,4 +4767,192 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    // Test that concurrent read and delete operations on blueprints do not
+    // result in torn reads. With the fix for issue #9594, blueprint_read
+    // checks for the top-level blueprint record at the END of reading, so
+    // if a concurrent delete has started (which deletes the top-level record
+    // first), the read will fail with "not found" rather than returning
+    // partial data.
+    //
+    // This test spawns concurrent readers and a deleter to exercise the race
+    // condition. Readers should either get the complete original blueprint
+    // OR a "not found" error - never partial/torn data.
+    #[tokio::test]
+    async fn test_concurrent_blueprint_read_delete() {
+        const TEST_NAME: &str = "test_concurrent_blueprint_read_delete";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create two blueprints - one to be the target (so it can't be deleted)
+        // and one to be deleted while being read.
+        let (_, _, target_blueprint) = representative(&logctx.log, TEST_NAME);
+        let authz_target = authz_blueprint_from_id(target_blueprint.id);
+
+        // Insert target blueprint and make it the current target
+        datastore
+            .blueprint_insert(&opctx, &target_blueprint)
+            .await
+            .expect("failed to insert target blueprint");
+        let target = BlueprintTarget {
+            target_id: target_blueprint.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, target)
+            .await
+            .expect("failed to set target");
+
+        // Create a second blueprint that we'll delete while reading
+        let blueprint_to_delete = {
+            let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
+                &target_blueprint,
+                "test blueprint to delete",
+                PlannerRng::from_entropy(),
+            )
+            .expect("failed to create builder");
+            builder.comment("blueprint that will be deleted");
+            builder.build(BlueprintSource::Test)
+        };
+        let authz_blueprint = authz_blueprint_from_id(blueprint_to_delete.id);
+
+        datastore
+            .blueprint_insert(&opctx, &blueprint_to_delete)
+            .await
+            .expect("failed to insert blueprint to delete");
+
+        // Verify we can read it back correctly
+        let read_back = datastore
+            .blueprint_read(&opctx, &authz_blueprint)
+            .await
+            .expect("failed to read blueprint");
+        assert_eq!(blueprint_to_delete, read_back);
+
+        // Track results from concurrent readers
+        let successful_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let not_found_errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let other_errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let delete_completed = Arc::new(AtomicBool::new(false));
+
+        // Signal when at least one read has completed, so we know readers are
+        // running before we start deleting
+        let (first_read_tx, first_read_rx) =
+            tokio::sync::oneshot::channel::<()>();
+        let first_read_tx =
+            Arc::new(std::sync::Mutex::new(Some(first_read_tx)));
+
+        // Spawn reader tasks that loop until deletion completes
+        const NUM_READERS: usize = 10;
+        let mut reader_handles = Vec::new();
+
+        for _ in 0..NUM_READERS {
+            let datastore = datastore.clone();
+            let opctx = opctx.child(std::collections::BTreeMap::new());
+            let authz_blueprint = authz_blueprint.clone();
+            let blueprint_to_delete = blueprint_to_delete.clone();
+            let successful_reads = successful_reads.clone();
+            let not_found_errors = not_found_errors.clone();
+            let other_errors = other_errors.clone();
+            let delete_completed = delete_completed.clone();
+            let first_read_tx = first_read_tx.clone();
+
+            reader_handles.push(tokio::spawn(async move {
+                loop {
+                    match datastore
+                        .blueprint_read(&opctx, &authz_blueprint)
+                        .await
+                    {
+                        Ok(blueprint) => {
+                            // If we got a blueprint back, it MUST be complete
+                            // and match the original. Any mismatch would
+                            // indicate a torn read.
+                            assert_eq!(
+                                blueprint, blueprint_to_delete,
+                                "Read returned a blueprint that doesn't match \
+                                 the original - this indicates a torn read!"
+                            );
+                            successful_reads.fetch_add(1, Ordering::Relaxed);
+
+                            // Signal that at least one read completed (only
+                            // the first sender to take the channel will send)
+                            if let Some(tx) =
+                                first_read_tx.lock().unwrap().take()
+                            {
+                                let _ = tx.send(());
+                            }
+                        }
+                        Err(e) => {
+                            let error_str = e.to_string();
+                            if error_str.contains("not found") {
+                                not_found_errors
+                                    .fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                eprintln!("Unexpected error: {e}");
+                                other_errors.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                    }
+
+                    // Stop reading after delete completes
+                    if delete_completed.load(Ordering::Relaxed) {
+                        break;
+                    }
+                }
+            }));
+        }
+
+        // Wait for at least one successful read before deleting, so we know
+        // the reader tasks have started
+        first_read_rx.await.expect("no reader completed a read");
+
+        // Delete the blueprint while readers are running
+        datastore
+            .blueprint_delete(&opctx, &authz_blueprint)
+            .await
+            .expect("failed to delete blueprint");
+        delete_completed.store(true, Ordering::Relaxed);
+
+        // Wait for all readers to complete
+        for handle in reader_handles {
+            handle.await.expect("reader task panicked");
+        }
+
+        // Log results for debugging.
+        let successful = successful_reads.load(Ordering::Relaxed);
+        let not_found = not_found_errors.load(Ordering::Relaxed);
+        let other = other_errors.load(Ordering::Relaxed);
+        eprintln!(
+            "Results: {} successful reads, {} not-found errors, {} other errors",
+            successful, not_found, other
+        );
+
+        // Key invariants:
+        // - At least one successful read (we waited for this before deleting)
+        // - Successful reads are validated inside the reader loop (must match
+        //   the original blueprint exactly, or the assert_eq! fails)
+        // - "Not found" errors are expected after deletion
+        // - No other errors should occur
+        assert!(
+            successful > 0,
+            "Expected at least one successful read (we wait for this)"
+        );
+        assert_eq!(other, 0, "No unexpected errors should occur");
+
+        // Verify the target blueprint is still intact
+        let target_read = datastore
+            .blueprint_read(&opctx, &authz_target)
+            .await
+            .expect("target blueprint should still be readable");
+        assert_eq!(target_blueprint, target_read);
+
+        // Verify the deleted blueprint is fully cleaned up
+        ensure_blueprint_fully_deleted(&datastore, blueprint_to_delete.id)
+            .await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
