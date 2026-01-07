@@ -513,7 +513,7 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
                     group.bench_function(&name, |b| {
                         // Force evaluation of the harness outside to_async to
                         // avoid nested block_on.
-                        let harness = &*harness;
+                        let harness = Lazy::force(&harness);
                         b.to_async(&rt).iter_custom(|iters| {
                             let opctx = harness.opctx();
                             let db = harness.db();
