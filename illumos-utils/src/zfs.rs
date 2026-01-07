@@ -1704,20 +1704,16 @@ impl Zfs {
                 )
             })?;
 
-            // The numeric type of these constants is not specified due to being
-            // different for illumos and linux. They are also `let dkioc` and
-            // not `const DKIOC` because `const` requires a type.
-            //
-            // XXX is there a way to pull this constant in from
-            // /usr/include/sys/dkio.h
-            let dkioc = 0x04 << 8;
-            let dkiocrawvolstop = dkioc | 31;
+            #[cfg(target_os = "illumos")]
+            const DKIOCRAWVOLSTOP: libc::c_int = (0x04 << 8) | 0x1f;
+            #[cfg(not(target_os = "illumos"))]
+            const DKIOCRAWVOLSTOP: libc::c_ulong = (0x04 << 8) | 0x1f;
 
             // DKIOCRAWVOLSTOP will stop the initialization and block waiting
             // for the initialization thread to exit. If this returns 0, the
             // initialization thread has stopped and exited ok, proceed with
             // deletion.
-            if unsafe { libc::ioctl(fd.as_raw_fd(), dkiocrawvolstop) } == -1 {
+            if unsafe { libc::ioctl(fd.as_raw_fd(), DKIOCRAWVOLSTOP) } == -1 {
                 let err = std::io::Error::last_os_error();
                 match err.raw_os_error().unwrap() {
                     libc::ENOENT => {
