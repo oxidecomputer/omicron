@@ -70,7 +70,7 @@ impl ZonesEditor {
         self.counts
     }
 
-    /// TODO-john
+    /// Iterate over all in-service zones on this sled.
     pub fn in_service_zones(
         &self,
     ) -> impl Iterator<Item = &BlueprintZoneConfig> {
@@ -93,7 +93,13 @@ impl ZonesEditor {
         self.danger_all_zones(BlueprintZoneDisposition::could_be_running)
     }
 
-    /// TODO-john
+    /// Iterate over the expunged zones on this sled.
+    ///
+    /// Like `Blueprint::expunged_zones()`, callers must specify a
+    /// [`BlueprintExpungedZoneAccessReason`]. This allows us to statically
+    /// track all uses of expunged zones, each of which we must account for in
+    /// the planner's logic to permanently prune expunged zones from the
+    /// blueprint.
     pub fn expunged_zones(
         &self,
         _reason: BlueprintExpungedZoneAccessReason,

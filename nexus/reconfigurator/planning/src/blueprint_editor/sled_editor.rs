@@ -306,10 +306,6 @@ impl SledEditor {
         }
     }
 
-    /// Iterate over all zones on this sled that could be running; this includes
-    /// in-service zones and expunged zones that are not yet ready for cleanup
-    /// (because we haven't confirmed via inventory that they've been shut
-    /// down).
     pub fn could_be_running_zones(
         &self,
     ) -> impl Iterator<Item = &BlueprintZoneConfig> {
@@ -324,7 +320,6 @@ impl SledEditor {
         }
     }
 
-    // TODO-john
     pub fn expunged_zones(
         &self,
         reason: BlueprintExpungedZoneAccessReason,

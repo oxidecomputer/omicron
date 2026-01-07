@@ -720,7 +720,14 @@ impl<'a> BlueprintBuilder<'a> {
         }))
     }
 
-    /// TODO-john
+    /// Iterate over the sled IDs of all commissioned sleds known to this
+    /// builder.
+    ///
+    /// This will include:
+    ///
+    /// * All commissioned sleds present in the parent blueprint that have not
+    ///   been decommissioned by this builder
+    /// * Any sleds that were added by this builder
     pub fn current_commissioned_sleds(
         &self,
     ) -> impl Iterator<Item = SledUuid> + '_ {
@@ -732,7 +739,11 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 
-    /// TODO-john
+    /// Iterate over the in-service [`BlueprintZoneConfig`] instances on a
+    /// particular sled.
+    ///
+    /// This will include both zones from the parent blueprint, as well
+    /// as the changes made within this builder.
     pub fn current_in_service_sled_zones(
         &self,
         sled_id: SledUuid,
@@ -743,7 +754,11 @@ impl<'a> BlueprintBuilder<'a> {
         Either::Right(editor.in_service_zones())
     }
 
-    /// TODO-john
+    /// Iterate over the in-service [`BlueprintZoneConfig`] instances on all
+    /// commissioned sleds.
+    ///
+    /// This will include both zones from the parent blueprint, as well
+    /// as the changes made within this builder.
     pub fn current_in_service_zones(
         &self,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
@@ -753,7 +768,17 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 
-    /// TODO-john
+    /// Iterate over the expunged [`BlueprintZoneConfig`] instances on a
+    /// particular sled.
+    ///
+    /// This will include both zones from the parent blueprint, as well
+    /// as the changes made within this builder.
+    ///
+    /// Like [`Blueprint::expunged_zones()`], callers must specify a
+    /// [`BlueprintExpungedZoneAccessReason`]. This allows us to statically
+    /// track all uses of expunged zones, each of which we must account for in
+    /// the planner's logic to permanently prune expunged zones from the
+    /// blueprint.
     pub fn current_expunged_sled_zones(
         &self,
         sled_id: SledUuid,
@@ -765,7 +790,12 @@ impl<'a> BlueprintBuilder<'a> {
         Either::Right(editor.expunged_zones(reason))
     }
 
-    /// TODO-john
+    /// Iterate over the [`BlueprintZoneConfig`] instances on a particular sled
+    /// that could be running (i.e., are in service or are expunged but not yet
+    /// ready for cleanup).
+    ///
+    /// This will include both zones from the parent blueprint, as well
+    /// as the changes made within this builder.
     pub fn current_could_be_running_sled_zones(
         &self,
         sled_id: SledUuid,
@@ -776,7 +806,12 @@ impl<'a> BlueprintBuilder<'a> {
         Either::Right(editor.could_be_running_zones())
     }
 
-    /// TODO-john
+    /// Iterate over the [`BlueprintZoneConfig`] instances on all commissioned
+    /// sleds that could be running (i.e., are in service or are expunged but
+    /// not yet ready for cleanup).
+    ///
+    /// This will include both zones from the parent blueprint, as well
+    /// as the changes made within this builder.
     pub fn current_could_be_running_zones(
         &self,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
@@ -786,7 +821,17 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 
-    /// TODO-john
+    /// Iterate all the [`BlueprintZoneConfig`] instances on a
+    /// particular sled, regarless of their disposition.
+    ///
+    /// This will include both zones from the parent blueprint, as well
+    /// as the changes made within this builder.
+    ///
+    /// Like [`Blueprint::expunged_zones()`], callers must specify a
+    /// [`BlueprintExpungedZoneAccessReason`]. This allows us to statically
+    /// track all uses of expunged zones, each of which we must account for in
+    /// the planner's logic to permanently prune expunged zones from the
+    /// blueprint.
     pub fn current_in_service_and_expunged_sled_zones(
         &self,
         sled_id: SledUuid,
