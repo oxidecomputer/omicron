@@ -1358,25 +1358,21 @@ pub struct IpPoolSiloUpdate {
 
 // Floating IPs
 
-/// How to allocate a floating IP address.
-///
-/// This enum makes invalid states unrepresentable: when specifying an
-/// explicit IP, there's no `ip_version` field (the IP determines its version).
-/// The `ip_version` preference is only available when auto-allocating.
+/// Specify how to allocate a floating IP address.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AddressSelector {
-    /// Reserve a specific IP address.
+    /// Reserve an explicit IP address.
     Explicit {
-        /// The specific IP address to reserve. Must be available in the pool.
+        /// The IP address to reserve. Must be available in the pool.
         ip: IpAddr,
         /// The pool containing this address. If not specified, the default
-        /// pool for this IP's version is used.
+        /// pool for the address's IP version is used.
         pool: Option<NameOrId>,
     },
-    /// Automatically allocate an IP address based on pool selection.
+    /// Automatically allocate an IP address from a specified pool.
     Auto {
-        /// How to select the pool for allocation.
+        /// Pool selection.
         #[serde(default)]
         pool_selector: PoolSelector,
     },
@@ -1394,7 +1390,7 @@ pub struct FloatingIpCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// How to allocate the floating IP address.
+    /// IP address allocation method.
     #[serde(default)]
     pub address_selector: AddressSelector,
 }
@@ -1500,10 +1496,7 @@ pub struct InstanceDiskAttach {
     pub name: Name,
 }
 
-/// Pool selection for IP address allocation.
-///
-/// This enum makes invalid states unrepresentable: `ip_version` is only
-/// relevant when using the default pool.
+/// Specify which IP pool to allocate from.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PoolSelector {
@@ -2843,7 +2836,7 @@ pub struct ProbeCreate {
     pub identity: IdentityMetadataCreateParams,
     #[schemars(with = "Uuid")]
     pub sled: SledUuid,
-    /// Pool selection for allocating an ephemeral IP to the probe.
+    /// Pool to allocate from.
     #[serde(default)]
     pub pool_selector: PoolSelector,
 }
