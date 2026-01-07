@@ -932,7 +932,7 @@ impl Downloader<'_> {
             Os::Mac => {
                 info!(self.log, "Building lldp from source for macOS");
 
-                let binaries = [("lldp", &["--no-default-features"][..])];
+                let binaries = [("lldpd", &["--no-default-features"][..])];
 
                 let built_binaries =
                     self.build_from_git("lldp", &commit, &binaries).await?;
