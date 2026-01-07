@@ -7,12 +7,15 @@
 use nexus_auth::context::OpContext;
 use nexus_types::{
     external_api::params::UninitializedSledId,
-    trust_quorum::{IsLrtqUpgrade, ProposedTrustQuorumConfig},
+    trust_quorum::{
+        IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
+    },
 };
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackUuid;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
+use trust_quorum_types::types::Epoch;
 
 impl super::Nexus {
     /// Add a set of sleds to the trust quorum
@@ -26,6 +29,70 @@ impl super::Nexus {
         rack_id: RackUuid,
         new_sleds: BTreeSet<UninitializedSledId>,
     ) -> Result<(), Error> {
+        let (latest_committed_config, latest_epoch) =
+            self.load_latest_possible_committed_config(opctx, rack_id).await?;
+        let proposed = self
+            .add_sleds_proposed_config(
+                latest_committed_config,
+                latest_epoch,
+                new_sleds,
+            )
+            .await?;
+        self.db_datastore.tq_insert_latest_config(opctx, proposed).await
+
+        // Read back the real configuration from the database. Importantly this
+        // includes a chosen coordinator.
+
+        // Now send the reconfiguration request to the coordinator. We do
+        // this directly in the API handler because this is a non-idempotent
+        // operation and we only want to issue it once.
+    }
+
+    async fn add_sleds_proposed_config(
+        &self,
+        latest_committed_config: TrustQuorumConfig,
+        latest_epoch: Epoch,
+        new_sleds: BTreeSet<UninitializedSledId>,
+    ) -> Result<ProposedTrustQuorumConfig, Error> {
+        let rack_id = latest_committed_config.rack_id;
+        let new_sleds: BTreeSet<BaseboardId> =
+            new_sleds.into_iter().map(Into::into).collect();
+        let existing: BTreeSet<_> =
+            latest_committed_config.members.keys().cloned().collect();
+
+        let intersection: BTreeSet<_> =
+            existing.intersection(&new_sleds).collect();
+        if !intersection.is_empty() {
+            return Err(Error::invalid_request(format!(
+                "The following sleds are already members of the trust quorum: \
+                 {intersection:?}. Is there a problem with their sled agents?"
+            )));
+        }
+
+        Ok(ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: latest_epoch.next(),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: latest_committed_config.epoch,
+            },
+            members: new_sleds.union(&existing).cloned().collect(),
+        })
+    }
+
+    // Load the latest committed trust quorum configuration for `rack_id` and
+    // return it along with the epoch for the latest configuration.
+    //
+    // If the configuration is aborted, then check to see what its latest
+    // `last_committed_epoch` is and load that configuration.
+    //
+    // Note that the configuration that comes back may not actually be committed
+    // yet if it's the latest configuration. That is ok because we will perform
+    // validation during insert of the any newly proposed config.
+    async fn load_latest_possible_committed_config(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+    ) -> Result<(TrustQuorumConfig, Epoch), Error> {
         // First get the latest configuration for this rack.
         let Some(latest_config) =
             self.db_datastore.tq_get_latest_config(opctx, rack_id).await?
@@ -38,7 +105,7 @@ impl super::Nexus {
 
         let highest_epoch = latest_config.epoch;
 
-        // We assume this config is committed whether it is or not.
+        // We assume this config is committed as long as it is not aborted.
         //
         // This assumption will be validated by the datastore code before
         // insertion of the new configuration.
@@ -64,29 +131,6 @@ impl super::Nexus {
             latest_config
         };
 
-        let new_sleds: BTreeSet<BaseboardId> =
-            new_sleds.into_iter().map(Into::into).collect();
-        let existing: BTreeSet<_> =
-            latest_committed_config.members.keys().cloned().collect();
-
-        let intersection: BTreeSet<_> =
-            existing.intersection(&new_sleds).collect();
-        if !intersection.is_empty() {
-            return Err(Error::invalid_request(format!(
-                "The following sleds are already members of the trust quorum: \
-                 {intersection:?}. Is there a problem with their sled agents?"
-            )));
-        }
-
-        let proposed = ProposedTrustQuorumConfig {
-            rack_id,
-            epoch: highest_epoch.next(),
-            is_lrtq_upgrade: IsLrtqUpgrade::No {
-                last_committed_epoch: latest_committed_config.epoch,
-            },
-            members: new_sleds.union(&existing).cloned().collect(),
-        };
-
-        self.db_datastore.tq_insert_latest_config(opctx, proposed).await
+        Ok((latest_committed_config, highest_epoch))
     }
 }
