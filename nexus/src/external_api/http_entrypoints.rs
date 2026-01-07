@@ -5687,9 +5687,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 ip_to_create.into_inner();
             let (pool, ip_version) = match pool_selector {
                 params::PoolSelector::Explicit { pool } => (Some(pool), None),
-                params::PoolSelector::Auto { ip_version } => {
-                    (None, ip_version)
-                }
+                params::PoolSelector::Auto { ip_version } => (None, ip_version),
             };
             let ip = nexus
                 .instance_attach_ephemeral_ip(

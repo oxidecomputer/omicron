@@ -107,9 +107,7 @@ impl From<FloatingIpCreate> for params::FloatingIpCreate {
                 pool_selector: params::PoolSelector::Explicit { pool },
             },
             (None, None) => params::AddressSelector::Auto {
-                pool_selector: params::PoolSelector::Auto {
-                    ip_version: None,
-                },
+                pool_selector: params::PoolSelector::Auto { ip_version: None },
             },
         };
         params::FloatingIpCreate { identity: old.identity, address_selector }

@@ -100,7 +100,9 @@ impl TryFrom<ExternalIpCreate> for params::ExternalIpCreate {
             ExternalIpCreate::Ephemeral { pool, ip_version } => {
                 let pool_selector = match (pool, ip_version) {
                     // Named pool specified -> ip_version must not be set
-                    (Some(pool), None) => params::PoolSelector::Explicit { pool },
+                    (Some(pool), None) => {
+                        params::PoolSelector::Explicit { pool }
+                    }
                     // Named pool & ip_version is an invalid combination
                     (Some(_), Some(_)) => {
                         return Err(Error::invalid_request(

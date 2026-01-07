@@ -1497,9 +1497,7 @@ async fn test_ephemeral_ip_ip_version_conflict(
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::EphemeralIpCreate {
-                pool_selector: params::PoolSelector::Auto {
-                    ip_version: None,
-                },
+                pool_selector: params::PoolSelector::Auto { ip_version: None },
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
