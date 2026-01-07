@@ -76,6 +76,7 @@ use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSource;
@@ -91,6 +92,7 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
@@ -1956,10 +1958,21 @@ impl DataStore {
                 self.ensure_zone_external_networking_deallocated_on_connection(
                     &conn,
                     &opctx.log,
+                    // TODO-correctness Currently the planner _does not wait_
+                    // for zones using external IPs to be ready for cleanup
+                    // before reassigning the external IP to a new zone, so we
+                    // have to deallocate IPs for both "ready for cleanup" and
+                    // "not ready for cleanup" zones. We should fix the planner,
+                    // at which point we can operate on only "ready for cleanup"
+                    // zones here.
+                    //
+                    // <https://github.com/oxidecomputer/omicron/issues/9506>
                     blueprint
-                        .all_omicron_zones(|disposition| {
-                            !disposition.is_in_service()
-                        })
+                        .expunged_zones(
+                            ZoneRunningStatus::Any,
+                            BlueprintExpungedZoneAccessReason
+                                ::DeallocateExternalNetworkingResources
+                        )
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
@@ -1967,11 +1980,7 @@ impl DataStore {
                 self.ensure_zone_external_networking_allocated_on_connection(
                     &conn,
                     opctx,
-                    blueprint
-                        .all_omicron_zones(|disposition| {
-                            disposition.is_in_service()
-                        })
-                        .map(|(_sled_id, zone)| zone),
+                    blueprint.in_service_zones().map(|(_sled_id, zone)| zone),
                 )
                 .await
                 .map_err(|e| err.bail(e))?;
@@ -3313,7 +3322,7 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len(), collection.sled_agents.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
+            blueprint1.in_service_zones().count(),
             collection.all_ledgered_omicron_zones().count()
         );
         // All zones should be in service.
@@ -3645,9 +3654,8 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len() + 1, blueprint2.sleds.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count()
-                + num_new_sled_zones,
-            blueprint2.all_omicron_zones(BlueprintZoneDisposition::any).count()
+            blueprint1.in_service_zones().count() + num_new_sled_zones,
+            blueprint2.in_service_zones().count()
         );
 
         // All zones should be in service.
@@ -4297,7 +4305,7 @@ mod tests {
 
         // Insert an IP pool range covering the one Nexus IP.
         let nexus_ip = blueprint1
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .find_map(|(_, zone_config)| {
                 zone_config
                     .zone_type
@@ -4517,7 +4525,10 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .all_omicron_zones(|disposition| !disposition.is_in_service())
+            .expunged_zones(
+                ZoneRunningStatus::Any,
+                BlueprintExpungedZoneAccessReason::Test,
+            )
             .collect::<Vec<_>>();
         assert!(
             not_in_service.is_empty(),

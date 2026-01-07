@@ -47,7 +47,6 @@ use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::blueprint_zone_type;
@@ -842,7 +841,7 @@ impl DataStore {
                     // Insert Nexus database access records
                     self.initialize_nexus_access_from_blueprint_on_connection(
                         &conn,
-                        blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                        blueprint.in_service_zones()
                             .filter_map(|(_sled, zone_cfg)| {
                                 if zone_cfg.zone_type.is_nexus() {
                                     Some(zone_cfg.id)
@@ -856,7 +855,7 @@ impl DataStore {
                     })?;
 
                     // Allocate networking records for all services.
-                    for (_, zone_config) in blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service) {
+                    for (_, zone_config) in blueprint.in_service_zones() {
                         self.rack_populate_service_networking_records(
                             &conn,
                             &log,
@@ -1068,9 +1067,7 @@ mod test {
     use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
-    use nexus_types::deployment::{
-        BlueprintZoneDisposition, BlueprintZoneImageSource, OximeterReadMode,
-    };
+    use nexus_types::deployment::{BlueprintZoneImageSource, OximeterReadMode};
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
@@ -1503,9 +1500,7 @@ mod test {
         let mut ntp1_id = None;
         let mut ntp2_id = None;
         let mut ntp3_id = None;
-        for (sled_id, zone) in
-            blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (sled_id, zone) in blueprint.in_service_zones() {
             match &zone.zone_type {
                 BlueprintZoneType::BoundaryNtp(_) => {
                     let which = if sled_id == sled1.id() {
@@ -1750,10 +1745,8 @@ mod test {
         assert_eq!(observed_blueprint, blueprint);
 
         // We should see both of the Nexus services we provisioned.
-        let mut observed_zones: Vec<_> = observed_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .map(|(_, z)| z)
-            .collect();
+        let mut observed_zones: Vec<_> =
+            observed_blueprint.in_service_zones().map(|(_, z)| z).collect();
         observed_zones.sort_by_key(|z| z.id);
         assert_eq!(observed_zones.len(), 2);
 
@@ -1778,12 +1771,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::any)
-                .next()
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().next().unwrap().1.zone_type
             {
                 external_ip.ip
             } else {
@@ -1797,12 +1785,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::any)
-                .nth(1)
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().nth(1).unwrap().1.zone_type
             {
                 external_ip.ip
             } else {
@@ -1955,10 +1938,8 @@ mod test {
         assert_eq!(observed_blueprint, blueprint);
 
         // We should see the Nexus service we provisioned.
-        let mut observed_zones: Vec<_> = observed_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .map(|(_, z)| z)
-            .collect();
+        let mut observed_zones: Vec<_> =
+            observed_blueprint.in_service_zones().map(|(_, z)| z).collect();
         observed_zones.sort_by_key(|z| z.id);
         assert_eq!(observed_zones.len(), 1);
 
@@ -1985,12 +1966,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::any)
-                .next()
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().next().unwrap().1.zone_type
             {
                 external_ip.ip
             } else {
