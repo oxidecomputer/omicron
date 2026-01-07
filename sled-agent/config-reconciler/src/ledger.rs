@@ -6,7 +6,6 @@
 
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
-use legacy_configs::convert_legacy_ledgers;
 use omicron_common::api::external::Generation;
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
@@ -30,9 +29,9 @@ use tufaceous_artifact::ArtifactHash;
 
 use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
-use crate::ledger::legacy_configs::try_convert_v4_sled_config;
+use ledgered_sled_config_versioning::read_ledgered_sled_config;
 
-mod legacy_configs;
+mod ledgered_sled_config_versioning;
 
 const CONFIG_LEDGER_FILENAME: &str = "omicron-sled-config.json";
 
@@ -639,35 +638,16 @@ async fn load_sled_config(
         log, "Attempting to load sled config from ledger";
         "paths" => ?paths,
     );
-    if let Some(config) = Ledger::new(log, paths.clone()).await {
-        info!(log, "Ledger of sled config exists");
-        return CurrentSledConfig::Ledgered(Box::new(config.into_inner()));
+    match read_ledgered_sled_config(log, paths).await {
+        Some(config) => CurrentSledConfig::Ledgered(Box::new(config)),
+        None => {
+            // We have no ledger; we must be waiting for RSS (if we're
+            // pre-rack-setup) or for Nexus to send us a config (if we're a sled
+            // being added to an existing rack).
+            info!(log, "No sled config ledger exists");
+            CurrentSledConfig::WaitingForInitialConfig
+        }
     }
-
-    // If we have no ledgered config, see if we can convert from the previous
-    // version of the format.
-    if let Some(config) = try_convert_v4_sled_config(log, paths).await {
-        info!(
-            log,
-            "Ledger of sled config exists, but it was formatted as \
-            version 6, with single-stack NICs. It has been rewritten \
-            to the current version",
-        );
-        return CurrentSledConfig::Ledgered(Box::new(config));
-    }
-
-    // If we have no ledgered config, see if we can convert from the even
-    // more-previous triple of legacy ledgers.
-    if let Some(config) = convert_legacy_ledgers(&config_datasets, log).await {
-        info!(log, "Converted legacy triple of ledgers into new sled config");
-        return CurrentSledConfig::Ledgered(Box::new(config));
-    }
-
-    // We have no ledger and didn't find legacy ledgers to convert; we must be
-    // waiting for RSS (if we're pre-rack-setup) or for Nexus to send us a
-    // config (if we're a sled being added to an existing rack).
-    info!(log, "No sled config ledger exists");
-    CurrentSledConfig::WaitingForInitialConfig
 }
 
 // `LedgerTask` should not exit in production, but may exit during tests
@@ -683,14 +663,9 @@ enum LedgerTaskExit {
 
 #[cfg(test)]
 mod tests {
-    use super::legacy_configs::tests::LEGACY_DATASETS_PATH;
-    use super::legacy_configs::tests::LEGACY_DISKS_PATH;
-    use super::legacy_configs::tests::LEGACY_ZONES_PATH;
     use super::*;
     use crate::internal_disks::InternalDiskDetails;
-    use crate::ledger::legacy_configs::tests::test_data_merged_config;
     use anyhow::anyhow;
-    use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
     use camino_tempfile::tempfile;
     use iddqd::IdOrdMap;
@@ -768,7 +743,7 @@ mod tests {
 
     impl TestHarness {
         async fn new(log: Logger) -> Self {
-            Self::build(log, FakeArtifactStore::default(), None, false).await
+            Self::build(log, FakeArtifactStore::default(), None).await
         }
 
         async fn with_fake_artifacts(
@@ -779,7 +754,6 @@ mod tests {
                 log,
                 FakeArtifactStore { artifacts: Some(artifacts.collect()) },
                 None,
-                false,
             )
             .await
         }
@@ -788,23 +762,15 @@ mod tests {
             log: Logger,
             config: &OmicronSledConfig,
         ) -> Self {
-            Self::build(log, FakeArtifactStore::default(), Some(config), false)
-                .await
-        }
-
-        async fn with_legacy_ledgers(log: Logger) -> Self {
-            Self::build(log, FakeArtifactStore::default(), None, true).await
+            Self::build(log, FakeArtifactStore::default(), Some(config)).await
         }
 
         // If `sled_config` is `Some(_)`, that config will be written to the
         // tempdir's config dataset before the ledger task is spawned.
-        // Otherwise, if `copy_legacy_ledgers` is true, we'll copy our test data
-        // legacy ledgers into the tempdir's config dataset.
         async fn build(
             log: Logger,
             fake_artifact_store: FakeArtifactStore,
             sled_config: Option<&OmicronSledConfig>,
-            copy_legacy_ledgers: bool,
         ) -> Self {
             // Create the tempdir.
             let tempdir = Utf8TempDir::new().expect("created temp directory");
@@ -830,19 +796,6 @@ mod tests {
                         .expect("created config file");
                     serde_json::to_writer(file, &sled_config)
                         .expect("wrote config to file");
-                } else if copy_legacy_ledgers {
-                    for src in [
-                        LEGACY_DISKS_PATH,
-                        LEGACY_DATASETS_PATH,
-                        LEGACY_ZONES_PATH,
-                    ] {
-                        let src = Utf8Path::new(src);
-                        let dst = path.join(src.file_name().unwrap());
-
-                        tokio::fs::copy(src, dst)
-                            .await
-                            .expect("staged file in tempdir");
-                    }
                 }
             }
 
@@ -864,11 +817,11 @@ mod tests {
                         Err(CondCheckError::<()>::NotYet)
                     }
                     CurrentSledConfig::WaitingForInitialConfig => {
-                        assert!(sled_config.is_none() && !copy_legacy_ledgers);
+                        assert!(sled_config.is_none());
                         Ok(())
                     }
                     CurrentSledConfig::Ledgered(_) => {
-                        assert!(sled_config.is_some() || copy_legacy_ledgers);
+                        assert!(sled_config.is_some());
                         Ok(())
                     }
                 },
@@ -1357,25 +1310,6 @@ mod tests {
             .await
             .expect("no ledger task error")
             .expect("config is valid");
-
-        logctx.cleanup_successful();
-    }
-
-    // Basic test that we convert the legacy triple of config ledgers if they're
-    // present. The `legacy_configs` submodule has more extensive tests of this
-    // functionality.
-    #[tokio::test]
-    async fn convert_legacy_ledgers_if_present() {
-        let logctx = dev::test_setup_log("convert_legacy_ledgers_if_present");
-
-        let test_harness =
-            TestHarness::with_legacy_ledgers(logctx.log.clone()).await;
-
-        // It should have combined the legacy ledgers.
-        assert_eq!(
-            *test_harness.current_config_rx.borrow(),
-            CurrentSledConfig::Ledgered(Box::new(test_data_merged_config())),
-        );
 
         logctx.cleanup_successful();
     }

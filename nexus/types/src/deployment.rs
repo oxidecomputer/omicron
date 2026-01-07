@@ -307,9 +307,97 @@ impl Blueprint {
         }
     }
 
+    /// Iterate over the in-service [`BlueprintZoneConfig`] instances in the
+    /// blueprint, along with the associated sled id.
+    pub fn in_service_zones(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        // Danger note: this call has no danger of accessing expunged zones,
+        // because we're filtering to in-service.
+        self.danger_all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+    }
+
+    /// Iterate over the expunged [`BlueprintZoneConfig`] instances in the
+    /// blueprint, along with the associated sled id.
+    ///
+    /// Each call must specify whether they want zones that are
+    /// `ready_for_cleanup` (i.e., have been confirmed to be shut down and will
+    /// not be restarted), and must also specify a
+    /// [`BlueprintExpungedZoneAccessReason`]. The latter allows us to
+    /// statically track all uses of expunged zones, each of which we must
+    /// account for in the planner's logic to permanently prune expunged zones
+    /// from the blueprint.
+    pub fn expunged_zones(
+        &self,
+        ready_for_cleanup: ZoneRunningStatus,
+        _reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        // Danger note: this call will definitely access expunged zones, but we
+        // know the caller has provided a known reason to do so.
+        self.danger_all_omicron_zones(move |disposition| {
+            let this_zone_ready_for_cleanup = match disposition {
+                BlueprintZoneDisposition::InService => return false,
+                BlueprintZoneDisposition::Expunged {
+                    as_of_generation: _,
+                    ready_for_cleanup: this_zone_ready_for_cleanup,
+                } => this_zone_ready_for_cleanup,
+            };
+            match ready_for_cleanup {
+                ZoneRunningStatus::Shutdown => this_zone_ready_for_cleanup,
+                ZoneRunningStatus::MaybeRunning => !this_zone_ready_for_cleanup,
+                ZoneRunningStatus::Any => true,
+            }
+        })
+    }
+
+    /// Iterate over all zones in the blueprint, regardless of whether they're
+    /// in-service or expunged.
+    ///
+    /// Like [`Self::expunged_zones()`], callers are required to specify a
+    /// reason to access expunged zones.
+    ///
+    /// The set of zones returned by this method is equivalent to the set of
+    /// zones returned by chaining together calls to `Self::in_service_zones()`
+    /// and `Self::expunged_zones(ZoneRunningStatus::Any, reason)`, but only
+    /// iterates over the zones once.
+    pub fn all_in_service_and_expunged_zones(
+        &self,
+        _reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        // Danger note: this call will definitely access expunged zones, but we
+        // know the caller has provided a known reason to do so.
+        self.danger_all_omicron_zones(BlueprintZoneDisposition::any)
+    }
+
+    /// Iterate over all zones in the blueprint, returning any that could be
+    /// running: either they're in-service, or they're expunged but have not yet
+    /// been confirmed shut down.
+    ///
+    /// The set of zones returned by this method is equivalent to the set of
+    /// zones returned by chaining together calls to `Self::in_service_zones()`
+    /// and `Self::expunged_zones(ZoneRunningStatus::MaybeRunning, reason)`, but
+    /// only iterates over the zones once and does not require a `reason`.
+    pub fn all_maybe_running_zones(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        // Danger note: this call will definitely access expunged zones, but
+        // only those that are not yet `ready_for_cleanup`. The planner's
+        // pruning only acts on `ready_for_cleanup` zones, so we don't need to
+        // track accesses of this kind of expunged zone.
+        self.danger_all_omicron_zones(
+            BlueprintZoneDisposition::could_be_running,
+        )
+    }
+
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
     /// that match the provided filter, along with the associated sled id.
-    pub fn all_omicron_zones<F>(
+    ///
+    /// This method is prefixed with `danger_` and is private because it allows
+    /// the caller to potentially act on expunged zones without providing a
+    /// reason for doing so. It should only be called by `in_service_zones()`
+    /// and the helper methods that require callers to specify a
+    /// [`BlueprintExpungedZoneAccessReason`] defined above.
+    fn danger_all_omicron_zones<F>(
         &self,
         mut filter: F,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
@@ -324,23 +412,39 @@ impl Blueprint {
             .filter(move |(_, z)| filter(z.disposition))
     }
 
-    /// Iterate over all Nexus zones that match the provided filter.
-    pub fn all_nexus_zones<F>(
+    /// Iterate over all in-service Nexus zones.
+    pub fn in_service_nexus_zones(
         &self,
-        filter: F,
     ) -> impl Iterator<
         Item = (SledUuid, &BlueprintZoneConfig, &blueprint_zone_type::Nexus),
-    >
-    where
-        F: FnMut(BlueprintZoneDisposition) -> bool,
-    {
-        self.all_omicron_zones(filter).filter_map(|(sled_id, zone)| {
+    > {
+        self.in_service_zones().filter_map(|(sled_id, zone)| {
             if let BlueprintZoneType::Nexus(nexus_config) = &zone.zone_type {
                 Some((sled_id, zone, nexus_config))
             } else {
                 None
             }
         })
+    }
+
+    /// Iterate over all expunged Nexus zones that are ready for cleanup (i.e.,
+    /// have been confirmed to be shut down and will not restart).
+    pub fn expunged_nexus_zones_ready_for_cleanup(
+        &self,
+        reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<
+        Item = (SledUuid, &BlueprintZoneConfig, &blueprint_zone_type::Nexus),
+    > {
+        self.expunged_zones(ZoneRunningStatus::Shutdown, reason).filter_map(
+            |(sled_id, zone)| {
+                if let BlueprintZoneType::Nexus(nexus_config) = &zone.zone_type
+                {
+                    Some((sled_id, zone, nexus_config))
+                } else {
+                    None
+                }
+            },
+        )
     }
 
     /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the
@@ -411,14 +515,17 @@ impl Blueprint {
         BlueprintDisplay { blueprint: self }
     }
 
-    /// Returns whether the given Nexus instance should be quiescing or quiesced
-    /// in preparation for handoff to the next generation
+    /// Returns whether the Nexus instance `nexus_id`, which is assumed to refer
+    /// to the currently-running Nexus instance (the current process), should be
+    /// quiescing or quiesced in preparation for handoff to the next generation
     pub fn is_nexus_quiescing(
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<bool, anyhow::Error> {
         let zone = self
-            .all_omicron_zones(|_z| true)
+            .all_in_service_and_expunged_zones(
+                BlueprintExpungedZoneAccessReason::NexusSelfIsQuiescing,
+            )
             .find(|(_sled_id, zone_config)| zone_config.id == nexus_id)
             .ok_or_else(|| {
                 anyhow!("zone {} does not exist in blueprint", nexus_id)
@@ -443,9 +550,7 @@ impl Blueprint {
         nexus_zones: &BTreeSet<OmicronZoneUuid>,
     ) -> Result<Option<Generation>, anyhow::Error> {
         let mut r#gen = None;
-        for (_, zone, nexus_zone) in
-            self.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (_, zone, nexus_zone) in self.in_service_nexus_zones() {
             if nexus_zones.contains(&zone.id) {
                 let found_gen = nexus_zone.nexus_generation;
                 if let Some(r#gen) = r#gen {
@@ -467,11 +572,13 @@ impl Blueprint {
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<Generation, Error> {
-        for (_sled_id, zone_config, nexus_config) in
-            self.all_nexus_zones(BlueprintZoneDisposition::could_be_running)
-        {
-            if zone_config.id == nexus_id {
-                return Ok(nexus_config.nexus_generation);
+        for (_sled_id, zone_config) in self.all_maybe_running_zones() {
+            if let BlueprintZoneType::Nexus(nexus_config) =
+                &zone_config.zone_type
+            {
+                if zone_config.id == nexus_id {
+                    return Ok(nexus_config.nexus_generation);
+                }
             }
         }
 
@@ -500,18 +607,19 @@ impl Blueprint {
         // zones. (Real racks will always have at least one in-service boundary
         // NTP zone, but some test or test systems may have 0 if they have only
         // a single sled and that sled's boundary NTP zone is being upgraded.)
-        self.all_omicron_zones(BlueprintZoneDisposition::any).find_map(
-            |(_sled_id, zone)| match &zone.zone_type {
-                BlueprintZoneType::BoundaryNtp(ntp_config) => {
-                    Some(UpstreamNtpConfig {
-                        ntp_servers: &ntp_config.ntp_servers,
-                        dns_servers: &ntp_config.dns_servers,
-                        domain: ntp_config.domain.as_deref(),
-                    })
-                }
-                _ => None,
-            },
+        self.all_in_service_and_expunged_zones(
+            BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig,
         )
+        .find_map(|(_sled_id, zone)| match &zone.zone_type {
+            BlueprintZoneType::BoundaryNtp(ntp_config) => {
+                Some(UpstreamNtpConfig {
+                    ntp_servers: &ntp_config.ntp_servers,
+                    dns_servers: &ntp_config.dns_servers,
+                    domain: ntp_config.domain.as_deref(),
+                })
+            }
+            _ => None,
+        })
     }
 
     /// Return the operator-specified configuration of Nexus.
@@ -530,18 +638,18 @@ impl Blueprint {
         // zones. (Real racks will always have at least one in-service Nexus
         // zone - the one calling this code - but some tests create blueprints
         // without any.)
-        self.all_omicron_zones(BlueprintZoneDisposition::any).find_map(
-            |(_sled_id, zone)| match &zone.zone_type {
-                BlueprintZoneType::Nexus(nexus_config) => {
-                    Some(OperatorNexusConfig {
-                        external_tls: nexus_config.external_tls,
-                        external_dns_servers: &nexus_config
-                            .external_dns_servers,
-                    })
-                }
-                _ => None,
-            },
+        self.all_in_service_and_expunged_zones(
+            BlueprintExpungedZoneAccessReason::NexusExternalConfig,
         )
+        .find_map(|(_sled_id, zone)| match &zone.zone_type {
+            BlueprintZoneType::Nexus(nexus_config) => {
+                Some(OperatorNexusConfig {
+                    external_tls: nexus_config.external_tls,
+                    external_dns_servers: &nexus_config.external_dns_servers,
+                })
+            }
+            _ => None,
+        })
     }
 
     /// Returns the complete set of external IP addresses assigned to external
@@ -581,14 +689,16 @@ impl Blueprint {
         // don't check for that here. That would be an illegal blueprint; blippy
         // would complain, and attempting to execute it would fail due to
         // database constraints on external IP uniqueness.
-        self.all_omicron_zones(BlueprintZoneDisposition::any)
-            .filter_map(|(_id, zone)| match &zone.zone_type {
-                BlueprintZoneType::ExternalDns(dns) => {
-                    Some(dns.dns_address.addr.ip())
-                }
-                _ => None,
-            })
-            .collect()
+        self.all_in_service_and_expunged_zones(
+            BlueprintExpungedZoneAccessReason::ExternalDnsExternalIps,
+        )
+        .filter_map(|(_id, zone)| match &zone.zone_type {
+            BlueprintZoneType::ExternalDns(dns) => {
+                Some(dns.dns_address.addr.ip())
+            }
+            _ => None,
+        })
+        .collect()
     }
 }
 
@@ -603,6 +713,155 @@ pub struct UpstreamNtpConfig<'a> {
 pub struct OperatorNexusConfig<'a> {
     pub external_tls: bool,
     pub external_dns_servers: &'a [IpAddr],
+}
+
+/// `ZoneRunningStatus` is an argument to [`Blueprint::expunged_zones()`]
+/// allowing the caller to to specify whether they want to operate on zones that
+/// are shut down, could still be running, or both/either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ZoneRunningStatus {
+    /// Only return zones that are guaranteed to be shutdown and will not be
+    /// restarted.
+    ///
+    /// This corresponds to `ready_for_cleanup: true` in a zone's
+    /// [`BlueprintZoneDisposition::Expunged`] state.
+    Shutdown,
+    /// Only return expunged zones that could still be running. This is
+    /// inherently racy. Zones in this state may already be stopped, and if they
+    /// aren't they are likely (but not guaranteed) to be stopped soon.
+    ///
+    /// This corresponds to `ready_for_cleanup: false` in a zone's
+    /// [`BlueprintZoneDisposition::Expunged`] state.
+    MaybeRunning,
+    /// Return expunged zones regardless of whether they're shut down or could
+    /// still be running.
+    ///
+    /// This corresponds to ignoring the `ready_for_cleanup` field of a zone's
+    /// [`BlueprintZoneDisposition::Expunged`] state.
+    Any,
+}
+
+/// Argument to [`Blueprint::expunged_zones()`] requiring the caller to specify
+/// the reason they want to access a blueprint's expunged zones.
+///
+/// The planner is responsible for permanently pruning expunged zones from the
+/// blueprint. However, doing so correctly requires waiting for any cleanup
+/// actions that need to happen, all of which are specific to the zone kind.
+/// For example, blueprint execution checks for expunged Oximeter zones to
+/// perform metric producer reassignment, which means the planner cannot prune
+/// an expunged Oximeter zone until it knows that all possible such
+/// reassignments are complete.
+///
+/// These reasons are not used at runtime; they exist solely to document and
+/// attempt to statically guard against new code adding a new call to
+/// `expunged_zones()` that the planner doesn't know about (and therefore
+/// doesn't get updated to account for!). If you are attempting to call
+/// `expunged_zones()` for a new reason, you must:
+///
+/// 1. Add a new variant to this enum.
+/// 2. Update the planner to account for it, to prevent the planner from pruning
+///    the zone before whatever your use of it is completed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BlueprintExpungedZoneAccessReason {
+    // --------------------------------------------------------------------
+    // Zone-kind-specific variants. Keep this sorted alphabetically, prefix
+    // them by the zone kind if applicable, and add details explaining the
+    // conditions the planner must consider during pruning.
+    // --------------------------------------------------------------------
+    /// Carrying forward the upstream NTP configuration provided by the operator
+    /// during rack setup; see [`Blueprint::upstream_ntp_config()`].
+    ///
+    /// The planner must not prune a boundary NTP zone if it's the last zone
+    /// remaining with the set of configuration.
+    BoundaryNtpUpstreamConfig,
+
+    /// Multinode Clickhouse configuration changes must operate one node at a
+    /// time, but the [`ClickhouseClusterConfig`] does not currently include the
+    /// IP addresses of all nodes. Blueprint execution therefore must scan
+    /// expunged nodes to find IP addresses.
+    ///
+    /// The planner must not prune a Clickhouse keeper or server zone if its
+    /// zone ID is contained in the current [`ClickhouseClusterConfig`].
+    ClickhouseKeeperServerConfigIps,
+
+    /// The cockroachdb cluster should be instructed to decommission any
+    /// expunged cockroach nodes.
+    ///
+    /// The planner must not prune a CRDB zone if it has not yet been
+    /// decommissioned.
+    CockroachDecommission,
+
+    /// This is a catch-all variant for updating the `external_ip` and
+    /// `network_interface` tables for all zone types that have external
+    /// networking (Nexus, boundary NTP, and external DNS).
+    ///
+    /// The planner must not prune any of these zone types if their external
+    /// networking bits are still referenced by the active CRDB tables.
+    DeallocateExternalNetworkingResources,
+
+    /// Carrying forward the external DNS external IPs provided by the operator
+    /// during rack setup; see [`Blueprint::all_external_dns_external_ips()`].
+    ///
+    /// The planner must not prune an external DNS zone if it's the last zone
+    /// remaining with the set of IPs.
+    ExternalDnsExternalIps,
+
+    /// After handoff, expunged Nexus zones must have their database access row
+    /// deleted.
+    ///
+    /// The planner must not prune a Nexus zone if it's still referenced in the
+    /// `db_metadata_nexus` table.
+    NexusDeleteMetadataRecord,
+
+    /// Carrying forward the external Nexus configuration provided by the
+    /// operator during rack setup; see [`Blueprint::operator_nexus_config()`].
+    ///
+    /// The planner must not prune a Nexus zone if it's the last zone
+    /// remaining with the set of configuration.
+    NexusExternalConfig,
+
+    /// Nexus needs to whether it itself should be quiescing. If the
+    /// actively-running Nexus has been expunged (but not yet shut down), it
+    /// should still be able to determine this!
+    ///
+    /// The planner does not need to account for this when pruning Nexus zones.
+    NexusSelfIsQuiescing,
+
+    /// Sagas assigneed to any expunged Nexus must be reassigned to an
+    /// in-service Nexus.
+    ///
+    /// The planner must not prune a Nexus zone if it still has any sagas
+    /// assigned to it.
+    NexusSagaReassignment,
+
+    /// Support bundles assigned to an expunged Nexus must either be reassigned
+    /// or marked as failed.
+    ///
+    /// The planner must not prune a Nexus zone if it still has any support
+    /// bundles assigned to it.
+    NexusSupportBundleReassign,
+
+    /// An expunged Oximeter zone must be marked expunged in the `oximeter` CRDB
+    /// table (so Nexus knows to stop assigning producers to it), and any
+    /// producers previously assigned to it must be reassigned to new Oximeters.
+    ///
+    /// The planner must not prune an Oximeter zone if it's still eligible for
+    /// new producers or if it has any assigned producers.
+    OximeterExpungeAndReassignProducers,
+
+    // --------------------------------------------------------------------
+    // Catch-all variants for non-production callers. The planner does not need
+    // to account for these when pruning.
+    // --------------------------------------------------------------------
+    /// Blippy performs checks that include expunged zones.
+    Blippy,
+
+    /// Omdb allows support operators to poke at blueprint contents, including
+    /// expunged zones.
+    Omdb,
+
+    /// Various unit and integration tests access expunged zones.
+    Test,
 }
 
 /// Description of the source of a blueprint.

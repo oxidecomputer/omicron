@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use omicron_common::ledger::Ledgerable;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
@@ -110,6 +111,28 @@ pub struct OmicronSledConfig {
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
+}
+
+// NOTE: Most trait impls live in the `impls` module of this crate and are only
+// implemented for the `latest` version of each type. However,
+// `OmicronSledConfig` is special: it's not only used in the sled-agent API
+// (which would only require trait impls on `latest`); it's also ledgered to
+// disk to support cold boot of the rack. In the ledgering case, we have to be
+// able to handle reading older versions, which means all the old versions we
+// support also need to implement `Ledgerable`. Therefore, we implement this
+// trait for this specific version (and do so for every other version of
+// `OmicronSledConfig` too).
+impl Ledgerable for OmicronSledConfig {
+    fn is_newer_than(&self, other: &Self) -> bool {
+        self.generation > other.generation
+    }
+
+    fn generation_bump(&mut self) {
+        // DO NOTHING!
+        //
+        // Generation bumps must only ever come from nexus and will be encoded
+        // in the struct itself
+    }
 }
 
 /// Describes the set of Omicron-managed zones running on a sled

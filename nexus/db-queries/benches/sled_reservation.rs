@@ -419,6 +419,10 @@ async fn bench_reservation(
 }
 
 fn sled_reservation_benchmark(c: &mut Criterion) {
+    if std::env::var("NEXTEST").as_deref() != Ok("1") {
+        panic!("this benchmark must be run under `cargo nextest bench`");
+    }
+
     let logctx = dev::test_setup_log("sled-reservation");
 
     let rt = tokio::runtime::Runtime::new().unwrap();

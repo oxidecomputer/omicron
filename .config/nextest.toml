@@ -5,7 +5,7 @@
 # improvements or bugfixes that are present in newer versions of nextest.
 nextest-version = { required = "0.9.117", recommended = "0.9.118" }
 
-experimental = ["setup-scripts"]
+experimental = ["benchmarks", "setup-scripts"]
 
 [[profile.default.scripts]]
 # Exclude omicron-dev tests from crdb-seed as we explicitly want to simulate an
