@@ -4156,10 +4156,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
             .after(migration_211::after),
     );
     map.insert(
-        Version::new(215, 0, 0),
+        Version::new(218, 0, 0),
         DataMigrationFns::new()
-            .before(migration_215::before)
-            .after(migration_215::after),
+            .before(migration_218::before)
+            .after(migration_218::after),
     );
     map
 }
