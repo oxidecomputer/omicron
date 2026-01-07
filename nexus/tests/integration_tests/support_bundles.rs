@@ -10,6 +10,9 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
+use nexus_db_model::SupportBundleState as DbSupportBundleState;
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
 use nexus_lockstep_client::types::LastResult;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -21,6 +24,7 @@ use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
@@ -838,4 +842,91 @@ async fn test_support_bundle_create_with_comment(
     bundle_delete(&client, bundle_no_comment.id).await.unwrap();
     bundle_delete(&client, bundle_with_comment.id).await.unwrap();
     bundle_delete(&client, bundle_empty_comment.id).await.unwrap();
+}
+
+fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
+    authz::SupportBundle::new(authz::FLEET, id, LookupType::by_id(id))
+}
+
+// Test that bundles in "Failed" state can be deleted.
+//
+// This is a regression test for https://github.com/oxidecomputer/omicron/issues/9558
+// where bundles that had transitioned to the Failed state could not be deleted
+// via the API because the delete operation incorrectly tried to transition
+// Failed -> Destroying, which is not a valid state transition.
+#[nexus_test]
+async fn test_support_bundle_delete_failed_bundle(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(1).build().await;
+
+    // Create a bundle via the external API
+    let bundle = bundle_create(&client).await.unwrap();
+    assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+    // Mark the bundle as "Failing" via the datastore.
+    // This simulates what happens when a Nexus managing the bundle is expunged
+    // or the underlying storage is removed.
+    let authz_bundle = authz_support_bundle_from_id(bundle.id);
+    datastore
+        .support_bundle_update(
+            &opctx,
+            &authz_bundle,
+            DbSupportBundleState::Failing,
+        )
+        .await
+        .expect("Should be able to mark bundle as failing");
+
+    // Run the background task to clean up storage and transition Failing -> Failed
+    let output = activate_bundle_collection_background_task(&cptestctx).await;
+    assert_eq!(output.cleanup_err, None);
+    assert_eq!(
+        output.cleanup_report,
+        Some(SupportBundleCleanupReport {
+            // The bundle hadn't been collected yet, so sled agent returns not found
+            sled_bundles_deleted_not_found: 1,
+            // The bundle transitioned from Failing to Failed
+            db_failing_bundles_updated: 1,
+            ..Default::default()
+        })
+    );
+
+    // Verify the bundle is now in Failed state via the external API
+    let bundle = bundle_get(&client, bundle.id).await.unwrap();
+    assert_eq!(
+        bundle.state,
+        SupportBundleState::Failed,
+        "Bundle should be in Failed state after cleanup"
+    );
+
+    // This is the key assertion: we should be able to delete a Failed bundle.
+    // Before the fix for #9558, this would fail with:
+    // "Cannot update support bundle state from Failed to Destroying"
+    bundle_delete(&client, bundle.id).await.unwrap();
+
+    // For Failed bundles, the storage has already been cleaned up by the
+    // background task, so deletion removes the database record immediately
+    // (no need for a subsequent background task run).
+    bundle_get_expect_fail(
+        &client,
+        bundle.id,
+        StatusCode::NOT_FOUND,
+        &format!("not found: support-bundle with id \"{}\"", bundle.id),
+    )
+    .await
+    .unwrap();
+
+    // Verify bundle is not in the list
+    let bundles = bundles_list(&client).await.unwrap();
+    assert!(
+        !bundles.iter().any(|b| b.id == bundle.id),
+        "Deleted bundle should not appear in bundle list"
+    );
 }

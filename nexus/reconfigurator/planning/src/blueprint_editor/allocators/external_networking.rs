@@ -86,9 +86,7 @@ impl ExternalNetworkingAllocator {
         external_ip_policy: &ExternalIpPolicy,
     ) -> anyhow::Result<Self> {
         Self::new(
-            blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-                .map(|(_sled_id, zone)| zone),
+            blueprint.in_service_zones().map(|(_sled_id, zone)| zone),
             external_ip_policy,
         )
     }
