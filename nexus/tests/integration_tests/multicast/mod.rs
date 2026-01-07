@@ -42,8 +42,8 @@ use nexus_types::external_api::views::{
 };
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
-    InstanceCpuCount, InstanceState,
+    ByteCount, DataPageParams, Hostname, IdentityMetadataCreateParams,
+    Instance, InstanceCpuCount, InstanceState,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
@@ -752,7 +752,11 @@ pub(crate) async fn verify_inventory_based_port_mapping(
 
     // Get the multicast member for this instance to find its external_group_id
     let members = datastore
-        .multicast_group_members_list_by_instance(&opctx, *instance_uuid)
+        .multicast_group_members_list_by_instance(
+            &opctx,
+            *instance_uuid,
+            &DataPageParams::max_page(),
+        )
         .await
         .map_err(|e| format!("list members failed: {e}"))?;
 

@@ -214,7 +214,11 @@ async fn test_sled_move_updates_multicast_port_mapping(
 
     // Verify stale port cleanup: fetch DPD state and ensure old port was removed
     let members = datastore
-        .multicast_group_members_list_by_instance(&opctx, instance_uuid)
+        .multicast_group_members_list_by_instance(
+            &opctx,
+            instance_uuid,
+            &DataPageParams::max_page(),
+        )
         .await
         .expect("Should list multicast members for instance");
     let member = members

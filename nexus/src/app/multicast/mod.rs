@@ -796,20 +796,17 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> ListResultVec<views::MulticastGroupMember> {
+        pagparams: &DataPageParams<'_, uuid::Uuid>,
+    ) -> ListResultVec<db::model::MulticastGroupMember> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Read).await?;
-        let members = self
-            .db_datastore
+        self.db_datastore
             .multicast_group_members_list_by_instance(
                 opctx,
                 InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                pagparams,
             )
-            .await?;
-        members
-            .into_iter()
-            .map(views::MulticastGroupMember::try_from)
-            .collect::<Result<Vec<_>, _>>()
+            .await
     }
 }
 

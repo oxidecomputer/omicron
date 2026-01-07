@@ -336,15 +336,15 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<MulticastGroupMember> {
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
-        dsl::multicast_group_member
+        paginated(dsl::multicast_group_member, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
-            .order(dsl::id.asc())
             .select(MulticastGroupMember::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -859,6 +859,7 @@ mod tests {
 
     use nexus_types::identity::Resource;
     use nexus_types::multicast::MulticastGroupCreate;
+    use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SledUuid;
@@ -1389,10 +1390,16 @@ mod tests {
         assert_eq!(member.state, MulticastGroupMemberState::Joining);
 
         // Test member lookup by parent_id
+        let pagparams = &DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
         let member_memberships = datastore
             .multicast_group_members_list_by_instance(
                 &opctx,
                 InstanceUuid::from_untyped_uuid(*instance_id),
+                pagparams,
             )
             .await
             .expect("Should list memberships for instance");
@@ -3401,10 +3408,16 @@ mod tests {
         assert_eq!(member1.id, member2.id);
 
         // Verify only one member exists for this (group, instance) pair
+        let pagparams = &DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
         let members = datastore
             .multicast_group_members_list_by_instance(
                 &opctx,
                 InstanceUuid::from_untyped_uuid(instance_id),
+                pagparams,
             )
             .await
             .expect("List members should succeed");

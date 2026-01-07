@@ -3300,7 +3300,7 @@ pub trait NexusExternalApi {
     }]
     async fn v2025121200_instance_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::OptionalProjectSelector>,
+        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
         path_params: Path<params::InstancePath>,
     ) -> Result<
         HttpResponseOk<ResultsPage<v2025121200::MulticastGroupMember>>,
@@ -3333,7 +3333,7 @@ pub trait NexusExternalApi {
     }]
     async fn instance_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::OptionalProjectSelector>,
+        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
         path_params: Path<params::InstancePath>,
     ) -> Result<
         HttpResponseOk<ResultsPage<views::MulticastGroupMember>>,

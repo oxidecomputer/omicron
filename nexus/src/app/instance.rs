@@ -401,6 +401,7 @@ impl super::Nexus {
             .multicast_group_members_list_by_instance(
                 opctx,
                 InstanceUuid::from_untyped_uuid(instance_id),
+                &DataPageParams::max_page(),
             )
             .await?;
         let current_group_ids: HashSet<_> =
@@ -1531,6 +1532,7 @@ impl super::Nexus {
                 .multicast_group_members_list_by_instance(
                     opctx,
                     InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    &DataPageParams::max_page(),
                 )
                 .await
                 .map_err(|e| {

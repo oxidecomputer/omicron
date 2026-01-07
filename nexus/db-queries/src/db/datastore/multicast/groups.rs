@@ -909,10 +909,9 @@ mod tests {
 
     use crate::db::datastore::Error;
     use crate::db::datastore::LookupType;
-    use crate::db::model::IpPool;
     use crate::db::model::{
-        IncompleteIpPoolResource, IpPoolReservationType, IpPoolResourceType,
-        IpVersion, MulticastGroupMemberState,
+        IncompleteIpPoolResource, IpPool, IpPoolReservationType,
+        IpPoolResourceType, IpVersion, MulticastGroupMemberState,
     };
     use crate::db::pub_test_utils::helpers::{
         SledUpdateBuilder, create_instance_with_vmm, create_project,

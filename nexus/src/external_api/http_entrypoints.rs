@@ -5644,7 +5644,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn instance_multicast_group_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<params::OptionalProjectSelector>,
+        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
         path_params: Path<params::InstancePath>,
     ) -> Result<
         HttpResponseOk<ResultsPage<views::MulticastGroupMember>>,
@@ -5657,25 +5657,36 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanById::from_query(&query)?;
 
             // Note: When instance is specified by UUID, project should be `None`
             // (UUIDs are globally unique). Project is only needed for name-based lookup.
             let instance_selector = params::InstanceSelector {
                 project: match &path.instance {
-                    NameOrId::Name(_) => query.project,
+                    NameOrId::Name(_) => scan_params.selector.project.clone(),
                     NameOrId::Id(_) => None,
                 },
                 instance: path.instance,
             };
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let memberships = nexus
-                .instance_list_multicast_groups(&opctx, &instance_lookup)
+            let members = nexus
+                .instance_list_multicast_groups(
+                    &opctx,
+                    &instance_lookup,
+                    &pag_params,
+                )
                 .await?;
-            Ok(HttpResponseOk(ResultsPage {
-                items: memberships,
-                next_page: None,
-            }))
+            let results = members
+                .into_iter()
+                .map(views::MulticastGroupMember::try_from)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                results,
+                &|_, member: &views::MulticastGroupMember| member.identity.id,
+            )?))
         };
         apictx
             .context
