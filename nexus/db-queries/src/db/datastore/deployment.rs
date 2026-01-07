@@ -3103,7 +3103,6 @@ mod tests {
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::PendingMgsUpdate;
@@ -3566,7 +3565,8 @@ mod tests {
         // 3. both slots set to a known version
         // 4. slot_a set to a known version; slot b set to an unknown version
         {
-            let sled_ids = builder.sled_ids_with_zones().collect::<Vec<_>>();
+            let sled_ids =
+                builder.current_commissioned_sleds().collect::<Vec<_>>();
             assert!(sled_ids.len() >= 4, "at least 4 sleds");
 
             let host_phase_2_samples = [
