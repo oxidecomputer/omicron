@@ -39,11 +39,11 @@ where
     where
         F: Fn(&Utf8Path) -> Result<Option<T>, InstallMetadataReadError>,
     {
-        let boot_dataset_dir =
-            internal_disks.boot_disk_install_dataset().join(subdir);
+        let boot_dataset_dir = internal_disks.boot_disk_install_dataset();
 
         // Read the file from the boot disk.
-        let boot_disk_path = boot_dataset_dir.join(metadata_file_name);
+        let boot_disk_path =
+            boot_dataset_dir.join(subdir).join(metadata_file_name);
 
         let boot_disk_metadata =
             read_install_metadata_file::<T>(&boot_dataset_dir, &boot_disk_path);
@@ -58,8 +58,7 @@ where
         let non_boot_datasets = internal_disks.non_boot_disk_install_datasets();
         let non_boot_disk_overrides = non_boot_datasets
             .map(|(zpool_id, dataset_dir)| {
-                let dataset_dir = dataset_dir.join(subdir);
-                let path = dataset_dir.join(metadata_file_name);
+                let path = dataset_dir.join(subdir).join(metadata_file_name);
                 let res = read_install_metadata_file::<T>(&dataset_dir, &path);
                 let res =
                     InstallMetadata::new(res, || with_default(&dataset_dir));
