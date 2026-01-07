@@ -131,18 +131,18 @@ impl EstablishedConn {
 
             let res = tokio::select! {
                 _ = interval.tick() => {
-                    self.ping().await
+                    self.ping()
                 }
                 Some(msg) = self.rx.recv() => {
-                    self.on_msg_from_main(msg).await
+                    self.on_msg_from_main(msg)
                 }
                 res = self.reader.read(&mut self.read_buf[self.total_read..]) => {
-                    self.on_read(res).await
+                    self.on_read(res)
                 }
                 res = self.writer.write_buf(&mut self.current_write),
                    if self.current_write.has_remaining() =>
                 {
-                   self.check_write_result(res).await
+                   self.check_write_result(res)
                 }
             };
 
@@ -158,7 +158,7 @@ impl EstablishedConn {
         let _ = self.writer.shutdown().await;
     }
 
-    async fn on_read(
+    fn on_read(
         &mut self,
         res: Result<usize, std::io::Error>,
     ) -> Result<(), ConnErr> {
@@ -259,7 +259,7 @@ impl EstablishedConn {
         }
     }
 
-    async fn check_write_result(
+    fn check_write_result(
         &mut self,
         res: Result<usize, std::io::Error>,
     ) -> Result<(), ConnErr> {
@@ -271,25 +271,20 @@ impl EstablishedConn {
                 Ok(())
             }
             Err(e) => {
-                let _ = self.writer.shutdown().await;
+                // We need to shut down the writer - returning an error here
+                // will cause our caller (`run()`) to stop, which will do so.
                 Err(ConnErr::FailedWrite(e))
             }
         }
     }
 
-    async fn on_msg_from_main(
-        &mut self,
-        msg: MainToConnMsg,
-    ) -> Result<(), ConnErr> {
+    fn on_msg_from_main(&mut self, msg: MainToConnMsg) -> Result<(), ConnErr> {
         match msg {
-            MainToConnMsg::Msg(msg) => self.write_framed_to_queue(msg).await,
+            MainToConnMsg::Msg(msg) => self.write_framed_to_queue(msg),
         }
     }
 
-    async fn write_framed_to_queue(
-        &mut self,
-        msg: WireMsg,
-    ) -> Result<(), ConnErr> {
+    fn write_framed_to_queue(&mut self, msg: WireMsg) -> Result<(), ConnErr> {
         if self.write_queue.len() == MSG_WRITE_QUEUE_CAPACITY {
             return Err(ConnErr::WriteQueueFull);
         } else {
@@ -299,11 +294,11 @@ impl EstablishedConn {
         }
     }
 
-    async fn ping(&mut self) -> Result<(), ConnErr> {
+    fn ping(&mut self) -> Result<(), ConnErr> {
         if Instant::now() - self.last_received_msg > INACTIVITY_TIMEOUT {
             return Err(ConnErr::InactivityTimeout);
         }
-        self.write_framed_to_queue(WireMsg::Ping).await
+        self.write_framed_to_queue(WireMsg::Ping)
     }
 }
 
