@@ -413,6 +413,7 @@ impl nexus_test_interface::NexusServer for Server {
                         bfd: Vec::new(),
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
+                    initial_trust_quorum_configuration: None,
                 },
                 false, // blueprint_execution_enabled
             )
