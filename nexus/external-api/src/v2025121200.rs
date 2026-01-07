@@ -41,8 +41,8 @@ pub struct EphemeralIpCreate {
 impl From<EphemeralIpCreate> for params::EphemeralIpCreate {
     fn from(old: EphemeralIpCreate) -> params::EphemeralIpCreate {
         let pool_selector = match old.pool {
-            Some(pool) => params::PoolSelector::Named { pool },
-            None => params::PoolSelector::Default { ip_version: None },
+            Some(pool) => params::PoolSelector::Explicit { pool },
+            None => params::PoolSelector::Auto { ip_version: None },
         };
         params::EphemeralIpCreate { pool_selector }
     }
@@ -72,8 +72,8 @@ impl From<ExternalIpCreate> for params::ExternalIpCreate {
         match old {
             ExternalIpCreate::Ephemeral { pool } => {
                 let pool_selector = match pool {
-                    Some(pool) => params::PoolSelector::Named { pool },
-                    None => params::PoolSelector::Default { ip_version: None },
+                    Some(pool) => params::PoolSelector::Explicit { pool },
+                    None => params::PoolSelector::Auto { ip_version: None },
                 };
                 params::ExternalIpCreate::Ephemeral { pool_selector }
             }
@@ -104,10 +104,10 @@ impl From<FloatingIpCreate> for params::FloatingIpCreate {
         let address_selector = match (old.ip, old.pool) {
             (Some(ip), pool) => params::AddressSelector::Explicit { ip, pool },
             (None, Some(pool)) => params::AddressSelector::Auto {
-                pool_selector: params::PoolSelector::Named { pool },
+                pool_selector: params::PoolSelector::Explicit { pool },
             },
             (None, None) => params::AddressSelector::Auto {
-                pool_selector: params::PoolSelector::Default {
+                pool_selector: params::PoolSelector::Auto {
                     ip_version: None,
                 },
             },

@@ -387,12 +387,12 @@ pub async fn create_floating_ip(
             pool: pool.map(|v| NameOrId::Name(v.parse().unwrap())),
         },
         (None, Some(pool)) => params::AddressSelector::Auto {
-            pool_selector: params::PoolSelector::Named {
+            pool_selector: params::PoolSelector::Explicit {
                 pool: NameOrId::Name(pool.parse().unwrap()),
             },
         },
         (None, None) => params::AddressSelector::Auto {
-            pool_selector: params::PoolSelector::Default { ip_version: None },
+            pool_selector: params::PoolSelector::Auto { ip_version: None },
         },
     };
     object_create(

@@ -55,8 +55,8 @@ impl super::Nexus {
 
         // Destructure pool_selector to get pool and ip_version
         let (pool, ip_version) = match &new_probe_params.pool_selector {
-            params::PoolSelector::Named { pool } => (Some(pool.clone()), None),
-            params::PoolSelector::Default { ip_version } => (None, *ip_version),
+            params::PoolSelector::Explicit { pool } => (Some(pool.clone()), None),
+            params::PoolSelector::Auto { ip_version } => (None, *ip_version),
         };
 
         // resolve NameOrId into authz::IpPool

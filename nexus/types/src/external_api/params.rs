@@ -1362,7 +1362,7 @@ pub struct IpPoolSiloUpdate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AddressSelector {
-    /// Reserve an explicit IP address.
+    /// Reserve a specific IP address.
     Explicit {
         /// The IP address to reserve. Must be available in the pool.
         ip: IpAddr,
@@ -1373,6 +1373,10 @@ pub enum AddressSelector {
     /// Automatically allocate an IP address from a specified pool.
     Auto {
         /// Pool selection.
+        ///
+        /// If omitted, this field uses the silo's default pool. If the
+        /// silo has default pools for both IPv4 and IPv6, the request will
+        /// fail unless `ip_version` is specified in the pool selector.
         #[serde(default)]
         pool_selector: PoolSelector,
     },
@@ -1501,12 +1505,12 @@ pub struct InstanceDiskAttach {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PoolSelector {
     /// Use the specified pool by name or ID.
-    Named {
+    Explicit {
         /// The pool to allocate from.
         pool: NameOrId,
     },
     /// Use the default pool for the silo.
-    Default {
+    Auto {
         /// IP version to use when multiple default pools exist.
         /// Required if both IPv4 and IPv6 default pools are configured.
         #[serde(default)]
@@ -1516,7 +1520,7 @@ pub enum PoolSelector {
 
 impl Default for PoolSelector {
     fn default() -> Self {
-        PoolSelector::Default { ip_version: None }
+        PoolSelector::Auto { ip_version: None }
     }
 }
 

@@ -123,10 +123,10 @@ impl super::Nexus {
             }
             params::AddressSelector::Auto { pool_selector } => {
                 match pool_selector {
-                    params::PoolSelector::Named { pool } => {
+                    params::PoolSelector::Explicit { pool } => {
                         (Some(pool), None, None)
                     }
-                    params::PoolSelector::Default { ip_version } => {
+                    params::PoolSelector::Auto { ip_version } => {
                         (None, None, ip_version)
                     }
                 }

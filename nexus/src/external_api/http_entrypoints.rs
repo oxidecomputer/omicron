@@ -5686,8 +5686,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let params::EphemeralIpCreate { pool_selector } =
                 ip_to_create.into_inner();
             let (pool, ip_version) = match pool_selector {
-                params::PoolSelector::Named { pool } => (Some(pool), None),
-                params::PoolSelector::Default { ip_version } => {
+                params::PoolSelector::Explicit { pool } => (Some(pool), None),
+                params::PoolSelector::Auto { ip_version } => {
                     (None, ip_version)
                 }
             };

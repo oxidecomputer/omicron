@@ -40,7 +40,7 @@ async fn test_probe_basic_crud(ctx: &ControlPlaneTestContext) {
             name: "class1".parse().unwrap(),
             description: "subspace relay probe".to_owned(),
         },
-        pool_selector: params::PoolSelector::Named {
+        pool_selector: params::PoolSelector::Explicit {
             pool: v6_pool.identity.name.clone().into(),
         },
         sled: SLED_AGENT_UUID.parse().unwrap(),
@@ -147,7 +147,7 @@ async fn test_probe_pool_selector_ip_version(ctx: &ControlPlaneTestContext) {
             name: "probe-v6".parse().unwrap(),
             description: "IPv6 probe".to_owned(),
         },
-        pool_selector: params::PoolSelector::Default {
+        pool_selector: params::PoolSelector::Auto {
             ip_version: Some(IpVersion::V6),
         },
         sled: SLED_AGENT_UUID.parse().unwrap(),
@@ -195,7 +195,7 @@ async fn test_probe_pool_selector_ip_version(ctx: &ControlPlaneTestContext) {
             name: "probe-v4".parse().unwrap(),
             description: "IPv4 probe".to_owned(),
         },
-        pool_selector: params::PoolSelector::Default {
+        pool_selector: params::PoolSelector::Auto {
             ip_version: Some(IpVersion::V4),
         },
         sled: SLED_AGENT_UUID.parse().unwrap(),

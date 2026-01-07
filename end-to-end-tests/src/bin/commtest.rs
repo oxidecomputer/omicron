@@ -389,7 +389,7 @@ async fn launch_probes(
                     .project(Name::try_from("classone").unwrap())
                     .body(ProbeCreate {
                         description: format!("probe {i}"),
-                        pool_selector: PoolSelector::Named {
+                        pool_selector: PoolSelector::Explicit {
                             pool: "default".parse().unwrap(),
                         },
                         name: format!("probe{i}").parse().unwrap(),

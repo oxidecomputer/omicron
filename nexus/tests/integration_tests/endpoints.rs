@@ -660,7 +660,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         network_interfaces:
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_selector: params::PoolSelector::Named {
+            pool_selector: params::PoolSelector::Explicit {
                 pool: DEMO_IP_POOL_NAME.clone().into(),
             },
         }],
@@ -686,7 +686,7 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         network_interfaces:
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_selector: params::PoolSelector::Named {
+            pool_selector: params::PoolSelector::Explicit {
                 pool: DEMO_IP_POOL_NAME.clone().into(),
             },
         }],
@@ -1201,7 +1201,7 @@ pub static DEMO_FLOAT_IP_ATTACH: LazyLock<params::FloatingIpAttach> =
     });
 pub static DEMO_EPHEMERAL_IP_ATTACH: LazyLock<params::EphemeralIpCreate> =
     LazyLock::new(|| params::EphemeralIpCreate {
-        pool_selector: params::PoolSelector::Default { ip_version: None },
+        pool_selector: params::PoolSelector::Auto { ip_version: None },
     });
 // Identity providers
 pub const IDENTITY_PROVIDERS_URL: &'static str =

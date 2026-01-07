@@ -236,7 +236,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
             description: String::from("a floating ip"),
         },
         address_selector: params::AddressSelector::Auto {
-            pool_selector: params::PoolSelector::Named {
+            pool_selector: params::PoolSelector::Explicit {
                 pool: NameOrId::Name("other-pool".parse().unwrap()),
             },
         },
@@ -355,7 +355,7 @@ async fn test_floating_ip_create_non_admin(
             description: String::from("a floating ip"),
         },
         address_selector: params::AddressSelector::Auto {
-            pool_selector: params::PoolSelector::Default { ip_version: None },
+            pool_selector: params::PoolSelector::Auto { ip_version: None },
         },
     };
     let fip: views::FloatingIp =
@@ -372,7 +372,7 @@ async fn test_floating_ip_create_non_admin(
             description: String::from("a floating ip"),
         },
         address_selector: params::AddressSelector::Auto {
-            pool_selector: params::PoolSelector::Named {
+            pool_selector: params::PoolSelector::Explicit {
                 pool: NameOrId::Name("other-pool".parse().unwrap()),
             },
         },
@@ -391,7 +391,7 @@ async fn test_floating_ip_create_non_admin(
             description: String::from("a floating ip"),
         },
         address_selector: params::AddressSelector::Auto {
-            pool_selector: params::PoolSelector::Named {
+            pool_selector: params::PoolSelector::Explicit {
                 pool: NameOrId::Name("unlinked-pool".parse().unwrap()),
             },
         },
@@ -446,7 +446,7 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
             description: String::from("a floating ip"),
         },
         address_selector: params::AddressSelector::Auto {
-            pool_selector: params::PoolSelector::Named {
+            pool_selector: params::PoolSelector::Explicit {
                 pool: NameOrId::Name("external-silo-pool".parse().unwrap()),
             },
         },
@@ -556,7 +556,7 @@ async fn test_floating_ip_create_name_in_use(
                 description: "another fip".into(),
             },
             address_selector: params::AddressSelector::Auto {
-                pool_selector: params::PoolSelector::Named {
+                pool_selector: params::PoolSelector::Explicit {
                     pool: v4_pool.identity.name.clone().into(),
                 },
             },
@@ -1247,7 +1247,7 @@ async fn test_external_ip_attach_fails_after_maximum(
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::EphemeralIpCreate {
-                pool_selector: params::PoolSelector::Named {
+                pool_selector: params::PoolSelector::Explicit {
                     pool: v6_pool
                         .identity
                         .name
@@ -1320,7 +1320,7 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::ExternalIpCreate::Ephemeral {
-                pool_selector: params::PoolSelector::Named {
+                pool_selector: params::PoolSelector::Explicit {
                     pool: pool_name.clone().into(),
                 },
             }))
@@ -1429,7 +1429,7 @@ async fn test_floating_ip_ip_version_conflict(
             description: "this should fail".to_string(),
         },
         address_selector: params::AddressSelector::Auto {
-            pool_selector: params::PoolSelector::Default { ip_version: None },
+            pool_selector: params::PoolSelector::Auto { ip_version: None },
         },
     };
     let error =
@@ -1449,7 +1449,7 @@ async fn test_floating_ip_ip_version_conflict(
             description: "IPv4 floating IP".to_string(),
         },
         address_selector: params::AddressSelector::Auto {
-            pool_selector: params::PoolSelector::Default {
+            pool_selector: params::PoolSelector::Auto {
                 ip_version: Some(views::IpVersion::V4),
             },
         },
@@ -1464,7 +1464,7 @@ async fn test_floating_ip_ip_version_conflict(
             description: "IPv6 floating IP".to_string(),
         },
         address_selector: params::AddressSelector::Auto {
-            pool_selector: params::PoolSelector::Default {
+            pool_selector: params::PoolSelector::Auto {
                 ip_version: Some(views::IpVersion::V6),
             },
         },
@@ -1497,7 +1497,7 @@ async fn test_ephemeral_ip_ip_version_conflict(
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::EphemeralIpCreate {
-                pool_selector: params::PoolSelector::Default {
+                pool_selector: params::PoolSelector::Auto {
                     ip_version: None,
                 },
             }))
@@ -1519,7 +1519,7 @@ async fn test_ephemeral_ip_ip_version_conflict(
     let eph_v4: views::ExternalIp = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::EphemeralIpCreate {
-                pool_selector: params::PoolSelector::Default {
+                pool_selector: params::PoolSelector::Auto {
                     ip_version: Some(views::IpVersion::V4),
                 },
             }))
@@ -1550,7 +1550,7 @@ async fn test_ephemeral_ip_ip_version_conflict(
     let eph_v6: views::ExternalIp = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::EphemeralIpCreate {
-                pool_selector: params::PoolSelector::Default {
+                pool_selector: params::PoolSelector::Auto {
                     ip_version: Some(views::IpVersion::V6),
                 },
             }))
@@ -1726,7 +1726,7 @@ async fn cannot_attach_ephemeral_ipv4_to_instance_missing_ipv4_stack(
     let result = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::EphemeralIpCreate {
-                pool_selector: params::PoolSelector::Named {
+                pool_selector: params::PoolSelector::Explicit {
                     pool: v4_pool.identity.name.clone().into(),
                 },
             }))
@@ -1781,7 +1781,7 @@ async fn cannot_attach_ephemeral_ipv6_to_instance_missing_ipv6_stack(
     let result = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::EphemeralIpCreate {
-                pool_selector: params::PoolSelector::Named {
+                pool_selector: params::PoolSelector::Explicit {
                     pool: v6_pool.identity.name.clone().into(),
                 },
             }))
@@ -1984,7 +1984,7 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
         &params::InstanceNetworkInterfaceAttachment::DefaultIpv6,
         /* disks = */ vec![],
         vec![params::ExternalIpCreate::Ephemeral {
-            pool_selector: params::PoolSelector::Named {
+            pool_selector: params::PoolSelector::Explicit {
                 pool: v6_pool.identity.id.into(),
             },
         }],
@@ -2223,7 +2223,7 @@ async fn instance_for_external_ips(
         .collect();
     if let Some(ip_version) = ephemeral_ip_version {
         eips.push(params::ExternalIpCreate::Ephemeral {
-            pool_selector: params::PoolSelector::Default {
+            pool_selector: params::PoolSelector::Auto {
                 ip_version: Some(ip_version),
             },
         })
@@ -2250,10 +2250,10 @@ async fn ephemeral_ip_attach(
 ) -> views::ExternalIp {
     let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
     let pool_selector = match pool_name {
-        Some(name) => params::PoolSelector::Named {
+        Some(name) => params::PoolSelector::Explicit {
             pool: name.parse::<Name>().unwrap().into(),
         },
-        None => params::PoolSelector::Default { ip_version: None },
+        None => params::PoolSelector::Auto { ip_version: None },
     };
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)

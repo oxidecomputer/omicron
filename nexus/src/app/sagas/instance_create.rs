@@ -922,10 +922,10 @@ async fn sic_allocate_instance_external_ip(
         // Allocate a new IP address from the target, possibly default, pool
         params::ExternalIpCreate::Ephemeral { pool_selector } => {
             let (pool, ip_version) = match pool_selector {
-                params::PoolSelector::Named { pool } => {
+                params::PoolSelector::Explicit { pool } => {
                     (Some(pool.clone()), None)
                 }
-                params::PoolSelector::Default { ip_version } => {
+                params::PoolSelector::Auto { ip_version } => {
                     (None, *ip_version)
                 }
             };
@@ -1555,7 +1555,7 @@ pub mod test {
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                    pool_selector: params::PoolSelector::Default {
+                    pool_selector: params::PoolSelector::Auto {
                         ip_version: Some(IpVersion::V4),
                     },
                 }],

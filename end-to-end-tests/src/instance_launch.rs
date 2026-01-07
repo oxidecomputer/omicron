@@ -74,7 +74,7 @@ async fn instance_launch() -> Result<()> {
             network_interfaces:
                 InstanceNetworkInterfaceAttachment::DefaultDualStack,
             external_ips: vec![ExternalIpCreate::Ephemeral {
-                pool_selector: PoolSelector::Default {
+                pool_selector: PoolSelector::Auto {
                     ip_version: Some(IpVersion::V4),
                 },
             }],

@@ -768,7 +768,7 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
                 description: "test floating ip".to_string(),
             },
             address_selector: params::AddressSelector::Auto {
-                pool_selector: params::PoolSelector::Named {
+                pool_selector: params::PoolSelector::Explicit {
                     pool: v4_pool.identity.name.clone().into(),
                 },
             },

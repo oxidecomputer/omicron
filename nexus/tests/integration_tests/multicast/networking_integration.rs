@@ -157,7 +157,7 @@ async fn test_multicast_with_external_ip_basic(
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
             .body(Some(&EphemeralIpCreate {
-                pool_selector: PoolSelector::Named {
+                pool_selector: PoolSelector::Explicit {
                     pool: v4_pool.identity.name.clone().into(),
                 },
             }))
@@ -345,7 +345,7 @@ async fn test_multicast_external_ip_lifecycle(
         NexusRequest::new(
             RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
                 .body(Some(&EphemeralIpCreate {
-                    pool_selector: PoolSelector::Named {
+                    pool_selector: PoolSelector::Explicit {
                         pool: v4_pool.identity.name.clone().into(),
                     },
                 }))
@@ -465,7 +465,7 @@ async fn test_multicast_with_external_ip_at_creation(
 
     // Create instance with external IP specified at creation
     let external_ip_param = ExternalIpCreate::Ephemeral {
-        pool_selector: PoolSelector::Named {
+        pool_selector: PoolSelector::Explicit {
             pool: v4_pool.identity.name.clone().into(),
         },
     };

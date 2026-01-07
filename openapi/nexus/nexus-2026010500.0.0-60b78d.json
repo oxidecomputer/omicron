@@ -14525,7 +14525,7 @@
         "description": "Specify how to allocate a floating IP address.",
         "oneOf": [
           {
-            "description": "Reserve an explicit IP address.",
+            "description": "Reserve a specific IP address.",
             "type": "object",
             "properties": {
               "ip": {
@@ -14559,10 +14559,10 @@
             "type": "object",
             "properties": {
               "pool_selector": {
-                "description": "Pool selection.",
+                "description": "Pool selection.\n\nIf omitted, this field uses the silo's default pool. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified in the pool selector.",
                 "default": {
                   "ip_version": null,
-                  "type": "default"
+                  "type": "auto"
                 },
                 "allOf": [
                   {
@@ -19013,7 +19013,7 @@
             "description": "Pool to allocate from.",
             "default": {
               "ip_version": null,
-              "type": "default"
+              "type": "auto"
             },
             "allOf": [
               {
@@ -19193,7 +19193,7 @@
                 "description": "Pool to allocate from.",
                 "default": {
                   "ip_version": null,
-                  "type": "default"
+                  "type": "auto"
                 },
                 "allOf": [
                   {
@@ -19710,7 +19710,7 @@
             "default": {
               "pool_selector": {
                 "ip_version": null,
-                "type": "default"
+                "type": "auto"
               },
               "type": "auto"
             },
@@ -23902,7 +23902,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "named"
+                  "explicit"
                 ]
               }
             },
@@ -23928,7 +23928,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "default"
+                  "auto"
                 ]
               }
             },
@@ -24385,7 +24385,7 @@
             "description": "Pool to allocate from.",
             "default": {
               "ip_version": null,
-              "type": "default"
+              "type": "auto"
             },
             "allOf": [
               {
