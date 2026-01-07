@@ -216,15 +216,30 @@ impl DataStore {
         for sled_agent in &collection.sled_agents {
             match &sled_agent.health_monitor.smf_services_in_maintenance {
                 Ok(svcs) => {
-                    for svc in &svcs.services {
+                    // When there are no services in maintenance, we will still
+                    // want to insert a row with the time the health check was
+                    // made and any parsing errors we may have collected.
+                    if svcs.services.is_empty() && svcs.time_of_status.is_some()
+                    {
                         svcs_in_maintenance.push(InvSvcInMaintenance::new(
                             collection_id,
                             sled_agent.sled_id,
-                            Some(svc.clone()),
+                            None,
                             svcs.errors.clone(),
                             None,
                             svcs.time_of_status,
                         ));
+                    } else {
+                        for svc in &svcs.services {
+                            svcs_in_maintenance.push(InvSvcInMaintenance::new(
+                                collection_id,
+                                sled_agent.sled_id,
+                                Some(svc.clone()),
+                                svcs.errors.clone(),
+                                None,
+                                svcs.time_of_status,
+                            ));
+                        }
                     }
                 }
                 Err(e) => svcs_in_maintenance.push(InvSvcInMaintenance::new(
@@ -2779,7 +2794,6 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                // TODO-K: Do I actually need paginated multicolumn?
                 let batch: Vec<InvSvcInMaintenance> = paginated_multicolumn(
                     dsl::inv_health_monitor_svc_in_maintenance,
                     (dsl::sled_id, dsl::id),
@@ -4063,13 +4077,21 @@ impl DataStore {
 
             let svcs_in_maintenance = svcs_in_maintenance_by_sled
                 .remove(&sled_id.into_untyped_uuid())
-                .map(|svcs| {
+                .map(|rows| {
                     // TODO-K: Clean up
-                    if let Some(e) = svcs[0].svcs_cmd_error.clone() {
+                    if let Some(e) = rows[0].svcs_cmd_error.clone() {
                         return Err(e);
                     }
+
                     let mut services = vec![];
-                    for svc in &svcs {
+                    for svc in &rows {
+                        if svc.fmri.is_none() && svc.zone.is_none() {
+                            continue;
+                        }
+
+                        // All rows should have both zone and FMRI populated or
+                        // none at all. Nevertheless, we'll handle the case of a
+                        // partially populated row.
                         let fmri = if let Some(f) = svc.fmri.clone() {
                             f
                         } else {
@@ -4081,14 +4103,13 @@ impl DataStore {
                             "".to_string()
                         };
 
-                        let service = SvcInMaintenance { fmri, zone };
-                        services.push(service)
+                        services.push(SvcInMaintenance { fmri, zone })
                     }
 
                     Ok(SvcsInMaintenanceResult {
                         services,
-                        errors: svcs[0].error_messages.clone(),
-                        time_of_status: svcs[0].time_of_status,
+                        errors: rows[0].error_messages.clone(),
+                        time_of_status: rows[0].time_of_status,
                     })
                 });
 

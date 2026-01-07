@@ -1121,26 +1121,27 @@ fn display_health_monitor(
                 writeln!(
                     indented,
                     "{} SMF services in maintenance at {}",
-                    svcs.services.len(),
+                    services.len(),
                     time
                 )?;
 
-                #[derive(Tabled)]
-                #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-                struct SvcRow {
-                    fmri: String,
-                    zone: String,
-                }
-                let rows = services.iter().map(|s| SvcRow {
-                    fmri: s.fmri.clone(),
-                    zone: s.zone.clone(),
-                });
-                let table = tabled::Table::new(rows)
-                    .with(tabled::settings::Style::empty())
-                    .with(tabled::settings::Padding::new(4, 1, 0, 0))
-                    .to_string();
-                writeln!(indented, "{table}")?;
-
+                if !services.is_empty() {
+                    #[derive(Tabled)]
+                    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                    struct SvcRow {
+                        fmri: String,
+                        zone: String,
+                    }
+                    let rows = services.iter().map(|s| SvcRow {
+                        fmri: s.fmri.clone(),
+                        zone: s.zone.clone(),
+                    });
+                    let table = tabled::Table::new(rows)
+                        .with(tabled::settings::Style::empty())
+                        .with(tabled::settings::Padding::new(4, 1, 0, 0))
+                        .to_string();
+                    writeln!(indented, "{table}")?;
+                };
                 if !errors.is_empty() {
                     writeln!(
                         indented,
@@ -1152,7 +1153,6 @@ fn display_health_monitor(
                     }
                 }
             } else {
-                // TODO-K: Should we record time even if no svcs in maintenance were found?
                 writeln!(
                     indented,
                     "no data on SMF services in maintenance has been collected"
