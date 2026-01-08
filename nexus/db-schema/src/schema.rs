@@ -2101,6 +2101,7 @@ table! {
         host_phase_2_desired_slot_b -> Nullable<Text>,
 
         subnet -> Inet,
+        last_allocated_ip_subnet_offset -> Int4,
     }
 }
 
