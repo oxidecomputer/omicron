@@ -327,9 +327,9 @@ async fn simc_create_image_record_undo(
 
     let image_id = sagactx.lookup::<Uuid>("image_id")?;
 
-    // Use fetch_optional to make this undo idempotent - if the image was
-    // already deleted (e.g., by a previous undo attempt), we can safely
-    // skip the delete operation.
+    // Make this undo idempotent by checking if the image still exists.
+    // If it was already deleted (e.g., by a previous undo attempt), we
+    // can safely skip the delete operation.
     match &params.image_type {
         ImageType::Project { .. } => {
             let lookup_result = LookupPath::new(&opctx, osagactx.datastore())
