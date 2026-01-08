@@ -227,7 +227,8 @@ pub struct OmicronSledConfig {
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
-    #[serde(default)]
+    // We purposely skip a serde default here to work around some ledger
+    // versioning quirks
     pub measurements: BTreeSet<OmicronSingleMeasurement>,
 }
 

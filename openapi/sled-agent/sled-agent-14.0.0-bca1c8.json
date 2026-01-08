@@ -7293,7 +7293,6 @@
             ]
           },
           "measurements": {
-            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/OmicronSingleMeasurement"
@@ -7330,6 +7329,7 @@
           "datasets",
           "disks",
           "generation",
+          "measurements",
           "zones"
         ]
       },

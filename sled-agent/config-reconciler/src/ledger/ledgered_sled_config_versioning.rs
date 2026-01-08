@@ -299,7 +299,7 @@ pub(super) mod tests {
             .expect("converted from v4");
         let v11 = v11::inventory::OmicronSledConfig::try_from(v10.clone())
             .expect("converted from v10");
-        let v14 = v11::inventory::OmicronSledConfig::try_from(v11.clone())
+        let v14 = v14::inventory::OmicronSledConfig::try_from(v11.clone())
             .expect("converted from v11");
 
         expectorate::assert_contents(
@@ -319,7 +319,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn read_config_converts_from_older_versions() {
-        let logctx = dev::test_setup_log("can_convert_v4_to_newer_versions");
+        let logctx = dev::test_setup_log("read_config_converts_from_older_versions");
         let log = &logctx.log;
 
         // All our configs should match the latest version. We use an explicit
@@ -327,7 +327,7 @@ pub(super) mod tests {
         // compilation error if the latest version changes. Bump the
         // version here and add the new version's path to the array of ledger
         // paths below.
-        let latest_version_path = EXPECTORATE_V11_CONFIG_PATH;
+        let latest_version_path = EXPECTORATE_V14_CONFIG_PATH;
         let expected_config = v14::inventory::OmicronSledConfig::read_from(
             log,
             latest_version_path.into(),
