@@ -73,7 +73,9 @@ num-integer.workspace = true
 omicron-cockroach-metrics.workspace = true
 openssl.workspace = true
 oximeter-client.workspace = true
-oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
+oximeter-db = { workspace = true, default-features = false, features = [
+    "oxql",
+] }
 oxnet.workspace = true
 oxql-types.workspace = true
 parallel-task-set.workspace = true
@@ -87,12 +89,14 @@ qorb.workspace = true
 rand.workspace = true
 range-requests.workspace = true
 ref-cast.workspace = true
+rdb-types.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 ring.workspace = true
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
+seq-macro.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
@@ -100,12 +104,14 @@ serde_with.workspace = true
 sha2.workspace = true
 sled-agent-client.workspace = true
 sled-agent-types.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-error-chain.workspace = true
 display-error-chain.workspace = true
 slog-term.workspace = true
+static_assertions.workspace = true
 steno.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
@@ -129,7 +135,6 @@ nexus-reconfigurator-execution.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-reconfigurator-rendezvous.workspace = true
-nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true

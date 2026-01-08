@@ -13,7 +13,7 @@ use crate::ledgers::PersistentStateLedger;
 use crate::proxy;
 use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackUuid;
-use serde::{Deserialize, Serialize};
+use sled_hardware_types::BaseboardId;
 use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
@@ -24,22 +24,18 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 use trust_quorum_protocol::{
-    Alarm, BaseboardId, CommitError, Configuration, Epoch, ExpungedMetadata,
-    LoadRackSecretError, LrtqUpgradeError, LrtqUpgradeMsg, Node, NodeCallerCtx,
-    NodeCommonCtx, NodeCtx, PersistentState, PrepareAndCommitError,
-    ReconfigurationError, ReconfigureMsg, ReconstructedRackSecret,
+    CommitError, LoadRackSecretError, LrtqUpgradeError, Node,
+    NodeCallerCtx as _, NodeCommonCtx as _, NodeCtx, PrepareAndCommitError,
+    ReconfigurationError, ReconstructedRackSecret,
 };
+use trust_quorum_types::configuration::Configuration;
+use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
+use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
+use trust_quorum_types::types::Epoch;
 
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
 use bootstore::schemes::v0::NetworkConfig;
-
-/// Whether or not a configuration has committed or is still underway.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CommitStatus {
-    Committed,
-    Pending,
-}
 
 /// We only expect a handful of messages at a time.
 const API_CHANNEL_BOUND: usize = 32;
@@ -60,46 +56,6 @@ pub struct Config {
     pub tq_ledger_paths: Vec<Utf8PathBuf>,
     pub network_config_ledger_paths: Vec<Utf8PathBuf>,
     pub sprockets: SprocketsConfig,
-}
-
-/// Status of the node coordinating the `Prepare` phase of a reconfiguration or
-/// LRTQ upgrade.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoordinatorStatus {
-    pub config: Configuration,
-    pub acked_prepares: BTreeSet<BaseboardId>,
-}
-
-// Details about a given node's status
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct NodeStatus {
-    pub connected_peers: BTreeSet<BaseboardId>,
-    pub alarms: BTreeSet<Alarm>,
-    pub persistent_state: NodePersistentStateSummary,
-    pub proxied_requests: u64,
-}
-
-/// A summary of a node's persistent state, leaving out things like key shares
-/// and hashes.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct NodePersistentStateSummary {
-    pub has_lrtq_share: bool,
-    pub configs: BTreeSet<Epoch>,
-    pub shares: BTreeSet<Epoch>,
-    pub commits: BTreeSet<Epoch>,
-    pub expunged: Option<ExpungedMetadata>,
-}
-
-impl From<&PersistentState> for NodePersistentStateSummary {
-    fn from(value: &PersistentState) -> Self {
-        Self {
-            has_lrtq_share: value.lrtq.is_some(),
-            configs: value.configs.iter().map(|c| c.epoch).collect(),
-            shares: value.shares.keys().cloned().collect(),
-            commits: value.commits.clone(),
-            expunged: value.expunged.clone(),
-        }
-    }
 }
 
 /// A request sent to the `NodeTask` from the `NodeTaskHandle`
@@ -244,11 +200,16 @@ impl NodeTaskHandle {
 
     /// Return a [`proxy::Proxy`] that allows callers to proxy certain API requests
     /// to other nodes.
+    ///
+    /// Each of these operations on `Proxy` should be accessible via its own
+    /// sled agent API endpoint
     pub fn proxy(&self) -> proxy::Proxy {
         proxy::Proxy::new(self.tx.clone())
     }
 
     /// Initiate a trust quorum reconfiguration at this node
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn reconfigure(
         &self,
         msg: ReconfigureMsg,
@@ -260,6 +221,8 @@ impl NodeTaskHandle {
     }
 
     /// Initiate an LRTQ upgrade at this node
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn upgrade_from_lrtq(
         &self,
         msg: LrtqUpgradeMsg,
@@ -273,6 +236,8 @@ impl NodeTaskHandle {
     /// Return the status of this node if it is coordinating the `Prepare` phase
     /// of a reconfiguration or LRTQ upgrade. Return `Ok(None)` or an error
     /// otherwise.
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn coordinator_status(
         &self,
     ) -> Result<Option<CoordinatorStatus>, NodeApiError> {
@@ -294,6 +259,8 @@ impl NodeTaskHandle {
     }
 
     /// Attempt to prepare and commit the given configuration
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn prepare_and_commit(
         &self,
         config: Configuration,
@@ -305,6 +272,8 @@ impl NodeTaskHandle {
     }
 
     /// Attempt to commit the configuration at epoch `epoch`
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn commit(
         &self,
         rack_id: RackUuid,
@@ -344,6 +313,8 @@ impl NodeTaskHandle {
     }
 
     /// Return internal information for the [`Node`]
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn status(&self) -> Result<NodeStatus, NodeApiError> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(NodeApiRequest::NodeStatus { tx }).await?;
@@ -358,6 +329,8 @@ impl NodeTaskHandle {
     }
 
     /// Update network config needed for bringing up the control plane
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn update_network_config(
         &self,
         config: NetworkConfig,
@@ -371,6 +344,8 @@ impl NodeTaskHandle {
     }
 
     /// Retrieve the current network config
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn network_config(
         &self,
     ) -> Result<Option<NetworkConfig>, NodeApiError> {
@@ -896,6 +871,7 @@ mod tests {
     use std::time::Duration;
     use tokio::task::JoinHandle;
     use trust_quorum_protocol::NodeHandlerCtx;
+    use trust_quorum_types::types::Threshold;
 
     fn pki_doc_to_node_configs(dir: Utf8PathBuf, n: usize) -> Vec<Config> {
         (1..=n)
@@ -1326,7 +1302,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other
@@ -1408,7 +1384,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell all but the last node how to reach each other
@@ -1543,7 +1519,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell all but the last node how to reach each other
@@ -1756,7 +1732,7 @@ mod tests {
             rack_id,
             epoch: Epoch(2),
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other
@@ -1845,7 +1821,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other
@@ -2130,7 +2106,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other

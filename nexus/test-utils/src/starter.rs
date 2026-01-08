@@ -30,11 +30,6 @@ use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
 use nexus_db_queries::db::pub_test_utils::crdb;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_sled_agent_shared::inventory::SledCpuFamily;
-use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use nexus_test_interface::InternalServer;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
@@ -50,6 +45,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
@@ -78,7 +74,7 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
@@ -98,8 +94,14 @@ use oximeter_producer::Server as ProducerServer;
 use sled_agent_client::types::EarlyNetworkConfig;
 use sled_agent_client::types::EarlyNetworkConfigBody;
 use sled_agent_client::types::RackNetworkConfigV2;
+use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronZoneDataset;
+use sled_agent_types::inventory::SledCpuFamily;
+use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Logger, debug, error, o};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{once, repeat, zip};
@@ -977,6 +979,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     zones,
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: BTreeSet::new(),
                 })
                 .await
                 .expect("Failed to configure sled agent {sled_id} with zones");
@@ -1072,8 +1075,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     },
                     external_ip: OmicronZoneExternalSnatIp {
                         id: ExternalIpUuid::new_v4(),
-                        snat_cfg: SourceNatConfig::new(external_ip, 0, 16383)
-                            .unwrap(),
+                        snat_cfg: SourceNatConfigGeneric::new(
+                            external_ip,
+                            0,
+                            16383,
+                        )
+                        .unwrap(),
                     },
                 },
             ),
@@ -1385,6 +1392,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 BlueprintSledConfig {
                     state: SledState::Active,
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                    last_allocated_ip_subnet_offset:
+                        LastAllocatedSubnetIpOffset::initial(),
                     sled_agent_generation,
                     disks,
                     datasets,
@@ -1974,7 +1983,7 @@ impl oximeter::Producer for IntegrationProducer {
     fn produce(
         &mut self,
     ) -> Result<
-        Box<(dyn Iterator<Item = oximeter::types::Sample> + 'static)>,
+        Box<dyn Iterator<Item = oximeter::types::Sample> + 'static>,
         oximeter::MetricsError,
     > {
         use oximeter::Metric;

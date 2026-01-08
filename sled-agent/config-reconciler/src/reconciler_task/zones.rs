@@ -11,7 +11,7 @@ use crate::InternalDisks;
 use crate::ResolverStatusExt;
 use crate::SledAgentFacilities;
 use crate::TimeSyncConfig;
-use crate::dump_setup_task::FormerZoneRootArchiver;
+use crate::debug_collector::FormerZoneRootArchiver;
 use camino::Utf8PathBuf;
 use futures::FutureExt as _;
 use futures::future;
@@ -25,12 +25,12 @@ use illumos_utils::zone::AdmError;
 use illumos_utils::zone::Api as _;
 use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::Zones;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use ntp_admin_client::types::TimeSync;
 use omicron_common::address::Ipv6Subnet;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::OmicronZoneConfig;
+use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::zone_images::MupdateOverrideReadError;
 use sled_agent_types::zone_images::OmicronZoneImageLocation;
 use sled_agent_types::zone_images::PreparedOmicronZone;
@@ -1280,21 +1280,22 @@ mod tests {
     use illumos_utils::zpool::PathInPool;
     use illumos_utils::zpool::ZpoolName;
     use illumos_utils::zpool::ZpoolOrRamdisk;
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-    use nexus_sled_agent_shared::inventory::ZoneKind;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::disk::SharedDatasetConfig;
-    use omicron_common::update::OmicronZoneManifest;
-    use omicron_common::update::OmicronZoneManifestSource;
+    use omicron_common::update::OmicronInstallManifest;
+    use omicron_common::update::OmicronInstallManifestSource;
     use omicron_common::zone_images::ZoneImageFileSource;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::MupdateOverrideUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::OmicronZoneDataset;
+    use sled_agent_types::inventory::OmicronZoneImageSource;
+    use sled_agent_types::inventory::ZoneKind;
+    use sled_agent_types::zone_images::MeasurementManifestStatus;
     use sled_agent_types::zone_images::MupdateOverrideStatus;
     use sled_agent_types::zone_images::OmicronZoneFileSource;
     use sled_agent_types::zone_images::RemoveMupdateOverrideBootSuccess;
@@ -1501,12 +1502,23 @@ mod tests {
                 removed_ddm_prefixes: Default::default(),
                 // successful status containing no artifacts
                 resolver_status: ResolverStatus {
+                    measurement_manifest: MeasurementManifestStatus {
+                        boot_disk_path: boot_disk_path.clone(),
+                        boot_disk_result: Ok(ZoneManifestArtifactsResult {
+                            manifest: OmicronInstallManifest {
+                                source: OmicronInstallManifestSource::SledAgent,
+                                files: IdOrdMap::new(),
+                            },
+                            data: IdOrdMap::new(),
+                        }),
+                        non_boot_disk_metadata: IdOrdMap::new(),
+                    },
                     zone_manifest: ZoneManifestStatus {
                         boot_disk_path: boot_disk_path.clone(),
                         boot_disk_result: Ok(ZoneManifestArtifactsResult {
-                            manifest: OmicronZoneManifest {
-                                source: OmicronZoneManifestSource::SledAgent,
-                                zones: IdOrdMap::new(),
+                            manifest: OmicronInstallManifest {
+                                source: OmicronInstallManifestSource::SledAgent,
+                                files: IdOrdMap::new(),
                             },
                             data: IdOrdMap::new(),
                         }),
@@ -1518,6 +1530,7 @@ mod tests {
                         non_boot_disk_overrides: IdOrdMap::new(),
                     },
                     image_directory_override: None,
+                    measurement_directory_override: None,
                 },
             }
         }
@@ -1567,7 +1580,7 @@ mod tests {
                 .expect("test should populate responses for start_omicron_zone")
         }
 
-        fn zone_image_resolver_status(&self) -> ResolverStatus {
+        fn file_source_resolver_status(&self) -> ResolverStatus {
             self.inner.lock().unwrap().resolver_status.clone()
         }
 

@@ -13,17 +13,19 @@ use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::PrivateIpStackCreate;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     InstanceNetworkInterface,
 };
 use oxnet::Ipv4Net;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
 type ControlPlaneTestContext =
@@ -46,8 +48,7 @@ async fn create_instance_expect_failure(
                 },
                 vpc_name: "default".parse().unwrap(),
                 subnet_name: subnet_name.parse().unwrap(),
-                ip: None,
-                transit_ips: vec![],
+                ip_config: PrivateIpStackCreate::auto_ipv4(),
             },
         ]);
     let new_instance = params::InstanceCreate {
@@ -91,7 +92,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let project_name = "springfield-squidport";
 
     // Create a project that we'll use for testing.
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     create_project(&client, project_name).await;
     let url_instances = format!("/v1/instances?project={}", project_name);
 
@@ -136,8 +137,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             },
             vpc_name: "default".parse().unwrap(),
             subnet_name: SUBNET_NAME.parse().unwrap(),
-            ip: None,
-            transit_ips: vec![],
+            ip_config: PrivateIpStackCreate::auto_ipv4(),
         },
     ]);
 
@@ -190,14 +190,22 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             .items;
     assert_eq!(network_interfaces.len(), subnet_size);
 
-    // Sort by IP address to simplify the checks
-    network_interfaces.sort_by(|a, b| a.ip.cmp(&b.ip));
+    // Sort by IP address(es) to simplify the checks.
+    network_interfaces.sort_by(|a, b| {
+        a.ip_stack
+            .ipv4_addr()
+            .cmp(&b.ip_stack.ipv4_addr())
+            .then(a.ip_stack.ipv6_addr().cmp(&b.ip_stack.ipv6_addr()))
+    });
     for (iface, addr) in network_interfaces
         .iter()
         .zip(subnet.addr_iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES))
     {
         assert_eq!(
-            iface.ip, addr,
+            IpAddr::V4(
+                *iface.ip_stack.ipv4_addr().expect("Expected an IPv4 stack")
+            ),
+            addr,
             "Nexus should provide auto-assigned IP addresses in order within an IP subnet"
         );
     }

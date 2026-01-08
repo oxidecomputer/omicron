@@ -152,9 +152,10 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
             },
+            cases: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, &sitrep1)
+            .fm_sitrep_insert(&opctx, sitrep1.clone())
             .await
             .expect("inserting initial sitrep should succeed");
 
@@ -174,9 +175,10 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.metadata.id),
             },
+            cases: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, &sitrep2)
+            .fm_sitrep_insert(&opctx, sitrep2.clone())
             .await
             .expect("inserting child sitrep should succeed");
 
@@ -265,8 +267,15 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id,
             },
+            // We could populate the orphan sitreps with cases and ereports
+            // here, but there's a unit test
+            // `test_sitrep_delete_deletes_cases()` in the
+            // `nexus_db_queries::db::datastore::fm` module which ensures that
+            // deleting a sitrep removes all the other records associated with
+            // it, so it should be safe to trust that this works properly.
+            cases: Default::default(),
         };
-        match datastore.fm_sitrep_insert(&opctx, &sitrep).await {
+        match datastore.fm_sitrep_insert(&opctx, sitrep).await {
             Ok(_) => {
                 panic!("inserting sitrep v{v} orphan {i} should not succeed")
             }

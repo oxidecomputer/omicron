@@ -150,6 +150,7 @@ Commands:
   alert                        Print information about alerts
   zpool                        Commands for querying and interacting with pools
   user-data-export             Commands for querying and interacting with user data export objects
+  whatis                       Given a UUID, try to figure out what type of object it refers to
   help                         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -214,6 +215,7 @@ Commands:
   alert                        Print information about alerts
   zpool                        Commands for querying and interacting with pools
   user-data-export             Commands for querying and interacting with user data export objects
+  whatis                       Given a UUID, try to figure out what type of object it refers to
   help                         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -761,6 +763,7 @@ Commands:
   running       List running sagas
   inject-error  Inject an error into a saga's currently running node(s)
   abandon       Prevent new Nexus processes from resuming execution of a saga
+  show          Show the execution of a saga
   help          Print this message or the help of the given subcommand(s)
 
 Options:

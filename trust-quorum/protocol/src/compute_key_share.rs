@@ -8,13 +8,12 @@
 //! share for that configuration it must collect a threshold of key shares from
 //! other nodes so  that it can compute its own key share.
 
-use crate::{
-    Alarm, BaseboardId, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind,
-};
+use crate::{BaseboardId, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind};
 use gfss::gf256::Gf256;
 use gfss::shamir::{self, Share};
 use slog::{Logger, error, o};
 use std::collections::BTreeMap;
+use trust_quorum_types::alarm::Alarm;
 
 /// In memory state that tracks retrieval of key shares in order to compute
 /// this node's key share for a given configuration.

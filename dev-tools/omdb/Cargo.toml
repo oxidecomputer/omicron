@@ -53,7 +53,6 @@ nexus-inventory.workspace = true
 nexus-lockstep-client.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-saga-recovery.workspace = true
-nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
@@ -61,9 +60,11 @@ omicron-workspace-hack.workspace = true
 owo-colors.workspace = true
 oxide-tokio-rt.workspace = true
 oximeter-client.workspace = true
-oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
+oximeter-db = { workspace = true, default-features = false, features = [
+    "oxql",
+] }
 oxnet.workspace = true
-petgraph.workspace = true
+petgraph = { workspace = true, features = ["serde-1"] }
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 ratatui.workspace = true
@@ -73,6 +74,8 @@ serde.workspace = true
 sigpipe.workspace = true
 serde_json.workspace = true
 sled-agent-client.workspace = true
+sled-agent-types.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 steno.workspace = true
@@ -81,7 +84,7 @@ support-bundle-viewer.workspace = true
 supports-color.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
+tokio = { workspace = true, features = ["full"] }
 tufaceous-artifact.workspace = true
 unicode-width.workspace = true
 update-engine.workspace = true

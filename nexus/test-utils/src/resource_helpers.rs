@@ -347,13 +347,31 @@ pub async fn link_ip_pool(
     .await;
 }
 
+/// Create a default IPv4 and IPv6 IP Pool.
+///
 /// What you want for any test that is not testing IP logic specifically
-pub async fn create_default_ip_pool(
+pub async fn create_default_ip_pools(
     client: &ClientTestContext,
-) -> views::IpPool {
-    let (pool, ..) = create_ip_pool(&client, "default", None).await;
-    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
-    pool
+) -> (views::IpPool, views::IpPool) {
+    let ranges = [
+        IpRange::try_from((
+            std::net::Ipv4Addr::new(10, 0, 0, 0),
+            std::net::Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap(),
+        IpRange::try_from((
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0xffff),
+        ))
+        .unwrap(),
+    ];
+    let (v4_pool, ..) =
+        create_ip_pool(&client, "default-v4", Some(ranges[0])).await;
+    link_ip_pool(&client, "default-v4", &DEFAULT_SILO.id(), true).await;
+    let (v6_pool, ..) =
+        create_ip_pool(&client, "default-v6", Some(ranges[1])).await;
+    link_ip_pool(&client, "default-v6", &DEFAULT_SILO.id(), true).await;
+    (v4_pool, v6_pool)
 }
 
 pub async fn create_floating_ip(
@@ -363,6 +381,20 @@ pub async fn create_floating_ip(
     ip: Option<IpAddr>,
     parent_pool_name: Option<&str>,
 ) -> FloatingIp {
+    let address_selector = match (ip, parent_pool_name) {
+        (Some(ip), pool) => params::AddressSelector::Explicit {
+            ip,
+            pool: pool.map(|v| NameOrId::Name(v.parse().unwrap())),
+        },
+        (None, Some(pool)) => params::AddressSelector::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: NameOrId::Name(pool.parse().unwrap()),
+            },
+        },
+        (None, None) => params::AddressSelector::Auto {
+            pool_selector: params::PoolSelector::Auto { ip_version: None },
+        },
+    };
     object_create(
         client,
         &format!("/v1/floating-ips?project={project}"),
@@ -371,8 +403,7 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            ip,
-            pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
+            address_selector,
         },
     )
     .await
@@ -538,6 +569,7 @@ pub async fn create_project(
     .await
 }
 
+/// Create a regular Crucible disk
 pub async fn create_disk(
     client: &ClientTestContext,
     project_name: &str,
@@ -552,8 +584,10 @@ pub async fn create_disk(
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(1),
         },
@@ -576,7 +610,9 @@ pub async fn create_disk_from_snapshot(
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::Snapshot { snapshot_id },
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Snapshot { snapshot_id },
+            },
             size: ByteCount::from_gibibytes_u32(1),
         },
     )
@@ -692,7 +728,7 @@ pub async fn create_instance(
         client,
         project_name,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::Default,
+        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         // Disks=
         Vec::<params::InstanceDiskAttachment>::new(),
         // External IPs=
@@ -1568,9 +1604,27 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     ///
     /// Does not inform sled agents to use these pools.
     ///
-    /// See: [Self::propagate_datasets_to_sleds] if you want to send
-    /// this configuration to a simulated sled agent.
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// configuration to a simulated sled agent.
     pub async fn add_zpool_with_datasets(&mut self, sled_id: SledUuid) {
+        self.add_sized_zpool_with_datasets(
+            sled_id,
+            Self::DEFAULT_ZPOOL_SIZE_GIB,
+        )
+        .await
+    }
+
+    /// Adds the zpool (of arbitrary size) and datasets into the database.
+    ///
+    /// Does not inform sled agents to use these pools.
+    ///
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// configuration to a simulated sled agent.
+    pub async fn add_sized_zpool_with_datasets(
+        &mut self,
+        sled_id: SledUuid,
+        gibibytes: u32,
+    ) {
         self.add_zpool_with_datasets_ext(
             sled_id,
             PhysicalDiskUuid::new_v4(),
@@ -1585,7 +1639,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                     kind: DatasetKind::Debug,
                 },
             ],
-            Self::DEFAULT_ZPOOL_SIZE_GIB,
+            gibibytes,
         )
         .await
     }

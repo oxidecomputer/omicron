@@ -19,17 +19,20 @@ use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
-use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
+use sled_agent_types::inventory::ZoneKind;
 use slog::{debug, info};
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use std::time::Duration;
 
 // TODO-coverage This test could check other stuff:
@@ -49,15 +52,23 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let opctx = lc.opctx();
     let datastore = lc.datastore();
 
+    let (_, parent_blueprint) = datastore
+        .blueprint_target_get_current_full(opctx)
+        .await
+        .expect("obtained current target blueprint");
     let planner_config = datastore
         .reconfigurator_config_get_latest(opctx)
         .await
         .expect("obtained latest reconfigurator config")
         .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
-    let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
-            .await
-            .expect("planning input");
+    let planning_input = PlanningInputFromDb::assemble(
+        &opctx,
+        &datastore,
+        planner_config,
+        Arc::new(parent_blueprint),
+    )
+    .await
+    .expect("planning input");
     let initial_nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
     let nexus = initial_nexus_clients.first().expect("internal Nexus client");
 
@@ -198,7 +209,10 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     .await
     .expect("editing blueprint to expunge zone");
     let (_, expunged_zone_config) = blueprint3
-        .all_omicron_zones(|_| true)
+        .expunged_zones(
+            ZoneRunningStatus::MaybeRunning,
+            BlueprintExpungedZoneAccessReason::Test,
+        )
         .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
         .expect("expunged zone in new blueprint");
     let BlueprintZoneDisposition::Expunged {
@@ -206,7 +220,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         ..
     } = expunged_zone_config.disposition
     else {
-        panic!("expected expunged zone to have disposition Expunged");
+        unreachable!("expunged_zones() returned a non-expunged zone");
     };
 
     // At some point, we should be unable to reach this Nexus any more.
@@ -271,17 +285,20 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
 
     // Now run through the planner.
     info!(log, "running through planner");
-    let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
-            .await
-            .expect("planning input");
     let (_, parent_blueprint) = datastore
         .blueprint_target_get_current_full(opctx)
         .await
         .expect("getting latest target blueprint");
+    let planning_input = PlanningInputFromDb::assemble(
+        &opctx,
+        &datastore,
+        planner_config,
+        Arc::new(parent_blueprint),
+    )
+    .await
+    .expect("planning input");
     let planner = Planner::new_based_on(
         log.clone(),
-        &parent_blueprint,
         &planning_input,
         "live test suite",
         &latest_collection,
@@ -294,7 +311,10 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // We don't need to check this here.  It just provides a better error
     // message if something has gone wrong up to this point.
     let (_, expunged_zone_config) = new_blueprint
-        .all_omicron_zones(|_| true)
+        .expunged_zones(
+            ZoneRunningStatus::Shutdown,
+            BlueprintExpungedZoneAccessReason::Test,
+        )
         .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
         .expect("expunged zone in new blueprint");
     assert!(expunged_zone_config.disposition.is_ready_for_cleanup());

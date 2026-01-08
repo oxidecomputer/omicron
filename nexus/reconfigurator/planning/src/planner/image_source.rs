@@ -6,10 +6,6 @@ use std::{collections::HashMap, fmt};
 
 use anyhow::anyhow;
 use iddqd::{IdOrdItem, IdOrdMap, id_ord_map::RefMut, id_upcast};
-use nexus_sled_agent_shared::inventory::{
-    BootPartitionContents, BootPartitionDetails, ZoneKind,
-    ZoneManifestBootInventory,
-};
 use nexus_types::{
     deployment::{
         BlueprintArtifactVersion, BlueprintHostPhase2DesiredContents,
@@ -21,6 +17,10 @@ use nexus_types::{
 };
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_uuid_kinds::{MupdateOverrideUuid, OmicronZoneUuid, SledUuid};
+use sled_agent_types::inventory::{
+    BootPartitionContents, BootPartitionDetails, ManifestBootInventory,
+    ZoneKind,
+};
 use slog::{debug, info, o, warn};
 use tufaceous_artifact::ArtifactHash;
 
@@ -73,7 +73,7 @@ impl NoopConvertInfo {
             };
 
             let zone_manifest = match &inv_sled
-                .zone_image_resolver
+                .file_source_resolver
                 .zone_manifest
                 .boot_inventory
             {
@@ -422,7 +422,7 @@ pub(crate) struct NoopConvertZoneInfo {
 impl NoopConvertZoneInfo {
     fn new(
         zone: &BlueprintZoneConfig,
-        zone_manifest: &ZoneManifestBootInventory,
+        zone_manifest: &ManifestBootInventory,
         artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
     ) -> Self {
         let file_name = zone.kind().artifact_in_install_dataset();

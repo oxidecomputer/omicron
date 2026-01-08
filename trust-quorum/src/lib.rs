@@ -10,9 +10,9 @@ mod ledgers;
 mod proxy;
 mod task;
 
-pub use proxy::Proxy;
+pub use proxy::{Proxy, ProxyError};
 
 pub(crate) use connection_manager::{
     ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg,
 };
-pub use task::{CommitStatus, Config, NodeApiError, NodeTask, NodeTaskHandle};
+pub use task::{Config, NodeApiError, NodeTask, NodeTaskHandle};

@@ -120,6 +120,7 @@ use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
+use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
@@ -130,6 +131,7 @@ use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
@@ -152,6 +154,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
+use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::ParseError;
@@ -183,6 +186,7 @@ mod ereport;
 mod saga;
 mod sitrep;
 mod user_data_export;
+mod whatis;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -417,6 +421,11 @@ enum DbCommands {
     Zpool(ZpoolArgs),
     /// Commands for querying and interacting with user data export objects
     UserDataExport(user_data_export::UserDataExportArgs),
+    /// Given a UUID, try to figure out what type of object it refers to
+    ///
+    /// More precisely, `omdb db whatis` reports tables containing a unique UUID
+    /// column with the specified value.
+    Whatis(whatis::WhatisArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1489,6 +1498,9 @@ impl DbArgs {
                     DbCommands::UserDataExport(args) => {
                         args.exec(&omdb, &opctx, &datastore).await
                     }
+                    DbCommands::Whatis(args) => {
+                        whatis::cmd_db_whatis(&datastore, args).await
+                    }
                 }
             }
         }).await
@@ -1611,16 +1623,19 @@ async fn lookup_service_info(
     service_id: Uuid,
     blueprint: &Blueprint,
 ) -> anyhow::Result<Option<ServiceInfo>> {
-    let Some(zone_config) = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::any)
-        .find_map(|(_sled_id, zone_config)| {
-            if zone_config.id.into_untyped_uuid() == service_id {
-                Some(zone_config)
-            } else {
-                None
-            }
-        })
-    else {
+    // We don't know anything about `service_id`; it may be in-service or it may
+    // be expunged. Check all the zone states.
+    let mut all_zones = blueprint.all_in_service_and_expunged_zones(
+        BlueprintExpungedZoneAccessReason::Omdb,
+    );
+
+    let Some(zone_config) = all_zones.find_map(|(_sled_id, zone_config)| {
+        if zone_config.id.into_untyped_uuid() == service_id {
+            Some(zone_config)
+        } else {
+            None
+        }
+    }) else {
         return Ok(None);
     };
 
@@ -2216,8 +2231,7 @@ async fn crucible_disk_info(
             }
         }
     } else {
-        // If the disk is not attached to anything, just print empty
-        // fields.
+        // If the disk is not attached to anything, just print empty fields.
         UpstairsRow {
             host_serial: "-".to_string(),
             disk_name,
@@ -2277,6 +2291,141 @@ async fn crucible_disk_info(
     Ok(())
 }
 
+async fn local_storage_disk_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    disk: LocalStorageDisk,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct GenericRow {
+        host_serial: String,
+        disk_name: String,
+        instance_name: String,
+        propolis_zone: String,
+        disk_state: String,
+    }
+
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    let disk_name = disk.name().to_string();
+    let disk_state = disk.runtime().disk_state.to_string();
+
+    let row = if let Some(instance_uuid) = disk.runtime().attach_instance_id {
+        // Get the instance this disk is attached to
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+        let instances: Vec<InstanceAndActiveVmm> = instance_dsl::instance
+            .filter(instance_dsl::id.eq(instance_uuid))
+            .left_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())),
+            )
+            .limit(1)
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .load_async(&*conn)
+            .await
+            .context("loading requested instance")?
+            .into_iter()
+            .map(|i: (Instance, Option<Vmm>)| i.into())
+            .collect();
+
+        let Some(instance) = instances.into_iter().next() else {
+            bail!("no instance: {} found", instance_uuid);
+        };
+
+        let instance_name = instance.instance().name().to_string();
+
+        if instance.vmm().is_some() {
+            let propolis_id =
+                instance.instance().runtime().propolis_id.unwrap();
+            let my_sled_id = instance.sled_id().unwrap();
+
+            let (_, my_sled) = LookupPath::new(opctx, datastore)
+                .sled_id(my_sled_id)
+                .fetch()
+                .await
+                .context("failed to look up sled")?;
+
+            GenericRow {
+                host_serial: my_sled.serial_number().to_string(),
+                disk_name,
+                instance_name,
+                propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
+                disk_state,
+            }
+        } else {
+            GenericRow {
+                host_serial: NOT_ON_SLED_MSG.to_string(),
+                disk_name,
+                instance_name,
+                propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
+                disk_state,
+            }
+        }
+    } else {
+        // If the disk is not attached to anything, just print empty fields.
+        GenericRow {
+            host_serial: "-".to_string(),
+            disk_name,
+            instance_name: "-".to_string(),
+            propolis_zone: "-".to_string(),
+            disk_state,
+        }
+    };
+
+    let table = tabled::Table::new(vec![row])
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Row {
+        disk_name: String,
+
+        time_created: DateTime<Utc>,
+        #[tabled(display_with = "display_option_blank")]
+        time_deleted: Option<DateTime<Utc>>,
+
+        dataset_id: DatasetUuid,
+        pool_id: ExternalZpoolUuid,
+        sled_id: SledUuid,
+
+        dataset_size: u64,
+    }
+
+    if let Some(allocation) = &disk.local_storage_dataset_allocation {
+        let rows = vec![Row {
+            disk_name: disk.name().to_string(),
+
+            time_created: allocation.time_created,
+            time_deleted: allocation.time_deleted,
+
+            dataset_id: allocation.local_storage_dataset_id(),
+            pool_id: allocation.pool_id(),
+            sled_id: allocation.sled_id(),
+
+            dataset_size: allocation.dataset_size.to_bytes(),
+        }];
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+
+        println!("{}", table);
+    } else {
+        println!("no allocation yet");
+    }
+
+    Ok(())
+}
+
 /// Run `omdb db disk info <UUID>`.
 async fn cmd_db_disk_info(
     opctx: &OpContext,
@@ -2286,6 +2435,9 @@ async fn cmd_db_disk_info(
     match datastore.disk_get(opctx, args.uuid).await? {
         Disk::Crucible(disk) => {
             crucible_disk_info(opctx, datastore, disk).await
+        }
+        Disk::LocalStorage(disk) => {
+            local_storage_disk_info(opctx, datastore, disk).await
         }
     }
 }

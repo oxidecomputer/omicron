@@ -5,7 +5,9 @@
 //! A mechanism for allocating clickhouse keeper and server nodes for clustered
 //! clickhouse setups during blueprint planning
 
-use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
+use clickhouse_admin_types::keeper::{
+    ClickhouseKeeperClusterMembership, KeeperId,
+};
 use nexus_types::deployment::{
     BlueprintZoneDisposition, BlueprintZoneType, ClickhouseClusterConfig,
 };
@@ -291,7 +293,7 @@ impl ClickhouseAllocator {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use clickhouse_admin_types::ServerId;
+    use clickhouse_admin_types::server::ServerId;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeMap;

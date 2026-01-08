@@ -241,7 +241,7 @@ pub async fn create_stopped_instance_record(
             hostname: "myhostname".try_into().unwrap(),
             user_data: Vec::new(),
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::None,
+                params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
             external_ips: Vec::new(),
             disks: Vec::new(),
             boot_disk: None,
