@@ -19,6 +19,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
+use nexus_db_model::IpVersion;
 use nexus_db_model::Probe;
 use nexus_db_model::VpcSubnet;
 use nexus_types::external_api::params::PrivateIpStackCreate;
@@ -219,6 +220,7 @@ impl super::DataStore {
         authz_project: &authz::Project,
         probe: &Probe,
         ip_pool: Option<authz::IpPool>,
+        ip_version: Option<IpVersion>,
     ) -> CreateResult<Probe> {
         // TODO-correctness: These need to be in a transaction.
         // See https://github.com/oxidecomputer/omicron/issues/9340.
@@ -231,6 +233,7 @@ impl super::DataStore {
                 Uuid::new_v4(),
                 probe.id(),
                 ip_pool,
+                ip_version,
             )
             .await?;
 
