@@ -843,6 +843,25 @@ mod test {
     }
 
     #[tokio::test]
+    async fn expectorate_query_insert_project_image() {
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+        let storage_type = crate::db::datastore::StorageType::Image;
+
+        let query = VirtualProvisioningCollectionUpdate::new_insert_storage(
+            id,
+            disk_byte_diff,
+            project_id,
+            storage_type,
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/virtual_provisioning_collection_update_insert_project_image.sql",
+        ).await;
+    }
+
+    #[tokio::test]
     async fn expectorate_query_delete_storage() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
@@ -857,6 +876,45 @@ mod test {
         expectorate_query_contents(
             &query,
             "tests/output/virtual_provisioning_collection_update_delete_storage.sql",
+        ).await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_insert_silo_storage() {
+        let id = Uuid::nil();
+        let silo_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+        let storage_type = crate::db::datastore::StorageType::Image;
+
+        let query =
+            VirtualProvisioningCollectionUpdate::new_insert_silo_storage(
+                id,
+                disk_byte_diff,
+                silo_id,
+                storage_type,
+            );
+        expectorate_query_contents(
+            &query,
+            "tests/output/virtual_provisioning_collection_update_insert_silo_storage.sql",
+        ).await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_delete_silo_storage() {
+        let id = Uuid::nil();
+        let silo_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+
+        let query =
+            VirtualProvisioningCollectionUpdate::new_delete_silo_storage(
+                id,
+                disk_byte_diff,
+                silo_id,
+            );
+
+        expectorate_query_contents(
+            &query,
+            "tests/output/virtual_provisioning_collection_update_delete_silo_storage.sql",
         ).await;
     }
 
@@ -940,6 +998,60 @@ mod test {
             disk_byte_diff,
             project_id,
         );
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_insert_silo_storage() {
+        let logctx = dev::test_setup_log("explain_insert_silo_storage");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let id = Uuid::nil();
+        let silo_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+        let storage_type = crate::db::datastore::StorageType::Image;
+
+        let query =
+            VirtualProvisioningCollectionUpdate::new_insert_silo_storage(
+                id,
+                disk_byte_diff,
+                silo_id,
+                storage_type,
+            );
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_delete_silo_storage() {
+        let logctx = dev::test_setup_log("explain_delete_silo_storage");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let id = Uuid::nil();
+        let silo_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+
+        let query =
+            VirtualProvisioningCollectionUpdate::new_delete_silo_storage(
+                id,
+                disk_byte_diff,
+                silo_id,
+            );
         let _ = query
             .explain_async(&conn)
             .await
