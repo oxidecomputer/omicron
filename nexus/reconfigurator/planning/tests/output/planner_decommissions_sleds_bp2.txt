@@ -5,6 +5,7 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     state:::::::::::::   decommissioned
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP:   fd00:1122:3344:103::2e
 
     host phase 2 contents:
     ------------------------
@@ -119,6 +120,7 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP:   fd00:1122:3344:101::2f
 
     host phase 2 contents:
     ------------------------
@@ -234,6 +236,7 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP:   fd00:1122:3344:102::2e
 
     host phase 2 contents:
     ------------------------

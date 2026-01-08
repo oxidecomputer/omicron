@@ -7170,6 +7170,7 @@ dependencies = [
 name = "nexus-reconfigurator-blippy"
 version = "0.1.0"
 dependencies = [
+ "ipnet",
  "nexus-reconfigurator-planning",
  "nexus-types",
  "omicron-common",
@@ -7543,6 +7544,7 @@ dependencies = [
  "illumos-utils",
  "indent_write",
  "internal-dns-types",
+ "ipnet",
  "ipnetwork",
  "itertools 0.14.0",
  "newtype-uuid",

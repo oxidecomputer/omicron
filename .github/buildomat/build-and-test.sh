@@ -133,7 +133,7 @@ ptime -m cargo build -Z unstable-options --timings=json \
 # the test would have worked but the system was too overloaded and tests
 # take longer than their default timeouts.
 banner test
-ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose \
+ptime -m timeout 2h cargo nextest run --profile ci --locked \
     --test-threads -2
 
 #

@@ -31,6 +31,8 @@ use serde::Serialize;
 use std::net::IpAddr;
 use uuid::Uuid;
 
+use crate::v2026010300;
+
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
 /// at the time the instance is created.
 // NOTE: VPC's are an organizing concept for networking resources, not for
@@ -81,7 +83,7 @@ impl TryFrom<InstanceNetworkInterfaceAttachment>
                 .collect::<Result<_, _>>()
                 .map(Self::Create),
             InstanceNetworkInterfaceAttachment::Default => {
-                Ok(Self::DefaultDualStack)
+                Ok(Self::DefaultIpv4)
             }
             InstanceNetworkInterfaceAttachment::None => Ok(Self::None),
         }
@@ -255,7 +257,7 @@ impl TryFrom<InstanceNetworkInterfaceCreate>
                         transit_ips: ipv6_transit_ips,
                     })
                 } else {
-                    PrivateIpStackCreate::auto_dual_stack()
+                    PrivateIpStackCreate::auto_ipv4()
                 }
             }
             Some(IpAddr::V4(ipv4)) => {
@@ -325,8 +327,9 @@ pub struct InstanceCreate {
     /// By default, all instances have outbound connectivity, but no inbound
     /// connectivity. These external addresses can be used to provide a fixed,
     /// known IP address for making inbound connections to the instance.
+    // Delegates through v2026010300 → params::ExternalIpCreate
     #[serde(default)]
-    pub external_ips: Vec<params::ExternalIpCreate>,
+    pub external_ips: Vec<v2026010300::ExternalIpCreate>,
 
     /// The multicast groups this instance should join.
     ///
@@ -418,7 +421,11 @@ impl TryFrom<InstanceCreate> for params::InstanceCreate {
             hostname: value.hostname,
             user_data: value.user_data,
             network_interfaces,
-            external_ips: value.external_ips,
+            external_ips: value
+                .external_ips
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?,
             multicast_groups: value.multicast_groups,
             disks: value.disks,
             boot_disk: value.boot_disk,

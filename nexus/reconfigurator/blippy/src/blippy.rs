@@ -27,6 +27,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tufaceous_artifact::ArtifactHash;
 
@@ -138,6 +139,12 @@ pub enum SledKind {
     UnderlayIpOnWrongSubnet {
         zone: BlueprintZoneConfig,
         subnet: Ipv6Subnet<SLED_PREFIX>,
+    },
+    /// A sled has a zone with an IP that is above the sled's overall "last
+    /// allocated IP" value.
+    UnderlayIpAboveLastAllocatedIp {
+        zone: BlueprintZoneConfig,
+        last_allocated_ip: Ipv6Addr,
     },
     /// Two sleds are using the same sled subnet.
     ConflictingSledSubnets {
@@ -267,6 +274,19 @@ impl fmt::Display for SledKind {
                     zone.id,
                     zone.underlay_ip(),
                     subnet,
+                )
+            }
+            SledKind::UnderlayIpAboveLastAllocatedIp {
+                zone,
+                last_allocated_ip,
+            } => {
+                write!(
+                    f,
+                    "{:?} zone {} underlay IP {} is above the sled's last \
+                     allocated IP: {last_allocated_ip}",
+                    zone.zone_type.kind(),
+                    zone.id,
+                    zone.underlay_ip(),
                 )
             }
             SledKind::ConflictingSledSubnets { other_sled, subnet } => {
