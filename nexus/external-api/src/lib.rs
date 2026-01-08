@@ -3769,7 +3769,7 @@ pub trait NexusExternalApi {
     }]
     async fn trust_quorum_add_sleds(
         rqctx: RequestContext<Self::Context>,
-        sleds: TypedBody<params::UninitializedSledIds>,
+        req: TypedBody<params::TrustQuorumAddSledsRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Retrieve the latest trust quorum configuration, including member status.
@@ -3782,7 +3782,7 @@ pub trait NexusExternalApi {
     async fn trust_quorum_get_latest_config(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackPath>,
-    ) -> Result<HttpResponseOk<TrustQuorumConfig>, HttpError>;
+    ) -> Result<HttpResponseOk<Option<TrustQuorumConfig>>, HttpError>;
 
     // Racks
 

@@ -100,8 +100,9 @@ impl From<UninitializedSledId> for BaseboardId {
     PartialEq,
     Eq,
 )]
-pub struct UninitializedSledIds {
-    ids: BTreeSet<UninitializedSledId>,
+pub struct TrustQuorumAddSledsRequest {
+    pub rack_id: RackUuid,
+    pub sled_ids: BTreeSet<UninitializedSledId>,
 }
 
 path_param!(AffinityGroupPath, affinity_group, "affinity group");
