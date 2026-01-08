@@ -81,6 +81,7 @@ use dns_service_client::DnsError;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
+use nexus_lockstep_client::types::InitialTrustQuorumConfig;
 use nexus_lockstep_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
@@ -601,6 +602,7 @@ impl ServiceInner {
                     zones: zones_config.zones.into_iter().collect(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: Default::default(),
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
@@ -771,6 +773,7 @@ impl ServiceInner {
         service_plan: &ServicePlan,
         port_discovery_mode: ExternalPortDiscovery,
         nexus_lockstep_address: SocketAddrV6,
+        initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
@@ -1050,6 +1053,7 @@ impl ServiceInner {
             rack_network_config,
             external_port_count: port_discovery_mode.into(),
             allowed_source_ips,
+            initial_trust_quorum_configuration,
         };
 
         let notify_nexus = || async {
@@ -1282,7 +1286,10 @@ impl ServiceInner {
 
         rss_step.update(RssStep::InitTrustQuorum);
         // Initialize the trust quorum if there are peers configured.
-        if let Some(peers) = &config.trust_quorum_peers {
+
+        let initial_trust_quorum_configuration = if let Some(peers) =
+            &config.trust_quorum_peers
+        {
             let initial_membership: BTreeSet<_> =
                 peers.iter().cloned().collect();
             bootstore
@@ -1297,10 +1304,24 @@ impl ServiceInner {
                     .collect();
                 let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
 
-                init_trust_quorum(&self.log, trust_quorum, tq_members, rack_id)
-                    .await?;
+                init_trust_quorum(
+                    &self.log,
+                    trust_quorum.clone(),
+                    tq_members.clone(),
+                    rack_id,
+                )
+                .await?;
+
+                Some(InitialTrustQuorumConfig {
+                    members: tq_members.into_iter().collect(),
+                    coordinator: trust_quorum.baseboard_id().clone(),
+                })
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
 
         // Save the relevant network config in the bootstore. We want this to
         // happen before we `initialize_sleds` so each scrimlet (including us)
@@ -1479,6 +1500,7 @@ impl ServiceInner {
             &service_plan,
             ExternalPortDiscovery::Auto(switch_mgmt_addrs),
             nexus_lockstep_address,
+            initial_trust_quorum_configuration,
         )
         .await?;
 
@@ -1725,8 +1747,8 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
-        Inventory, InventoryDisk, OmicronZoneType, SledCpuFamily, SledRole,
-        ZoneImageResolverInventory,
+        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
+        OmicronZoneType, SledCpuFamily, SledRole,
     };
 
     fn make_sled_info(
@@ -1769,7 +1791,8 @@ mod test {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
-                zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                file_source_resolver:
+                    OmicronFileSourceResolverInventory::new_fake(),
                 health_monitor: HealthMonitorInventory::new(),
             },
             true,

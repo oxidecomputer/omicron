@@ -48,7 +48,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use scalar::ScalarEditor;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::ZoneKind;
-use std::iter;
 use std::mem;
 use std::net::Ipv6Addr;
 use underlay_ip_allocator::SledUnderlayIpAllocator;

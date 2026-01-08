@@ -1315,8 +1315,8 @@ mod tests {
     use oxnet::Ipv6Net;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::HealthMonitorInventory;
+    use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
-    use sled_agent_types::inventory::ZoneImageResolverInventory;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
     use sled_agent_types::rack_init::RecoverySiloConfig;
     use sled_hardware_types::Baseboard;
@@ -1536,7 +1536,8 @@ mod tests {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
-                zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                file_source_resolver:
+                    OmicronFileSourceResolverInventory::new_fake(),
                 health_monitor: HealthMonitorInventory::new(),
             },
             is_scrimlet,

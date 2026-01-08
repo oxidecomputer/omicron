@@ -1862,7 +1862,7 @@ impl<'a> Planner<'a> {
                 sled_id,
                 &sled_details.baseboard_id,
                 inv_sled
-                    .zone_image_resolver
+                    .file_source_resolver
                     .mupdate_override
                     .boot_override
                     .as_ref(),

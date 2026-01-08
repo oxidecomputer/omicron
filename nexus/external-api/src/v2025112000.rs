@@ -220,6 +220,7 @@ pub struct InstanceCreate {
     /// By default, all instances have outbound connectivity, but no inbound
     /// connectivity. These external addresses can be used to provide a fixed,
     /// known IP address for making inbound connections to the instance.
+    // Delegates through v2025121200 → params::ExternalIpCreate
     #[serde(default)]
     pub external_ips: Vec<v2025121200::ExternalIpCreate>,
 
