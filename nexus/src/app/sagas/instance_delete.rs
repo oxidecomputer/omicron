@@ -276,8 +276,9 @@ mod test {
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
             external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                pool: None,
-                ip_version: Some(IpVersion::V4),
+                pool_selector: params::PoolSelector::Auto {
+                    ip_version: Some(IpVersion::V4),
+                },
             }],
             boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },

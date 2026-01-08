@@ -45,6 +45,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
@@ -100,6 +101,7 @@ use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Logger, debug, error, o};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{once, repeat, zip};
@@ -977,6 +979,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     zones,
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: BTreeSet::new(),
                 })
                 .await
                 .expect("Failed to configure sled agent {sled_id} with zones");
@@ -1389,6 +1392,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 BlueprintSledConfig {
                     state: SledState::Active,
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                    last_allocated_ip_subnet_offset:
+                        LastAllocatedSubnetIpOffset::initial(),
                     sled_agent_generation,
                     disks,
                     datasets,

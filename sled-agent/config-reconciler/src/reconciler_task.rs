@@ -236,6 +236,8 @@ impl LatestReconciliationResult {
             zones: self.zones_inventory.clone(),
             boot_partitions: self.boot_partitions.clone(),
             remove_mupdate_override: self.remove_mupdate_override.clone(),
+            // TODO: this will come in another PR
+            measurements: IdOrdMap::new(),
         }
     }
 
@@ -468,7 +470,7 @@ impl ReconcilerTask {
         //
         // This status is obtained after remove_mupdate_override is processed.
         let resolver_status =
-            sled_agent_facilities.zone_image_resolver_status();
+            sled_agent_facilities.file_source_resolver_status();
 
         // Reconcile any changes to our boot partitions. This is typically a
         // no-op; if we've successfully read both boot partitions in a previous

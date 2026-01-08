@@ -177,6 +177,7 @@ impl HostPhase2SledAgentContext {
 struct HostPhase2SledAgentImpl;
 
 mod api_impl {
+
     use super::HostPhase2SledAgentContext;
     use super::HostPhase2SledAgentImpl;
     use camino::Utf8PathBuf;
@@ -246,10 +247,10 @@ mod api_impl {
     use sled_agent_types::inventory::Inventory;
     use sled_agent_types::inventory::ManifestInventory;
     use sled_agent_types::inventory::MupdateOverrideInventory;
+    use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
-    use sled_agent_types::inventory::ZoneImageResolverInventory;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::support_bundle::RangeRequestHeaders;
@@ -269,6 +270,7 @@ mod api_impl {
     use sled_agent_types::zone_bundle::ZonePathParam;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
     use std::time::Duration;
 
     // We only implement endpoints required for testing host OS updates. All
@@ -340,6 +342,7 @@ mod api_impl {
                     slot_a: HostPhase2DesiredContents::CurrentContents,
                     slot_b: HostPhase2DesiredContents::CurrentContents,
                 },
+                measurements: BTreeSet::new(),
             };
 
             Ok(HttpResponseOk(Inventory {
@@ -365,11 +368,20 @@ mod api_impl {
                     datasets: BTreeMap::new(),
                     orphaned_datasets: IdOrdMap::new(),
                     zones: BTreeMap::new(),
+                    measurements: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
-                zone_image_resolver: ZoneImageResolverInventory {
+                file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {
+                        boot_disk_path: Utf8PathBuf::new(),
+                        boot_inventory: Err(
+                            "not implemented by HostPhase2SledAgentImpl"
+                                .to_string(),
+                        ),
+                        non_boot_status: IdOrdMap::new(),
+                    },
+                    measurement_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
                         boot_inventory: Err(
                             "not implemented by HostPhase2SledAgentImpl"

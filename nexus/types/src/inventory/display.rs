@@ -618,7 +618,7 @@ fn display_sleds(
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
-            zone_image_resolver,
+            file_source_resolver,
             health_monitor,
         } = sled;
 
@@ -722,9 +722,9 @@ fn display_sleds(
         writeln!(indented, "zone image resolver status:")?;
         {
             let mut indent2 = IndentWriter::new("    ", &mut indented);
-            // Use write! rather than writeln! since zone_image_resolver.display()
+            // Use write! rather than writeln! since file_source_resolver.display()
             // always produces a newline at the end.
-            write!(indent2, "{}", zone_image_resolver.display())?;
+            write!(indent2, "{}", file_source_resolver.display())?;
         }
 
         if let Some(last_reconciliation) = &last_reconciliation {
@@ -736,6 +736,7 @@ fn display_sleds(
                 zones,
                 boot_partitions,
                 remove_mupdate_override,
+                measurements,
             } = last_reconciliation;
 
             display_boot_partition_contents(boot_partitions, &mut indented)?;
@@ -795,7 +796,7 @@ fn display_sleds(
                         remove_mupdate_override.non_boot_message
                     )?;
                 } else {
-                    match &zone_image_resolver.mupdate_override.boot_override {
+                    match &file_source_resolver.mupdate_override.boot_override {
                         Ok(Some(_)) => {
                             writeln!(
                                 indent2,
@@ -854,6 +855,16 @@ fn display_sleds(
                             writeln!(indent3, "{err}")?;
                         }
                     }
+                }
+            }
+
+            writeln!(indented, "reference measurements:")?;
+            let mut indent2 = IndentWriter::new("    ", &mut indented);
+            if measurements.is_empty() {
+                writeln!(indent2, "(measurement set is empty)")?;
+            } else {
+                for m in measurements {
+                    writeln!(indent2, "{}", m.display())?;
                 }
             }
         }
@@ -1134,6 +1145,7 @@ fn display_sled_config(
         zones,
         remove_mupdate_override,
         host_phase_2,
+        measurements,
     } = config;
 
     writeln!(f, "\n{label} SLED CONFIG")?;
@@ -1253,6 +1265,26 @@ fn display_sled_config(
             .with(tabled::settings::Padding::new(4, 1, 0, 0))
             .to_string();
         writeln!(indented, "ZONES: {}", zones.len())?;
+        writeln!(indented, "{table}")?;
+    }
+
+    if measurements.is_empty() {
+        writeln!(indented, "measurement empty")?;
+    } else {
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct MeasurementRow {
+            hash: String,
+        }
+
+        let rows = measurements
+            .iter()
+            .map(|m| MeasurementRow { hash: format!("artifact {}", m.hash) });
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(2, 1, 0, 0))
+            .to_string();
+        writeln!(indented, "MEASUREMENTS: {}", zones.len())?;
         writeln!(indented, "{table}")?;
     }
 

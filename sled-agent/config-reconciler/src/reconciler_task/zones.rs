@@ -1580,7 +1580,7 @@ mod tests {
                 .expect("test should populate responses for start_omicron_zone")
         }
 
-        fn zone_image_resolver_status(&self) -> ResolverStatus {
+        fn file_source_resolver_status(&self) -> ResolverStatus {
             self.inner.lock().unwrap().resolver_status.clone()
         }
 
