@@ -737,6 +737,7 @@ mod test {
     use sled_agent_types::inventory::OmicronZoneType;
     use sled_agent_types::inventory::SledCpuFamily;
     use slog::o;
+    use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::sync::Arc;
@@ -753,6 +754,7 @@ mod test {
             zones,
             remove_mupdate_override,
             host_phase_2,
+            measurements,
         } = config;
 
         swriteln!(s, "        generation: {generation}");
@@ -790,6 +792,14 @@ mod test {
                 zone.id,
                 zone.zone_type.kind().report_str(),
             );
+        }
+
+        swriteln!(s, "        measurements:");
+        for h in measurements {
+            swriteln!(s, "            artifact: {}", h.hash);
+        }
+        if measurements.is_empty() {
+            swriteln!(s, "            (empty)");
         }
     }
 
@@ -1004,6 +1014,7 @@ mod test {
                 },
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                measurements: BTreeSet::new(),
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

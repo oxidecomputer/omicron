@@ -3781,7 +3781,7 @@ mod migration_211 {
     }
 }
 
-mod migration_218 {
+mod migration_219 {
     use super::*;
     use pretty_assertions::assert_eq;
     use std::collections::BTreeMap;
@@ -4156,10 +4156,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
             .after(migration_211::after),
     );
     map.insert(
-        Version::new(218, 0, 0),
+        Version::new(219, 0, 0),
         DataMigrationFns::new()
-            .before(migration_218::before)
-            .after(migration_218::after),
+            .before(migration_219::before)
+            .after(migration_219::after),
     );
     map
 }
