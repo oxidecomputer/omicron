@@ -89,6 +89,21 @@ impl From<UninitializedSledId> for BaseboardId {
     }
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct UninitializedSledIds {
+    ids: BTreeSet<UninitializedSledId>,
+}
+
 path_param!(AffinityGroupPath, affinity_group, "affinity group");
 path_param!(AntiAffinityGroupPath, anti_affinity_group, "anti affinity group");
 path_param!(MulticastGroupPath, multicast_group, "multicast group");

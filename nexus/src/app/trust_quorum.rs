@@ -44,7 +44,6 @@ impl super::Nexus {
 
         // Read back the real configuration from the database. Importantly this
         // includes a chosen coordinator.
-        // Load the configuration for the last commmitted epoch
         let Some(new_config) =
             self.db_datastore.tq_get_config(opctx, rack_id, new_epoch).await?
         else {
@@ -118,6 +117,9 @@ impl super::Nexus {
         Ok(())
     }
 
+    // Create a new `ProposedTrustQuorumConfig` including `new_sleds` in
+    // the membership. Return an error if any of the new sleds exist in the
+    // `latest_committed_config` membership already.
     async fn add_sleds_proposed_config(
         &self,
         latest_committed_config: TrustQuorumConfig,

@@ -8,13 +8,19 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::RackUuid;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_with::{DisplayFromStr, serde_as};
 use sled_hardware_types::BaseboardId;
 use trust_quorum_types::{
     crypto::EncryptedRackSecrets, crypto::Sha3_256Digest, types::Epoch,
     types::Threshold,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum TrustQuorumConfigState {
     Preparing,
     PreparingLrtqUpgrade,
@@ -42,14 +48,19 @@ impl TrustQuorumConfigState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum TrustQuorumMemberState {
     Unacked,
     Prepared,
     Committed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
 pub struct TrustQuorumMemberData {
     pub state: TrustQuorumMemberState,
 
@@ -72,7 +83,8 @@ impl TrustQuorumMemberData {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TrustQuorumConfig {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
@@ -82,6 +94,7 @@ pub struct TrustQuorumConfig {
     pub commit_crash_tolerance: u8,
     pub coordinator: BaseboardId,
     pub encrypted_rack_secrets: Option<EncryptedRackSecrets>,
+    #[serde_as(as = "BTreeMap<DisplayFromStr, _>")]
     pub members: BTreeMap<BaseboardId, TrustQuorumMemberData>,
     pub time_created: DateTime<Utc>,
     pub time_committing: Option<DateTime<Utc>>,
