@@ -7,7 +7,6 @@
 use crate::CollectionBuilder;
 use crate::now_db_precision;
 use camino::Utf8Path;
-use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use clickhouse_admin_types::keeper::KeeperId;
 use gateway_client::types::PowerState;
@@ -668,20 +667,14 @@ pub fn representative() -> Representative {
                 zone_image_resolver(ZoneImageResolverExampleKind::Error),
                 HealthMonitorInventory {
                     smf_services_in_maintenance: Ok(SvcsInMaintenanceResult {
-                        services: vec![
-                            SvcInMaintenance {
-                                fmri: "svc:/site/fake-service:default"
-                                    .to_string(),
-                                zone: "global".to_string(),
-                            },
-                            SvcInMaintenance {
-                                fmri: "svc:/site/fake-service2:default"
-                                    .to_string(),
-                                zone: "global".to_string(),
-                            },
-                        ],
+                        services: vec![SvcInMaintenance {
+                            fmri: "svc:/site/fake-service:default".to_string(),
+                            zone: "global".to_string(),
+                        }],
                         errors: vec![],
-                        time_of_status: Some(Utc::now()),
+                        time_of_status: Some(
+                            "2026-01-01T00:00:00Z".parse().unwrap(),
+                        ),
                     }),
                 },
             ),
