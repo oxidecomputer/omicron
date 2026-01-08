@@ -3781,6 +3781,206 @@ mod migration_211 {
     }
 }
 
+mod migration_218 {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    // Randomly-generated test UUIDs
+    const TEST_SILO_ID: &str = "a1a1a1a1-0000-4000-8000-000000000001";
+    const TEST_PROJECT_ID: &str = "b2b2b2b2-0000-4000-8000-000000000002";
+    const TEST_PROJECT_IMAGE_ID: &str = "c3c3c3c3-0000-4000-8000-000000000003";
+    const TEST_SILO_IMAGE_ID: &str = "d4d4d4d4-0000-4000-8000-000000000004";
+    const TEST_VOLUME_ID_1: &str = "e5e5e5e5-0000-4000-8000-000000000005";
+    const TEST_VOLUME_ID_2: &str = "f6f6f6f6-0000-4000-8000-000000000006";
+
+    // 1 GiB and 2 GiB in bytes
+    const PROJECT_IMAGE_SIZE: i64 = 1073741824;
+    const SILO_IMAGE_SIZE: i64 = 2147483648;
+
+    async fn before_impl(ctx: &MigrationContext<'_>) {
+        // Insert test silo with quotas and virtual_provisioning_collection
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO omicron.public.silo (
+                    id, name, description, time_created, time_modified,
+                    discoverable, authentication_mode, user_provision_type,
+                    mapped_fleet_roles, rcgen
+                ) VALUES (
+                    '{TEST_SILO_ID}', 'migration-218-silo', 'Test silo',
+                    now(), now(), true, 'local', 'jit', '{{}}', 1
+                );
+
+                INSERT INTO omicron.public.silo_quotas (
+                    silo_id, cpus, memory_bytes, storage_bytes,
+                    time_created, time_modified
+                ) VALUES (
+                    '{TEST_SILO_ID}', 100, 1099511627776, 10995116277760,
+                    now(), now()
+                );
+
+                INSERT INTO omicron.public.virtual_provisioning_collection (
+                    id, time_modified, collection_type,
+                    virtual_disk_bytes_provisioned, cpus_provisioned,
+                    ram_provisioned
+                ) VALUES (
+                    '{TEST_SILO_ID}', now(), 'Silo', 0, 0, 0
+                );
+
+                INSERT INTO omicron.public.project (
+                    id, name, description, time_created, time_modified, silo_id, rcgen
+                ) VALUES (
+                    '{TEST_PROJECT_ID}', 'migration-218-project', 'Test project',
+                    now(), now(), '{TEST_SILO_ID}', 1
+                );
+
+                INSERT INTO omicron.public.virtual_provisioning_collection (
+                    id, time_modified, collection_type,
+                    virtual_disk_bytes_provisioned, cpus_provisioned,
+                    ram_provisioned
+                ) VALUES (
+                    '{TEST_PROJECT_ID}', now(), 'Project', 0, 0, 0
+                );
+
+                INSERT INTO omicron.public.image (
+                    id, name, description, time_created, time_modified,
+                    silo_id, project_id, volume_id, os, version,
+                    block_size, size_bytes
+                ) VALUES (
+                    '{TEST_PROJECT_IMAGE_ID}', 'project-image', 'Test project image',
+                    now(), now(), '{TEST_SILO_ID}', '{TEST_PROJECT_ID}',
+                    '{TEST_VOLUME_ID_1}', 'linux', '1.0', '512',
+                    {PROJECT_IMAGE_SIZE}
+                );
+
+                INSERT INTO omicron.public.image (
+                    id, name, description, time_created, time_modified,
+                    silo_id, project_id, volume_id, os, version,
+                    block_size, size_bytes
+                ) VALUES (
+                    '{TEST_SILO_IMAGE_ID}', 'silo-image', 'Test silo image',
+                    now(), now(), '{TEST_SILO_ID}', NULL,
+                    '{TEST_VOLUME_ID_2}', 'linux', '1.0', '512',
+                    {SILO_IMAGE_SIZE}
+                );
+                "
+            ))
+            .await
+            .expect("inserted pre-migration data");
+    }
+
+    async fn after_impl(ctx: &MigrationContext<'_>) {
+        let project_image_id: Uuid = TEST_PROJECT_IMAGE_ID.parse().unwrap();
+        let silo_image_id: Uuid = TEST_SILO_IMAGE_ID.parse().unwrap();
+        let project_id: Uuid = TEST_PROJECT_ID.parse().unwrap();
+        let silo_id: Uuid = TEST_SILO_ID.parse().unwrap();
+
+        // Verify virtual_provisioning_resource entries were created for images
+        let resource_rows = ctx
+            .client
+            .query(
+                "
+                SELECT id, resource_type, virtual_disk_bytes_provisioned
+                FROM omicron.public.virtual_provisioning_resource
+                WHERE id IN ($1, $2)
+                ORDER BY id
+                ",
+                &[&project_image_id, &silo_image_id],
+            )
+            .await
+            .expect("queried virtual_provisioning_resource");
+
+        assert_eq!(
+            resource_rows.len(),
+            2,
+            "Expected 2 virtual_provisioning_resource entries for images"
+        );
+
+        for row in &resource_rows {
+            let resource_type: String = row.get("resource_type");
+            assert_eq!(
+                resource_type, "image",
+                "Resource type should be 'image'"
+            );
+        }
+
+        // Verify project collection was updated (should have PROJECT_IMAGE_SIZE)
+        let project_row = ctx
+            .client
+            .query_one(
+                "
+                SELECT virtual_disk_bytes_provisioned
+                FROM omicron.public.virtual_provisioning_collection
+                WHERE id = $1
+                ",
+                &[&project_id],
+            )
+            .await
+            .expect("queried project collection");
+        let project_bytes: i64 = project_row.get(0);
+        assert_eq!(
+            project_bytes, PROJECT_IMAGE_SIZE,
+            "Project should have {} bytes provisioned",
+            PROJECT_IMAGE_SIZE
+        );
+
+        // Verify silo collection was updated
+        // (should have PROJECT_IMAGE_SIZE + SILO_IMAGE_SIZE)
+        let silo_row = ctx
+            .client
+            .query_one(
+                "
+                SELECT virtual_disk_bytes_provisioned
+                FROM omicron.public.virtual_provisioning_collection
+                WHERE id = $1
+                ",
+                &[&silo_id],
+            )
+            .await
+            .expect("queried silo collection");
+        let silo_bytes: i64 = silo_row.get(0);
+        let expected_silo_bytes = PROJECT_IMAGE_SIZE + SILO_IMAGE_SIZE;
+        assert_eq!(
+            silo_bytes, expected_silo_bytes,
+            "Silo should have {} bytes provisioned",
+            expected_silo_bytes
+        );
+
+        // Clean up test data to not affect other tests
+        ctx.client
+            .batch_execute(&format!(
+                "
+                DELETE FROM omicron.public.virtual_provisioning_resource
+                WHERE id IN ('{TEST_PROJECT_IMAGE_ID}', '{TEST_SILO_IMAGE_ID}');
+
+                DELETE FROM omicron.public.image
+                WHERE id IN ('{TEST_PROJECT_IMAGE_ID}', '{TEST_SILO_IMAGE_ID}');
+
+                DELETE FROM omicron.public.virtual_provisioning_collection
+                WHERE id IN ('{TEST_PROJECT_ID}', '{TEST_SILO_ID}');
+
+                DELETE FROM omicron.public.project WHERE id = '{TEST_PROJECT_ID}';
+                DELETE FROM omicron.public.silo_quotas WHERE silo_id = '{TEST_SILO_ID}';
+                DELETE FROM omicron.public.silo WHERE id = '{TEST_SILO_ID}';
+                "
+            ))
+            .await
+            .expect("cleaned up test data");
+    }
+
+    pub(super) fn before<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(before_impl(ctx))
+    }
+
+    pub(super) fn after<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(after_impl(ctx))
+    }
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -3900,6 +4100,12 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new()
             .before(migration_211::before)
             .after(migration_211::after),
+    );
+    map.insert(
+        Version::new(218, 0, 0),
+        DataMigrationFns::new()
+            .before(migration_218::before)
+            .after(migration_218::after),
     );
     map
 }
