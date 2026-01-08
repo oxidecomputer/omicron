@@ -1018,19 +1018,16 @@ impl_enum_type!(
     Idle => b"idle"
 );
 
-// TODO-K: add docs and move type elsewhere?
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_health_monitor_svc_in_maintenance)]
 pub struct InvSvcInMaintenance {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    // TODO-K: Is this ID necessary?
     pub id: DbTypedUuid<SvcInMaintenanceKind>,
     pub fmri: Option<String>,
     pub zone: Option<String>,
     pub error_messages: Vec<String>,
     pub svcs_cmd_error: Option<String>,
-    // TODO-K: Check if this needs to be an option
     pub time_of_status: Option<DateTime<Utc>>,
 }
 

@@ -209,49 +209,55 @@ impl DataStore {
             }
         }
 
-        // TODO-K: Clean up
         // Pull services in maintenance out of all sled agents
-        let mut svcs_in_maintenance = vec![];
-
-        for sled_agent in &collection.sled_agents {
-            match &sled_agent.health_monitor.smf_services_in_maintenance {
-                Ok(svcs) => {
+        let svcs_in_maintenance: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                match &sled_agent.health_monitor.smf_services_in_maintenance {
                     // When there are no services in maintenance, we will still
                     // want to insert a row with the time the health check was
                     // made and any parsing errors we may have collected.
-                    if svcs.services.is_empty() && svcs.time_of_status.is_some()
+                    Ok(svcs)
+                        if svcs.services.is_empty()
+                            && svcs.time_of_status.is_some() =>
                     {
-                        svcs_in_maintenance.push(InvSvcInMaintenance::new(
+                        vec![InvSvcInMaintenance::new(
                             collection_id,
                             sled_agent.sled_id,
                             None,
                             svcs.errors.clone(),
                             None,
                             svcs.time_of_status,
-                        ));
-                    } else {
-                        for svc in &svcs.services {
-                            svcs_in_maintenance.push(InvSvcInMaintenance::new(
+                        )]
+                    }
+                    Ok(svcs) => svcs
+                        .services
+                        .iter()
+                        .map(|svc| {
+                            InvSvcInMaintenance::new(
                                 collection_id,
                                 sled_agent.sled_id,
                                 Some(svc.clone()),
                                 svcs.errors.clone(),
                                 None,
                                 svcs.time_of_status,
-                            ));
-                        }
+                            )
+                        })
+                        .collect(),
+                    Err(e) => {
+                        vec![InvSvcInMaintenance::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            None,
+                            vec![],
+                            Some(e.to_string()),
+                            None,
+                        )]
                     }
                 }
-                Err(e) => svcs_in_maintenance.push(InvSvcInMaintenance::new(
-                    collection_id,
-                    sled_agent.sled_id,
-                    None,
-                    vec![],
-                    Some(e.to_string()),
-                    None,
-                )),
-            }
-        }
+            })
+            .collect();
 
         // Pull disks out of all sled agents
         let disks: Vec<_> = collection
@@ -2656,7 +2662,6 @@ impl DataStore {
             disk_firmware
         };
 
-        // TODO-K: Take inspiration here
         // Mapping of "Sled ID" -> "All disks reported by that sled"
         let physical_disks: BTreeMap<
             SledUuid,
@@ -2711,7 +2716,6 @@ impl DataStore {
             disks
         };
 
-        // TODO-K: get inspiration ID here
         // Mapping of "Sled ID" -> "All zpools reported by that sled"
         let zpools: BTreeMap<Uuid, Vec<nexus_types::inventory::Zpool>> = {
             use nexus_db_schema::schema::inv_zpool::dsl;
@@ -2782,7 +2786,6 @@ impl DataStore {
             datasets
         };
 
-        // TODO-K: fix
         // Mapping of "Sled ID" -> "All SMF services in maintenance reported by
         // that sled"
         let mut svcs_in_maintenance_by_sled = {
@@ -4071,55 +4074,48 @@ impl DataStore {
                     ))
                 })?;
 
-            // TODO-K; Clean up
             // Convert all health checks into a full `HealthMonitorInventory`
             let mut health_monitor = HealthMonitorInventory::new();
 
             let svcs_in_maintenance = svcs_in_maintenance_by_sled
                 .remove(&sled_id.into_untyped_uuid())
                 .map(|rows| {
-                    // TODO-K: Clean up
-                    if let Some(e) = rows[0].svcs_cmd_error.clone() {
-                        return Err(e);
+                    // Get metadata from the first row. All rows from the same
+                    // collection and sled will share time_of_status,
+                    // svcs_cmd_error and error_messages.
+                    let first_row =
+                        rows.first().expect("rows should not be empty");
+
+                    // Check if the svcs command itself failed first. If so, we
+                    // can safely assume no services in maintenance have been
+                    // reported and return an error.
+                    if let Some(e) = &first_row.svcs_cmd_error {
+                        return Err(e.clone());
                     }
 
-                    let mut services = vec![];
-                    for svc in &rows {
-                        if svc.fmri.is_none() && svc.zone.is_none() {
-                            continue;
-                        }
-
-                        // All rows should have both zone and FMRI populated or
-                        // none at all. Nevertheless, we'll handle the case of a
-                        // partially populated row.
-                        let fmri = if let Some(f) = svc.fmri.clone() {
-                            f
-                        } else {
-                            "".to_string()
-                        };
-                        let zone = if let Some(z) = svc.zone.clone() {
-                            z
-                        } else {
-                            "".to_string()
-                        };
-
-                        services.push(SvcInMaintenance { fmri, zone })
-                    }
+                    // Convert database rows to service in maintenance entries.
+                    // All rows should have both zone and FMRI populated or none
+                    // at all. Nevertheless, we'll handle the case of a
+                    // partially populated row.
+                    let services: Vec<SvcInMaintenance> = rows
+                        .iter()
+                        .filter(|svc| svc.fmri.is_some() || svc.zone.is_some())
+                        .map(|svc| SvcInMaintenance {
+                            fmri: svc.fmri.clone().unwrap_or_default(),
+                            zone: svc.zone.clone().unwrap_or_default(),
+                        })
+                        .collect();
 
                     Ok(SvcsInMaintenanceResult {
                         services,
-                        errors: rows[0].error_messages.clone(),
-                        time_of_status: rows[0].time_of_status,
+                        errors: first_row.error_messages.clone(),
+                        time_of_status: first_row.time_of_status,
                     })
                 });
 
             if let Some(svcs) = svcs_in_maintenance {
-                // TODO-K: removeme
-                println!("DEBUG {svcs:?}");
                 health_monitor.smf_services_in_maintenance = svcs
             };
-
-            // TODO-K: End of clean up bit
 
             let sled_agent = nexus_types::inventory::SledAgent {
                 time_collected: s.time_collected,
@@ -4157,8 +4153,6 @@ impl DataStore {
                 reconciler_status,
                 last_reconciliation,
                 zone_image_resolver,
-                // TODO-K[omicron#9516]: Actually query the DB when there is
-                // something there
                 health_monitor,
             };
             sled_agents
