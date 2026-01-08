@@ -38,11 +38,11 @@ pub(crate) struct Params {
 
 declare_saga_actions! {
     image_delete;
-    SPACE_ACCOUNT -> "no_result0" {
-        + sid_account_space
-    }
-    DELETE_IMAGE_RECORD -> "no_result1" {
+    DELETE_IMAGE_RECORD -> "no_result0" {
         + sid_delete_image_record
+    }
+    SPACE_ACCOUNT -> "no_result1" {
+        + sid_account_space
     }
 }
 
@@ -60,8 +60,8 @@ impl NexusSaga for SagaImageDelete {
         params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(space_account_action());
         builder.append(delete_image_record_action());
+        builder.append(space_account_action());
 
         const DELETE_VOLUME_PARAMS: &'static str = "delete_volume_params";
 
