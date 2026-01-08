@@ -273,7 +273,6 @@ pub(super) mod tests {
     const EXPECTORATE_V14_CONFIG_PATH: &str =
         "expectorate/v14-sled-config.json";
 
-
     // This is solely an expectorate test to guarantee:
     //
     // * the conversions for various versions function (at least starting from
@@ -319,7 +318,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn read_config_converts_from_older_versions() {
-        let logctx = dev::test_setup_log("read_config_converts_from_older_versions");
+        let logctx =
+            dev::test_setup_log("read_config_converts_from_older_versions");
         let log = &logctx.log;
 
         // All our configs should match the latest version. We use an explicit
