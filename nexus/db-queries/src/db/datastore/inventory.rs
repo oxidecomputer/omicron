@@ -1950,6 +1950,7 @@ impl DataStore {
             nmupdate_override_non_boot: usize,
             nconfig_reconcilers: usize,
             nboot_partitions: usize,
+            nhealth_monitor_svc_in_maintenance: usize,
             nomicron_sled_configs: usize,
             nomicron_sled_config_disks: usize,
             nomicron_sled_config_datasets: usize,
@@ -1984,6 +1985,7 @@ impl DataStore {
             nmupdate_override_non_boot,
             nconfig_reconcilers,
             nboot_partitions,
+            nhealth_monitor_svc_in_maintenance,
             nomicron_sled_configs,
             nomicron_sled_config_disks,
             nomicron_sled_config_datasets,
@@ -2188,6 +2190,16 @@ impl DataStore {
                         .await?
                     };
 
+                    // Remove rows associated with the health monitor
+                    let nhealth_monitor_svc_in_maintenance = {
+                        use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
+                        diesel::delete(dsl::inv_health_monitor_svc_in_maintenance.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     // Remove rows associated with `OmicronSledConfig`s.
                     let nomicron_sled_configs = {
                         use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
@@ -2295,8 +2307,6 @@ impl DataStore {
                         .await?
                     };
 
-                    // TODO-K: Remove rows for health monitor
-
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
@@ -2318,6 +2328,7 @@ impl DataStore {
                         nmupdate_override_non_boot,
                         nconfig_reconcilers,
                         nboot_partitions,
+                        nhealth_monitor_svc_in_maintenance,
                         nomicron_sled_configs,
                         nomicron_sled_config_disks,
                         nomicron_sled_config_datasets,
@@ -2362,6 +2373,7 @@ impl DataStore {
             "nmupdate_override_non_boot" => nmupdate_override_non_boot,
             "nconfig_reconcilers" => nconfig_reconcilers,
             "nboot_partitions" => nboot_partitions,
+            "nhealth_monitor_svc_in_maintenance" => nhealth_monitor_svc_in_maintenance,
             "nomicron_sled_configs" => nomicron_sled_configs,
             "nomicron_sled_config_disks" => nomicron_sled_config_disks,
             "nomicron_sled_config_datasets" => nomicron_sled_config_datasets,
@@ -2373,7 +2385,6 @@ impl DataStore {
             "ncockroach_status" => ncockroach_status,
             "nntp_timesync" => nntp_timesync,
             "ninternal_dns" => ninternal_dns,
-            // TODO-K: add health monitor rows here too
         );
 
         Ok(())
