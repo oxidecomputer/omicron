@@ -602,6 +602,7 @@ impl ServiceInner {
                     zones: zones_config.zones.into_iter().collect(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: Default::default(),
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
@@ -1746,8 +1747,8 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
-        Inventory, InventoryDisk, OmicronZoneType, SledCpuFamily, SledRole,
-        ZoneImageResolverInventory,
+        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
+        OmicronZoneType, SledCpuFamily, SledRole,
     };
 
     fn make_sled_info(
@@ -1790,7 +1791,8 @@ mod test {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
-                zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                file_source_resolver:
+                    OmicronFileSourceResolverInventory::new_fake(),
                 health_monitor: HealthMonitorInventory::new(),
             },
             true,
