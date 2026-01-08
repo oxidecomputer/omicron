@@ -8110,7 +8110,6 @@ dependencies = [
  "serde_with",
  "slog",
  "slog-error-chain",
- "static_assertions",
  "strum 0.27.2",
  "test-strategy",
  "thiserror 2.0.17",
