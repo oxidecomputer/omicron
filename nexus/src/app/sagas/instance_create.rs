@@ -920,12 +920,20 @@ async fn sic_allocate_instance_external_ip(
     // Runtime state should never be able to make 'complete_op' fallible.
     let ip = match ip_params {
         // Allocate a new IP address from the target, possibly default, pool
-        params::ExternalIpCreate::Ephemeral { pool, ip_version } => {
+        params::ExternalIpCreate::Ephemeral { pool_selector } => {
+            let (pool, ip_version) = match pool_selector {
+                params::PoolSelector::Explicit { pool } => {
+                    (Some(pool.clone()), None)
+                }
+                params::PoolSelector::Auto { ip_version } => {
+                    (None, *ip_version)
+                }
+            };
             let pool = if let Some(name_or_id) = pool {
                 Some(
                     osagactx
                         .nexus()
-                        .ip_pool_lookup(&opctx, name_or_id)
+                        .ip_pool_lookup(&opctx, &name_or_id)
                         .map_err(ActionError::action_failed)?
                         .lookup_for(authz::Action::CreateChild)
                         .await
@@ -1547,8 +1555,9 @@ pub mod test {
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                    pool: None,
-                    ip_version: Some(IpVersion::V4),
+                    pool_selector: params::PoolSelector::Auto {
+                        ip_version: Some(IpVersion::V4),
+                    },
                 }],
                 boot_disk: Some(params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {

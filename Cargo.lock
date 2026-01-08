@@ -7055,6 +7055,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-types-versions",
+ "sled-hardware-types",
  "slog",
  "uuid",
 ]
@@ -7169,6 +7170,7 @@ dependencies = [
 name = "nexus-reconfigurator-blippy"
 version = "0.1.0"
 dependencies = [
+ "ipnet",
  "nexus-reconfigurator-planning",
  "nexus-types",
  "omicron-common",
@@ -7542,6 +7544,7 @@ dependencies = [
  "illumos-utils",
  "indent_write",
  "internal-dns-types",
+ "ipnet",
  "ipnetwork",
  "itertools 0.14.0",
  "newtype-uuid",
@@ -13024,10 +13027,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "async-recursion",
  "async-trait",
  "bytes",
  "camino",
  "camino-tempfile",
+ "camino-tempfile-ext",
  "chrono",
  "debug-ignore",
  "derive_more 0.99.20",

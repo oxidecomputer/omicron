@@ -1357,27 +1357,46 @@ pub struct IpPoolSiloUpdate {
 }
 
 // Floating IPs
+
+/// Specify how to allocate a floating IP address.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AddressSelector {
+    /// Reserve a specific IP address.
+    Explicit {
+        /// The IP address to reserve. Must be available in the pool.
+        ip: IpAddr,
+        /// The pool containing this address. If not specified, the default
+        /// pool for the address's IP version is used.
+        pool: Option<NameOrId>,
+    },
+    /// Automatically allocate an IP address from a specified pool.
+    Auto {
+        /// Pool selection.
+        ///
+        /// If omitted, this field uses the silo's default pool. If the
+        /// silo has default pools for both IPv4 and IPv6, the request will
+        /// fail unless `ip_version` is specified in the pool selector.
+        #[serde(default)]
+        pool_selector: PoolSelector,
+    },
+}
+
+impl Default for AddressSelector {
+    fn default() -> Self {
+        AddressSelector::Auto { pool_selector: PoolSelector::default() }
+    }
+}
+
 /// Parameters for creating a new floating IP address for instances.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FloatingIpCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// An IP address to reserve for use as a floating IP. This field is
-    /// optional: when not set, an address will be automatically chosen from
-    /// `pool`. If set, then the IP must be available in the resolved `pool`.
-    pub ip: Option<IpAddr>,
-
-    /// The parent IP pool that a floating IP is pulled from. If unset, the
-    /// default pool is selected.
-    pub pool: Option<NameOrId>,
-
-    /// IP version to use when allocating from the default pool.
-    /// Only used when both `ip` and `pool` are not specified. Required if
-    /// multiple default pools of different IP versions exist. Allocation
-    /// fails if no pool of the requested version is available.
+    /// IP address allocation method.
     #[serde(default)]
-    pub ip_version: Option<IpVersion>,
+    pub address_selector: AddressSelector,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1481,21 +1500,40 @@ pub struct InstanceDiskAttach {
     pub name: Name,
 }
 
+/// Specify which IP pool to allocate from.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PoolSelector {
+    /// Use the specified pool by name or ID.
+    Explicit {
+        /// The pool to allocate from.
+        pool: NameOrId,
+    },
+    /// Use the default pool for the silo.
+    Auto {
+        /// IP version to use when multiple default pools exist.
+        /// Required if both IPv4 and IPv6 default pools are configured.
+        #[serde(default)]
+        ip_version: Option<IpVersion>,
+    },
+}
+
+impl Default for PoolSelector {
+    fn default() -> Self {
+        PoolSelector::Auto { ip_version: None }
+    }
+}
+
 /// Parameters for creating an external IP address for instances.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalIpCreate {
     /// An IP address providing both inbound and outbound access. The address is
-    /// automatically assigned from the provided IP pool or the default IP pool
-    /// if not specified.
+    /// automatically assigned from a pool.
     Ephemeral {
-        pool: Option<NameOrId>,
-        /// IP version to use when allocating from the default pool.
-        /// Only used when `pool` is not specified. Required if multiple default
-        /// pools of different IP versions exist. Allocation fails if no pool
-        /// of the requested version is available.
+        /// Pool to allocate from.
         #[serde(default)]
-        ip_version: Option<IpVersion>,
+        pool_selector: PoolSelector,
     },
     /// An IP address providing both inbound and outbound access. The address is
     /// an existing floating IP object assigned to the current project.
@@ -1506,18 +1544,10 @@ pub enum ExternalIpCreate {
 
 /// Parameters for creating an ephemeral IP address for an instance.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub struct EphemeralIpCreate {
-    /// Name or ID of the IP pool used to allocate an address. If unspecified,
-    /// the default IP pool will be used.
-    pub pool: Option<NameOrId>,
-
-    /// IP version to use when allocating from the default pool.
-    /// Only used when `pool` is not specified. Required if multiple default
-    /// pools of different IP versions exist. Allocation fails if no pool
-    /// of the requested version is available.
+    /// Pool to allocate from.
     #[serde(default)]
-    pub ip_version: Option<IpVersion>,
+    pub pool_selector: PoolSelector,
 }
 
 /// Parameters for detaching an external IP from an instance.
@@ -2810,7 +2840,9 @@ pub struct ProbeCreate {
     pub identity: IdentityMetadataCreateParams,
     #[schemars(with = "Uuid")]
     pub sled: SledUuid,
-    pub ip_pool: Option<NameOrId>,
+    /// Pool to allocate from.
+    #[serde(default)]
+    pub pool_selector: PoolSelector,
 }
 
 /// List probes with an optional name or id.
