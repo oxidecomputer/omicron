@@ -102,18 +102,21 @@ pub mod inventory {
     pub use crate::v1::inventory::SledCpuFamily;
     pub use crate::v1::inventory::SledRole;
     pub use crate::v1::inventory::ZoneArtifactInventory;
-    pub use crate::v1::inventory::ZoneImageResolverInventory;
     pub use crate::v1::inventory::ZoneKind;
 
-    pub use crate::v11::inventory::ConfigReconcilerInventory;
-    pub use crate::v11::inventory::ConfigReconcilerInventoryStatus;
-    pub use crate::v11::inventory::OmicronSledConfig;
     pub use crate::v11::inventory::OmicronZoneConfig;
     pub use crate::v11::inventory::OmicronZoneType;
     pub use crate::v11::inventory::OmicronZonesConfig;
 
     pub use crate::v12::inventory::HealthMonitorInventory;
-    pub use crate::v12::inventory::Inventory;
+
+    pub use crate::v14::inventory::ConfigReconcilerInventory;
+    pub use crate::v14::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v14::inventory::Inventory;
+    pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
+    pub use crate::v14::inventory::OmicronSingleMeasurement;
+    pub use crate::v14::inventory::OmicronSledConfig;
+    pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
@@ -121,8 +124,8 @@ pub mod inventory {
     pub use crate::impls::inventory::MupdateOverrideBootInventoryDisplay;
     pub use crate::impls::inventory::MupdateOverrideInventoryDisplay;
     pub use crate::impls::inventory::MupdateOverrideNonBootInventoryDisplay;
+    pub use crate::impls::inventory::OmicronFileSourceResolverInventoryDisplay;
     pub use crate::impls::inventory::ZoneArtifactInventoryDisplay;
-    pub use crate::impls::inventory::ZoneImageResolverInventoryDisplay;
 }
 
 pub mod probes {
@@ -138,10 +141,8 @@ pub mod rack_init {
 
 pub mod sled {
     pub use crate::v1::sled::AddSledRequest;
-    pub use crate::v1::sled::BaseboardId;
     pub use crate::v1::sled::StartSledAgentRequest;
     pub use crate::v1::sled::StartSledAgentRequestBody;
-    pub use crate::v1::sled::UnknownBaseboardError;
 }
 
 pub mod support_bundle {
@@ -153,6 +154,14 @@ pub mod support_bundle {
     pub use crate::v1::support_bundle::SupportBundlePathParam;
     pub use crate::v1::support_bundle::SupportBundleState;
     pub use crate::v1::support_bundle::SupportBundleTransferQueryParams;
+}
+
+pub mod trust_quorum {
+    // HTTP request types specific to the sled-agent API: the rest of the types
+    // used in the API are inherent to the Trust Quorum protocol and are defined
+    // in the crate trust-quorum-types:
+    pub use crate::v13::trust_quorum::ProxyCommitRequest;
+    pub use crate::v13::trust_quorum::ProxyPrepareAndCommitRequest;
 }
 
 pub mod zone_bundle {

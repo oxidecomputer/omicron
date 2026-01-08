@@ -19,7 +19,7 @@ use omicron_common::api::internal::{
         SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
     },
 };
-use sled_agent_types_versions::{latest, v1, v4, v6, v7, v9, v10, v11};
+use sled_agent_types_versions::{latest, v1, v4, v6, v7, v9, v10, v11, v12};
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
 api_versions!([
@@ -34,6 +34,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (14, MEASUREMENTS),
+    (13, ADD_TRUST_QUORUM),
     (12, ADD_SMF_SERVICES_HEALTH_CHECK),
     (11, ADD_DUAL_STACK_EXTERNAL_IP_CONFIG),
     (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
@@ -332,12 +334,28 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..
+        versions = VERSION_MEASUREMENTS..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "omicron_config_put",
+        method = PUT,
+        path = "/omicron-config",
+        versions =
+            VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..VERSION_MEASUREMENTS,
+    }]
+    async fn omicron_config_put_v11(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v11::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body =
+            body.try_map(latest::inventory::OmicronSledConfig::try_from)?;
+        Self::omicron_config_put(rqctx, body).await
+    }
 
     #[endpoint {
         operation_id = "omicron_config_put",
@@ -350,9 +368,8 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v10::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body =
-            body.try_map(latest::inventory::OmicronSledConfig::try_from)?;
-        Self::omicron_config_put(rqctx, body).await
+        let body = body.try_map(v11::inventory::OmicronSledConfig::try_from)?;
+        Self::omicron_config_put_v11(rqctx, body).await
     }
 
     #[endpoint {
@@ -724,7 +741,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_SMF_SERVICES_HEALTH_CHECK..,
+        versions = VERSION_MEASUREMENTS..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
@@ -735,13 +752,26 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions =
-            VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..VERSION_ADD_SMF_SERVICES_HEALTH_CHECK,
+        versions = VERSION_ADD_SMF_SERVICES_HEALTH_CHECK..VERSION_MEASUREMENTS,
+    }]
+    async fn inventory_v12(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v12::inventory::Inventory>, HttpError> {
+        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
+        inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..VERSION_ADD_SMF_SERVICES_HEALTH_CHECK,
     }]
     async fn inventory_v11(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v11::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v12(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v11::inventory::Inventory::from(inv))
         })
     }
@@ -1065,4 +1095,100 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         path_params: Path<latest::dataset::LocalStoragePathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate a trust quorum reconfiguration
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/configuration",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_reconfigure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<trust_quorum_types::messages::ReconfigureMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate an upgrade from LRTQ
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/upgrade",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_upgrade_from_lrtq(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<trust_quorum_types::messages::LrtqUpgradeMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Commit a trust quorum configuration
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<trust_quorum_types::messages::CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the coordinator status if this node is coordinating a reconfiguration
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/coordinator-status",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_coordinator_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<Option<trust_quorum_types::status::CoordinatorStatus>>,
+        HttpError,
+    >;
+
+    /// Attempt to prepare and commit a trust quorum configuration
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/prepare-and-commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<trust_quorum_types::messages::PrepareAndCommitRequest>,
+    ) -> Result<
+        HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+        HttpError,
+    >;
+
+    /// Proxy a commit operation to another trust quorum node
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/proxy/commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_proxy_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Proxy a prepare-and-commit operation to another trust quorum node
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/proxy/prepare-and-commit",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_proxy_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::ProxyPrepareAndCommitRequest>,
+    ) -> Result<
+        HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+        HttpError,
+    >;
+
+    /// Proxy a status request to another trust quorum node
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/proxy/status",
+        versions = VERSION_ADD_TRUST_QUORUM..,
+    }]
+    async fn trust_quorum_proxy_status(
+        request_context: RequestContext<Self::Context>,
+        query_params: Query<sled_hardware_types::BaseboardId>,
+    ) -> Result<HttpResponseOk<trust_quorum_types::status::NodeStatus>, HttpError>;
 }

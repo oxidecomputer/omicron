@@ -20,5 +20,6 @@ pub mod rack_init;
 pub mod rack_ops;
 pub mod sled;
 pub mod support_bundle;
+pub mod trust_quorum;
 pub mod zone_bundle;
 pub mod zone_images;

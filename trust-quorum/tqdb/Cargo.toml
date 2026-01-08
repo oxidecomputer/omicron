@@ -18,6 +18,7 @@ omicron-repl-utils.workspace = true
 reedline.workspace = true
 reconfigurator-cli.workspace = true
 serde_json.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
 tabled.workspace = true
 trust-quorum-protocol = { workspace = true, features = ["danger_partial_eq_ct_wrapper"] }

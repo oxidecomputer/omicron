@@ -36,6 +36,10 @@ use openapiv3::OpenAPI;
 /// Copies of data types that changed between versions
 mod v2025112000;
 mod v2025120300;
+mod v2025121200;
+mod v2025122300;
+mod v2026010100;
+mod v2026010300;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -65,6 +69,10 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026010500, POOL_SELECTION_ENUMS),
+    (2026010300, DUAL_STACK_NICS),
+    (2026010100, SILO_PROJECT_IP_VERSION_AND_POOL_TYPE),
+    (2025122300, IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS),
     (2025121200, BGP_PEER_COLLISION_STATE),
     (2025120300, LOCAL_STORAGE),
     (2025112000, INITIAL),
@@ -488,9 +496,36 @@ pub trait NexusExternalApi {
     /// can have at most one default pool. IPs are allocated from the default
     /// pool when users ask for one without specifying a pool.
     #[endpoint {
+        operation_id = "silo_ip_pool_list",
         method = GET,
         path = "/v1/system/silos/{silo}/ip-pools",
         tags = ["system/silos"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn v2025122300_silo_ip_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SiloPath>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025122300::SiloIpPool>>, HttpError>
+    {
+        let page =
+            Self::silo_ip_pool_list(rqctx, path_params, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// List IP pools linked to silo
+    ///
+    /// Linked IP pools are available to users in the specified silo. A silo
+    /// can have at most one default pool. IPs are allocated from the default
+    /// pool when users ask for one without specifying a pool.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}/ip-pools",
+        tags = ["system/silos"],
+        versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..,
     }]
     async fn silo_ip_pool_list(
         rqctx: RequestContext<Self::Context>,
@@ -939,9 +974,30 @@ pub trait NexusExternalApi {
 
     /// List IP pools
     #[endpoint {
+        operation_id = "project_ip_pool_list",
         method = GET,
         path = "/v1/ip-pools",
         tags = ["projects"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn v2025122300_project_ip_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025122300::SiloIpPool>>, HttpError>
+    {
+        let page = Self::project_ip_pool_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// List IP pools
+    #[endpoint {
+        method = GET,
+        path = "/v1/ip-pools",
+        tags = ["projects"],
+        versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..,
     }]
     async fn project_ip_pool_list(
         rqctx: RequestContext<Self::Context>,
@@ -950,9 +1006,28 @@ pub trait NexusExternalApi {
 
     /// Fetch IP pool
     #[endpoint {
+        operation_id = "project_ip_pool_view",
         method = GET,
         path = "/v1/ip-pools/{pool}",
         tags = ["projects"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn v2025122300_project_ip_pool_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<v2025122300::SiloIpPool>, HttpError> {
+        match Self::project_ip_pool_view(rqctx, path_params).await {
+            Ok(HttpResponseOk(pool)) => Ok(HttpResponseOk(pool.into())),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fetch IP pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/ip-pools/{pool}",
+        tags = ["projects"],
+        versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..,
     }]
     async fn project_ip_pool_view(
         rqctx: RequestContext<Self::Context>,
@@ -1206,9 +1281,49 @@ pub trait NexusExternalApi {
 
     /// Create floating IP
     #[endpoint {
+        operation_id = "floating_ip_create",
         method = POST,
         path = "/v1/floating-ips",
         tags = ["floating-ips"],
+        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+    }]
+    async fn v2025121200_floating_ip_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        floating_params: TypedBody<v2025121200::FloatingIpCreate>,
+    ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
+        Self::floating_ip_create(
+            rqctx,
+            query_params,
+            floating_params.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create floating IP
+    #[endpoint {
+        operation_id = "floating_ip_create",
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS
+            ..VERSION_POOL_SELECTION_ENUMS,
+    }]
+    async fn v2026010300_floating_ip_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        floating_params: TypedBody<v2026010300::FloatingIpCreate>,
+    ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
+        let floating_params = floating_params.try_map(TryInto::try_into)?;
+        Self::floating_ip_create(rqctx, query_params, floating_params).await
+    }
+
+    /// Create floating IP
+    #[endpoint {
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_POOL_SELECTION_ENUMS..,
     }]
     async fn floating_ip_create(
         rqctx: RequestContext<Self::Context>,
@@ -1612,8 +1727,68 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         new_instance: TypedBody<v2025112000::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
-            .await
+        Self::v2025121200_instance_create(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+    }]
+    async fn v2025121200_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2025121200::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::v2026010100_instance_create(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions =
+            VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2026010100::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        let new_instance = new_instance.try_map(TryInto::try_into)?;
+        Self::instance_create(rqctx, query_params, new_instance).await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..VERSION_POOL_SELECTION_ENUMS,
+    }]
+    async fn v2026010300_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2026010300::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        let new_instance = new_instance.try_map(TryInto::try_into)?;
+        Self::instance_create(rqctx, query_params, new_instance).await
     }
 
     /// Create instance
@@ -1621,7 +1796,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_POOL_SELECTION_ENUMS..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
@@ -2754,9 +2929,35 @@ pub trait NexusExternalApi {
 
     /// List network interfaces
     #[endpoint {
+        operation_id = "instance_network_interface_list",
         method = GET,
         path = "/v1/network-interfaces",
         tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_instance_network_interface_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::InstanceSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026010100::InstanceNetworkInterface>>,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { next_page, items }) =
+            Self::instance_network_interface_list(rqctx, query_params).await?;
+        items
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { next_page, items }))
+            .map_err(HttpError::from)
+    }
+
+    /// List network interfaces
+    #[endpoint {
+        method = GET,
+        path = "/v1/network-interfaces",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn instance_network_interface_list(
         rqctx: RequestContext<Self::Context>,
@@ -2765,9 +2966,38 @@ pub trait NexusExternalApi {
 
     /// Create network interface
     #[endpoint {
+        operation_id = "instance_network_interface_create",
         method = POST,
         path = "/v1/network-interfaces",
         tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_instance_network_interface_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::InstanceSelector>,
+        interface_params: TypedBody<
+            v2026010100::InstanceNetworkInterfaceCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026010100::InstanceNetworkInterface>,
+        HttpError,
+    > {
+        let interface_params = interface_params.try_map(TryInto::try_into)?;
+        let HttpResponseCreated(nic) = Self::instance_network_interface_create(
+            rqctx,
+            query_params,
+            interface_params,
+        )
+        .await?;
+        nic.try_into().map(HttpResponseCreated).map_err(HttpError::from)
+    }
+
+    /// Create network interface
+    #[endpoint {
+        method = POST,
+        path = "/v1/network-interfaces",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn instance_network_interface_create(
         rqctx: RequestContext<Self::Context>,
@@ -2794,9 +3024,33 @@ pub trait NexusExternalApi {
 
     /// Fetch network interface
     #[endpoint {
+        operation_id = "instance_network_interface_view",
         method = GET,
         path = "/v1/network-interfaces/{interface}",
         tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_instance_network_interface_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::NetworkInterfacePath>,
+        query_params: Query<params::OptionalInstanceSelector>,
+    ) -> Result<HttpResponseOk<v2026010100::InstanceNetworkInterface>, HttpError>
+    {
+        let HttpResponseOk(nic) = Self::instance_network_interface_view(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await?;
+        nic.try_into().map(HttpResponseOk).map_err(HttpError::from)
+    }
+
+    /// Fetch network interface
+    #[endpoint {
+        method = GET,
+        path = "/v1/network-interfaces/{interface}",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn instance_network_interface_view(
         rqctx: RequestContext<Self::Context>,
@@ -2806,9 +3060,35 @@ pub trait NexusExternalApi {
 
     /// Update network interface
     #[endpoint {
+        operation_id = "instance_network_interface_update",
         method = PUT,
         path = "/v1/network-interfaces/{interface}",
         tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_instance_network_interface_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::NetworkInterfacePath>,
+        query_params: Query<params::OptionalInstanceSelector>,
+        updated_iface: TypedBody<params::InstanceNetworkInterfaceUpdate>,
+    ) -> Result<HttpResponseOk<v2026010100::InstanceNetworkInterface>, HttpError>
+    {
+        let HttpResponseOk(nic) = Self::instance_network_interface_update(
+            rqctx,
+            path_params,
+            query_params,
+            updated_iface,
+        )
+        .await?;
+        nic.try_into().map(HttpResponseOk).map_err(HttpError::from)
+    }
+
+    /// Update network interface
+    #[endpoint {
+        method = PUT,
+        path = "/v1/network-interfaces/{interface}",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn instance_network_interface_update(
         rqctx: RequestContext<Self::Context>,
@@ -2833,9 +3113,58 @@ pub trait NexusExternalApi {
 
     /// Allocate and attach ephemeral IP to instance
     #[endpoint {
+        operation_id = "instance_ephemeral_ip_attach",
         method = POST,
         path = "/v1/instances/{instance}/external-ips/ephemeral",
         tags = ["instances"],
+        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+    }]
+    async fn v2025121200_instance_ephemeral_ip_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        ip_to_create: TypedBody<v2025121200::EphemeralIpCreate>,
+    ) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError> {
+        Self::instance_ephemeral_ip_attach(
+            rqctx,
+            path_params,
+            query_params,
+            ip_to_create.map(Into::into),
+        )
+        .await
+    }
+
+    /// Allocate and attach ephemeral IP to instance
+    #[endpoint {
+        operation_id = "instance_ephemeral_ip_attach",
+        method = POST,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS
+            ..VERSION_POOL_SELECTION_ENUMS,
+    }]
+    async fn v2026010300_instance_ephemeral_ip_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        ip_to_create: TypedBody<v2026010300::EphemeralIpCreate>,
+    ) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError> {
+        let ip_to_create = ip_to_create.try_map(TryInto::try_into)?;
+        Self::instance_ephemeral_ip_attach(
+            rqctx,
+            path_params,
+            query_params,
+            ip_to_create,
+        )
+        .await
+    }
+
+    /// Allocate and attach ephemeral IP to instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = VERSION_POOL_SELECTION_ENUMS..,
     }]
     async fn instance_ephemeral_ip_attach(
         rqctx: RequestContext<Self::Context>,
@@ -3084,9 +3413,41 @@ pub trait NexusExternalApi {
 
     /// List network interfaces
     #[endpoint {
+        operation_id = "vpc_subnet_list_network_interfaces",
         method = GET,
         path = "/v1/vpc-subnets/{subnet}/network-interfaces",
         tags = ["vpcs"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_vpc_subnet_list_network_interfaces(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPath>,
+        query_params: Query<PaginatedByNameOrId<params::OptionalVpcSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026010100::InstanceNetworkInterface>>,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::vpc_subnet_list_network_interfaces(
+                rqctx,
+                path_params,
+                query_params,
+            )
+            .await?;
+        items
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { items, next_page }))
+            .map_err(HttpError::from)
+    }
+
+    /// List network interfaces
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpc-subnets/{subnet}/network-interfaces",
+        tags = ["vpcs"],
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn vpc_subnet_list_network_interfaces(
         rqctx: RequestContext<Self::Context>,
@@ -4103,9 +4464,33 @@ pub trait NexusExternalApi {
 
     /// List instrumentation probes
     #[endpoint {
+        operation_id = "probe_list",
         method = GET,
         path = "/experimental/v1/probes",
         tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_probe_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026010100::ProbeInfo>>, HttpError>
+    {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::probe_list(rqctx, query_params).await?;
+        items
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { items, next_page }))
+            .map_err(HttpError::from)
+    }
+
+    /// List instrumentation probes
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/probes",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn probe_list(
         rqctx: RequestContext<Self::Context>,
@@ -4114,9 +4499,28 @@ pub trait NexusExternalApi {
 
     /// View instrumentation probe
     #[endpoint {
+        operation_id = "probe_view",
         method = GET,
         path = "/experimental/v1/probes/{probe}",
         tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2026010100_probe_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::ProbePath>,
+        query_params: Query<params::ProjectSelector>,
+    ) -> Result<HttpResponseOk<v2026010100::ProbeInfo>, HttpError> {
+        let HttpResponseOk(info) =
+            Self::probe_view(rqctx, path_params, query_params).await?;
+        info.try_into().map(HttpResponseOk).map_err(HttpError::from)
+    }
+
+    /// View instrumentation probe
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/probes/{probe}",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = VERSION_DUAL_STACK_NICS..,
     }]
     async fn probe_view(
         rqctx: RequestContext<Self::Context>,
@@ -4126,9 +4530,26 @@ pub trait NexusExternalApi {
 
     /// Create instrumentation probe
     #[endpoint {
+        operation_id = "probe_create",
         method = POST,
         path = "/experimental/v1/probes",
         tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = ..VERSION_POOL_SELECTION_ENUMS,
+    }]
+    async fn v2026010300_probe_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_probe: TypedBody<v2026010300::ProbeCreate>,
+    ) -> Result<HttpResponseCreated<Probe>, HttpError> {
+        Self::probe_create(rqctx, query_params, new_probe.map(Into::into)).await
+    }
+
+    /// Create instrumentation probe
+    #[endpoint {
+        method = POST,
+        path = "/experimental/v1/probes",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = VERSION_POOL_SELECTION_ENUMS..,
     }]
     async fn probe_create(
         rqctx: RequestContext<Self::Context>,

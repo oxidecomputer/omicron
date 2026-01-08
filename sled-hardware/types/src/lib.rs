@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use daft::Diffable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::ops::RangeInclusive;
@@ -181,6 +182,71 @@ impl std::fmt::Display for Baseboard {
             Baseboard::Pc { identifier, model } => {
                 write!(f, "pc-{identifier}-{model}")
             }
+        }
+    }
+}
+
+/// A representation of a Baseboard ID as used in the inventory subsystem.
+///
+/// This type is essentially the same as a `Baseboard` except it doesn't have a
+/// revision or HW type (Gimlet, PC, Unknown).
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    JsonSchema,
+    Diffable,
+)]
+#[daft(leaf)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct BaseboardId {
+    /// Oxide Part Number
+    pub part_number: String,
+    /// Serial number (unique for a given part number)
+    pub serial_number: String,
+}
+
+impl std::fmt::Display for BaseboardId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.part_number, self.serial_number)
+    }
+}
+
+impl slog::KV for BaseboardId {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        serializer.emit_str("part_number".into(), &self.part_number)?;
+        serializer.emit_str("serial_number".into(), &self.serial_number)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Baseboard is of unknown type")]
+pub struct UnknownBaseboardError;
+
+impl TryFrom<Baseboard> for BaseboardId {
+    type Error = UnknownBaseboardError;
+
+    fn try_from(value: Baseboard) -> Result<Self, Self::Error> {
+        match value {
+            Baseboard::Gimlet { identifier, model, .. } => Ok(BaseboardId {
+                part_number: model,
+                serial_number: identifier,
+            }),
+            Baseboard::Pc { identifier, model } => Ok(BaseboardId {
+                part_number: model,
+                serial_number: identifier,
+            }),
+            Baseboard::Unknown => Err(UnknownBaseboardError),
         }
     }
 }
