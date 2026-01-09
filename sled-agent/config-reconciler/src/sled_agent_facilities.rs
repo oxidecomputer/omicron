@@ -40,10 +40,11 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
         zone_root_path: PathInPool,
     ) -> impl Future<Output = anyhow::Result<RunningZone>> + Send;
 
-    /// Get the status of the zone image resolver.
-    ///
+    /// Get the status of the file source resolver.
+    /// This is designed to translate information about a file into
+    /// something usable at runtime.
     /// This can be used to prepare zones as well as start them.
-    fn zone_image_resolver_status(&self) -> ResolverStatus;
+    fn file_source_resolver_status(&self) -> ResolverStatus;
 
     /// Remove the mupdate override file from disk.
     fn remove_mupdate_override(

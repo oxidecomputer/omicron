@@ -36,12 +36,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use nexus_types::external_api::params;
-use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, NameOrId,
-};
+use omicron_common::api::external;
 
-use crate::v2026010100;
+use crate::{v2026010100, v2026010300};
 
 // Re-export multicast types from v2025122300.
 // They're identical for both versions (both use NameOrId, explicit
@@ -58,12 +55,17 @@ pub use super::v2025122300::{
 pub struct EphemeralIpCreate {
     /// Name or ID of the IP pool used to allocate an address.
     /// If unspecified, the default IP pool will be used.
-    pub pool: Option<NameOrId>,
+    pub pool: Option<external::NameOrId>,
 }
 
+// Converts directly to params::EphemeralIpCreate using PoolSelector
 impl From<EphemeralIpCreate> for params::EphemeralIpCreate {
     fn from(old: EphemeralIpCreate) -> params::EphemeralIpCreate {
-        params::EphemeralIpCreate { pool: old.pool, ip_version: None }
+        let pool_selector = match old.pool {
+            Some(pool) => params::PoolSelector::Explicit { pool },
+            None => params::PoolSelector::Auto { ip_version: None },
+        };
+        params::EphemeralIpCreate { pool_selector }
     }
 }
 
@@ -77,23 +79,27 @@ pub enum ExternalIpCreate {
     Ephemeral {
         /// Name or ID of the IP pool to use. If unspecified, the
         /// default IP pool will be used.
-        pool: Option<NameOrId>,
+        pool: Option<external::NameOrId>,
     },
     /// A floating IP address.
     Floating {
         /// The name or ID of the floating IP address to attach.
-        floating_ip: NameOrId,
+        floating_ip: external::NameOrId,
     },
 }
 
-impl From<ExternalIpCreate> for params::ExternalIpCreate {
-    fn from(old: ExternalIpCreate) -> params::ExternalIpCreate {
+// Converts to v2026010300::ExternalIpCreate (adds ip_version: None)
+impl From<ExternalIpCreate> for v2026010300::ExternalIpCreate {
+    fn from(old: ExternalIpCreate) -> v2026010300::ExternalIpCreate {
         match old {
             ExternalIpCreate::Ephemeral { pool } => {
-                params::ExternalIpCreate::Ephemeral { pool, ip_version: None }
+                v2026010300::ExternalIpCreate::Ephemeral {
+                    pool,
+                    ip_version: None,
+                }
             }
             ExternalIpCreate::Floating { floating_ip } => {
-                params::ExternalIpCreate::Floating { floating_ip }
+                v2026010300::ExternalIpCreate::Floating { floating_ip }
             }
         }
     }
@@ -104,24 +110,32 @@ impl From<ExternalIpCreate> for params::ExternalIpCreate {
 pub struct FloatingIpCreate {
     /// common identifying metadata
     #[serde(flatten)]
-    pub identity: omicron_common::api::external::IdentityMetadataCreateParams,
+    pub identity: external::IdentityMetadataCreateParams,
     /// An IP address to reserve for use as a floating IP. This field is
     /// optional: when not set, an address will be automatically chosen from
     /// `pool`. If set, then the IP must be available in the resolved `pool`.
     pub ip: Option<std::net::IpAddr>,
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
-    pub pool: Option<NameOrId>,
+    pub pool: Option<external::NameOrId>,
 }
 
+// Converts directly to params::FloatingIpCreate using AddressSelector
 impl From<FloatingIpCreate> for params::FloatingIpCreate {
     fn from(old: FloatingIpCreate) -> params::FloatingIpCreate {
-        params::FloatingIpCreate {
-            identity: old.identity,
-            ip: old.ip,
-            pool: old.pool,
-            ip_version: None,
-        }
+        let address_selector = match (old.ip, old.pool) {
+            // Explicit IP address provided
+            (Some(ip), pool) => params::AddressSelector::Explicit { ip, pool },
+            // Allocate from specified pool
+            (None, Some(pool)) => params::AddressSelector::Auto {
+                pool_selector: params::PoolSelector::Explicit { pool },
+            },
+            // Allocate from default pool
+            (None, None) => params::AddressSelector::Auto {
+                pool_selector: params::PoolSelector::Auto { ip_version: None },
+            },
+        };
+        params::FloatingIpCreate { identity: old.identity, address_selector }
     }
 }
 
@@ -129,13 +143,13 @@ impl From<FloatingIpCreate> for params::FloatingIpCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
+    pub identity: external::IdentityMetadataCreateParams,
     /// The number of vCPUs to be allocated to the instance
-    pub ncpus: InstanceCpuCount,
+    pub ncpus: external::InstanceCpuCount,
     /// The amount of RAM (in bytes) to be allocated to the instance
-    pub memory: ByteCount,
+    pub memory: external::ByteCount,
     /// The hostname to be assigned to the instance
-    pub hostname: Hostname,
+    pub hostname: external::Hostname,
     /// User data for instance initialization systems (such as cloud-init).
     #[serde(default, with = "params::UserData")]
     pub user_data: Vec<u8>,
@@ -147,7 +161,7 @@ pub struct InstanceCreate {
     pub external_ips: Vec<ExternalIpCreate>,
     /// The multicast groups this instance should join.
     #[serde(default)]
-    pub multicast_groups: Vec<NameOrId>,
+    pub multicast_groups: Vec<external::NameOrId>,
     /// A list of disks to be attached to the instance.
     #[serde(default)]
     pub disks: Vec<params::InstanceDiskAttachment>,
@@ -155,19 +169,19 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub boot_disk: Option<params::InstanceDiskAttachment>,
     /// An allowlist of SSH public keys to be transferred to the instance.
-    pub ssh_public_keys: Option<Vec<NameOrId>>,
+    pub ssh_public_keys: Option<Vec<external::NameOrId>>,
     /// Should this instance be started upon creation; true by default.
     #[serde(default = "params::bool_true")]
     pub start: bool,
     /// The auto-restart policy for this instance.
     #[serde(default)]
-    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+    pub auto_restart_policy: Option<external::InstanceAutoRestartPolicy>,
     /// Anti-Affinity groups which this instance should be added.
     #[serde(default)]
-    pub anti_affinity_groups: Vec<NameOrId>,
+    pub anti_affinity_groups: Vec<external::NameOrId>,
     /// The CPU platform to be used for this instance.
     #[serde(default)]
-    pub cpu_platform: Option<InstanceCpuPlatform>,
+    pub cpu_platform: Option<external::InstanceCpuPlatform>,
 }
 
 impl From<InstanceCreate> for v2026010100::InstanceCreate {

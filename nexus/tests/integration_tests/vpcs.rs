@@ -767,9 +767,11 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
                 name: fip_name.parse().unwrap(),
                 description: "test floating ip".to_string(),
             },
-            ip: None,
-            pool: Some(v4_pool.identity.name.clone().into()),
-            ip_version: None,
+            address_selector: params::AddressSelector::Auto {
+                pool_selector: params::PoolSelector::Explicit {
+                    pool: v4_pool.identity.name.clone().into(),
+                },
+            },
         },
     )
     .authn_as(AuthnMode::SiloUser(limited_user.id))

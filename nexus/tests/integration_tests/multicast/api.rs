@@ -521,17 +521,17 @@ async fn test_join_by_ip_ssm_without_sources_fails(
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
 }
 
-/// Test joining an existing SSM group by ID without sources should fail.
+/// Test joining an existing SSM group without sources fails for all lookup methods.
 ///
-/// This tests the SSM validation for join-by-ID path: if an SSM group exists
-/// (created by first instance with sources), a second instance cannot join
-/// by group ID without providing sources.
+/// When an SSM group exists (created by first instance with sources), a second
+/// instance cannot join without providing sources - regardless of lookup method.
+/// This test consolidates validation for join-by-ID, join-by-name, and join-by-IP.
 #[nexus_test]
-async fn test_join_existing_ssm_group_by_id_without_sources_fails(
+async fn test_join_existing_ssm_group_without_sources_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let project_name = "ssm-id-fail-project";
+    let project_name = "ssm-join-existing-fail-project";
 
     // Setup: SSM pool
     ops::join3(
@@ -539,21 +539,21 @@ async fn test_join_existing_ssm_group_by_id_without_sources_fails(
         create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
-            "ssm-id-fail-pool",
+            "ssm-join-existing-fail-pool",
             (232, 40, 0, 1),
             (232, 40, 0, 255),
         ),
     )
     .await;
 
-    create_instance(client, project_name, "ssm-id-inst-1").await;
-    create_instance(client, project_name, "ssm-id-inst-2").await;
+    create_instance(client, project_name, "ssm-inst-creator").await;
+    create_instance(client, project_name, "ssm-inst-joiner").await;
 
     // First instance creates SSM group with sources
     let ssm_ip = "232.40.0.100";
     let source_ip: IpAddr = "10.40.0.1".parse().unwrap();
     let join_url_1 = format!(
-        "/v1/instances/ssm-id-inst-1/multicast-groups/{ssm_ip}?project={project_name}"
+        "/v1/instances/ssm-inst-creator/multicast-groups/{ssm_ip}?project={project_name}"
     );
 
     let join_body_1 = InstanceMulticastGroupJoin {
@@ -564,118 +564,84 @@ async fn test_join_existing_ssm_group_by_id_without_sources_fails(
         put_upsert(client, &join_url_1, &join_body_1).await;
 
     let group_id = member_1.multicast_group_id;
-
-    // Second instance tries to join by group ID w/o sources
-    let join_url_by_id = format!(
-        "/v1/instances/ssm-id-inst-2/multicast-groups/{group_id}?project={project_name}"
-    );
-
-    let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::PUT, &join_url_by_id)
-            .body(Some(&InstanceMulticastGroupJoin {
-                source_ips: None, // No sources!
-                ip_version: None,
-            }))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Join by ID without sources should fail for SSM group");
-
-    let error_body: dropshot::HttpErrorResponseBody =
-        error.parsed_body().unwrap();
-    assert_eq!(
-        error_body.error_code,
-        Some("InvalidRequest".to_string()),
-        "Expected InvalidRequest for SSM join-by-ID without sources, got: {:?}",
-        error_body.error_code
-    );
-
-    let expected_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
-    cleanup_instances(
-        cptestctx,
-        client,
-        project_name,
-        &["ssm-id-inst-1", "ssm-id-inst-2"],
-    )
-    .await;
-    wait_for_group_deleted(cptestctx, &expected_group_name).await;
-}
-
-/// Test joining an existing SSM group by NAME without sources should fail.
-#[nexus_test]
-async fn test_join_existing_ssm_group_by_name_without_sources_fails(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let project_name = "ssm-name-fail-project";
-
-    // Setup: SSM pool
-    ops::join3(
-        create_project(client, project_name),
-        create_default_ip_pools(client),
-        create_multicast_ip_pool_with_range(
-            client,
-            "ssm-name-fail-pool",
-            (232, 45, 0, 1),
-            (232, 45, 0, 100),
-        ),
-    )
-    .await;
-
-    create_instance(client, project_name, "ssm-name-inst-1").await;
-    create_instance(client, project_name, "ssm-name-inst-2").await;
-
-    // First instance creates SSM group with sources
-    let ssm_ip = "232.45.0.50";
-    let join_url = format!(
-        "/v1/instances/ssm-name-inst-1/multicast-groups/{ssm_ip}?project={project_name}"
-    );
-    let join_body = InstanceMulticastGroupJoin {
-        source_ips: Some(vec!["10.0.0.1".parse().unwrap()]),
-        ip_version: None,
-    };
-
-    put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_body).await;
-
-    // Get the group's auto-generated name
-    let expected_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
-
-    // Second instance tries to join by NAME without sources
-    let join_by_name_url = format!(
-        "/v1/instances/ssm-name-inst-2/multicast-groups/{expected_group_name}?project={project_name}"
-    );
+    let group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
     let join_body_no_sources =
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
-    let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::PUT, &join_by_name_url)
+    // Join by ID without sources - should fail
+    let join_url_by_id = format!(
+        "/v1/instances/ssm-inst-joiner/multicast-groups/{group_id}?project={project_name}"
+    );
+    let error_by_id = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &join_url_by_id)
             .body(Some(&join_body_no_sources))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Join by name without sources should fail for SSM group");
-
-    let error_body: dropshot::HttpErrorResponseBody =
-        error.parsed_body().unwrap();
+    .expect("Join by ID without sources should fail")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
     assert_eq!(
-        error_body.error_code,
+        error_by_id.error_code,
         Some("InvalidRequest".to_string()),
-        "Expected InvalidRequest for SSM join-by-name without sources, got: {:?}",
-        error_body.error_code
+        "Expected InvalidRequest for join-by-ID, got: {:?}",
+        error_by_id.error_code
+    );
+
+    // Join by name without sources - should fail
+    let join_url_by_name = format!(
+        "/v1/instances/ssm-inst-joiner/multicast-groups/{group_name}?project={project_name}"
+    );
+    let error_by_name = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &join_url_by_name)
+            .body(Some(&join_body_no_sources))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Join by name without sources should fail")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error_by_name.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for join-by-name, got: {:?}",
+        error_by_name.error_code
+    );
+
+    // Join by IP without sources - should fail
+    let join_url_by_ip = format!(
+        "/v1/instances/ssm-inst-joiner/multicast-groups/{ssm_ip}?project={project_name}"
+    );
+    let error_by_ip = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &join_url_by_ip)
+            .body(Some(&join_body_no_sources))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Join by IP without sources should fail")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error_by_ip.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for join-by-IP, got: {:?}",
+        error_by_ip.error_code
     );
 
     cleanup_instances(
         cptestctx,
         client,
         project_name,
-        &["ssm-name-inst-1", "ssm-name-inst-2"],
+        &["ssm-inst-creator", "ssm-inst-joiner"],
     )
     .await;
-    wait_for_group_deleted(cptestctx, &expected_group_name).await;
+    wait_for_group_deleted(cptestctx, &group_name).await;
 }
 
 /// Test that SSM join-by-IP with empty sources array fails.
@@ -736,85 +702,6 @@ async fn test_ssm_with_empty_sources_array_fails(
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-}
-
-/// Test joining an existing SSM group by IP without sources fails.
-///
-/// When an SSM group already exists (created by first instance with sources),
-/// a second instance joining by IP should still fail without sources since
-/// the group is SSM.
-#[nexus_test]
-async fn test_join_existing_ssm_group_by_ip_without_sources_fails(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let project_name = "ssm-ip-existing-fail-project";
-
-    // Setup: SSM pool
-    ops::join3(
-        create_project(client, project_name),
-        create_default_ip_pools(client),
-        create_multicast_ip_pool_with_range(
-            client,
-            "ssm-ip-existing-fail-pool",
-            (232, 47, 0, 1),
-            (232, 47, 0, 100),
-        ),
-    )
-    .await;
-
-    create_instance(client, project_name, "ssm-ip-inst-1").await;
-    create_instance(client, project_name, "ssm-ip-inst-2").await;
-
-    // First instance creates SSM group with sources
-    let ssm_ip = "232.47.0.50";
-    let join_url = format!(
-        "/v1/instances/ssm-ip-inst-1/multicast-groups/{ssm_ip}?project={project_name}"
-    );
-    let join_body = InstanceMulticastGroupJoin {
-        source_ips: Some(vec!["10.0.0.1".parse().unwrap()]),
-        ip_version: None,
-    };
-
-    put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_body).await;
-
-    let expected_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
-
-    // Second instance tries to join by IP without sources
-    // Even though the group exists, SSM still requires sources
-    let join_url_2 = format!(
-        "/v1/instances/ssm-ip-inst-2/multicast-groups/{ssm_ip}?project={project_name}"
-    );
-    let join_body_no_sources =
-        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
-
-    let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::PUT, &join_url_2)
-            .body(Some(&join_body_no_sources))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Join existing SSM group by IP without sources should fail");
-
-    let error_body: dropshot::HttpErrorResponseBody =
-        error.parsed_body().unwrap();
-    assert_eq!(
-        error_body.error_code,
-        Some("InvalidRequest".to_string()),
-        "Expected InvalidRequest for SSM join-by-IP without sources, got: {:?}",
-        error_body.error_code
-    );
-
-    cleanup_instances(
-        cptestctx,
-        client,
-        project_name,
-        &["ssm-ip-inst-1", "ssm-ip-inst-2"],
-    )
-    .await;
-    wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
 /// Test join-by-IP with IP not in any pool should fail.

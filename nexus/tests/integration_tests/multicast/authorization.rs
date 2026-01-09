@@ -414,64 +414,16 @@ async fn test_cross_project_instance_attachment_allowed(
     assert!(instance_ids.contains(&instance2.identity.id));
 }
 
-/// Verify that unauthenticated users cannot list multicast groups without
-/// proper authentication for the list endpoint.
+/// Verify that unauthenticated users cannot access any multicast API endpoints.
+///
+/// This consolidated test covers all unauthenticated access scenarios:
+/// - List groups (401)
+/// - Get single group (401)
+/// - List members (401)
+/// - Join group (401)
+/// - Leave group (401)
 #[nexus_test]
-async fn test_unauthenticated_cannot_list_multicast_groups(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    create_default_ip_pools(&client).await;
-
-    // Get current silo info
-    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
-    let silo: Silo = object_get(client, &silo_url).await;
-
-    // Create multicast pool and link to silo
-    create_multicast_ip_pool(&client, "mcast-pool").await;
-    link_ip_pool(&client, "default-v4", &silo.identity.id, true).await;
-    link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
-
-    // Create a collaborator user who can create groups
-    let creator = create_local_user(
-        client,
-        &silo,
-        &"creator-user".parse().unwrap(),
-        UserPassword::LoginDisallowed,
-    )
-    .await;
-
-    grant_iam(
-        client,
-        &silo_url,
-        SiloRole::Collaborator,
-        creator.id,
-        AuthnMode::PrivilegedUser,
-    )
-    .await;
-
-    // Creator creates a multicast group via instance join
-    create_group_via_instance_join(
-        client,
-        creator.id,
-        "test-group",
-        "mcast-pool",
-    )
-    .await;
-
-    // Try to list multicast groups without authentication - should get 401 Unauthorized
-    let group_url = "/v1/multicast-groups";
-    RequestBuilder::new(client, http::Method::GET, group_url)
-        .expect_status(Some(StatusCode::UNAUTHORIZED))
-        .execute()
-        .await
-        .expect("Expected 401 Unauthorized for unauthenticated list request");
-}
-
-/// Verify that unauthenticated users cannot access member operations.
-/// This tests that member endpoints (list/add/remove) require authentication.
-#[nexus_test]
-async fn test_unauthenticated_cannot_access_member_operations(
+async fn test_unauthenticated_access_denied(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -518,7 +470,26 @@ async fn test_unauthenticated_cannot_access_member_operations(
     let instance =
         create_instance(client, "test-project", "test-instance").await;
 
-    // Try to LIST members without authentication - should get 401
+    // List groups without authentication - should get 401
+    RequestBuilder::new(client, http::Method::GET, "/v1/multicast-groups")
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect(
+            "Expected 401 Unauthorized for unauthenticated list groups request",
+        );
+
+    // Get single group without authentication - should get 401
+    let group_url = mcast_group_url(&group.identity.name.to_string());
+    RequestBuilder::new(client, http::Method::GET, &group_url)
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect(
+            "Expected 401 Unauthorized for unauthenticated get group request",
+        );
+
+    // List members without authentication - should get 401
     let members_url = mcast_group_members_url(&group.identity.name.to_string());
     RequestBuilder::new(client, http::Method::GET, &members_url)
         .expect_status(Some(StatusCode::UNAUTHORIZED))
@@ -526,7 +497,7 @@ async fn test_unauthenticated_cannot_access_member_operations(
         .await
         .expect("Expected 401 Unauthorized for unauthenticated list members request");
 
-    // Try to JOIN without authentication - should get 401
+    // Join without authentication - should get 401
     // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
     let join_url = format!(
         "/v1/instances/{}/multicast-groups/{}?project=test-project",
@@ -541,7 +512,7 @@ async fn test_unauthenticated_cannot_access_member_operations(
         .await
         .expect("Expected 401 Unauthorized for unauthenticated join request");
 
-    // Try to leave without authentication - should get 401
+    // Leave without authentication - should get 401
     // Uses instance-centric API: DELETE /v1/instances/{instance}/multicast-groups/{group}
     RequestBuilder::new(client, http::Method::DELETE, &join_url)
         .expect_status(Some(StatusCode::UNAUTHORIZED))

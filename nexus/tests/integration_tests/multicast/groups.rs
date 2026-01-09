@@ -1130,6 +1130,9 @@ async fn test_source_ip_validation_on_join(
 /// Test that source IP address family must match multicast group address family.
 ///
 /// IPv4 multicast groups can only have IPv4 source IPs, and vice versa.
+/// This test covers both directions:
+/// - IPv6 sources with IPv4 group (fails)
+/// - IPv4 sources with IPv6 group (fails)
 #[nexus_test]
 async fn test_source_ip_address_family_validation(
     cptestctx: &ControlPlaneTestContext,
@@ -1141,16 +1144,17 @@ async fn test_source_ip_address_family_validation(
     // IPv4 SSM address
     let ipv4_ssm_ip = "232.5.0.100";
 
-    // Create project and pools
-    ops::join3(
+    // Create project and both IPv4 and IPv6 multicast pools
+    ops::join4(
         create_project(&client, project_name),
         create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
-            "addr-family-mcast-pool",
+            "addr-family-mcast-pool-v4",
             (232, 5, 0, 1),
             (232, 5, 0, 255),
         ),
+        create_multicast_ip_pool_v6(&client, "addr-family-mcast-pool-v6"),
     )
     .await;
 
@@ -1181,8 +1185,37 @@ async fn test_source_ip_address_family_validation(
     assert_eq!(
         error.error_code,
         Some("InvalidRequest".to_string()),
-        "Expected InvalidRequest for address family mismatch, got: {:?}",
+        "Expected InvalidRequest for IPv6 source with IPv4 group, got: {:?}",
         error.error_code
+    );
+
+    // Try to join IPv6 group with IPv4 source - should fail
+    let ipv4_source: IpAddr = "10.0.0.1".parse().unwrap();
+    let join_url_v6 = format!(
+        "/v1/instances/{instance_name}/multicast-groups/ipv6-mismatch-group?project={project_name}"
+    );
+    let join_body_v6 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![ipv4_source]),
+        ip_version: Some(IpVersion::V6),
+    };
+
+    let error_v6 = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &join_url_v6)
+            .body(Some(&join_body_v6))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Request should complete")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .expect("Should parse error body");
+
+    assert_eq!(
+        error_v6.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for IPv4 source with IPv6 group, got: {:?}",
+        error_v6.error_code
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
@@ -1332,113 +1365,6 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
         client,
         project_name,
         &[instance_names[1], instance_names[2], instance_names[3]],
-    )
-    .await;
-}
-
-/// Test that groups are allocated from the auto-discovered pool.
-///
-/// Pool selection is automatic - when multiple pools exist, the first one
-/// alphabetically is used (after preferring any default pool).
-#[nexus_test]
-async fn test_automatic_pool_selection(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let project_name = "pool-selection-test-project";
-    let instance_name = "pool-selection-instance";
-
-    // Setup: project and default IP pool in parallel
-    ops::join2(
-        create_project(&client, project_name),
-        create_default_ip_pools(&client),
-    )
-    .await;
-    create_instance(client, project_name, instance_name).await;
-
-    // Create a multicast pool (after instance, to test auto-discovery)
-    let mcast_pool = create_multicast_ip_pool_with_range(
-        &client,
-        "mcast-pool",
-        (224, 20, 0, 1),
-        (224, 20, 0, 10),
-    )
-    .await;
-
-    // Case: Join group - pool is auto-discovered
-    let group_name = "auto-pool-group";
-    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
-        .await;
-
-    let group_view: MulticastGroup =
-        object_get(client, &mcast_group_url(group_name)).await;
-    // Pool is auto-discovered from available multicast pools
-    assert_eq!(group_view.ip_pool_id, mcast_pool.identity.id);
-    // Verify IP is in pool's range (224.20.0.x)
-    if let IpAddr::V4(ip) = group_view.multicast_ip {
-        assert_eq!(ip.octets()[0], 224);
-        assert_eq!(ip.octets()[1], 20);
-    } else {
-        panic!("Expected IPv4 multicast address");
-    }
-
-    // Cleanup
-    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(cptestctx, group_name).await;
-}
-
-/// Test validation errors for pool exhaustion.
-#[nexus_test]
-async fn test_pool_exhaustion(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let project_name = "pool-exhaustion-test-project";
-
-    // Create project and IP pools in parallel (multicast pool has single IP)
-    ops::join3(
-        create_project(&client, project_name),
-        create_default_ip_pools(&client),
-        create_multicast_ip_pool_with_range(
-            &client,
-            "empty-pool",
-            (224, 99, 0, 1),
-            (224, 99, 0, 1), // Single IP
-        ),
-    )
-    .await;
-
-    // Use the single IP
-    let instance_name = "pool-exhaust-instance";
-    create_instance(client, project_name, instance_name).await;
-    let group_exhaust = "exhaust-empty-pool";
-    multicast_group_attach(
-        cptestctx,
-        project_name,
-        instance_name,
-        group_exhaust,
-    )
-    .await;
-
-    // Now try to create another group - should fail
-    let instance2_name = "pool-exhaust-instance-2";
-    create_instance(client, project_name, instance2_name).await;
-    let group_fail = "fail-empty-pool";
-    let join_url_fail = format!(
-        "/v1/instances/{instance2_name}/multicast-groups/{group_fail}?project={project_name}"
-    );
-    let join_params_fail =
-        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
-    object_put_error(
-        client,
-        &join_url_fail,
-        &join_params_fail,
-        StatusCode::INSUFFICIENT_STORAGE,
-    )
-    .await;
-
-    // Cleanup
-    cleanup_instances(
-        cptestctx,
-        client,
-        project_name,
-        &[instance_name, instance2_name],
     )
     .await;
 }

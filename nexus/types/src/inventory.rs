@@ -42,11 +42,11 @@ use sled_agent_types_versions::latest::inventory::HealthMonitorInventory;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
+use sled_agent_types_versions::latest::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
 use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
 use sled_agent_types_versions::latest::inventory::SledCpuFamily;
 use sled_agent_types_versions::latest::inventory::SledRole;
-use sled_agent_types_versions::latest::inventory::ZoneImageResolverInventory;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -641,7 +641,7 @@ pub struct SledAgent {
     pub ledgered_sled_config: Option<OmicronSledConfig>,
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub zone_image_resolver: ZoneImageResolverInventory,
+    pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub health_monitor: HealthMonitorInventory,
 }
 

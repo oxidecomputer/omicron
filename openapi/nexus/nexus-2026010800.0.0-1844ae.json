@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026010400.0.0"
+    "version": "2026010800.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -14309,6 +14309,68 @@
           "lot"
         ]
       },
+      "AddressSelector": {
+        "description": "Specify how to allocate a floating IP address.",
+        "oneOf": [
+          {
+            "description": "Reserve a specific IP address.",
+            "type": "object",
+            "properties": {
+              "ip": {
+                "description": "The IP address to reserve. Must be available in the pool.",
+                "type": "string",
+                "format": "ip"
+              },
+              "pool": {
+                "nullable": true,
+                "description": "The pool containing this address. If not specified, the default pool for the address's IP version is used.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NameOrId"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "type"
+            ]
+          },
+          {
+            "description": "Automatically allocate an IP address from a specified pool.",
+            "type": "object",
+            "properties": {
+              "pool_selector": {
+                "description": "Pool selection.\n\nIf omitted, this field uses the silo's default pool. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified in the pool selector.",
+                "default": {
+                  "ip_version": null,
+                  "type": "auto"
+                },
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PoolSelector"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "auto"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "AffinityGroup": {
         "description": "View of an Affinity Group",
         "type": "object",
@@ -18735,22 +18797,15 @@
         "description": "Parameters for creating an ephemeral IP address for an instance.",
         "type": "object",
         "properties": {
-          "ip_version": {
-            "nullable": true,
-            "description": "IP version to use when allocating from the default pool. Only used when `pool` is not specified. Required if multiple default pools of different IP versions exist. Allocation fails if no pool of the requested version is available.",
-            "default": null,
+          "pool_selector": {
+            "description": "Pool to allocate from.",
+            "default": {
+              "ip_version": null,
+              "type": "auto"
+            },
             "allOf": [
               {
-                "$ref": "#/components/schemas/IpVersion"
-              }
-            ]
-          },
-          "pool": {
-            "nullable": true,
-            "description": "Name or ID of the IP pool used to allocate an address. If unspecified, the default IP pool will be used.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
+                "$ref": "#/components/schemas/PoolSelector"
               }
             ]
           }
@@ -18919,24 +18974,18 @@
         "description": "Parameters for creating an external IP address for instances.",
         "oneOf": [
           {
-            "description": "An IP address providing both inbound and outbound access. The address is automatically assigned from the provided IP pool or the default IP pool if not specified.",
+            "description": "An IP address providing both inbound and outbound access. The address is automatically assigned from a pool.",
             "type": "object",
             "properties": {
-              "ip_version": {
-                "nullable": true,
-                "description": "IP version to use when allocating from the default pool. Only used when `pool` is not specified. Required if multiple default pools of different IP versions exist. Allocation fails if no pool of the requested version is available.",
-                "default": null,
+              "pool_selector": {
+                "description": "Pool to allocate from.",
+                "default": {
+                  "ip_version": null,
+                  "type": "auto"
+                },
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/IpVersion"
-                  }
-                ]
-              },
-              "pool": {
-                "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NameOrId"
+                    "$ref": "#/components/schemas/PoolSelector"
                   }
                 ]
               },
@@ -19444,36 +19493,26 @@
         "description": "Parameters for creating a new floating IP address for instances.",
         "type": "object",
         "properties": {
+          "address_selector": {
+            "description": "IP address allocation method.",
+            "default": {
+              "pool_selector": {
+                "ip_version": null,
+                "type": "auto"
+              },
+              "type": "auto"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AddressSelector"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
-          "ip": {
-            "nullable": true,
-            "description": "An IP address to reserve for use as a floating IP. This field is optional: when not set, an address will be automatically chosen from `pool`. If set, then the IP must be available in the resolved `pool`.",
-            "type": "string",
-            "format": "ip"
-          },
-          "ip_version": {
-            "nullable": true,
-            "description": "IP version to use when allocating from the default pool. Only used when both `ip` and `pool` are not specified. Required if multiple default pools of different IP versions exist. Allocation fails if no pool of the requested version is available.",
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpVersion"
-              }
-            ]
-          },
           "name": {
             "$ref": "#/components/schemas/Name"
-          },
-          "pool": {
-            "nullable": true,
-            "description": "The parent IP pool that a floating IP is pulled from. If unset, the default pool is selected.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
           }
         },
         "required": [
@@ -20989,7 +21028,7 @@
             ]
           },
           "multicast_groups": {
-            "description": "The multicast groups this instance should join.\n\nThe instance will be automatically added as a member of the specified multicast groups during creation, enabling it to send and receive multicast traffic for those groups.\n\nEach entry specifies the group (by name, UUID, or IP address) and optional source IPs for source-filtered multicast. SSM addresses (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6) require at least one source IP.",
+            "description": "Multicast groups this instance should join at creation.\n\nGroups can be specified by name, UUID, or IP address. Non-existent groups are created automatically.",
             "default": [],
             "type": "array",
             "items": {
@@ -21122,7 +21161,7 @@
         "properties": {
           "ip_version": {
             "nullable": true,
-            "description": "IP version for default pool selection when joining by name.\n\nOnly used when `group` is a name and the group doesn't exist yet (implicit creation). Required if multiple default multicast pools of different IP versions are linked to the silo.\n\nIgnored when joining by UUID or IP address.",
+            "description": "IP version for pool selection when creating a group by name. Required if both IPv4 and IPv6 default multicast pools are linked.",
             "default": null,
             "allOf": [
               {
@@ -21132,7 +21171,7 @@
           },
           "source_ips": {
             "nullable": true,
-            "description": "Optional source IP addresses for source-filtered multicast.\n\n- **ASM**: Sources optional. If omitted, receives from any source. - **SSM (232.0.0.0/8, ff3x::/32)**: At least one source required.\n\nEach member stores its own sources; the group's `source_ips` shows the union.",
+            "description": "Source IPs for source-filtered multicast (SSM). Optional for ASM groups, required for SSM groups (232.0.0.0/8, ff3x::/32).",
             "default": null,
             "type": "array",
             "items": {
@@ -21583,7 +21622,7 @@
           },
           "multicast_groups": {
             "nullable": true,
-            "description": "Multicast groups this instance should join.\n\nWhen specified, this replaces the instance's current multicast group membership with the new set of groups. The instance will leave any groups not listed here and join any new groups that are specified.\n\nEach entry specifies the group (by name, UUID, or IP address) and optional source IPs for source-filtered multicast. SSM addresses (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6) require at least one source IP.\n\nIf not provided (None), the instance's multicast group membership will not be changed.",
+            "description": "Multicast groups this instance should join.\n\nWhen specified, this replaces the instance's current multicast group membership with the new set of groups. The instance will leave any groups not listed here and join any new groups that are specified.\n\nEach entry can specify the group by name, UUID, or IP address, along with optional source IP filtering for SSM (Source-Specific Multicast). When a group doesn't exist, it will be implicitly created using the default multicast pool (or you can specify `ip_version` to disambiguate if needed).\n\nIf not provided, the instance's multicast group membership will not be changed.",
             "default": null,
             "type": "array",
             "items": {
@@ -23062,7 +23101,7 @@
           },
           "ip_version": {
             "nullable": true,
-            "description": "IP version for default pool selection when joining by name.\n\nOnly used when `group` is a name and the group doesn't exist yet (implicit creation). Required if multiple default multicast pools of different IP versions are linked to the silo.\n\nIgnored when joining by UUID or IP address.",
+            "description": "IP version for pool selection when creating a group by name. Required if both IPv4 and IPv6 default multicast pools are linked.",
             "default": null,
             "allOf": [
               {
@@ -23072,7 +23111,7 @@
           },
           "source_ips": {
             "nullable": true,
-            "description": "Optional source IP addresses for source-filtered multicast.\n\n- **ASM**: Sources optional. If omitted, receives from any source. - **SSM (232.0.0.0/8, ff3x::/32)**: At least one source required.\n\nEach member stores its own sources; the group's `source_ips` shows the union.",
+            "description": "Source IPs for source-filtered multicast (SSM). Optional for ASM groups, required for SSM groups (232.0.0.0/8, ff3x::/32).",
             "default": null,
             "type": "array",
             "items": {
@@ -23615,6 +23654,60 @@
           "values"
         ]
       },
+      "PoolSelector": {
+        "description": "Specify which IP pool to allocate from.",
+        "oneOf": [
+          {
+            "description": "Use the specified pool by name or ID.",
+            "type": "object",
+            "properties": {
+              "pool": {
+                "description": "The pool to allocate from.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NameOrId"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "pool",
+              "type"
+            ]
+          },
+          {
+            "description": "Use the default pool for the silo.",
+            "type": "object",
+            "properties": {
+              "ip_version": {
+                "nullable": true,
+                "description": "IP version to use when multiple default pools exist. Required if both IPv4 and IPv6 default pools are configured.",
+                "default": null,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/IpVersion"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "auto"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "PrivateIpConfig": {
         "description": "VPC-private IP address configuration for a network interface.",
         "oneOf": [
@@ -24055,16 +24148,20 @@
           "description": {
             "type": "string"
           },
-          "ip_pool": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
-          },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "pool_selector": {
+            "description": "Pool to allocate from.",
+            "default": {
+              "ip_version": null,
+              "type": "auto"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PoolSelector"
+              }
+            ]
           },
           "sled": {
             "type": "string",

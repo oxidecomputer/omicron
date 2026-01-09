@@ -35,6 +35,7 @@
 //! - `GET /v1/multicast-groups` (multicast_group_list)
 //! - `GET /v1/multicast-groups/{multicast_group}` (multicast_group_view)
 //! - `POST /v1/multicast-groups/{multicast_group}/members` (multicast_group_member_add)
+//! - `POST /v1/instances` (instance_create)
 //! - `PUT /v1/instances/{instance}` (instance_update)
 //!
 //! [`SiloIpPool`]: self::SiloIpPool
