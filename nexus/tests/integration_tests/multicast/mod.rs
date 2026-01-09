@@ -63,6 +63,7 @@ mod failures;
 mod groups;
 mod instances;
 mod networking_integration;
+mod omdb;
 mod pool_selection;
 
 // Timeout constants for test operations
