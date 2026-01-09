@@ -851,6 +851,13 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// new producers or if it has any assigned producers.
     OximeterExpungeAndReassignProducers,
 
+    /// The planner must compare expunged zones against inventory to transition
+    /// them to "ready for cleanup".
+    ///
+    /// The planner does not need to account for this when pruning zones.
+    /// (Moving them to "ready for cleanup" is a _prerequisite_ for pruning.)
+    PlannerCheckReadyForCleanup,
+
     // --------------------------------------------------------------------
     // Catch-all variants for non-production callers. The planner does not need
     // to account for these when pruning.
@@ -861,6 +868,10 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// Omdb allows support operators to poke at blueprint contents, including
     /// expunged zones.
     Omdb,
+
+    /// `reconfigurator-cli` allows manual blueprint changes, including
+    /// modifying expunged zones.
+    ReconfiguratorCli,
 
     /// Various unit and integration tests access expunged zones.
     Test,
@@ -1630,12 +1641,11 @@ impl BlueprintZoneDisposition {
     /// Always returns true.
     ///
     /// This is intended for use with methods that take a filtering closure
-    /// operating on a `BlueprintZoneDisposition` (e.g.,
-    /// `Blueprint::all_omicron_zones()`), allowing callers to make it clear
-    /// they accept any disposition via
+    /// operating on a `BlueprintZoneDisposition`, allowing callers to make it
+    /// clear they accept any disposition via
     ///
     /// ```rust,ignore
-    /// blueprint.all_omicron_zones(BlueprintZoneDisposition::any)
+    /// blueprint.zones_with_filter(BlueprintZoneDisposition::any)
     /// ```
     pub fn any(self) -> bool {
         true
