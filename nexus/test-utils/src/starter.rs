@@ -45,6 +45,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
@@ -1392,6 +1393,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 BlueprintSledConfig {
                     state: SledState::Active,
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                    last_allocated_ip_subnet_offset:
+                        LastAllocatedSubnetIpOffset::initial(),
                     sled_agent_generation,
                     disks,
                     datasets,
