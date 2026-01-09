@@ -354,6 +354,10 @@ pub struct DbFetchOptions {
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
     /// Launch `cockroach-sql`
+    ///
+    /// This launches with the session variable `default_transcation_read_only`
+    /// to on. Becuase this variable can be disabled, it is required to use
+    /// `--destructive` with this command.
     Sql,
     /// Print information about blueprints
     ///
@@ -1160,11 +1164,12 @@ impl DbArgs {
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
         if let DbCommands::Sql = &self.command {
+            let _token = omdb.check_allow_destructive()?;
             let url = self.db_url_opts.resolve_pg_url(omdb, log).await?;
             let url = url.url().split(',').next().unwrap_or(url.url());
             let mut command =
                 Command::new("/opt/oxide/cockroachdb/bin/cockroach-sql");
-            let error = command.args(["--url", url]).exec();
+            let error = command.args(["--read-only", "--url", url]).exec();
             return Err(error)
                 .with_context(|| format!("failed to exec {command:?}"));
         }
