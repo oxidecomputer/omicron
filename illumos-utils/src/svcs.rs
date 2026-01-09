@@ -121,7 +121,7 @@ impl SvcsInMaintenanceResult {
                             ));
                             error!(
                                 log,
-                                "unable to parse; output line missing zone:";
+                                "unable to parse; output line missing zone";
                                 "line" => line,
                             );
                             continue;
