@@ -3775,7 +3775,7 @@ pub trait NexusExternalApi {
     /// Retrieve the latest trust quorum configuration, including member status.
     #[endpoint {
         method = GET,
-        path = "/v1/trust-quorum/config/latest",
+        path = "/v1/trust-quorum/config/latest/{rack_id}",
         tags = ["experimental"],
         versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
     }]
