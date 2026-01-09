@@ -7,6 +7,8 @@
 use dropshot::ResultsPage;
 use http::StatusCode;
 use http::method::Method;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -21,6 +23,7 @@ use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::{params, views};
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
 
@@ -584,4 +587,391 @@ async fn test_image_deletion_permissions(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("should be able to delete project image as unpriv user!");
+}
+
+/// Test that creating and deleting images correctly updates virtual
+/// provisioning at project, silo, and fleet levels.
+///
+/// This test creates images from snapshots of blank disks. Since disks,
+/// snapshots, and images all contribute to virtual_disk_bytes_provisioned,
+/// we track the expected total at each step.
+#[nexus_test]
+async fn test_image_virtual_provisioning_collection(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+
+    DiskTest::new(&cptestctx).await;
+
+    let project = create_project(client, PROJECT_NAME).await;
+    let project_id = project.identity.id;
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Use 1 GiB for all resources (disk, snapshot, image)
+    let one_gib = ByteCount::from_gibibytes_u32(1);
+
+    // Helper to get provisioning for a collection
+    async fn get_provisioned_bytes(
+        datastore: &nexus_db_queries::db::DataStore,
+        opctx: &OpContext,
+        id: uuid::Uuid,
+    ) -> u64 {
+        datastore
+            .virtual_provisioning_collection_get(opctx, id)
+            .await
+            .unwrap()
+            .virtual_disk_bytes_provisioned
+            .to_bytes()
+    }
+
+    // Initially, all collections should have 0 virtual_disk_bytes_provisioned
+    assert_eq!(get_provisioned_bytes(&datastore, &opctx, project_id).await, 0);
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, DEFAULT_SILO_ID).await,
+        0
+    );
+    assert_eq!(get_provisioned_bytes(&datastore, &opctx, *FLEET_ID).await, 0);
+
+    // =========================================================================
+    // Create resources for project-scoped image: disk1 -> snapshot1 -> image1
+    // =========================================================================
+
+    // Create disk1 (1 GiB blank disk)
+    let disks_url = format!("/v1/disks?project={}", PROJECT_NAME);
+    let _disk1 = NexusRequest::objects_post(
+        client,
+        &disks_url,
+        &params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "disk1".parse().unwrap(),
+                description: String::from("first test disk"),
+            },
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+            },
+            size: one_gib,
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<Disk>()
+    .await;
+
+    // After disk1: project/silo/fleet all have 1 GiB
+    let after_disk1 = one_gib.to_bytes();
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, project_id).await,
+        after_disk1
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, DEFAULT_SILO_ID).await,
+        after_disk1
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, *FLEET_ID).await,
+        after_disk1
+    );
+
+    // Create snapshot1 from disk1
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
+    let snapshot1: views::Snapshot = NexusRequest::objects_post(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot1".parse().unwrap(),
+                description: String::from("first test snapshot"),
+            },
+            disk: "disk1".parse().unwrap(),
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // After snapshot1: disk1 + snapshot1 = 2 GiB each
+    let after_snapshot1 = one_gib.to_bytes() * 2;
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, project_id).await,
+        after_snapshot1
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, DEFAULT_SILO_ID).await,
+        after_snapshot1
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, *FLEET_ID).await,
+        after_snapshot1
+    );
+
+    // Create project-scoped image from snapshot1
+    let project_images_url = get_project_images_url(PROJECT_NAME);
+    let project_image = NexusRequest::objects_post(
+        client,
+        &project_images_url,
+        &params::ImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "project-image".parse().unwrap(),
+                description: String::from("a project-scoped image"),
+            },
+            os: "testOS".to_string(),
+            version: "1.0".to_string(),
+            source: params::ImageSource::Snapshot { id: snapshot1.identity.id },
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<views::Image>()
+    .await;
+
+    // After project_image: disk1 + snapshot1 + image1 = 3 GiB each
+    let after_project_image = one_gib.to_bytes() * 3;
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, project_id).await,
+        after_project_image
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, DEFAULT_SILO_ID).await,
+        after_project_image
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, *FLEET_ID).await,
+        after_project_image
+    );
+
+    // =========================================================================
+    // Create resources for silo-scoped image: disk2 -> snapshot2 -> image2
+    // =========================================================================
+
+    // Create disk2 (another 1 GiB blank disk)
+    let _disk2 = NexusRequest::objects_post(
+        client,
+        &disks_url,
+        &params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "disk2".parse().unwrap(),
+                description: String::from("second test disk"),
+            },
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+            },
+            size: one_gib,
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<Disk>()
+    .await;
+
+    // After disk2: previous + disk2 = 4 GiB
+    let after_disk2 = one_gib.to_bytes() * 4;
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, project_id).await,
+        after_disk2
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, DEFAULT_SILO_ID).await,
+        after_disk2
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, *FLEET_ID).await,
+        after_disk2
+    );
+
+    // Create snapshot2 from disk2
+    let snapshot2: views::Snapshot = NexusRequest::objects_post(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot2".parse().unwrap(),
+                description: String::from("second test snapshot"),
+            },
+            disk: "disk2".parse().unwrap(),
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // After snapshot2: previous + snapshot2 = 5 GiB
+    let after_snapshot2 = one_gib.to_bytes() * 5;
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, project_id).await,
+        after_snapshot2
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, DEFAULT_SILO_ID).await,
+        after_snapshot2
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, *FLEET_ID).await,
+        after_snapshot2
+    );
+
+    // Create silo-scoped image from snapshot2
+    // Note: silo images don't add to project provisioning, only silo and fleet
+    let silo_images_url = "/v1/images";
+    let silo_image = NexusRequest::objects_post(
+        client,
+        &silo_images_url,
+        &params::ImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "silo-image".parse().unwrap(),
+                description: String::from("a silo-scoped image"),
+            },
+            os: "testOS".to_string(),
+            version: "1.0".to_string(),
+            source: params::ImageSource::Snapshot { id: snapshot2.identity.id },
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<views::Image>()
+    .await;
+
+    // After silo_image:
+    // - Project still has 5 GiB (disk1 + snapshot1 + image1 + disk2 + snapshot2)
+    // - Silo/Fleet have 6 GiB (above + silo_image)
+    let project_after_silo_image = one_gib.to_bytes() * 5;
+    let silo_after_silo_image = one_gib.to_bytes() * 6;
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, project_id).await,
+        project_after_silo_image,
+        "Project should not include silo-scoped image"
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, DEFAULT_SILO_ID).await,
+        silo_after_silo_image,
+        "Silo should include silo-scoped image"
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, *FLEET_ID).await,
+        silo_after_silo_image,
+        "Fleet should include silo-scoped image"
+    );
+
+    // =========================================================================
+    // Delete images and verify provisioning decreases correctly
+    // =========================================================================
+
+    // Delete the project-scoped image
+    let project_image_url = format!("/v1/images/{}", project_image.identity.id);
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &project_image_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to delete project image");
+
+    // After deleting project_image:
+    // - Project: disk1 + snapshot1 + disk2 + snapshot2 = 4 GiB
+    // - Silo/Fleet: above + silo_image = 5 GiB
+    let project_after_delete_project_image = one_gib.to_bytes() * 4;
+    let silo_after_delete_project_image = one_gib.to_bytes() * 5;
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, project_id).await,
+        project_after_delete_project_image
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, DEFAULT_SILO_ID).await,
+        silo_after_delete_project_image
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, *FLEET_ID).await,
+        silo_after_delete_project_image
+    );
+
+    // Delete the silo-scoped image
+    let silo_image_url = format!("/v1/images/{}", silo_image.identity.id);
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &silo_image_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to delete silo image");
+
+    // After deleting silo_image:
+    // - All collections: disk1 + snapshot1 + disk2 + snapshot2 = 4 GiB
+    let after_delete_silo_image = one_gib.to_bytes() * 4;
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, project_id).await,
+        after_delete_silo_image
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, DEFAULT_SILO_ID).await,
+        after_delete_silo_image
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, *FLEET_ID).await,
+        after_delete_silo_image
+    );
+
+    // =========================================================================
+    // Clean up disks and snapshots
+    // =========================================================================
+
+    // Delete snapshots first (they depend on disks conceptually, but can be
+    // deleted independently)
+    let snapshot1_url =
+        format!("/v1/snapshots/snapshot1?project={}", PROJECT_NAME);
+    NexusRequest::object_delete(client, &snapshot1_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete snapshot1");
+
+    let snapshot2_url =
+        format!("/v1/snapshots/snapshot2?project={}", PROJECT_NAME);
+    NexusRequest::object_delete(client, &snapshot2_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete snapshot2");
+
+    // After deleting snapshots: disk1 + disk2 = 2 GiB
+    let after_delete_snapshots = one_gib.to_bytes() * 2;
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, project_id).await,
+        after_delete_snapshots
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, DEFAULT_SILO_ID).await,
+        after_delete_snapshots
+    );
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, *FLEET_ID).await,
+        after_delete_snapshots
+    );
+
+    // Delete disks
+    let disk1_url = format!("/v1/disks/disk1?project={}", PROJECT_NAME);
+    NexusRequest::object_delete(client, &disk1_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk1");
+
+    let disk2_url = format!("/v1/disks/disk2?project={}", PROJECT_NAME);
+    NexusRequest::object_delete(client, &disk2_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk2");
+
+    // After deleting disks: all collections should be 0
+    assert_eq!(get_provisioned_bytes(&datastore, &opctx, project_id).await, 0);
+    assert_eq!(
+        get_provisioned_bytes(&datastore, &opctx, DEFAULT_SILO_ID).await,
+        0
+    );
+    assert_eq!(get_provisioned_bytes(&datastore, &opctx, *FLEET_ID).await, 0);
 }
