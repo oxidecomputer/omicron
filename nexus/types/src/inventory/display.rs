@@ -14,12 +14,14 @@ use chrono::SecondsFormat;
 use clap::Subcommand;
 use gateway_types::component::SpType;
 use iddqd::IdOrdMap;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use indent_write::fmt::IndentWriter;
 use itertools::Itertools;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
+use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types_versions::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
@@ -907,41 +909,8 @@ fn display_sleds(
             }
         }
 
-        // TODO-K[omicron#9516]: This is temporarily hidden until we add the
-        // health monitor types to the DB. Once those have been integrated,
-        // we'll show health monitor status when everything is healthy as well.
-        if !health_monitor.is_empty() {
-            writeln!(indented, "HEALTH MONITOR")?;
-            let mut indent2 = IndentWriter::new("  ", &mut indented);
-            match &health_monitor.smf_services_in_maintenance {
-                Ok(svcs) => {
-                    if !svcs.is_empty() {
-                        if let Some(time_of_status) = &svcs.time_of_status {
-                            writeln!(
-                                indent2,
-                                "SMF services in maintenance at {}:",
-                                time_of_status.to_rfc3339_opts(
-                                    SecondsFormat::Millis,
-                                    /* use_z */ true,
-                                )
-                            )?;
-                        }
-                        let mut indent3 = IndentWriter::new("  ", &mut indent2);
-                        for svc in &svcs.services {
-                            writeln!(indent3, "{svc}")?;
-                        }
-                    }
-                }
-                Err(e) => {
-                    writeln!(
-                        indent2,
-                        "failed to retrieve SMF services in maintenance: {e}"
-                    )?;
-                }
-            }
-        }
-
         f = indented.into_inner();
+        display_health_monitor(health_monitor, f)?;
     }
     Ok(())
 }
@@ -1131,6 +1100,85 @@ fn collect_config_reconciler_errors<T: Ord + fmt::Display>(
             }
         })
         .collect()
+}
+
+fn display_health_monitor(
+    health_monitor: &HealthMonitorInventory,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    let HealthMonitorInventory { smf_services_in_maintenance } = health_monitor;
+
+    writeln!(f, "\nHEALTH MONITOR")?;
+
+    let mut indented = IndentWriter::new("    ", f);
+
+    match &smf_services_in_maintenance {
+        Ok(svcs) => {
+            if !svcs.is_empty() {
+                let SvcsInMaintenanceResult {
+                    services,
+                    errors,
+                    time_of_status,
+                } = svcs;
+                let time = if let Some(t) = time_of_status {
+                    t.to_rfc3339_opts(
+                        SecondsFormat::Millis,
+                        /* use_z */ true,
+                    )
+                } else {
+                    "unknown time".to_string()
+                };
+
+                writeln!(
+                    indented,
+                    "{} SMF services in maintenance at {}",
+                    services.len(),
+                    time
+                )?;
+
+                if !services.is_empty() {
+                    #[derive(Tabled)]
+                    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                    struct SvcRow {
+                        fmri: String,
+                        zone: String,
+                    }
+                    let rows = services.iter().map(|s| SvcRow {
+                        fmri: s.fmri.clone(),
+                        zone: s.zone.clone(),
+                    });
+                    let table = tabled::Table::new(rows)
+                        .with(tabled::settings::Style::empty())
+                        .with(tabled::settings::Padding::new(4, 1, 0, 0))
+                        .to_string();
+                    writeln!(indented, "{table}")?;
+                };
+                if !errors.is_empty() {
+                    writeln!(
+                        indented,
+                        "\nfound errors when retrieving services in maintenance:"
+                    )?;
+                    let mut indent2 = IndentWriter::new("    ", &mut indented);
+                    for e in errors {
+                        writeln!(indent2, "{e}")?;
+                    }
+                }
+            } else {
+                writeln!(
+                    indented,
+                    "no data on SMF services in maintenance has been collected"
+                )?;
+            }
+        }
+        Err(e) => {
+            writeln!(
+                indented,
+                "failed to retrieve SMF services in maintenance: {e}"
+            )?;
+        }
+    };
+
+    Ok(())
 }
 
 fn display_sled_config(

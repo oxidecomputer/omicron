@@ -27,6 +27,8 @@ use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use illumos_utils::svcs::SvcInMaintenance;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
@@ -62,6 +64,7 @@ use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledBootPartition;
 use nexus_db_model::InvSledConfigReconciler;
+use nexus_db_model::InvSvcInMaintenance;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
@@ -209,6 +212,56 @@ impl DataStore {
                 }
             }
         }
+
+        // Pull services in maintenance out of all sled agents
+        let svcs_in_maintenance: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                match &sled_agent.health_monitor.smf_services_in_maintenance {
+                    // When there are no services in maintenance, we will still
+                    // want to insert a row with the time the health check was
+                    // made and any parsing errors we may have collected.
+                    Ok(svcs)
+                        if svcs.services.is_empty()
+                            && svcs.time_of_status.is_some() =>
+                    {
+                        vec![InvSvcInMaintenance::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            None,
+                            svcs.errors.clone(),
+                            None,
+                            svcs.time_of_status,
+                        )]
+                    }
+                    Ok(svcs) => svcs
+                        .services
+                        .iter()
+                        .map(|svc| {
+                            InvSvcInMaintenance::new(
+                                collection_id,
+                                sled_agent.sled_id,
+                                Some(svc.clone()),
+                                svcs.errors.clone(),
+                                None,
+                                svcs.time_of_status,
+                            )
+                        })
+                        .collect(),
+                    Err(e) => {
+                        vec![InvSvcInMaintenance::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            None,
+                            vec![],
+                            Some(e.to_string()),
+                            None,
+                        )]
+                    }
+                }
+            })
+            .collect();
 
         // Pull disks out of all sled agents
         let disks: Vec<_> = collection
@@ -1507,6 +1560,25 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the unhealthy services we found
+            {
+                use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut svcs_in_maintenance = svcs_in_maintenance.into_iter();
+                loop {
+                    let some_svcs_in_maintenance =
+                        svcs_in_maintenance.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_svcs_in_maintenance.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_health_monitor_svc_in_maintenance)
+                        .values(some_svcs_in_maintenance)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for the sled agents that we found.  In practice, we'd
             // expect these to all have baseboards (if using Oxide hardware) or
             // none have baseboards (if not).
@@ -2011,6 +2083,7 @@ impl DataStore {
             nmupdate_override_non_boot: usize,
             nconfig_reconcilers: usize,
             nboot_partitions: usize,
+            nhealth_monitor_svc_in_maintenance: usize,
             nomicron_sled_configs: usize,
             nomicron_sled_config_disks: usize,
             nomicron_sled_config_datasets: usize,
@@ -2048,6 +2121,7 @@ impl DataStore {
             nmupdate_override_non_boot,
             nconfig_reconcilers,
             nboot_partitions,
+            nhealth_monitor_svc_in_maintenance,
             nomicron_sled_configs,
             nomicron_sled_config_disks,
             nomicron_sled_config_datasets,
@@ -2278,6 +2352,16 @@ impl DataStore {
                         .await?
                     };
 
+                    // Remove rows associated with the health monitor
+                    let nhealth_monitor_svc_in_maintenance = {
+                        use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
+                        diesel::delete(dsl::inv_health_monitor_svc_in_maintenance.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     // Remove rows associated with `OmicronSledConfig`s.
                     let nomicron_sled_configs = {
                         use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
@@ -2409,6 +2493,7 @@ impl DataStore {
                         nmupdate_override_non_boot,
                         nconfig_reconcilers,
                         nboot_partitions,
+                        nhealth_monitor_svc_in_maintenance,
                         nomicron_sled_configs,
                         nomicron_sled_config_disks,
                         nomicron_sled_config_datasets,
@@ -2457,6 +2542,7 @@ impl DataStore {
             "nmupdate_override_non_boot" => nmupdate_override_non_boot,
             "nconfig_reconcilers" => nconfig_reconcilers,
             "nboot_partitions" => nboot_partitions,
+            "nhealth_monitor_svc_in_maintenance" => nhealth_monitor_svc_in_maintenance,
             "nomicron_sled_configs" => nomicron_sled_configs,
             "nomicron_sled_config_disks" => nomicron_sled_config_disks,
             "nomicron_sled_config_datasets" => nomicron_sled_config_datasets,
@@ -2858,6 +2944,39 @@ impl DataStore {
                 }
             }
             datasets
+        };
+
+        // Mapping of "Sled ID" -> "All SMF services in maintenance reported by
+        // that sled"
+        let mut svcs_in_maintenance_by_sled = {
+            use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
+
+            let mut svcs = BTreeMap::<Uuid, Vec<InvSvcInMaintenance>>::new();
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch: Vec<InvSvcInMaintenance> = paginated_multicolumn(
+                    dsl::inv_health_monitor_svc_in_maintenance,
+                    (dsl::sled_id, dsl::id),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvSvcInMaintenance::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
+                for svc in batch {
+                    svcs.entry(svc.sled_id.into_untyped_uuid())
+                        .or_default()
+                        .push(svc);
+                }
+            }
+            svcs
         };
 
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
@@ -4248,6 +4367,49 @@ impl DataStore {
                     ))
                 })?;
 
+            // Convert all health checks into a full `HealthMonitorInventory`
+            let mut health_monitor = HealthMonitorInventory::new();
+
+            let svcs_in_maintenance = svcs_in_maintenance_by_sled
+                .remove(&sled_id.into_untyped_uuid())
+                .map(|rows| {
+                    // Get metadata from the first row. All rows from the same
+                    // collection and sled will share time_of_status,
+                    // svcs_cmd_error and error_messages.
+                    let first_row =
+                        rows.first().expect("rows should not be empty");
+
+                    // Check if the svcs command itself failed first. If so, we
+                    // can safely assume no services in maintenance have been
+                    // reported and return an error.
+                    if let Some(e) = &first_row.svcs_cmd_error {
+                        return Err(e.clone());
+                    }
+
+                    // Convert database rows to service in maintenance entries.
+                    // All rows should have both zone and FMRI populated or none
+                    // at all. Nevertheless, we'll handle the case of a
+                    // partially populated row.
+                    let services: Vec<SvcInMaintenance> = rows
+                        .iter()
+                        .filter(|svc| svc.fmri.is_some() || svc.zone.is_some())
+                        .map(|svc| SvcInMaintenance {
+                            fmri: svc.fmri.clone().unwrap_or_default(),
+                            zone: svc.zone.clone().unwrap_or_default(),
+                        })
+                        .collect();
+
+                    Ok(SvcsInMaintenanceResult {
+                        services,
+                        errors: first_row.error_messages.clone(),
+                        time_of_status: first_row.time_of_status,
+                    })
+                });
+
+            if let Some(svcs) = svcs_in_maintenance {
+                health_monitor.smf_services_in_maintenance = svcs
+            };
+
             let sled_agent = nexus_types::inventory::SledAgent {
                 time_collected: s.time_collected,
                 source: s.source,
@@ -4284,9 +4446,7 @@ impl DataStore {
                 reconciler_status,
                 last_reconciliation,
                 file_source_resolver,
-                // TODO-K[omicron#9516]: Actually query the DB when there is
-                // something there
-                health_monitor: HealthMonitorInventory::new(),
+                health_monitor,
             };
             sled_agents
                 .insert_unique(sled_agent)

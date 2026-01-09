@@ -6764,6 +6764,7 @@ dependencies = [
  "expectorate",
  "hex",
  "iddqd",
+ "illumos-utils",
  "ipnetwork",
  "itertools 0.14.0",
  "macaddr",

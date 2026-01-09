@@ -84,6 +84,9 @@ impl_typed_uuid_kinds! {
         Sled = {},
         SpUpdate = {},
         SupportBundle = {},
+        // `SvcInMaintenance`s do not contain IDs themselves. These IDs exist
+        // for the same reason as those in `OmicronSledConfig`.
+        SvcInMaintenance = {},
         TufArtifact = {},
         TufRepo = {},
         TufTrustRoot = {},
