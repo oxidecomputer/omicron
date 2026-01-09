@@ -381,6 +381,20 @@ pub async fn create_floating_ip(
     ip: Option<IpAddr>,
     parent_pool_name: Option<&str>,
 ) -> FloatingIp {
+    let address_selector = match (ip, parent_pool_name) {
+        (Some(ip), pool) => params::AddressSelector::Explicit {
+            ip,
+            pool: pool.map(|v| NameOrId::Name(v.parse().unwrap())),
+        },
+        (None, Some(pool)) => params::AddressSelector::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: NameOrId::Name(pool.parse().unwrap()),
+            },
+        },
+        (None, None) => params::AddressSelector::Auto {
+            pool_selector: params::PoolSelector::Auto { ip_version: None },
+        },
+    };
     object_create(
         client,
         &format!("/v1/floating-ips?project={project}"),
@@ -389,9 +403,7 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            ip,
-            pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
-            ip_version: None,
+            address_selector,
         },
     )
     .await

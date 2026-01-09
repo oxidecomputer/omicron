@@ -47,7 +47,6 @@ use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::blueprint_zone_type;
@@ -57,6 +56,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
+use nexus_types::internal_api::params::InitialTrustQuorumConfig;
 use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
@@ -70,6 +70,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -96,6 +97,7 @@ pub struct RackInit {
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
     pub allowed_source_ips: AllowedSourceIps,
+    pub initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
 }
 
 /// Possible errors while trying to initialize rack
@@ -116,6 +118,7 @@ enum RackInitError {
     Database(DieselError),
     // Error adding initial allowed source IP list
     AllowedSourceIpError(Error),
+    TrustQuorum(Error),
 }
 
 impl From<DieselError> for RackInitError {
@@ -177,6 +180,9 @@ impl From<RackInitError> for Error {
                 err
             )),
             RackInitError::AllowedSourceIpError(err) => err,
+            RackInitError::TrustQuorum(err) => err.internal_context(
+                "failed to insert initial trust quorum configuration",
+            ),
         }
     }
 }
@@ -842,7 +848,7 @@ impl DataStore {
                     // Insert Nexus database access records
                     self.initialize_nexus_access_from_blueprint_on_connection(
                         &conn,
-                        blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                        blueprint.in_service_zones()
                             .filter_map(|(_sled, zone_cfg)| {
                                 if zone_cfg.zone_type.is_nexus() {
                                     Some(zone_cfg.id)
@@ -856,7 +862,7 @@ impl DataStore {
                     })?;
 
                     // Allocate networking records for all services.
-                    for (_, zone_config) in blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service) {
+                    for (_, zone_config) in blueprint.in_service_zones() {
                         self.rack_populate_service_networking_records(
                             &conn,
                             &log,
@@ -976,6 +982,20 @@ impl DataStore {
                         DieselError::RollbackTransaction
                     })?;
 
+                    // Insert the initial trust quorum configuration
+                    if let Some(tq_config) = rack_init.initial_trust_quorum_configuration {
+                        Self::tq_insert_rss_config_after_handoff(
+                            opctx,
+                            &conn,
+                            RackUuid::from_untyped_uuid(rack_id),
+                            tq_config.members,
+                            tq_config.coordinator
+                        ).await.map_err(|e| {
+                            err.set(RackInitError::TrustQuorum(e)).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
+                    }
+
                     let rack = diesel::update(rack_dsl::rack)
                         .filter(rack_dsl::id.eq(rack_id))
                         .set((
@@ -1068,9 +1088,7 @@ mod test {
     use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
-    use nexus_types::deployment::{
-        BlueprintZoneDisposition, BlueprintZoneImageSource, OximeterReadMode,
-    };
+    use nexus_types::deployment::{BlueprintZoneImageSource, OximeterReadMode};
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
@@ -1167,6 +1185,7 @@ mod test {
                     "test suite".to_string(),
                 ),
                 allowed_source_ips: AllowedSourceIps::Any,
+                initial_trust_quorum_configuration: None
             }
         }
     }
@@ -1503,9 +1522,7 @@ mod test {
         let mut ntp1_id = None;
         let mut ntp2_id = None;
         let mut ntp3_id = None;
-        for (sled_id, zone) in
-            blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (sled_id, zone) in blueprint.in_service_zones() {
             match &zone.zone_type {
                 BlueprintZoneType::BoundaryNtp(_) => {
                     let which = if sled_id == sled1.id() {
@@ -1750,10 +1767,8 @@ mod test {
         assert_eq!(observed_blueprint, blueprint);
 
         // We should see both of the Nexus services we provisioned.
-        let mut observed_zones: Vec<_> = observed_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .map(|(_, z)| z)
-            .collect();
+        let mut observed_zones: Vec<_> =
+            observed_blueprint.in_service_zones().map(|(_, z)| z).collect();
         observed_zones.sort_by_key(|z| z.id);
         assert_eq!(observed_zones.len(), 2);
 
@@ -1778,12 +1793,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::any)
-                .next()
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().next().unwrap().1.zone_type
             {
                 external_ip.ip
             } else {
@@ -1797,12 +1807,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::any)
-                .nth(1)
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().nth(1).unwrap().1.zone_type
             {
                 external_ip.ip
             } else {
@@ -1955,10 +1960,8 @@ mod test {
         assert_eq!(observed_blueprint, blueprint);
 
         // We should see the Nexus service we provisioned.
-        let mut observed_zones: Vec<_> = observed_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .map(|(_, z)| z)
-            .collect();
+        let mut observed_zones: Vec<_> =
+            observed_blueprint.in_service_zones().map(|(_, z)| z).collect();
         observed_zones.sort_by_key(|z| z.id);
         assert_eq!(observed_zones.len(), 1);
 
@@ -1985,12 +1988,7 @@ mod test {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) = &blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::any)
-                .next()
-                .unwrap()
-                .1
-                .zone_type
+            }) = &blueprint.in_service_zones().next().unwrap().1.zone_type
             {
                 external_ip.ip
             } else {

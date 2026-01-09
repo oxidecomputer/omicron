@@ -63,8 +63,8 @@ use sled_agent_types::instance::{
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
     HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
-    ZoneImageResolverInventory,
+    InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    OmicronZonesConfig, SledRole,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 
@@ -826,6 +826,7 @@ impl SledAgent {
             zones: zones_config.zones.into_iter().collect(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: Default::default(),
         };
 
         Ok(Inventory {
@@ -898,8 +899,9 @@ impl SledAgent {
             last_reconciliation: Some(
                 ConfigReconcilerInventory::debug_assume_success(sled_config),
             ),
-            // TODO: simulate the zone image resolver with greater fidelity
-            zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+            // TODO: simulate the file source resolver with greater fidelity
+            file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
+            ),
             health_monitor,
         })
     }

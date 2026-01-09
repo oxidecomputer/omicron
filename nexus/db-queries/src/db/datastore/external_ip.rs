@@ -98,9 +98,15 @@ impl DataStore {
         ip_id: Uuid,
         probe_id: Uuid,
         pool: Option<authz::IpPool>,
+        ip_version: Option<IpVersion>,
     ) -> CreateResult<ExternalIp> {
         let authz_pool = self
-            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast, None)
+            .resolve_pool_for_allocation(
+                opctx,
+                pool,
+                IpPoolType::Unicast,
+                ip_version,
+            )
             .await?;
         let data = IncompleteExternalIp::for_ephemeral_probe(
             ip_id,

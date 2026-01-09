@@ -43,6 +43,8 @@ pub mod v11;
 pub mod v12;
 #[path = "add_trust_quorum/mod.rs"]
 pub mod v13;
+#[path = "measurements/mod.rs"]
+pub mod v14;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]

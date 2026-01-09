@@ -73,7 +73,7 @@ impl NoopConvertInfo {
             };
 
             let zone_manifest = match &inv_sled
-                .zone_image_resolver
+                .file_source_resolver
                 .zone_manifest
                 .boot_inventory
             {

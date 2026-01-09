@@ -15,6 +15,7 @@ use internal_dns_types::config::{
     DnsConfigBuilder, DnsConfigParams, Host, Zone,
 };
 use internal_dns_types::names::ServiceName;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintHostPhase2DesiredSlots, BlueprintPhysicalDiskConfig,
@@ -909,11 +910,19 @@ impl Plan {
                     })?;
             }
 
+            // We could more carefully track which IPs we actually allocated to
+            // this sled, but in practice Reconfigurator treats the entire
+            // RSS_RESERVED_ADDRESSES range as reserved anyway, so it's fine for
+            // us to just start there.
+            let last_allocated_ip_subnet_offset =
+                LastAllocatedSubnetIpOffset::new(RSS_RESERVED_ADDRESSES);
+
             blueprint_sleds.insert(
                 sled_description.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
                     subnet: sled_description.subnet,
+                    last_allocated_ip_subnet_offset,
                     sled_agent_generation: sled_agent_config_generation,
                     disks: sled_config.disks.clone(),
                     datasets,
@@ -1306,8 +1315,8 @@ mod tests {
     use oxnet::Ipv6Net;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::HealthMonitorInventory;
+    use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
-    use sled_agent_types::inventory::ZoneImageResolverInventory;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
     use sled_agent_types::rack_init::RecoverySiloConfig;
     use sled_hardware_types::Baseboard;
@@ -1527,7 +1536,8 @@ mod tests {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
-                zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                file_source_resolver:
+                    OmicronFileSourceResolverInventory::new_fake(),
                 health_monitor: HealthMonitorInventory::new(),
             },
             is_scrimlet,

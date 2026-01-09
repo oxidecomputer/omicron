@@ -131,6 +131,7 @@ use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
@@ -1622,16 +1623,19 @@ async fn lookup_service_info(
     service_id: Uuid,
     blueprint: &Blueprint,
 ) -> anyhow::Result<Option<ServiceInfo>> {
-    let Some(zone_config) = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::any)
-        .find_map(|(_sled_id, zone_config)| {
-            if zone_config.id.into_untyped_uuid() == service_id {
-                Some(zone_config)
-            } else {
-                None
-            }
-        })
-    else {
+    // We don't know anything about `service_id`; it may be in-service or it may
+    // be expunged. Check all the zone states.
+    let mut all_zones = blueprint.all_in_service_and_expunged_zones(
+        BlueprintExpungedZoneAccessReason::Omdb,
+    );
+
+    let Some(zone_config) = all_zones.find_map(|(_sled_id, zone_config)| {
+        if zone_config.id.into_untyped_uuid() == service_id {
+            Some(zone_config)
+        } else {
+            None
+        }
+    }) else {
         return Ok(None);
     };
 

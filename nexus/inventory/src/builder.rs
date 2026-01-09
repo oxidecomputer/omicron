@@ -674,7 +674,7 @@ impl CollectionBuilder {
             ledgered_sled_config: inventory.ledgered_sled_config,
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
-            zone_image_resolver: inventory.zone_image_resolver,
+            file_source_resolver: inventory.file_source_resolver,
             health_monitor: inventory.health_monitor,
         };
 
