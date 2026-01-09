@@ -1728,6 +1728,12 @@ pub struct ScimClientBearerTokenValue {
     pub bearer_token: String,
 }
 
+impl SimpleIdentity for ScimClientBearerTokenValue {
+    fn id(&self) -> Uuid {
+        self.id
+    }
+}
+
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct ScimClientBearerToken {
     pub id: Uuid,
