@@ -13106,7 +13106,6 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8e2f55fa74cdf1de3603c00bab92c270596e27ab)",
  "proptest",
  "rcgen",
  "schemars 0.8.22",
