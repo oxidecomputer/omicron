@@ -1352,6 +1352,40 @@ pub trait NexusExternalApi {
 
     /// Create floating IP
     #[endpoint {
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_POOL_SELECTION_ENUMS..,
+    }]
+    async fn floating_ip_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        floating_params: TypedBody<latest::floating_ip::FloatingIpCreate>,
+    ) -> Result<HttpResponseCreated<latest::floating_ip::FloatingIp>, HttpError>;
+
+    /// Create floating IP
+    #[endpoint {
+        operation_id = "floating_ip_create",
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS
+            ..VERSION_POOL_SELECTION_ENUMS,
+    }]
+    async fn floating_ip_create_v2026010300(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025112000::project::ProjectSelector>,
+        floating_params: TypedBody<v2026010300::floating_ip::FloatingIpCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025112000::floating_ip::FloatingIp>,
+        HttpError,
+    > {
+        let floating_params = floating_params.try_map(TryInto::try_into)?;
+        Self::floating_ip_create(rqctx, query_params, floating_params).await
+    }
+
+    /// Create floating IP
+    #[endpoint {
         operation_id = "floating_ip_create",
         method = POST,
         path = "/v1/floating-ips",
@@ -1378,40 +1412,6 @@ pub trait NexusExternalApi {
         )
         .await
     }
-
-    /// Create floating IP
-    #[endpoint {
-        operation_id = "floating_ip_create",
-        method = POST,
-        path = "/v1/floating-ips",
-        tags = ["floating-ips"],
-        versions = VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS
-            ..VERSION_POOL_SELECTION_ENUMS,
-    }]
-    async fn floating_ip_create_v2026010300(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<v2025112000::project::ProjectSelector>,
-        floating_params: TypedBody<v2026010300::floating_ip::FloatingIpCreate>,
-    ) -> Result<
-        HttpResponseCreated<v2025112000::floating_ip::FloatingIp>,
-        HttpError,
-    > {
-        let floating_params = floating_params.try_map(TryInto::try_into)?;
-        Self::floating_ip_create(rqctx, query_params, floating_params).await
-    }
-
-    /// Create floating IP
-    #[endpoint {
-        method = POST,
-        path = "/v1/floating-ips",
-        tags = ["floating-ips"],
-        versions = VERSION_POOL_SELECTION_ENUMS..,
-    }]
-    async fn floating_ip_create(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        floating_params: TypedBody<latest::floating_ip::FloatingIpCreate>,
-    ) -> Result<HttpResponseCreated<latest::floating_ip::FloatingIp>, HttpError>;
 
     /// Update floating IP
     #[endpoint {
@@ -1814,23 +1814,50 @@ pub trait NexusExternalApi {
 
     /// Create instance
     #[endpoint {
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_POOL_SELECTION_ENUMS..,
+    }]
+    async fn instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_instance: TypedBody<latest::instance::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError>;
+
+    /// Create instance
+    #[endpoint {
         operation_id = "instance_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = ..VERSION_LOCAL_STORAGE,
+        versions = VERSION_DUAL_STACK_NICS..VERSION_POOL_SELECTION_ENUMS,
     }]
-    async fn instance_create_v2025112000(
+    async fn instance_create_v2026010300(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025112000::project::ProjectSelector>,
-        new_instance: TypedBody<v2025112000::instance::InstanceCreate>,
+        new_instance: TypedBody<v2026010300::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create_v2025121200(
-            rqctx,
-            query_params,
-            new_instance.map(Into::into),
-        )
-        .await
+        let new_instance = new_instance.try_map(TryInto::try_into)?;
+        Self::instance_create(rqctx, query_params, new_instance).await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions =
+            VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn instance_create_v2026010100(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025112000::project::ProjectSelector>,
+        new_instance: TypedBody<v2026010100::instance::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        let new_instance = new_instance.try_map(TryInto::try_into)?;
+        Self::instance_create(rqctx, query_params, new_instance).await
     }
 
     /// Create instance
@@ -1860,47 +1887,20 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions =
-            VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS..VERSION_DUAL_STACK_NICS,
+        versions = ..VERSION_LOCAL_STORAGE,
     }]
-    async fn instance_create_v2026010100(
+    async fn instance_create_v2025112000(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025112000::project::ProjectSelector>,
-        new_instance: TypedBody<v2026010100::instance::InstanceCreate>,
+        new_instance: TypedBody<v2025112000::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        let new_instance = new_instance.try_map(TryInto::try_into)?;
-        Self::instance_create(rqctx, query_params, new_instance).await
+        Self::instance_create_v2025121200(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
     }
-
-    /// Create instance
-    #[endpoint {
-        operation_id = "instance_create",
-        method = POST,
-        path = "/v1/instances",
-        tags = ["instances"],
-        versions = VERSION_DUAL_STACK_NICS..VERSION_POOL_SELECTION_ENUMS,
-    }]
-    async fn instance_create_v2026010300(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<v2025112000::project::ProjectSelector>,
-        new_instance: TypedBody<v2026010300::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        let new_instance = new_instance.try_map(TryInto::try_into)?;
-        Self::instance_create(rqctx, query_params, new_instance).await
-    }
-
-    /// Create instance
-    #[endpoint {
-        method = POST,
-        path = "/v1/instances",
-        tags = ["instances"],
-        versions = VERSION_POOL_SELECTION_ENUMS..,
-    }]
-    async fn instance_create(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_instance: TypedBody<latest::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError>;
 
     /// Fetch instance
     #[endpoint {
@@ -3276,34 +3276,17 @@ pub trait NexusExternalApi {
 
     /// Allocate and attach ephemeral IP to instance
     #[endpoint {
-        operation_id = "instance_ephemeral_ip_attach",
         method = POST,
         path = "/v1/instances/{instance}/external-ips/ephemeral",
         tags = ["instances"],
-        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+        versions = VERSION_POOL_SELECTION_ENUMS..,
     }]
-    async fn instance_ephemeral_ip_attach_v2025121200(
+    async fn instance_ephemeral_ip_attach(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025112000::path_params::InstancePath>,
-        query_params: Query<v2025112000::project::OptionalProjectSelector>,
-        ip_to_create: TypedBody<v2025121200::instance::EphemeralIpCreate>,
-    ) -> Result<
-        HttpResponseAccepted<v2025112000::external_ip::ExternalIp>,
-        HttpError,
-    > {
-        // Chain through intermediate versions: v2025121200 → v2026010100 → v2026010300
-        Self::instance_ephemeral_ip_attach_v2026010300(
-            rqctx,
-            path_params,
-            query_params,
-            ip_to_create.map(|p| {
-                let intermediate: v2026010100::instance::EphemeralIpCreate =
-                    p.into();
-                intermediate.into()
-            }),
-        )
-        .await
-    }
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        ip_to_create: TypedBody<latest::instance::EphemeralIpCreate>,
+    ) -> Result<HttpResponseAccepted<latest::external_ip::ExternalIp>, HttpError>;
 
     /// Allocate and attach ephemeral IP to instance
     #[endpoint {
@@ -3318,7 +3301,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025112000::path_params::InstancePath>,
         query_params: Query<v2025112000::project::OptionalProjectSelector>,
-        ip_to_create: TypedBody<v2026010300::instance::EphemeralIpCreate>,
+        ip_to_create: TypedBody<v2026010100::instance::EphemeralIpCreate>,
     ) -> Result<
         HttpResponseAccepted<v2025112000::external_ip::ExternalIp>,
         HttpError,
@@ -3335,17 +3318,30 @@ pub trait NexusExternalApi {
 
     /// Allocate and attach ephemeral IP to instance
     #[endpoint {
+        operation_id = "instance_ephemeral_ip_attach",
         method = POST,
         path = "/v1/instances/{instance}/external-ips/ephemeral",
         tags = ["instances"],
-        versions = VERSION_POOL_SELECTION_ENUMS..,
+        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
     }]
-    async fn instance_ephemeral_ip_attach(
+    async fn instance_ephemeral_ip_attach_v2025121200(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::InstancePath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-        ip_to_create: TypedBody<latest::instance::EphemeralIpCreate>,
-    ) -> Result<HttpResponseAccepted<latest::external_ip::ExternalIp>, HttpError>;
+        path_params: Path<v2025112000::path_params::InstancePath>,
+        query_params: Query<v2025112000::project::OptionalProjectSelector>,
+        ip_to_create: TypedBody<v2025121200::instance::EphemeralIpCreate>,
+    ) -> Result<
+        HttpResponseAccepted<v2025112000::external_ip::ExternalIp>,
+        HttpError,
+    > {
+        // Convert v2025121200 → v2026010100 (adds ip_version: None).
+        Self::instance_ephemeral_ip_attach_v2026010300(
+            rqctx,
+            path_params,
+            query_params,
+            ip_to_create.map(|p| p.into()),
+        )
+        .await
+    }
 
     /// Detach and deallocate ephemeral IP from instance
     #[endpoint {

@@ -41,21 +41,21 @@ pub enum ExternalIpCreate {
     Floating { floating_ip: NameOrId },
 }
 
-impl TryFrom<v2026010300::instance::ExternalIpCreate> for ExternalIpCreate {
+impl TryFrom<v2026010100::instance::ExternalIpCreate> for ExternalIpCreate {
     type Error = omicron_common::api::external::Error;
 
     fn try_from(
-        old: v2026010300::instance::ExternalIpCreate,
+        old: v2026010100::instance::ExternalIpCreate,
     ) -> Result<Self, Self::Error> {
         match old {
-            v2026010300::instance::ExternalIpCreate::Ephemeral {
+            v2026010100::instance::ExternalIpCreate::Ephemeral {
                 pool,
                 ip_version,
             } => {
                 let pool_selector = (pool, ip_version).try_into()?;
                 Ok(ExternalIpCreate::Ephemeral { pool_selector })
             }
-            v2026010300::instance::ExternalIpCreate::Floating {
+            v2026010100::instance::ExternalIpCreate::Floating {
                 floating_ip,
             } => Ok(ExternalIpCreate::Floating { floating_ip }),
         }
@@ -70,11 +70,11 @@ pub struct EphemeralIpCreate {
     pub pool_selector: PoolSelector,
 }
 
-impl TryFrom<v2026010300::instance::EphemeralIpCreate> for EphemeralIpCreate {
+impl TryFrom<v2026010100::instance::EphemeralIpCreate> for EphemeralIpCreate {
     type Error = omicron_common::api::external::Error;
 
     fn try_from(
-        old: v2026010300::instance::EphemeralIpCreate,
+        old: v2026010100::instance::EphemeralIpCreate,
     ) -> Result<Self, Self::Error> {
         let pool_selector = (old.pool, old.ip_version).try_into()?;
         Ok(EphemeralIpCreate { pool_selector })
@@ -246,17 +246,3 @@ impl TryFrom<v2025121200::instance::InstanceCreate> for InstanceCreate {
     }
 }
 
-// Note: Direct conversion from v2026010100 is not needed since
-// v2026010100::instance::EphemeralIpCreate is a re-export of v2026010300's type.
-
-// Direct conversion for EphemeralIpCreate from v2025121200
-impl TryFrom<v2025121200::instance::EphemeralIpCreate> for EphemeralIpCreate {
-    type Error = omicron_common::api::external::Error;
-
-    fn try_from(
-        old: v2025121200::instance::EphemeralIpCreate,
-    ) -> Result<Self, Self::Error> {
-        let v2026010100: v2026010100::instance::EphemeralIpCreate = old.into();
-        v2026010100.try_into()
-    }
-}

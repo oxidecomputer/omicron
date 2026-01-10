@@ -13,8 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
 use super::ip_pool::PoolSelector;
-use crate::v2025121200;
-use crate::v2026010100;
 use crate::v2026010300;
 
 /// Specify how to allocate a floating IP address.
@@ -95,31 +93,5 @@ impl TryFrom<v2026010300::floating_ip::FloatingIpCreate> for FloatingIpCreate {
             },
         };
         Ok(FloatingIpCreate { identity: old.identity, address_selector })
-    }
-}
-
-// Direct conversion from v2026010100 (chains through v2026010300)
-impl TryFrom<v2026010100::floating_ip::FloatingIpCreate> for FloatingIpCreate {
-    type Error = omicron_common::api::external::Error;
-
-    fn try_from(
-        old: v2026010100::floating_ip::FloatingIpCreate,
-    ) -> Result<Self, Self::Error> {
-        let intermediate: v2026010300::floating_ip::FloatingIpCreate =
-            old.into();
-        intermediate.try_into()
-    }
-}
-
-// Direct conversion from v2025121200 (chains through v2026010100 → v2026010300)
-impl TryFrom<v2025121200::floating_ip::FloatingIpCreate> for FloatingIpCreate {
-    type Error = omicron_common::api::external::Error;
-
-    fn try_from(
-        old: v2025121200::floating_ip::FloatingIpCreate,
-    ) -> Result<Self, Self::Error> {
-        let v2026010100: v2026010100::floating_ip::FloatingIpCreate =
-            old.into();
-        v2026010100.try_into()
     }
 }

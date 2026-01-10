@@ -1249,11 +1249,11 @@ mod tests {
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::instance::PrivateIpStackCreate;
-    use nexus_types::external_api::shared::Ipv4Range;
     use nexus_types::external_api::vpc;
     use nexus_types::identity::Resource;
     use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::IpRange;
+    use omicron_common::address::Ipv4Range;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::{
         self, IdentityMetadataCreateParams, LookupType,

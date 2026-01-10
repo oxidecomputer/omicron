@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
 use crate::v2025112000;
+use crate::v2025121200;
 
 /// Parameters for creating a new floating IP address for instances.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -27,6 +28,14 @@ pub struct FloatingIpCreate {
 impl From<v2025112000::floating_ip::FloatingIpCreate> for FloatingIpCreate {
     fn from(
         old: v2025112000::floating_ip::FloatingIpCreate,
+    ) -> FloatingIpCreate {
+        FloatingIpCreate { identity: old.identity, ip: old.ip, pool: old.pool }
+    }
+}
+
+impl From<v2025121200::floating_ip::FloatingIpCreate> for FloatingIpCreate {
+    fn from(
+        old: v2025121200::floating_ip::FloatingIpCreate,
     ) -> FloatingIpCreate {
         FloatingIpCreate { identity: old.identity, ip: old.ip, pool: old.pool }
     }

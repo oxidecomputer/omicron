@@ -10,14 +10,15 @@
 use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::{
     ByteCount, Error, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
-    IpVersion, Name, NameOrId,
+    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, Name,
+    NameOrId,
 };
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
+use crate::v2025112000;
 use crate::v2026010100;
 
 use crate::v2025112000::instance::{UserData, bool_true};
@@ -165,26 +166,26 @@ pub enum InstanceNetworkInterfaceAttachment {
     None,
 }
 
-impl TryFrom<v2026010100::instance::InstanceNetworkInterfaceAttachment>
+impl TryFrom<v2025112000::instance::InstanceNetworkInterfaceAttachment>
     for InstanceNetworkInterfaceAttachment
 {
     type Error = Error;
 
     fn try_from(
-        value: v2026010100::instance::InstanceNetworkInterfaceAttachment,
+        value: v2025112000::instance::InstanceNetworkInterfaceAttachment,
     ) -> Result<Self, Self::Error> {
         match value {
-            v2026010100::instance::InstanceNetworkInterfaceAttachment::Create(
+            v2025112000::instance::InstanceNetworkInterfaceAttachment::Create(
                 nics,
             ) => nics
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()
                 .map(Self::Create),
-            v2026010100::instance::InstanceNetworkInterfaceAttachment::Default => {
+            v2025112000::instance::InstanceNetworkInterfaceAttachment::Default => {
                 Ok(Self::DefaultIpv4)
             }
-            v2026010100::instance::InstanceNetworkInterfaceAttachment::None => {
+            v2025112000::instance::InstanceNetworkInterfaceAttachment::None => {
                 Ok(Self::None)
             }
         }
@@ -205,13 +206,13 @@ pub struct InstanceNetworkInterfaceCreate {
     pub ip_config: PrivateIpStackCreate,
 }
 
-impl TryFrom<v2026010100::instance::InstanceNetworkInterfaceCreate>
+impl TryFrom<v2025112000::instance::InstanceNetworkInterfaceCreate>
     for InstanceNetworkInterfaceCreate
 {
     type Error = Error;
 
     fn try_from(
-        value: v2026010100::instance::InstanceNetworkInterfaceCreate,
+        value: v2025112000::instance::InstanceNetworkInterfaceCreate,
     ) -> Result<Self, Self::Error> {
         use oxnet::IpNet;
 
@@ -276,42 +277,6 @@ impl TryFrom<v2026010100::instance::InstanceNetworkInterfaceCreate>
     }
 }
 
-// --- External IP Types (with flat pool/ip_version fields) ---
-
-/// The type of IP address to attach to an instance during creation.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ExternalIpCreate {
-    /// An IP address providing both inbound and outbound access.
-    Ephemeral {
-        /// Name or ID of the IP pool to use. If unspecified, the
-        /// default IP pool will be used.
-        pool: Option<NameOrId>,
-        /// The IP version preference for address allocation.
-        ip_version: Option<IpVersion>,
-    },
-    /// A floating IP address.
-    Floating {
-        /// The name or ID of the floating IP address to attach.
-        floating_ip: NameOrId,
-    },
-}
-
-// Note: From<v2025121200::instance::ExternalIpCreate> is provided via
-// v2025121200's impl since v2026010100 re-exports this type.
-
-/// Parameters for creating an ephemeral IP address for an instance.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EphemeralIpCreate {
-    /// Name or ID of the IP pool used to allocate an address.
-    pub pool: Option<NameOrId>,
-    /// The IP version preference for address allocation.
-    pub ip_version: Option<IpVersion>,
-}
-
-// Note: From<v2025121200::instance::EphemeralIpCreate> is provided via
-// v2025121200's impl since v2026010100 re-exports this type.
-
 // --- Instance Create ---
 
 /// Create-time parameters for an `Instance`
@@ -326,8 +291,9 @@ pub struct InstanceCreate {
     pub user_data: Vec<u8>,
     #[serde(default)]
     pub network_interfaces: InstanceNetworkInterfaceAttachment,
+    // ExternalIpCreate is unchanged from v2026010100.
     #[serde(default)]
-    pub external_ips: Vec<ExternalIpCreate>,
+    pub external_ips: Vec<v2026010100::instance::ExternalIpCreate>,
     #[serde(default)]
     pub multicast_groups: Vec<NameOrId>,
     #[serde(default)]
@@ -359,11 +325,8 @@ impl TryFrom<v2026010100::instance::InstanceCreate> for InstanceCreate {
             hostname: old.hostname,
             user_data: old.user_data,
             network_interfaces,
-            external_ips: old
-                .external_ips
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            // ExternalIpCreate is unchanged from v2026010100.
+            external_ips: old.external_ips,
             multicast_groups: old.multicast_groups,
             disks: old.disks,
             boot_disk: old.boot_disk,

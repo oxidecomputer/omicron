@@ -10,9 +10,9 @@ use api_identity::ObjectIdentity;
 use omicron_common::api::external;
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, MacAddr,
-    Name, NameOrId, ObjectIdentity, PrivateIpStack, PrivateIpv4Stack,
-    PrivateIpv6Stack,
+    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
+    IpVersion, MacAddr, NameOrId, ObjectIdentity, PrivateIpStack,
+    PrivateIpv4Stack, PrivateIpv6Stack,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
@@ -20,85 +20,17 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use uuid::Uuid;
 
-use crate::v2025112000;
 use crate::v2025120300;
 use crate::v2025121200;
 
 use crate::v2025112000::instance::{UserData, bool_true};
 use crate::v2025120300::instance::InstanceDiskAttachment;
 
-// --- Network Interface Types (old-style with single IP) ---
-
-/// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", content = "params", rename_all = "snake_case")]
-pub enum InstanceNetworkInterfaceAttachment {
-    /// Create one or more `InstanceNetworkInterface`s for the `Instance`.
-    Create(Vec<InstanceNetworkInterfaceCreate>),
-
-    /// The default networking configuration for an instance is to create a
-    /// single primary interface with an automatically-assigned IP address.
-    #[default]
-    Default,
-
-    /// No network interfaces at all will be created for the instance.
-    None,
-}
-
-impl From<v2025112000::instance::InstanceNetworkInterfaceAttachment>
-    for InstanceNetworkInterfaceAttachment
-{
-    fn from(
-        old: v2025112000::instance::InstanceNetworkInterfaceAttachment,
-    ) -> Self {
-        match old {
-            v2025112000::instance::InstanceNetworkInterfaceAttachment::Create(
-                nics,
-            ) => InstanceNetworkInterfaceAttachment::Create(
-                nics.into_iter().map(Into::into).collect(),
-            ),
-            v2025112000::instance::InstanceNetworkInterfaceAttachment::Default => {
-                InstanceNetworkInterfaceAttachment::Default
-            }
-            v2025112000::instance::InstanceNetworkInterfaceAttachment::None => {
-                InstanceNetworkInterfaceAttachment::None
-            }
-        }
-    }
-}
-
-/// Create-time parameters for an `InstanceNetworkInterface`
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceNetworkInterfaceCreate {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    /// The VPC in which to create the interface.
-    pub vpc_name: Name,
-    /// The VPC Subnet in which to create the interface.
-    pub subnet_name: Name,
-    /// The IP address for the interface. One will be auto-assigned if not provided.
-    pub ip: Option<IpAddr>,
-    /// A set of additional networks that this interface may send and
-    /// receive traffic on.
-    #[serde(default)]
-    pub transit_ips: Vec<IpNet>,
-}
-
-impl From<v2025112000::instance::InstanceNetworkInterfaceCreate>
-    for InstanceNetworkInterfaceCreate
-{
-    fn from(
-        old: v2025112000::instance::InstanceNetworkInterfaceCreate,
-    ) -> Self {
-        InstanceNetworkInterfaceCreate {
-            identity: old.identity,
-            vpc_name: old.vpc_name,
-            subnet_name: old.subnet_name,
-            ip: old.ip,
-            transit_ips: old.transit_ips,
-        }
-    }
-}
+// Re-export network interface types from the initial version where they were
+// first defined. These types are unchanged in this version.
+pub use crate::v2025112000::instance::{
+    InstanceNetworkInterfaceAttachment, InstanceNetworkInterfaceCreate,
+};
 
 /// An `InstanceNetworkInterface` represents a virtual network interface device
 /// attached to an instance.
@@ -219,9 +151,35 @@ impl TryFrom<external::InstanceNetworkInterface> for InstanceNetworkInterface {
     }
 }
 
-// Re-export ExternalIpCreate and EphemeralIpCreate from v2026010300.
-// These have the ip_version field which is used by endpoints in this version range.
-pub use crate::v2026010300::instance::{EphemeralIpCreate, ExternalIpCreate};
+// --- External IP Types (with flat pool/ip_version fields) ---
+
+/// The type of IP address to attach to an instance during creation.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalIpCreate {
+    /// An IP address providing both inbound and outbound access.
+    Ephemeral {
+        /// Name or ID of the IP pool to use. If unspecified, the
+        /// default IP pool will be used.
+        pool: Option<NameOrId>,
+        /// The IP version preference for address allocation.
+        ip_version: Option<IpVersion>,
+    },
+    /// A floating IP address.
+    Floating {
+        /// The name or ID of the floating IP address to attach.
+        floating_ip: NameOrId,
+    },
+}
+
+/// Parameters for creating an ephemeral IP address for an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EphemeralIpCreate {
+    /// Name or ID of the IP pool used to allocate an address.
+    pub pool: Option<NameOrId>,
+    /// The IP version preference for address allocation.
+    pub ip_version: Option<IpVersion>,
+}
 
 // --- Instance Create ---
 
@@ -260,7 +218,7 @@ impl From<v2025120300::instance::InstanceCreate> for InstanceCreate {
     fn from(old: v2025120300::instance::InstanceCreate) -> Self {
         // Chain conversion through v2025121200 for external_ips.
         // v2025120300 uses v2025112000's ExternalIpCreate (without ip_version).
-        // v2025121200 converts to v2026010300's ExternalIpCreate (with ip_version).
+        // v2025121200 converts to this version's ExternalIpCreate (with ip_version).
         let external_ips: Vec<ExternalIpCreate> = old
             .external_ips
             .into_iter()
@@ -277,8 +235,50 @@ impl From<v2025120300::instance::InstanceCreate> for InstanceCreate {
             memory: old.memory,
             hostname: old.hostname,
             user_data: old.user_data,
-            network_interfaces: old.network_interfaces.into(),
+            // network_interfaces is the same type (v2025112000)
+            network_interfaces: old.network_interfaces,
             external_ips,
+            multicast_groups: old.multicast_groups,
+            disks: old.disks,
+            boot_disk: old.boot_disk,
+            ssh_public_keys: old.ssh_public_keys,
+            start: old.start,
+            auto_restart_policy: old.auto_restart_policy,
+            anti_affinity_groups: old.anti_affinity_groups,
+            cpu_platform: old.cpu_platform,
+        }
+    }
+}
+
+impl From<v2025121200::instance::EphemeralIpCreate> for EphemeralIpCreate {
+    fn from(old: v2025121200::instance::EphemeralIpCreate) -> EphemeralIpCreate {
+        EphemeralIpCreate { pool: old.pool, ip_version: None }
+    }
+}
+
+impl From<v2025121200::instance::ExternalIpCreate> for ExternalIpCreate {
+    fn from(old: v2025121200::instance::ExternalIpCreate) -> ExternalIpCreate {
+        match old {
+            v2025121200::instance::ExternalIpCreate::Ephemeral { pool } => {
+                ExternalIpCreate::Ephemeral { pool, ip_version: None }
+            }
+            v2025121200::instance::ExternalIpCreate::Floating { floating_ip } => {
+                ExternalIpCreate::Floating { floating_ip }
+            }
+        }
+    }
+}
+
+impl From<v2025121200::instance::InstanceCreate> for InstanceCreate {
+    fn from(old: v2025121200::instance::InstanceCreate) -> InstanceCreate {
+        InstanceCreate {
+            identity: old.identity,
+            ncpus: old.ncpus,
+            memory: old.memory,
+            hostname: old.hostname,
+            user_data: old.user_data,
+            network_interfaces: old.network_interfaces,
+            external_ips: old.external_ips.into_iter().map(Into::into).collect(),
             multicast_groups: old.multicast_groups,
             disks: old.disks,
             boot_disk: old.boot_disk,

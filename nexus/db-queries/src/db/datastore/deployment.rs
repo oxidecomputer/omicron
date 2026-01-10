@@ -3124,7 +3124,6 @@ mod tests {
         PhysicalDiskPolicy, PhysicalDiskState,
     };
     use nexus_types::external_api::sled::{SledPolicy, SledState};
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Collection;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;

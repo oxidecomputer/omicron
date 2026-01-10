@@ -15,9 +15,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::v2025112000;
 use crate::v2025120300;
-use crate::v2026010100;
 
-use crate::v2025112000::instance::{UserData, bool_true};
+use crate::v2025112000::instance::{
+    InstanceNetworkInterfaceAttachment, UserData, bool_true,
+};
 use crate::v2025120300::instance::InstanceDiskAttachment;
 
 /// Parameters for creating an ephemeral IP address for an instance.
@@ -33,17 +34,6 @@ impl From<v2025112000::instance::EphemeralIpCreate> for EphemeralIpCreate {
         old: v2025112000::instance::EphemeralIpCreate,
     ) -> EphemeralIpCreate {
         EphemeralIpCreate { pool: old.pool }
-    }
-}
-
-impl From<EphemeralIpCreate> for v2026010100::instance::EphemeralIpCreate {
-    fn from(
-        old: EphemeralIpCreate,
-    ) -> v2026010100::instance::EphemeralIpCreate {
-        v2026010100::instance::EphemeralIpCreate {
-            pool: old.pool,
-            ip_version: None,
-        }
     }
 }
 
@@ -79,24 +69,6 @@ impl From<v2025112000::instance::ExternalIpCreate> for ExternalIpCreate {
     }
 }
 
-impl From<ExternalIpCreate> for v2026010100::instance::ExternalIpCreate {
-    fn from(old: ExternalIpCreate) -> v2026010100::instance::ExternalIpCreate {
-        match old {
-            ExternalIpCreate::Ephemeral { pool } => {
-                v2026010100::instance::ExternalIpCreate::Ephemeral {
-                    pool,
-                    ip_version: None,
-                }
-            }
-            ExternalIpCreate::Floating { floating_ip } => {
-                v2026010100::instance::ExternalIpCreate::Floating {
-                    floating_ip,
-                }
-            }
-        }
-    }
-}
-
 /// Create-time parameters for an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
@@ -113,8 +85,7 @@ pub struct InstanceCreate {
     pub user_data: Vec<u8>,
     /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interfaces:
-        v2026010100::instance::InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: InstanceNetworkInterfaceAttachment,
     /// The external IP addresses provided to this instance.
     #[serde(default)]
     pub external_ips: Vec<ExternalIpCreate>,
@@ -151,7 +122,7 @@ impl From<v2025120300::instance::InstanceCreate> for InstanceCreate {
             memory: old.memory,
             hostname: old.hostname,
             user_data: old.user_data,
-            network_interfaces: old.network_interfaces.into(),
+            network_interfaces: old.network_interfaces,
             external_ips: old
                 .external_ips
                 .into_iter()
@@ -176,32 +147,3 @@ impl From<v2025112000::instance::InstanceCreate> for InstanceCreate {
         intermediate.into()
     }
 }
-
-impl From<InstanceCreate> for v2026010100::instance::InstanceCreate {
-    fn from(old: InstanceCreate) -> v2026010100::instance::InstanceCreate {
-        v2026010100::instance::InstanceCreate {
-            identity: old.identity,
-            ncpus: old.ncpus,
-            memory: old.memory,
-            hostname: old.hostname,
-            user_data: old.user_data,
-            network_interfaces: old.network_interfaces,
-            external_ips: old
-                .external_ips
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-            multicast_groups: old.multicast_groups,
-            disks: old.disks,
-            boot_disk: old.boot_disk,
-            ssh_public_keys: old.ssh_public_keys,
-            start: old.start,
-            auto_restart_policy: old.auto_restart_policy,
-            anti_affinity_groups: old.anti_affinity_groups,
-            cpu_platform: old.cpu_platform,
-        }
-    }
-}
-
-// Conversions from v2025112000 to v2026010100 for InstanceNetworkInterfaceAttachment
-// and InstanceNetworkInterfaceCreate are defined in v2026010100::instance.
