@@ -46,6 +46,8 @@ impl DiskTypeLocalStorage {
         let overhead: u64 =
             external::ByteCount::from_mebibytes_u32(70).to_bytes() * gbs;
 
+        // XXX revisit, tracked by oxidecomputer/omicron#9591
+
         // Don't unwrap this - the size of this disk is a parameter set by an
         // API call, and we don't want to panic on out of range input.
         let required_dataset_overhead =
