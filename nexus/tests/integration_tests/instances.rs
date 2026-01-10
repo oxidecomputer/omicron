@@ -7627,18 +7627,40 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         "not found: default unicast IPv4 pool for current silo".to_string();
     assert_eq!(error.message, msg);
 
-    // same deal if you specify a pool that doesn't exist
+    // Specifying a nonexistent pool also fails with 404, but we need to
+    // avoid SNAT allocation (which uses the default pool) to actually
+    // exercise the explicit pool lookup. Use network_interfaces: None.
     let body = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "nonexistent-pool-inst".parse().unwrap(),
+            description: "".to_string(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool_selector: params::PoolSelector::Explicit {
                 pool: "nonexistent-pool".parse::<Name>().unwrap().into(),
             },
         }],
-        ..body
+        ssh_public_keys: None,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
     };
     let error =
         object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
-    assert_eq!(error.message, msg);
+    assert_eq!(error.error_code.unwrap(), "ObjectNotFound".to_string());
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"nonexistent-pool\"".to_string()
+    );
 }
 
 #[nexus_test]
