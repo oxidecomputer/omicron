@@ -7608,7 +7608,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         network_interfaces:
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_selector: params::PoolSelector::Auto { ip_version: None }, // <--- the only important thing here
+            pool_selector: params::PoolSelector::Auto { ip_version: None },
         }],
         ssh_public_keys: None,
         disks: vec![],
@@ -7789,19 +7789,20 @@ async fn create_instance_with_pool(
     instance_name: &str,
     pool_name: Option<&str>,
 ) -> Instance {
-    let pool_selector = match pool_name {
-        Some(name) => params::PoolSelector::Explicit {
-            pool: name.parse::<Name>().unwrap().into(),
-        },
-        None => params::PoolSelector::Auto { ip_version: None },
-    };
     create_instance_with(
         client,
         PROJECT_NAME,
         instance_name,
         &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         vec![],
-        vec![params::ExternalIpCreate::Ephemeral { pool_selector }],
+        vec![params::ExternalIpCreate::Ephemeral {
+            pool_selector: match pool_name {
+                Some(name) => params::PoolSelector::Explicit {
+                    pool: name.parse::<Name>().unwrap().into(),
+                },
+                None => params::PoolSelector::Auto { ip_version: None },
+            },
+        }],
         true,
         Default::default(),
         None,
@@ -8898,7 +8899,7 @@ async fn instance_wait_for_simulated_transition(
 /// Simulates state transitions for the incarnation of the instance on the
 /// supplied sled (which may not be the sled ID currently stored in the
 /// instance's CRDB record).
-async fn vmm_simulate_on_sled(
+pub async fn vmm_simulate_on_sled(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
     sled_id: SledUuid,

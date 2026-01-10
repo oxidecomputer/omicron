@@ -93,30 +93,18 @@ impl NextExternalMulticastGroup {
         out.push_bind_param::<sql_types::Nullable<sql_types::Timestamptz>, Option<DateTime<Utc>>>(&None)?;
         out.push_sql(" AS time_deleted, ");
 
+        // VNI
+        out.push_bind_param::<sql_types::Int4, Vni>(&self.group.vni)?;
+        out.push_sql(" AS vni, ");
+
         // Pool ID from the candidates subquery (like external IP)
         out.push_sql("ip_pool_id, ");
 
         // Pool range ID from the candidates subquery
         out.push_sql("ip_pool_range_id, ");
 
-        // VNI
-        out.push_bind_param::<sql_types::Int4, Vni>(&self.group.vni)?;
-        out.push_sql(" AS vni, ");
-
         // The multicast IP comes from the candidates subquery
         out.push_sql("candidate_ip AS multicast_ip, ");
-
-        // Handle source IPs array
-        out.push_sql("ARRAY[");
-        for (i, source_ip) in self.group.source_ips.iter().enumerate() {
-            if i > 0 {
-                out.push_sql(", ");
-            }
-            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
-                source_ip,
-            )?;
-        }
-        out.push_sql("]::inet[] AS source_ips, ");
 
         // MVLAN for external uplink forwarding
         out.push_bind_param::<sql_types::Nullable<sql_types::Int2>, Option<i16>>(&self.group.mvlan)?;
@@ -125,8 +113,11 @@ impl NextExternalMulticastGroup {
         out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(&None)?;
         out.push_sql(" AS underlay_group_id, ");
 
-        out.push_bind_param::<sql_types::Nullable<sql_types::Text>, Option<String>>(&self.group.tag)?;
-        out.push_sql(" AS tag, ");
+        // Compute tag as {uuid}:{multicast_ip} for DPD operations.
+        // This format ensures uniqueness across the group's lifecycle.
+        out.push_sql("(");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.group.id)?;
+        out.push_sql("::text || ':' || candidate_ip::text) AS tag, ");
 
         // New multicast groups start in "Creating" state (RPW pattern)
         out.push_bind_param::<nexus_db_schema::enums::MulticastGroupStateEnum, MulticastGroupState>(&MulticastGroupState::Creating)?;
@@ -134,7 +125,10 @@ impl NextExternalMulticastGroup {
 
         out.push_sql("nextval('omicron.public.multicast_group_version') AS version_added, ");
         out.push_bind_param::<sql_types::Nullable<sql_types::Int8>, Option<Generation>>(&None)?;
-        out.push_sql(" AS version_removed");
+        out.push_sql(" AS version_removed, ");
+
+        out.push_bind_param::<sql_types::Nullable<sql_types::Int2>, Option<i16>>(&None)?;
+        out.push_sql(" AS underlay_salt");
 
         // FROM the candidates subquery with LEFT JOIN (like external IP)
         out.push_sql(" FROM (");
@@ -217,6 +211,39 @@ impl NextExternalMulticastGroup {
         out.push_sql(" AND time_deleted IS NULL");
         Ok(())
     }
+
+    /// Push a subquery to update the `ip_pool_range` table's rcgen, if we've
+    /// successfully allocated a multicast group from that range.
+    ///
+    /// This prevents race conditions where a range is deleted while a
+    /// multicast group allocation is in progress. The range deletion checks
+    /// the rcgen value, and this increment ensures it changes when an
+    /// allocation occurs.
+    fn push_update_ip_pool_range_subquery<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        use schema::ip_pool_range::dsl;
+        out.push_sql("UPDATE ");
+        schema::ip_pool_range::table.walk_ast(out.reborrow())?;
+        out.push_sql(" SET ");
+        out.push_identifier(dsl::time_modified::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
+            &self.now,
+        )?;
+        out.push_sql(", ");
+        out.push_identifier(dsl::rcgen::NAME)?;
+        out.push_sql(" = ");
+        out.push_identifier(dsl::rcgen::NAME)?;
+        out.push_sql(" + 1 WHERE ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" = (SELECT ip_pool_range_id FROM next_external_multicast_group) AND ");
+        out.push_identifier(dsl::time_deleted::NAME)?;
+        out.push_sql(" IS NULL RETURNING ");
+        out.push_identifier(dsl::id::NAME)?;
+        Ok(())
+    }
 }
 
 impl QueryFragment<Pg> for NextExternalMulticastGroup {
@@ -241,18 +268,23 @@ impl QueryFragment<Pg> for NextExternalMulticastGroup {
         out.push_sql("INSERT INTO ");
         schema::multicast_group::table.walk_ast(out.reborrow())?;
         out.push_sql(
-            " (id, name, description, time_created, time_modified, time_deleted, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, mvlan, underlay_group_id, tag, state, version_added, version_removed)
-             SELECT id, name, description, time_created, time_modified, time_deleted, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, mvlan, underlay_group_id, tag, state, version_added, version_removed FROM next_external_multicast_group
+            " (id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, mvlan, underlay_group_id, tag, state, version_added, version_removed, underlay_salt)
+             SELECT id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, mvlan, underlay_group_id, tag, state, version_added, version_removed, underlay_salt FROM next_external_multicast_group
                 WHERE NOT EXISTS (SELECT 1 FROM previously_allocated_group)
-                RETURNING id, name, description, time_created, time_modified, time_deleted, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, mvlan, underlay_group_id, tag, state, version_added, version_removed",
+                RETURNING id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, mvlan, underlay_group_id, tag, state, version_added, version_removed, underlay_salt",
         );
+        out.push_sql("), ");
+
+        // Update the IP pool range's rcgen to prevent race conditions with range deletion
+        out.push_sql("updated_pool_range AS (");
+        self.push_update_ip_pool_range_subquery(out.reborrow())?;
         out.push_sql(") ");
 
         // Return either the newly inserted or previously allocated group
         out.push_sql(
-            "SELECT id, name, description, time_created, time_modified, time_deleted, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, mvlan, underlay_group_id, tag, state, version_added, version_removed FROM previously_allocated_group
+            "SELECT id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, mvlan, underlay_group_id, tag, state, version_added, version_removed, underlay_salt FROM previously_allocated_group
             UNION ALL
-            SELECT id, name, description, time_created, time_modified, time_deleted, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, mvlan, underlay_group_id, tag, state, version_added, version_removed FROM multicast_group",
+            SELECT id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, mvlan, underlay_group_id, tag, state, version_added, version_removed, underlay_salt FROM multicast_group",
         );
 
         Ok(())

@@ -9,7 +9,11 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
-use omicron_common::address::ConcreteIp;
+use omicron_common::address::{
+    ConcreteIp, IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET,
+    IPV6_LINK_LOCAL_MULTICAST_SUBNET, IPV6_RESERVED_SCOPE_MULTICAST_SUBNET,
+    MAX_SSM_SOURCE_IPS,
+};
 use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
@@ -29,8 +33,7 @@ use serde::{
     de::{self, Visitor},
 };
 use sled_hardware_types::BaseboardId;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::num::NonZeroU32;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -41,11 +44,14 @@ use uuid::Uuid;
 
 macro_rules! path_param {
     ($struct:ident, $param:ident, $name:tt) => {
+        path_param!($struct, $param, $name, NameOrId, "Name or ID of the ");
+    };
+    ($struct:ident, $param:ident, $name:tt, $type:ty, $doc_prefix:tt) => {
         #[derive(Serialize, Deserialize, JsonSchema)]
         pub struct $struct {
-            #[doc = "Name or ID of the "]
+            #[doc = $doc_prefix]
             #[doc = $name]
-            pub $param: NameOrId,
+            pub $param: $type,
         }
     };
 }
@@ -91,7 +97,13 @@ impl From<UninitializedSledId> for BaseboardId {
 
 path_param!(AffinityGroupPath, affinity_group, "affinity group");
 path_param!(AntiAffinityGroupPath, anti_affinity_group, "anti affinity group");
-path_param!(MulticastGroupPath, multicast_group, "multicast group");
+path_param!(
+    MulticastGroupPath,
+    multicast_group,
+    "multicast group",
+    MulticastGroupIdentifier,
+    "Name, ID, or IP address of the "
+);
 path_param!(ProjectPath, project, "project");
 path_param!(InstancePath, instance, "instance");
 path_param!(NetworkInterfacePath, interface, "network interface");
@@ -245,10 +257,114 @@ pub struct FloatingIpSelector {
     pub floating_ip: NameOrId,
 }
 
+/// Identifier for a multicast group: can be a Name, UUID, or IP address.
+///
+/// This type supports the join-by-IP pattern where users can specify
+/// a multicast IP address directly, and the system will auto-discover
+/// the pool and find or create the group.
+#[derive(Debug, Display, Clone, PartialEq)]
+#[display("{0}")]
+pub enum MulticastGroupIdentifier {
+    Id(Uuid),
+    Name(Name),
+    Ip(IpAddr),
+}
+
+impl TryFrom<String> for MulticastGroupIdentifier {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if let Ok(id) = Uuid::parse_str(&value) {
+            Ok(MulticastGroupIdentifier::Id(id))
+        } else if let Ok(ip) = value.parse::<IpAddr>() {
+            Ok(MulticastGroupIdentifier::Ip(ip))
+        } else {
+            Ok(MulticastGroupIdentifier::Name(Name::try_from(value)?))
+        }
+    }
+}
+
+impl FromStr for MulticastGroupIdentifier {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        MulticastGroupIdentifier::try_from(String::from(value))
+    }
+}
+
+impl From<Name> for MulticastGroupIdentifier {
+    fn from(name: Name) -> Self {
+        MulticastGroupIdentifier::Name(name)
+    }
+}
+
+impl From<Uuid> for MulticastGroupIdentifier {
+    fn from(id: Uuid) -> Self {
+        MulticastGroupIdentifier::Id(id)
+    }
+}
+
+impl From<IpAddr> for MulticastGroupIdentifier {
+    fn from(ip: IpAddr) -> Self {
+        MulticastGroupIdentifier::Ip(ip)
+    }
+}
+
+impl From<NameOrId> for MulticastGroupIdentifier {
+    fn from(value: NameOrId) -> Self {
+        match value {
+            NameOrId::Name(name) => MulticastGroupIdentifier::Name(name),
+            NameOrId::Id(id) => MulticastGroupIdentifier::Id(id),
+        }
+    }
+}
+
+impl Serialize for MulticastGroupIdentifier {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for MulticastGroupIdentifier {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        MulticastGroupIdentifier::try_from(s).map_err(de::Error::custom)
+    }
+}
+
+impl JsonSchema for MulticastGroupIdentifier {
+    fn schema_name() -> String {
+        "MulticastGroupIdentifier".to_string()
+    }
+
+    fn json_schema(
+        _generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A multicast group identifier".to_string()),
+                description: Some(
+                    "Can be a UUID, a name, or an IP address".to_string(),
+                ),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 #[derive(Deserialize, JsonSchema, Clone)]
 pub struct MulticastGroupSelector {
-    /// Name or ID of the multicast group (fleet-scoped)
-    pub multicast_group: NameOrId,
+    /// Name, ID, or IP address of the multicast group (fleet-scoped)
+    pub multicast_group: MulticastGroupIdentifier,
 }
 
 /// Path parameter for multicast group lookup by IP address.
@@ -1596,13 +1712,12 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub external_ips: Vec<ExternalIpCreate>,
 
-    /// The multicast groups this instance should join.
+    /// Multicast groups this instance should join at creation.
     ///
-    /// The instance will be automatically added as a member of the specified
-    /// multicast groups during creation, enabling it to send and receive
-    /// multicast traffic for those groups.
+    /// Groups can be specified by name, UUID, or IP address. Non-existent
+    /// groups are created automatically.
     #[serde(default)]
-    pub multicast_groups: Vec<NameOrId>,
+    pub multicast_groups: Vec<MulticastGroupJoinSpec>,
 
     /// A list of disks to be attached to the instance.
     ///
@@ -1725,10 +1840,15 @@ pub struct InstanceUpdate {
     /// membership with the new set of groups. The instance will leave any
     /// groups not listed here and join any new groups that are specified.
     ///
-    /// If not provided (None), the instance's multicast group membership
-    /// will not be changed.
+    /// Each entry can specify the group by name, UUID, or IP address, along with
+    /// optional source IP filtering for SSM (Source-Specific Multicast). When
+    /// a group doesn't exist, it will be implicitly created using the default
+    /// multicast pool (or you can specify `ip_version` to disambiguate if needed).
+    ///
+    /// If not provided, the instance's multicast group membership will not
+    /// be changed.
     #[serde(default)]
-    pub multicast_groups: Option<Vec<NameOrId>>,
+    pub multicast_groups: Option<Vec<MulticastGroupJoinSpec>>,
 }
 
 #[inline]
@@ -3142,19 +3262,19 @@ pub struct AuditLog {
 pub struct MulticastGroupCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// The multicast IP address to allocate. If None, one will be allocated
-    /// from the default pool.
+    /// The multicast IP address to allocate. If not provided, one will be
+    /// allocated from the default pool.
     #[serde(default, deserialize_with = "validate_multicast_ip_param")]
     pub multicast_ip: Option<IpAddr>,
     /// Source IP addresses for Source-Specific Multicast (SSM).
     ///
-    /// None uses default behavior (Any-Source Multicast).
-    /// Empty list explicitly allows any source (Any-Source Multicast).
-    /// Non-empty list restricts to specific sources (SSM).
+    /// If not provided, uses default behavior (Any-Source Multicast).
+    /// An empty list explicitly allows any source (Any-Source Multicast).
+    /// A non-empty list restricts to specific sources (SSM).
     #[serde(default, deserialize_with = "validate_source_ips_param")]
     pub source_ips: Option<Vec<IpAddr>>,
-    /// Name or ID of the IP pool to allocate from. If None, uses the default
-    /// multicast pool.
+    /// Name or ID of the IP pool to allocate from. If not provided, uses the
+    /// default multicast pool.
     #[serde(default)]
     pub pool: Option<NameOrId>,
     /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
@@ -3192,9 +3312,11 @@ pub struct MulticastGroupUpdate {
 pub struct MulticastGroupMemberAdd {
     /// Name or ID of the instance to add to the multicast group
     pub instance: NameOrId,
+    /// Source IPs for source-filtered multicast (SSM). Optional for ASM groups,
+    /// required for SSM groups (232.0.0.0/8, ff3x::/32).
+    #[serde(default, deserialize_with = "validate_source_ips_param")]
+    pub source_ips: Option<Vec<IpAddr>>,
 }
-
-// MVLAN validators
 
 /// Dendrite requires VLAN IDs >= 2 (rejects 0 and 1)
 ///
@@ -3253,8 +3375,8 @@ pub struct MulticastGroupMemberRemove {
 /// Path parameters for multicast group member operations.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MulticastGroupMemberPath {
-    /// Name or ID of the multicast group
-    pub multicast_group: NameOrId,
+    /// Name, ID, or IP address of the multicast group
+    pub multicast_group: MulticastGroupIdentifier,
     /// Name or ID of the instance
     pub instance: NameOrId,
 }
@@ -3264,8 +3386,45 @@ pub struct MulticastGroupMemberPath {
 pub struct InstanceMulticastGroupPath {
     /// Name or ID of the instance
     pub instance: NameOrId,
-    /// Name or ID of the multicast group
-    pub multicast_group: NameOrId,
+    /// Name, ID, or IP address of the multicast group
+    pub multicast_group: MulticastGroupIdentifier,
+}
+
+/// Parameters for joining an instance to a multicast group.
+///
+/// When joining by IP address, the pool containing the multicast IP is
+/// auto-discovered from all linked multicast pools.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
+pub struct InstanceMulticastGroupJoin {
+    /// Source IPs for source-filtered multicast (SSM). Optional for ASM groups,
+    /// required for SSM groups (232.0.0.0/8, ff3x::/32).
+    #[serde(default, deserialize_with = "validate_source_ips_param")]
+    pub source_ips: Option<Vec<IpAddr>>,
+
+    /// IP version for pool selection when creating a group by name.
+    /// Required if both IPv4 and IPv6 default multicast pools are linked.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
+}
+
+/// Specification for joining a multicast group with optional source filtering.
+///
+/// Used in `InstanceCreate` and `InstanceUpdate` to specify multicast group
+/// membership along with per-member source IP configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MulticastGroupJoinSpec {
+    /// The multicast group to join, specified by name, UUID, or IP address.
+    pub group: MulticastGroupIdentifier,
+
+    /// Source IPs for source-filtered multicast (SSM). Optional for ASM groups,
+    /// required for SSM groups (232.0.0.0/8, ff3x::/32).
+    #[serde(default, deserialize_with = "validate_source_ips_param")]
+    pub source_ips: Option<Vec<IpAddr>>,
+
+    /// IP version for pool selection when creating a group by name.
+    /// Required if both IPv4 and IPv6 default multicast pools are linked.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 /// Validate that an IP address is suitable for use as a SSM source.
@@ -3358,27 +3517,22 @@ fn validate_ipv6_multicast(addr: Ipv6Addr) -> Result<(), String> {
         return Err(format!("{addr} is not a multicast address"));
     }
 
-    // Define reserved IPv6 multicast subnets using oxnet
-    let reserved_subnets = [
-        // Interface-local scope (ff01::/16)
-        Ipv6Net::new(Ipv6Addr::new(0xff01, 0, 0, 0, 0, 0, 0, 0), 16).unwrap(),
-        // Link-local scope (ff02::/16)
-        Ipv6Net::new(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0), 16).unwrap(),
-    ];
-
     // Check reserved subnets
-    for subnet in &reserved_subnets {
-        if subnet.contains(addr) {
-            return Err(format!(
-                "{} is in the reserved multicast subnet {}",
-                addr, subnet
-            ));
-        }
+    if IPV6_RESERVED_SCOPE_MULTICAST_SUBNET.contains(addr) {
+        return Err(format!(
+            "{addr} is in the reserved-scope multicast range (ff00::/16)"
+        ));
     }
-
-    // Note: Admin-local scope (ff04::/16) is allowed for on-premises deployments.
-    // Collision avoidance with underlay addresses is handled by the mapping
-    // function which sets a collision-avoidance bit in the underlay space.
+    if IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET.contains(addr) {
+        return Err(format!(
+            "{addr} is in the interface-local multicast range (ff01::/16)"
+        ));
+    }
+    if IPV6_LINK_LOCAL_MULTICAST_SUBNET.contains(addr) {
+        return Err(format!(
+            "{addr} is in the link-local multicast range (ff02::/16)"
+        ));
+    }
 
     Ok(())
 }
@@ -3405,12 +3559,34 @@ where
     D: Deserializer<'de>,
 {
     let ips_opt = Option::<Vec<IpAddr>>::deserialize(deserializer)?;
-    if let Some(ref ips) = ips_opt {
-        for ip in ips {
-            validate_source_ip(*ip).map_err(|e| de::Error::custom(e))?;
+    if let Some(ips) = ips_opt {
+        // Validate each IP and deduplicate
+        let mut seen = HashSet::new();
+        for ip in &ips {
+            validate_source_ip(*ip).map_err(de::Error::custom)?;
+            seen.insert(*ip);
         }
+
+        // Check max limit after deduplication
+        if seen.len() > MAX_SSM_SOURCE_IPS {
+            return Err(de::Error::custom(format!(
+                "too many source IPs: {} exceeds maximum of {MAX_SSM_SOURCE_IPS} per RFC 3376",
+                seen.len(),
+            )));
+        }
+
+        // Return deduplicated list preserving original order
+        let mut deduped = Vec::with_capacity(seen.len());
+        let mut added = HashSet::new();
+        for ip in ips {
+            if added.insert(ip) {
+                deduped.push(ip);
+            }
+        }
+        Ok(Some(deduped))
+    } else {
+        Ok(None)
     }
-    Ok(ips_opt)
 }
 
 const fn is_unicast_v4(ip: &Ipv4Addr) -> bool {
