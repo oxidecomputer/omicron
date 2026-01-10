@@ -1,9 +1,10 @@
-use std::net::IpAddr;
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Nexus methods for operating on `InstanceNetworkInterface`s.
 
 use nexus_db_lookup::lookup;
-use nexus_db_model::IpConfig;
-use nexus_db_model::Ipv4Assignment;
-use nexus_db_model::Ipv4Config;
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::queries::network_interface;
@@ -77,33 +78,6 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         params: &instance::InstanceNetworkInterfaceCreate,
     ) -> CreateResult<db::model::InstanceNetworkInterface> {
-        // TODO-completeness: Support creating dual-stack NICs in the public
-        // API. See https://github.com/oxidecomputer/omicron/issues/9248.
-        let ipv4_assignment = match params.ip {
-            Some(IpAddr::V4(ip)) => Ipv4Assignment::Explicit(ip),
-            Some(IpAddr::V6(_)) => {
-                return Err(Error::invalid_request(
-                    "IPv6 addressing is not yet suported for network interfaces",
-                ));
-            }
-            None => Ipv4Assignment::Auto,
-        };
-        let transit_ips = params
-            .transit_ips
-            .iter()
-            .map(|ipnet| {
-                let oxnet::IpNet::V4(net) = ipnet else {
-                    return Err(Error::invalid_request(
-                        "IPv6 transit IPs are not yet supported \
-                        for network interfaces",
-                    ));
-                };
-                Ok(*net)
-            })
-            .collect::<Result<_, _>>()?;
-        let ip_config =
-            IpConfig::V4(Ipv4Config { ip: ipv4_assignment, transit_ips });
-
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -124,7 +98,7 @@ impl super::Nexus {
             InstanceUuid::from_untyped_uuid(authz_instance.id()),
             db_subnet,
             params.identity.clone(),
-            ip_config,
+            params.ip_config.clone(),
         )?;
         self.db_datastore
             .instance_create_network_interface(

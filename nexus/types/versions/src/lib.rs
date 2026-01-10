@@ -35,3 +35,13 @@ pub mod latest;
 pub mod v2025112000;
 #[path = "local_storage/mod.rs"]
 pub mod v2025120300;
+#[path = "bgp_peer_collision_state/mod.rs"]
+pub mod v2025121200;
+#[path = "ip_version_and_multiple_default_pools/mod.rs"]
+pub mod v2025122300;
+#[path = "silo_project_ip_version_and_pool_type/mod.rs"]
+pub mod v2026010100;
+#[path = "dual_stack_nics/mod.rs"]
+pub mod v2026010300;
+#[path = "pool_selection_enums/mod.rs"]
+pub mod v2026010500;

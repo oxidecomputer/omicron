@@ -669,6 +669,8 @@ table! {
         resource_type -> crate::enums::IpPoolResourceTypeEnum,
         resource_id -> Uuid,
         is_default -> Bool,
+        pool_type -> crate::enums::IpPoolTypeEnum,
+        ip_version -> crate::enums::IpVersionEnum,
     }
 }
 
@@ -1689,6 +1691,11 @@ table! {
         zone_manifest_mupdate_id -> Nullable<Uuid>,
         zone_manifest_boot_disk_error -> Nullable<Text>,
 
+        measurement_manifest_boot_disk_path -> Text,
+        measurement_manifest_source -> Nullable<crate::enums::InvZoneManifestSourceEnum>,
+        measurement_manifest_mupdate_id -> Nullable<Uuid>,
+        measurement_manifest_boot_disk_error -> Nullable<Text>,
+
         mupdate_override_boot_disk_path -> Text,
         mupdate_override_id -> Nullable<Uuid>,
         mupdate_override_boot_disk_error -> Nullable<Text>,
@@ -1755,6 +1762,19 @@ table! {
 }
 
 table! {
+    inv_last_reconciliation_measurements
+        (inv_collection_id, sled_id, file_name)
+    {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        file_name -> Text,
+        path -> Text,
+        error_message -> Nullable<Text>
+    }
+}
+
+table! {
     inv_last_reconciliation_orphaned_dataset
         (inv_collection_id, sled_id, pool_id, kind, zone_name)
     {
@@ -1782,6 +1802,18 @@ table! {
 }
 
 table! {
+    inv_zone_manifest_measurement (inv_collection_id, sled_id, measurement_file_name) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        measurement_file_name -> Text,
+        path -> Text,
+        expected_size -> Int8,
+        expected_sha256 -> Text,
+        error -> Nullable<Text>,
+    }
+}
+
+table! {
     inv_zone_manifest_zone (inv_collection_id, sled_id, zone_file_name) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
@@ -1795,6 +1827,17 @@ table! {
 
 table! {
     inv_zone_manifest_non_boot (inv_collection_id, sled_id, non_boot_zpool_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        non_boot_zpool_id -> Uuid,
+        path -> Text,
+        is_valid -> Bool,
+        message -> Text,
+    }
+}
+
+table! {
+    inv_measurement_manifest_non_boot (inv_collection_id, sled_id, non_boot_zpool_id) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
         non_boot_zpool_id -> Uuid,
@@ -1880,6 +1923,7 @@ table! {
         remove_mupdate_override -> Nullable<Uuid>,
         host_phase_2_desired_slot_a -> Nullable<Text>,
         host_phase_2_desired_slot_b -> Nullable<Text>,
+        measurements -> Nullable<Array<Text>>,
     }
 }
 
@@ -2057,6 +2101,7 @@ table! {
         host_phase_2_desired_slot_b -> Nullable<Text>,
 
         subnet -> Inet,
+        last_allocated_ip_subnet_offset -> Int4,
     }
 }
 
@@ -2989,3 +3034,37 @@ table! {
 
 allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
+
+table! {
+    trust_quorum_configuration (rack_id, epoch) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        last_committed_epoch -> Nullable<Int8>,
+        state -> crate::enums::TrustQuorumConfigurationStateEnum,
+        threshold -> Int2,
+        commit_crash_tolerance -> Int2,
+        coordinator -> Uuid,
+        encrypted_rack_secrets_salt -> Nullable<Text>,
+        encrypted_rack_secrets -> Nullable<Binary>,
+        time_created -> Timestamptz,
+        time_committing -> Nullable<Timestamptz>,
+        time_committed -> Nullable<Timestamptz>,
+        time_aborted -> Nullable<Timestamptz>,
+        abort_reason -> Nullable<Text>,
+    }
+}
+
+table! {
+    trust_quorum_member (rack_id, epoch, hw_baseboard_id) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        hw_baseboard_id -> Uuid,
+        state -> crate::enums::TrustQuorumMemberStateEnum,
+        share_digest -> Nullable<Text>,
+        time_prepared -> Nullable<Timestamptz>,
+        time_committed -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(trust_quorum_member, hw_baseboard_id);
+joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));

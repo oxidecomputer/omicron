@@ -60,6 +60,7 @@ impl_typed_uuid_kinds! {
         InternalZpool = {},
         LoopbackAddress = {},
         MulticastGroup = {},
+        Measurement = {},
         Mupdate = {},
         MupdateOverride = {},
         // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs
@@ -74,6 +75,7 @@ impl_typed_uuid_kinds! {
         Rack = {},
         RackInit = {},
         RackReset = {},
+        ReconfiguratorSimOp = {},
         ReconfiguratorSimState = {},
         Region = {},
         SiloGroup = {},

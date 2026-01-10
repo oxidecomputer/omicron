@@ -28,8 +28,8 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::test_params::UserPassword;
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_local_user, create_project,
-    grant_iam, link_ip_pool, object_get,
+    create_default_ip_pools, create_instance, create_local_user,
+    create_project, grant_iam, link_ip_pool, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::{
@@ -58,7 +58,7 @@ async fn test_silo_users_can_create_and_modify_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Get current silo info
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
@@ -182,7 +182,7 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    let (v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
 
     // Get current silo info
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
@@ -190,7 +190,13 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
 
     // Create multicast pool and link to silo
     create_multicast_ip_pool(&client, "mcast-pool").await;
-    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    link_ip_pool(
+        &client,
+        v4_pool.identity.name.as_str(),
+        &silo.identity.id,
+        true,
+    )
+    .await;
     link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
 
     // Create a regular silo user
@@ -266,7 +272,7 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
         hostname: "user-instance".parse::<Hostname>().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -322,7 +328,7 @@ async fn test_authenticated_users_can_read_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Get current silo info
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
@@ -415,7 +421,7 @@ async fn test_cross_project_instance_attachment_allowed(
 
     // Create pools and projects
     let (_, _project1, _project2, mcast_pool) = ops::join4(
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_project(client, "project1"),
         create_project(client, "project2"),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -490,7 +496,7 @@ async fn test_unauthenticated_cannot_list_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Get current silo info
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
@@ -539,7 +545,7 @@ async fn test_unauthenticated_cannot_access_member_operations(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    let (v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
 
     // Get current silo info
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
@@ -547,7 +553,13 @@ async fn test_unauthenticated_cannot_access_member_operations(
 
     // Create multicast pool and link to silo
     create_multicast_ip_pool(&client, "mcast-pool").await;
-    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    link_ip_pool(
+        &client,
+        v4_pool.identity.name.as_str(),
+        &silo.identity.id,
+        true,
+    )
+    .await;
     link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
 
     // Create project and instance
@@ -630,7 +642,7 @@ async fn test_unprivileged_users_can_list_group_members(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    let (v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
 
     // Get current silo info
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
@@ -638,7 +650,13 @@ async fn test_unprivileged_users_can_list_group_members(
 
     // Create multicast pool and link to silo
     create_multicast_ip_pool(&client, "mcast-pool").await;
-    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    link_ip_pool(
+        &client,
+        v4_pool.identity.name.as_str(),
+        &silo.identity.id,
+        true,
+    )
+    .await;
     link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
 
     // Create two regular silo users
@@ -724,7 +742,7 @@ async fn test_unprivileged_users_can_list_group_members(
         hostname: "privileged-instance".parse::<Hostname>().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -873,7 +891,7 @@ async fn test_project_only_users_can_access_multicast_groups(
 ) {
     let client = &cptestctx.external_client;
     // create_default_ip_pool already links "default" pool to the DEFAULT_SILO
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Create multicast pool (fleet-scoped, no per-silo linking needed)
     create_multicast_ip_pool(&client, "mcast-pool").await;
@@ -1045,7 +1063,7 @@ async fn test_project_only_users_can_access_multicast_groups(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,

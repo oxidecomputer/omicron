@@ -26,6 +26,7 @@ parse-display.workspace = true
 regex.workspace = true
 schemars.workspace = true
 semver.workspace = true
+sled-hardware-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 slog-error-chain.workspace = true

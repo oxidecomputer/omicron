@@ -51,7 +51,6 @@ use nexus_types::deployment::UpstreamNtpConfig;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::sled::SledState;
-use nexus_types::inventory::BaseboardId;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
@@ -75,6 +74,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::ZoneKind;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -3245,9 +3245,7 @@ pub mod test {
             // that are already in use by existing zones. Attempting to add a
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
-            for (_, z) in
-                parent.all_omicron_zones(BlueprintZoneDisposition::any)
-            {
+            for (_, z) in parent.in_service_zones() {
                 if let Some((external_ip, _)) =
                     z.zone_type.external_networking()
                 {
@@ -3316,9 +3314,7 @@ pub mod test {
         // Ensure no CRDB zones (currently `ExampleSystemBuilder` never
         // provisions CRDB; this check makes sure we update our use of it if
         // that changes).
-        for (_, z) in
-            parent.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (_, z) in parent.in_service_zones() {
             assert!(
                 !z.zone_type.is_cockroach(),
                 "unexpected cockroach zone \
@@ -3361,7 +3357,7 @@ pub mod test {
         verify_blueprint(&blueprint, &input);
         assert_eq!(
             blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter(|(sled_id, z)| {
                     *sled_id == target_sled_id
                         && z.zone_type.kind() == ZoneKind::CockroachDb

@@ -1028,7 +1028,7 @@ pub(crate) async fn instance_for_multicast_groups(
             hostname: instance_name.parse::<Hostname>().unwrap(),
             user_data: vec![],
             ssh_public_keys: None,
-            network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![],
             multicast_groups,
             disks: vec![],
@@ -1074,7 +1074,7 @@ pub(crate) async fn create_instances_with_multicast_groups(
                         user_data: b"#cloud-config".to_vec(),
                         ssh_public_keys: None,
                         network_interfaces:
-                            InstanceNetworkInterfaceAttachment::Default,
+                            InstanceNetworkInterfaceAttachment::DefaultIpv4,
                         external_ips: vec![],
                         disks: vec![],
                         boot_disk: None,

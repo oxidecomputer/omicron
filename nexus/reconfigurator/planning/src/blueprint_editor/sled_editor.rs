@@ -31,6 +31,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::sled::SledState;
@@ -47,7 +48,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use scalar::ScalarEditor;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::ZoneKind;
-use std::iter;
 use std::mem;
 use std::net::Ipv6Addr;
 use underlay_ip_allocator::SledUnderlayIpAllocator;
@@ -504,17 +504,10 @@ impl ActiveSledEditor {
         let zones =
             ZonesEditor::new(config.sled_agent_generation, config.zones);
 
-        // We never reuse underlay IPs within a sled, regardless of zone
-        // dispositions. If a zone has been fully removed from the blueprint
-        // some time after expungement, we may reuse its IP; reconfigurator must
-        // know that's safe prior to pruning the expunged zone.
-        let zone_ips =
-            zones.zones(BlueprintZoneDisposition::any).map(|z| z.underlay_ip());
-
         Ok(Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
                 config.subnet,
-                zone_ips,
+                config.last_allocated_ip_subnet_offset,
             ),
             incoming_sled_agent_generation: config.sled_agent_generation,
             zones,
@@ -529,15 +522,11 @@ impl ActiveSledEditor {
     }
 
     pub fn new_empty(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
-        // Creating the underlay IP allocator can only fail if we have a zone
-        // with an IP outside the sled subnet, but we don't have any zones at
-        // all, so this can't fail. Match explicitly to guard against this error
-        // turning into an enum and getting new variants we'd need to check.
-        let underlay_ip_allocator =
-            SledUnderlayIpAllocator::new(subnet, iter::empty());
-
         Self {
-            underlay_ip_allocator,
+            underlay_ip_allocator: SledUnderlayIpAllocator::new(
+                subnet,
+                LastAllocatedSubnetIpOffset::initial(),
+            ),
             incoming_sled_agent_generation: Generation::new(),
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
@@ -579,6 +568,9 @@ impl ActiveSledEditor {
             config: BlueprintSledConfig {
                 state: SledState::Active,
                 subnet: self.underlay_ip_allocator.subnet(),
+                last_allocated_ip_subnet_offset: self
+                    .underlay_ip_allocator
+                    .last_allocated_ip_subnet_offset(),
                 sled_agent_generation,
                 disks,
                 datasets,

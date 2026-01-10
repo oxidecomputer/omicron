@@ -29,8 +29,8 @@ use nexus_reconfigurator_planning::system::{
     RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
 };
 use nexus_reconfigurator_simulation::{
-    BlueprintId, CollectionId, GraphRenderOptions, GraphStartingState,
-    ReconfiguratorSimId, SimState,
+    BlueprintId, CollectionId, DisplayUuidPrefix, GraphRenderOptions,
+    GraphStartingState, ReconfiguratorSimId, ReconfiguratorSimOpId, SimState,
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
@@ -61,6 +61,7 @@ use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::ReconfiguratorSimOpUuid;
 use omicron_uuid_kinds::ReconfiguratorSimStateUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
@@ -92,30 +93,23 @@ pub mod test_utils;
 struct ReconfiguratorSim {
     // The simulator currently being used.
     sim: Simulator,
-    // The current state.
-    current: ReconfiguratorSimStateUuid,
     // The current system state
     log: slog::Logger,
 }
 
 impl ReconfiguratorSim {
     fn new(log: slog::Logger, seed: Option<String>) -> Self {
-        Self {
-            sim: Simulator::new(&log, seed),
-            current: Simulator::ROOT_ID,
-            log,
-        }
+        Self { sim: Simulator::new(&log, seed), log }
     }
 
     fn current_state(&self) -> &SimState {
         self.sim
-            .get_state(self.current)
+            .get_state(self.sim.current())
             .expect("current state should always exist")
     }
 
     fn commit_and_bump(&mut self, description: String, state: SimStateBuilder) {
-        let new_id = state.commit(description, &mut self.sim);
-        self.current = new_id;
+        state.commit_and_bump(description, &mut self.sim);
     }
 
     fn planning_input(
@@ -158,9 +152,7 @@ impl ReconfiguratorSim {
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
         // Handle zone networking setup first
-        for (_, zone) in parent_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (_, zone) in parent_blueprint.in_service_zones() {
             if let Some((external_ip, nic)) =
                 zone.zone_type.external_networking()
             {
@@ -212,9 +204,7 @@ impl ReconfiguratorSim {
             let active_nexus_gen =
                 state.config().active_nexus_zone_generation();
             let mut active_nexus_zones = BTreeSet::new();
-            for (_, zone, nexus) in parent_blueprint
-                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
-            {
+            for (_, zone, nexus) in parent_blueprint.in_service_nexus_zones() {
                 if nexus.nexus_generation == active_nexus_gen {
                     active_nexus_zones.insert(zone.id);
                 }
@@ -231,9 +221,7 @@ impl ReconfiguratorSim {
             let active_nexus_gen =
                 state.config().active_nexus_zone_generation();
             let mut not_yet_nexus_zones = BTreeSet::new();
-            for (_, zone) in parent_blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            {
+            for (_, zone) in parent_blueprint.in_service_zones() {
                 match &zone.zone_type {
                     nexus_types::deployment::BlueprintZoneType::Nexus(
                         nexus,
@@ -482,6 +470,13 @@ fn process_command(
         Commands::Save(args) => cmd_save(sim, args),
         Commands::State(StateArgs::Log(args)) => cmd_state_log(sim, args),
         Commands::State(StateArgs::Switch(args)) => cmd_state_switch(sim, args),
+        Commands::Op(OpArgs::Log(args)) => cmd_op_log(sim, args),
+        Commands::Op(OpArgs::Undo) => cmd_op_undo(sim),
+        Commands::Op(OpArgs::Redo) => cmd_op_redo(sim),
+        Commands::Op(OpArgs::Restore(args)) => cmd_op_restore(sim, args),
+        Commands::Op(OpArgs::Wipe) => cmd_op_wipe(sim),
+        Commands::Undo => cmd_op_undo(sim),
+        Commands::Redo => cmd_op_redo(sim),
         Commands::Wipe(args) => cmd_wipe(sim, args),
     };
 
@@ -583,6 +578,13 @@ enum Commands {
     /// state-related commands
     #[command(flatten)]
     State(StateArgs),
+    /// operation log commands (undo, redo, restore)
+    #[command(subcommand)]
+    Op(OpArgs),
+    /// undo the last operation (alias for `op undo`)
+    Undo,
+    /// redo the last undone operation (alias for `op redo`)
+    Redo,
     /// reset the state of the REPL
     Wipe(WipeArgs),
 }
@@ -1194,6 +1196,45 @@ impl From<ReconfiguratorSimStateIdOpt> for ReconfiguratorSimId {
     }
 }
 
+#[derive(Clone, Debug)]
+enum ReconfiguratorSimOpIdOpt {
+    /// use a specific reconfigurator sim operation by full UUID
+    Id(ReconfiguratorSimOpUuid),
+    /// use a reconfigurator sim operation by UUID prefix
+    Prefix(String),
+}
+
+impl FromStr for ReconfiguratorSimOpIdOpt {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse::<ReconfiguratorSimOpUuid>() {
+            Ok(id) => Ok(ReconfiguratorSimOpIdOpt::Id(id)),
+            Err(_) => Ok(ReconfiguratorSimOpIdOpt::Prefix(s.to_owned())),
+        }
+    }
+}
+
+impl fmt::Display for ReconfiguratorSimOpIdOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReconfiguratorSimOpIdOpt::Id(id) => id.fmt(f),
+            ReconfiguratorSimOpIdOpt::Prefix(prefix) => prefix.fmt(f),
+        }
+    }
+}
+
+impl From<ReconfiguratorSimOpIdOpt> for ReconfiguratorSimOpId {
+    fn from(value: ReconfiguratorSimOpIdOpt) -> Self {
+        match value {
+            ReconfiguratorSimOpIdOpt::Id(id) => ReconfiguratorSimOpId::Id(id),
+            ReconfiguratorSimOpIdOpt::Prefix(prefix) => {
+                ReconfiguratorSimOpId::Prefix(prefix)
+            }
+        }
+    }
+}
+
 /// Clap field for an optional mupdate override UUID.
 ///
 /// This structure is similar to `Option`, but is specified separately to:
@@ -1666,6 +1707,50 @@ struct StateLogArgs {
 struct StateSwitchArgs {
     /// The state ID or unique prefix to switch to
     state_id: ReconfiguratorSimStateIdOpt,
+}
+
+#[derive(Debug, Subcommand)]
+enum OpArgs {
+    /// display the operation log
+    ///
+    /// Shows the history of operations, similar to `jj op log`.
+    Log(OpLogArgs),
+    /// undo the most recent operation
+    ///
+    /// Creates a new restore operation that goes back to the previous state.
+    Undo,
+    /// redo a previously undone operation
+    ///
+    /// Creates a new restore operation that goes forward to a previously
+    /// undone state.
+    Redo,
+    /// restore to a specific operation
+    ///
+    /// Creates a new restore operation that sets the heads to match those
+    /// of the specified operation.
+    Restore(OpRestoreArgs),
+    /// wipe the operation log
+    ///
+    /// Clears all operation history and resets to just the root operation.
+    /// This is the only operation that violates the append-only principle.
+    Wipe,
+}
+
+#[derive(Debug, Args)]
+struct OpLogArgs {
+    /// Limit number of operations to display
+    #[clap(long, short = 'n')]
+    limit: Option<usize>,
+
+    /// Verbose mode: show full UUIDs and heads at each operation
+    #[clap(long, short = 'v')]
+    verbose: bool,
+}
+
+#[derive(Debug, Args)]
+struct OpRestoreArgs {
+    /// The operation ID or unique prefix to restore to
+    operation_id: ReconfiguratorSimOpIdOpt,
 }
 
 #[derive(Debug, Args)]
@@ -2492,17 +2577,12 @@ fn cmd_blueprint_edit(
         }
         BlueprintEditCommands::BumpNexusGeneration => {
             let current_generation = builder.nexus_generation();
-            let current_max = blueprint
-                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
-                .fold(
-                    current_generation,
-                    |current_max, (_sled_id, _zone_config, nexus_config)| {
-                        std::cmp::max(
-                            nexus_config.nexus_generation,
-                            current_max,
-                        )
-                    },
-                );
+            let current_max = blueprint.in_service_nexus_zones().fold(
+                current_generation,
+                |current_max, (_sled_id, _zone_config, nexus_config)| {
+                    std::cmp::max(nexus_config.nexus_generation, current_max)
+                },
+            );
             ensure!(
                 current_max > current_generation,
                 "cannot bump blueprint generation (currently \
@@ -3004,7 +3084,7 @@ fn cmd_state_log(
         GraphStartingState::None
     };
 
-    let options = GraphRenderOptions::new(sim.current)
+    let options = GraphRenderOptions::new(sim.sim.current())
         .with_verbose(verbose)
         .with_starting_state(starting_state);
 
@@ -3019,15 +3099,70 @@ fn cmd_state_switch(
 ) -> anyhow::Result<Option<String>> {
     let state = sim.sim.resolve_and_get_state(args.state_id.into())?;
     let target_id = state.id();
+    // Need to grab the generation and description here because switch_state
+    // below requires mutable access.
+    let generation = state.generation();
+    let description = state.description().to_owned();
 
-    sim.current = target_id;
+    sim.sim.switch_state(target_id)?;
 
     Ok(Some(format!(
         "switched to state {} (generation {}): {}",
-        target_id,
-        state.generation(),
-        state.description()
+        target_id, generation, description,
     )))
+}
+
+fn cmd_op_log(
+    sim: &mut ReconfiguratorSim,
+    args: OpLogArgs,
+) -> anyhow::Result<Option<String>> {
+    let output = sim.sim.render_operation_graph(args.limit, args.verbose);
+    Ok(Some(output))
+}
+
+fn cmd_op_undo(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+    sim.sim.operation_undo()?;
+
+    let current_op = sim.sim.operation_current();
+    Ok(Some(format!(
+        "created operation {}: {}",
+        DisplayUuidPrefix::new(current_op.id(), false),
+        current_op.description(false)
+    )))
+}
+
+fn cmd_op_redo(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+    sim.sim.operation_redo()?;
+
+    let current_op = sim.sim.operation_current();
+    Ok(Some(format!(
+        "created operation {}: {}",
+        DisplayUuidPrefix::new(current_op.id(), false),
+        current_op.description(false)
+    )))
+}
+
+fn cmd_op_restore(
+    sim: &mut ReconfiguratorSim,
+    args: OpRestoreArgs,
+) -> anyhow::Result<Option<String>> {
+    let target_op =
+        sim.sim.resolve_and_get_operation(args.operation_id.into())?;
+    let target_id = target_op.id();
+    let description = target_op.description(false);
+
+    sim.sim.operation_restore(target_id)?;
+
+    Ok(Some(format!(
+        "created operation {}: {}",
+        DisplayUuidPrefix::new(target_id, false),
+        description
+    )))
+}
+
+fn cmd_op_wipe(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+    sim.sim.operation_wipe();
+    Ok(Some("wiped operation log".to_string()))
 }
 
 fn cmd_wipe(

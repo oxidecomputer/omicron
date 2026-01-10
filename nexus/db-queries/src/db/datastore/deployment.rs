@@ -76,6 +76,7 @@ use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSource;
@@ -83,6 +84,7 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -91,7 +93,7 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::inventory::BaseboardId;
+use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
@@ -105,6 +107,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TypedUuid;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -260,6 +263,10 @@ impl DataStore {
                     .artifact_hash()
                     .map(ArtifactHash),
                 subnet: Ipv6Network::from(sled.subnet).into(),
+                last_allocated_ip_subnet_offset: sled
+                    .last_allocated_ip_subnet_offset
+                    .into_u16()
+                    .into(),
             })
             .collect::<Vec<_>>();
 
@@ -670,61 +677,6 @@ impl DataStore {
         let blueprint_id =
             BlueprintUuid::from_untyped_uuid(authz_blueprint.id());
 
-        // Read the metadata from the primary blueprint row, and ensure that it
-        // exists.
-        let (
-            parent_blueprint_id,
-            internal_dns_version,
-            external_dns_version,
-            target_release_minimum_generation,
-            nexus_generation,
-            cockroachdb_fingerprint,
-            cockroachdb_setting_preserve_downgrade,
-            time_created,
-            creator,
-            comment,
-            source,
-        ) = {
-            use nexus_db_schema::schema::blueprint::dsl;
-
-            let Some(blueprint) = dsl::blueprint
-                .filter(dsl::id.eq(to_db_typed_uuid(blueprint_id)))
-                .select(DbBlueprint::as_select())
-                .get_result_async(&*conn)
-                .await
-                .optional()
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?
-            else {
-                return Err(authz_blueprint.not_found());
-            };
-
-            (
-                blueprint.parent_blueprint_id.map(From::from),
-                *blueprint.internal_dns_version,
-                *blueprint.external_dns_version,
-                *blueprint.target_release_minimum_generation,
-                *blueprint.nexus_generation,
-                blueprint.cockroachdb_fingerprint,
-                blueprint.cockroachdb_setting_preserve_downgrade,
-                blueprint.time_created,
-                blueprint.creator,
-                blueprint.comment,
-                BlueprintSource::from(blueprint.source),
-            )
-        };
-        let cockroachdb_setting_preserve_downgrade =
-            CockroachDbPreserveDowngrade::from_optional_string(
-                &cockroachdb_setting_preserve_downgrade,
-            )
-            .map_err(|_| {
-                Error::internal_error(&format!(
-                    "unrecognized cluster version {:?}",
-                    cockroachdb_setting_preserve_downgrade
-                ))
-            })?;
-
         // Load the sled metadata for this blueprint. We use this to prime our
         // primary map of sled configs, but we leave the zones / disks /
         // datasets maps empty (to be filled in when we query those tables
@@ -796,10 +748,15 @@ impl DataStore {
                             &InlineErrorChain::new(&*e).to_string(),
                         )
                     })?;
+                    let last_allocated_ip_subnet_offset =
+                        LastAllocatedSubnetIpOffset::new(
+                            *s.last_allocated_ip_subnet_offset,
+                        );
                     let config = BlueprintSledConfig {
                         state: s.sled_state.into(),
                         subnet,
                         sled_agent_generation: *s.sled_agent_generation,
+                        last_allocated_ip_subnet_offset,
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),
                         zones: IdOrdMap::new(),
@@ -1475,6 +1432,69 @@ impl DataStore {
             )?;
         }
 
+        // Read the metadata from the primary blueprint row last. We do this at
+        // the end (rather than the beginning) so that if a concurrent delete
+        // operation has started, we will observe that the top-level blueprint
+        // record is missing and return "not found". This prevents returning a
+        // partially-torn blueprint where child rows have been deleted but we
+        // still return an incomplete result.
+        //
+        // The blueprint insert and delete operations are transactional, so if
+        // this read succeeds, we know the blueprint exists and hasn't been
+        // deleted.
+        let (
+            parent_blueprint_id,
+            internal_dns_version,
+            external_dns_version,
+            target_release_minimum_generation,
+            nexus_generation,
+            cockroachdb_fingerprint,
+            cockroachdb_setting_preserve_downgrade,
+            time_created,
+            creator,
+            comment,
+            source,
+        ) = {
+            use nexus_db_schema::schema::blueprint::dsl;
+
+            let Some(blueprint) = dsl::blueprint
+                .filter(dsl::id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(DbBlueprint::as_select())
+                .get_result_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+            else {
+                return Err(authz_blueprint.not_found());
+            };
+
+            (
+                blueprint.parent_blueprint_id.map(From::from),
+                *blueprint.internal_dns_version,
+                *blueprint.external_dns_version,
+                *blueprint.target_release_minimum_generation,
+                *blueprint.nexus_generation,
+                blueprint.cockroachdb_fingerprint,
+                blueprint.cockroachdb_setting_preserve_downgrade,
+                blueprint.time_created,
+                blueprint.creator,
+                blueprint.comment,
+                BlueprintSource::from(blueprint.source),
+            )
+        };
+        let cockroachdb_setting_preserve_downgrade =
+            CockroachDbPreserveDowngrade::from_optional_string(
+                &cockroachdb_setting_preserve_downgrade,
+            )
+            .map_err(|_| {
+                Error::internal_error(&format!(
+                    "unrecognized cluster version {:?}",
+                    cockroachdb_setting_preserve_downgrade
+                ))
+            })?;
+
         Ok(Blueprint {
             id: blueprint_id,
             pending_mgs_updates,
@@ -1956,10 +1976,21 @@ impl DataStore {
                 self.ensure_zone_external_networking_deallocated_on_connection(
                     &conn,
                     &opctx.log,
+                    // TODO-correctness Currently the planner _does not wait_
+                    // for zones using external IPs to be ready for cleanup
+                    // before reassigning the external IP to a new zone, so we
+                    // have to deallocate IPs for both "ready for cleanup" and
+                    // "not ready for cleanup" zones. We should fix the planner,
+                    // at which point we can operate on only "ready for cleanup"
+                    // zones here.
+                    //
+                    // <https://github.com/oxidecomputer/omicron/issues/9506>
                     blueprint
-                        .all_omicron_zones(|disposition| {
-                            !disposition.is_in_service()
-                        })
+                        .expunged_zones(
+                            ZoneRunningStatus::Any,
+                            BlueprintExpungedZoneAccessReason
+                                ::DeallocateExternalNetworkingResources
+                        )
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
@@ -1967,11 +1998,7 @@ impl DataStore {
                 self.ensure_zone_external_networking_allocated_on_connection(
                     &conn,
                     opctx,
-                    blueprint
-                        .all_omicron_zones(|disposition| {
-                            disposition.is_in_service()
-                        })
-                        .map(|(_sled_id, zone)| zone),
+                    blueprint.in_service_zones().map(|(_sled_id, zone)| zone),
                 )
                 .await
                 .map_err(|e| err.bail(e))?;
@@ -3116,6 +3143,7 @@ mod tests {
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
     use rand::Rng;
+    use sled_hardware_types::BaseboardId;
     use std::collections::BTreeSet;
     use std::mem;
     use std::net::Ipv6Addr;
@@ -3313,7 +3341,7 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len(), collection.sled_agents.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
+            blueprint1.in_service_zones().count(),
             collection.all_ledgered_omicron_zones().count()
         );
         // All zones should be in service.
@@ -3645,9 +3673,8 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len() + 1, blueprint2.sleds.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count()
-                + num_new_sled_zones,
-            blueprint2.all_omicron_zones(BlueprintZoneDisposition::any).count()
+            blueprint1.in_service_zones().count() + num_new_sled_zones,
+            blueprint2.in_service_zones().count()
         );
 
         // All zones should be in service.
@@ -4297,7 +4324,7 @@ mod tests {
 
         // Insert an IP pool range covering the one Nexus IP.
         let nexus_ip = blueprint1
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .find_map(|(_, zone_config)| {
                 zone_config
                     .zone_type
@@ -4517,7 +4544,10 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .all_omicron_zones(|disposition| !disposition.is_in_service())
+            .expunged_zones(
+                ZoneRunningStatus::Any,
+                BlueprintExpungedZoneAccessReason::Test,
+            )
             .collect::<Vec<_>>();
         assert!(
             not_in_service.is_empty(),
@@ -4755,6 +4785,194 @@ mod tests {
             explanation
         );
         eprintln!("{explanation}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that concurrent read and delete operations on blueprints do not
+    // result in torn reads. With the fix for issue #9594, blueprint_read
+    // checks for the top-level blueprint record at the END of reading, so
+    // if a concurrent delete has started (which deletes the top-level record
+    // first), the read will fail with "not found" rather than returning
+    // partial data.
+    //
+    // This test spawns concurrent readers and a deleter to exercise the race
+    // condition. Readers should either get the complete original blueprint
+    // OR a "not found" error - never partial/torn data.
+    #[tokio::test]
+    async fn test_concurrent_blueprint_read_delete() {
+        const TEST_NAME: &str = "test_concurrent_blueprint_read_delete";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create two blueprints - one to be the target (so it can't be deleted)
+        // and one to be deleted while being read.
+        let (_, _, target_blueprint) = representative(&logctx.log, TEST_NAME);
+        let authz_target = authz_blueprint_from_id(target_blueprint.id);
+
+        // Insert target blueprint and make it the current target
+        datastore
+            .blueprint_insert(&opctx, &target_blueprint)
+            .await
+            .expect("failed to insert target blueprint");
+        let target = BlueprintTarget {
+            target_id: target_blueprint.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, target)
+            .await
+            .expect("failed to set target");
+
+        // Create a second blueprint that we'll delete while reading
+        let blueprint_to_delete = {
+            let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
+                &target_blueprint,
+                "test blueprint to delete",
+                PlannerRng::from_entropy(),
+            )
+            .expect("failed to create builder");
+            builder.comment("blueprint that will be deleted");
+            builder.build(BlueprintSource::Test)
+        };
+        let authz_blueprint = authz_blueprint_from_id(blueprint_to_delete.id);
+
+        datastore
+            .blueprint_insert(&opctx, &blueprint_to_delete)
+            .await
+            .expect("failed to insert blueprint to delete");
+
+        // Verify we can read it back correctly
+        let read_back = datastore
+            .blueprint_read(&opctx, &authz_blueprint)
+            .await
+            .expect("failed to read blueprint");
+        assert_eq!(blueprint_to_delete, read_back);
+
+        // Track results from concurrent readers
+        let successful_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let not_found_errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let other_errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let delete_completed = Arc::new(AtomicBool::new(false));
+
+        // Signal when at least one read has completed, so we know readers are
+        // running before we start deleting
+        let (first_read_tx, first_read_rx) =
+            tokio::sync::oneshot::channel::<()>();
+        let first_read_tx =
+            Arc::new(std::sync::Mutex::new(Some(first_read_tx)));
+
+        // Spawn reader tasks that loop until deletion completes
+        const NUM_READERS: usize = 10;
+        let mut reader_handles = Vec::new();
+
+        for _ in 0..NUM_READERS {
+            let datastore = datastore.clone();
+            let opctx = opctx.child(std::collections::BTreeMap::new());
+            let authz_blueprint = authz_blueprint.clone();
+            let blueprint_to_delete = blueprint_to_delete.clone();
+            let successful_reads = successful_reads.clone();
+            let not_found_errors = not_found_errors.clone();
+            let other_errors = other_errors.clone();
+            let delete_completed = delete_completed.clone();
+            let first_read_tx = first_read_tx.clone();
+
+            reader_handles.push(tokio::spawn(async move {
+                loop {
+                    match datastore
+                        .blueprint_read(&opctx, &authz_blueprint)
+                        .await
+                    {
+                        Ok(blueprint) => {
+                            // If we got a blueprint back, it MUST be complete
+                            // and match the original. Any mismatch would
+                            // indicate a torn read.
+                            assert_eq!(
+                                blueprint, blueprint_to_delete,
+                                "Read returned a blueprint that doesn't match \
+                                 the original - this indicates a torn read!"
+                            );
+                            successful_reads.fetch_add(1, Ordering::Relaxed);
+
+                            // Signal that at least one read completed (only
+                            // the first sender to take the channel will send)
+                            if let Some(tx) =
+                                first_read_tx.lock().unwrap().take()
+                            {
+                                let _ = tx.send(());
+                            }
+                        }
+                        Err(e) => {
+                            let error_str = e.to_string();
+                            if error_str.contains("not found") {
+                                not_found_errors
+                                    .fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                eprintln!("Unexpected error: {e}");
+                                other_errors.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                    }
+
+                    // Stop reading after delete completes
+                    if delete_completed.load(Ordering::Relaxed) {
+                        break;
+                    }
+                }
+            }));
+        }
+
+        // Wait for at least one successful read before deleting, so we know
+        // the reader tasks have started
+        first_read_rx.await.expect("no reader completed a read");
+
+        // Delete the blueprint while readers are running
+        datastore
+            .blueprint_delete(&opctx, &authz_blueprint)
+            .await
+            .expect("failed to delete blueprint");
+        delete_completed.store(true, Ordering::Relaxed);
+
+        // Wait for all readers to complete
+        for handle in reader_handles {
+            handle.await.expect("reader task panicked");
+        }
+
+        // Log results for debugging.
+        let successful = successful_reads.load(Ordering::Relaxed);
+        let not_found = not_found_errors.load(Ordering::Relaxed);
+        let other = other_errors.load(Ordering::Relaxed);
+        eprintln!(
+            "Results: {} successful reads, {} not-found errors, {} other errors",
+            successful, not_found, other
+        );
+
+        // Key invariants:
+        // - At least one successful read (we waited for this before deleting)
+        // - Successful reads are validated inside the reader loop (must match
+        //   the original blueprint exactly, or the assert_eq! fails)
+        // - "Not found" errors are expected after deletion
+        // - No other errors should occur
+        assert!(
+            successful > 0,
+            "Expected at least one successful read (we wait for this)"
+        );
+        assert_eq!(other, 0, "No unexpected errors should occur");
+
+        // Verify the target blueprint is still intact
+        let target_read = datastore
+            .blueprint_read(&opctx, &authz_target)
+            .await
+            .expect("target blueprint should still be readable");
+        assert_eq!(target_blueprint, target_read);
+
+        // Verify the deleted blueprint is fully cleaned up
+        ensure_blueprint_fully_deleted(&datastore, blueprint_to_delete.id)
+            .await;
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -24,7 +24,7 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
@@ -68,7 +68,7 @@ fn get_disk_url(name: &str) -> String {
 }
 
 async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }

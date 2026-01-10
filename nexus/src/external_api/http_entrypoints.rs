@@ -563,6 +563,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .map(|(pool, silo_link)| ip_pool::SiloIpPool {
                     identity: pool.identity(),
                     is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
+                    pool_type: pool.pool_type.into(),
                 })
                 .collect();
 
@@ -1664,6 +1666,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .map(|(pool, silo_link)| ip_pool::SiloIpPool {
                     identity: pool.identity(),
                     is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
+                    pool_type: pool.pool_type.into(),
                 })
                 .collect();
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
@@ -1694,6 +1698,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ip_pool::SiloIpPool {
                 identity: pool.identity(),
                 is_default: silo_link.is_default,
+                ip_version: pool.ip_version.into(),
+                pool_type: pool.pool_type.into(),
             }))
         };
         apictx
@@ -5498,8 +5504,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?
                 .into_iter()
-                .map(|d| d.into())
-                .collect();
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?;
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 interfaces,
@@ -5532,7 +5538,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &interface_params.into_inner(),
                 )
                 .await?;
-            Ok(HttpResponseCreated(iface.into()))
+            iface.try_into().map(HttpResponseCreated).map_err(HttpError::from)
         };
         apictx
             .context
@@ -5597,7 +5603,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_network_interface_lookup(&opctx, interface_selector)?
                 .fetch()
                 .await?;
-            Ok(HttpResponseOk(interface.into()))
+            interface.try_into().map(HttpResponseOk).map_err(HttpError::from)
         };
         apictx
             .context
@@ -5638,7 +5644,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     updated_iface,
                 )
                 .await?;
-            Ok(HttpResponseOk(InstanceNetworkInterface::from(interface)))
+            interface.try_into().map(HttpResponseOk).map_err(HttpError::from)
         };
         apictx
             .context
@@ -5699,11 +5705,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
+            let instance::EphemeralIpCreate { pool_selector } =
+                ip_to_create.into_inner();
+            let (pool, ip_version) = match pool_selector {
+                ip_pool::PoolSelector::Explicit { pool } => (Some(pool), None),
+                ip_pool::PoolSelector::Auto { ip_version } => {
+                    (None, ip_version)
+                }
+            };
             let ip = nexus
                 .instance_attach_ephemeral_ip(
                     &opctx,
                     &instance_lookup,
-                    ip_to_create.into_inner().pool,
+                    pool,
+                    ip_version,
                 )
                 .await?;
             Ok(HttpResponseAccepted(ip))
@@ -6319,8 +6334,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?
                 .into_iter()
-                .map(|interfaces| interfaces.into())
-                .collect();
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?;
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 interfaces,

@@ -356,11 +356,31 @@ pub async fn link_ip_pool(
     .await;
 }
 
+/// Create a default IPv4 and IPv6 IP Pool.
+///
 /// What you want for any test that is not testing IP logic specifically
-pub async fn create_default_ip_pool(client: &ClientTestContext) -> IpPool {
-    let (pool, ..) = create_ip_pool(&client, "default", None).await;
-    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
-    pool
+pub async fn create_default_ip_pools(
+    client: &ClientTestContext,
+) -> (IpPool, IpPool) {
+    let ranges = [
+        IpRange::try_from((
+            std::net::Ipv4Addr::new(10, 0, 0, 0),
+            std::net::Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap(),
+        IpRange::try_from((
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0xffff),
+        ))
+        .unwrap(),
+    ];
+    let (v4_pool, ..) =
+        create_ip_pool(&client, "default-v4", Some(ranges[0])).await;
+    link_ip_pool(&client, "default-v4", &DEFAULT_SILO.id(), true).await;
+    let (v6_pool, ..) =
+        create_ip_pool(&client, "default-v6", Some(ranges[1])).await;
+    link_ip_pool(&client, "default-v6", &DEFAULT_SILO.id(), true).await;
+    (v4_pool, v6_pool)
 }
 
 pub async fn create_floating_ip(
@@ -370,6 +390,20 @@ pub async fn create_floating_ip(
     ip: Option<IpAddr>,
     parent_pool_name: Option<&str>,
 ) -> FloatingIp {
+    let address_selector = match (ip, parent_pool_name) {
+        (Some(ip), pool) => floating_ip::AddressSelector::Explicit {
+            ip,
+            pool: pool.map(|v| NameOrId::Name(v.parse().unwrap())),
+        },
+        (None, Some(pool)) => floating_ip::AddressSelector::Auto {
+            pool_selector: ip_pool::PoolSelector::Explicit {
+                pool: NameOrId::Name(pool.parse().unwrap()),
+            },
+        },
+        (None, None) => floating_ip::AddressSelector::Auto {
+            pool_selector: ip_pool::PoolSelector::Auto { ip_version: None },
+        },
+    };
     object_create(
         client,
         &format!("/v1/floating-ips?project={project}"),
@@ -378,8 +412,7 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            ip,
-            pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
+            address_selector,
         },
     )
     .await
@@ -704,7 +737,7 @@ pub async fn create_instance(
         client,
         project_name,
         instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::Default,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         // Disks=
         Vec::<instance::InstanceDiskAttachment>::new(),
         // External IPs=

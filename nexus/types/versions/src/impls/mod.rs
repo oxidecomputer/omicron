@@ -13,6 +13,8 @@
 
 mod alert;
 mod disk;
+mod hardware;
+mod instance;
 pub(crate) mod multicast;
 mod physical_disk;
 mod policy;

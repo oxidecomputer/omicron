@@ -57,7 +57,6 @@ use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
     OmicronZoneExternalSnatIp,
 };
-use nexus_types::inventory::BaseboardId;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -69,6 +68,7 @@ use omicron_uuid_kinds::{
     PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
 use sled_agent_types::inventory::OmicronZoneDataset;
+use sled_hardware_types::BaseboardId;
 use std::net::{IpAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -223,6 +223,7 @@ pub struct BpSledMetadata {
     /// Public only for easy of writing queries; consumers should prefer the
     /// `subnet()` method.
     pub subnet: IpNetwork,
+    pub last_allocated_ip_subnet_offset: SqlU16,
 }
 
 impl BpSledMetadata {

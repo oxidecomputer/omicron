@@ -235,6 +235,7 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
         StepOutcome, StepStatus,
@@ -285,6 +286,8 @@ mod test {
                     BlueprintSledConfig {
                         state: SledState::Active,
                         subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                        last_allocated_ip_subnet_offset:
+                            LastAllocatedSubnetIpOffset::initial(),
                         sled_agent_generation: Generation::new().next(),
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),
@@ -520,9 +523,7 @@ mod test {
         .await;
 
         // Insert records for the zpools backing the datasets in these zones.
-        for (sled_id, config) in
-            loaded.blueprint.all_omicron_zones(BlueprintZoneDisposition::any)
-        {
+        for (sled_id, config) in loaded.blueprint.in_service_zones() {
             let Some(dataset) = config.zone_type.durable_dataset() else {
                 continue;
             };

@@ -334,20 +334,49 @@ impl DataStore {
         params: MulticastGroupAllocationParams,
     ) -> CreateResult<ExternalMulticastGroup> {
         let group_id = Uuid::new_v4();
-        let authz_pool = self
-            .resolve_pool_for_allocation(
-                opctx,
-                params.pool,
-                IpPoolType::Multicast,
-            )
-            .await?;
 
-        // Enforce ASM/SSM semantics when allocating from a pool:
-        // - If sources are provided without an explicit IP (implicit allocation),
-        //   the pool must be SSM so we allocate an SSM address.
-        // - If the pool is SSM and sources are empty/missing, reject.
+        // Check if source_ips are provided (determines SSM vs ASM)
         let sources_empty =
             params.source_ips.as_ref().map(|v| v.is_empty()).unwrap_or(true);
+
+        // Resolve the pool: if explicit pool provided, validate it; otherwise
+        // auto-select based on SSM/ASM semantics.
+        //
+        // TODO: We're moving towards implicit lifecycle where groups are
+        // auto-created when instances send to multicast addresses. When that
+        // lands (https://github.com/oxidecomputer/omicron/pull/9450), the
+        // parameters here will be updated to choose between IPv4/IPv6 pools when
+        // `multicast_ip` is not provided.
+        let authz_pool = match params.pool {
+            Some(pool) => {
+                // User provided an explicit pool - validate it's a multicast pool
+                self.resolve_pool_for_allocation(
+                    opctx,
+                    Some(pool),
+                    IpPoolType::Multicast,
+                    None,
+                )
+                .await?
+            }
+            None => {
+                // No explicit pool -> auto-select SSM or ASM based on source IPs.
+                if sources_empty {
+                    // No sources → need ASM pool
+                    let (authz_pool, _pool) =
+                        self.ip_pools_fetch_asm_multicast(opctx, None).await?;
+                    authz_pool
+                } else {
+                    // Has sources → need SSM pool
+                    let (authz_pool, _pool) =
+                        self.ip_pools_fetch_ssm_multicast(opctx, None).await?;
+                    authz_pool
+                }
+            }
+        };
+
+        // Validate ASM/SSM semantics when an explicit pool was provided:
+        // - If sources are provided without an explicit IP, pool must be SSM.
+        // - If pool is SSM, sources must be provided.
 
         let pool_is_ssm =
             self.multicast_pool_is_ssm(opctx, authz_pool.id()).await?;
@@ -355,7 +384,9 @@ impl DataStore {
         if !sources_empty && params.ip.is_none() && !pool_is_ssm {
             let pool_id = authz_pool.id();
             return Err(external::Error::invalid_request(&format!(
-                "Cannot allocate SSM multicast group from ASM pool {pool_id}. Choose a multicast pool with SSM ranges (IPv4 232/8, IPv6 FF3x::/32) or provide an explicit SSM address."
+                "Cannot allocate SSM multicast group from ASM pool {pool_id}. \
+                 Choose a multicast pool with SSM ranges (IPv4 232/8, IPv6 \
+                 FF3x::/32) or provide an explicit SSM address."
             )));
         }
 
@@ -671,8 +702,8 @@ mod tests {
     use crate::db::datastore::LookupType;
     use crate::db::model::IpPool;
     use crate::db::model::{
-        Generation, InstanceRuntimeState, IpPoolReservationType,
-        IpPoolResource, IpPoolResourceType, IpVersion,
+        Generation, IncompleteIpPoolResource, InstanceRuntimeState,
+        IpPoolReservationType, IpPoolResourceType, IpVersion,
         MulticastGroupMemberState,
     };
     use crate::db::pub_test_utils::helpers::{
@@ -731,7 +762,7 @@ mod tests {
             .await
             .expect("Should add multicast range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -837,7 +868,7 @@ mod tests {
             .await
             .expect("Should add multicast range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -994,7 +1025,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1088,7 +1119,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1505,7 +1536,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1692,7 +1723,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1906,7 +1937,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2021,7 +2052,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2157,7 +2188,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2282,7 +2313,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -2393,7 +2424,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -2525,7 +2556,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),

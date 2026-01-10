@@ -4,6 +4,7 @@
 
 //! Multicast group types for version INITIAL.
 
+use crate::impls::multicast::{validate_multicast_ip, validate_source_ip};
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadata, NameOrId, ObjectIdentity,
@@ -200,8 +201,6 @@ where
         None => Ok(Some(Nullable(None))), // Explicit null to clear
     }
 }
-
-use crate::latest::multicast::{validate_multicast_ip, validate_source_ip};
 
 /// Deserializer for validating multicast IP addresses.
 fn validate_multicast_ip_param<'de, D>(

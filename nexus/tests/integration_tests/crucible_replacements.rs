@@ -21,7 +21,7 @@ use nexus_lockstep_client::types::LastResult;
 use nexus_test_utils::background::*;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_disk_from_snapshot;
 use nexus_test_utils::resource_helpers::create_project;
@@ -75,7 +75,7 @@ fn get_snapshots_url() -> String {
 }
 
 async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }

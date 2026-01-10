@@ -12,13 +12,14 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_local_user, create_project, create_vpc,
+    create_default_ip_pools, create_local_user, create_project, create_vpc,
     create_vpc_with_error, grant_iam, objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::internet_gateway;
+use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
 use nexus_types::external_api::silo;
@@ -401,7 +402,7 @@ async fn test_limited_collaborator_can_create_instance(
     let client = &cptestctx.external_client;
 
     // Create IP pool and project (with default VPC and subnet)
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project_name = "test-project";
     create_project(&client, &project_name).await;
 
@@ -471,7 +472,7 @@ async fn test_limited_collaborator_can_create_instance(
             user_data: vec![],
             ssh_public_keys: None,
             network_interfaces:
-                instance::InstanceNetworkInterfaceAttachment::Default,
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![],
             multicast_groups: vec![],
             disks: vec![],
@@ -499,7 +500,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     let client = &cptestctx.external_client;
 
     // Create IP pool and project
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project_name = "test-project";
     create_project(&client, &project_name).await;
 
@@ -729,8 +730,8 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create IP pool and project (with default VPC and subnet)
-    create_default_ip_pool(client).await;
+    // Create IP pools and project (with default VPC and subnet)
+    let (v4_pool, _v6_pool) = create_default_ip_pools(client).await;
     let project_name = "test-project";
     create_project(&client, &project_name).await;
 
@@ -773,8 +774,11 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
                 name: fip_name.parse().unwrap(),
                 description: "test floating ip".to_string(),
             },
-            ip: None,
-            pool: None,
+            address_selector: floating_ip::AddressSelector::Auto {
+                pool_selector: ip_pool::PoolSelector::Explicit {
+                    pool: v4_pool.identity.name.clone().into(),
+                },
+            },
         },
     )
     .authn_as(AuthnMode::SiloUser(limited_user.id))

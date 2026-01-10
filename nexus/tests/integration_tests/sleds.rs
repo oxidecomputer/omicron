@@ -11,7 +11,7 @@ use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
 use nexus_db_queries::context::OpContext;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::SLED_AGENT_UUID;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
@@ -183,7 +183,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&external_client).await;
+    create_default_ip_pools(&external_client).await;
     let project = create_project(&external_client, "test-project").await;
     let instance =
         create_instance(&external_client, "test-project", "test-instance")

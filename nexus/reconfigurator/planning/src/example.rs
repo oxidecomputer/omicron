@@ -30,7 +30,6 @@ use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintSource;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -731,7 +730,7 @@ impl ExampleSystemBuilder {
 
         // Find and set the set of active Nexuses
         let active_nexus_zone_ids: BTreeSet<_> = blueprint
-            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_nexus_zones()
             .filter_map(|(_, zone, nexus_zone)| {
                 if nexus_zone.nexus_generation == blueprint.nexus_generation {
                     Some(zone.id)
@@ -1019,7 +1018,6 @@ mod tests {
     use internal_dns_resolver::Resolver;
     use internal_dns_types::names::ServiceName;
     use nexus_types::deployment::BlueprintZoneConfig;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::execution::blueprint_internal_dns_config;
     use nexus_types::deployment::execution::overridables;
     use nexus_types::internal_api::params::DnsConfigParams;
@@ -1447,9 +1445,7 @@ mod tests {
                 }
                 ServiceName::Crucible(_) => {
                     // Each Crucible zone should be queryable.
-                    for (_, zone) in blueprint.all_omicron_zones(
-                        BlueprintZoneDisposition::is_in_service,
-                    ) {
+                    for (_, zone) in blueprint.in_service_zones() {
                         if zone.kind() == ZoneKind::Crucible {
                             out.insert(ServiceName::Crucible(zone.id), Ok(()));
                         }
@@ -1472,7 +1468,7 @@ mod tests {
         kind: ZoneKind,
     ) -> Vec<&BlueprintZoneConfig> {
         blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .in_service_zones()
             .filter_map(|(_, zone)| {
                 (zone.zone_type.kind() == kind).then_some(zone)
             })

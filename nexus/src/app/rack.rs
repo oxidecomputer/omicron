@@ -720,6 +720,8 @@ impl super::Nexus {
                         .into(),
                     dns_update,
                     allowed_source_ips: request.allowed_source_ips,
+                    initial_trust_quorum_configuration: request
+                        .initial_trust_quorum_configuration,
                 },
             )
             .await?;

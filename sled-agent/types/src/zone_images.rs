@@ -18,11 +18,11 @@ use sled_agent_types_versions::latest::inventory::ManifestNonBootInventory;
 use sled_agent_types_versions::latest::inventory::MupdateOverrideBootInventory;
 use sled_agent_types_versions::latest::inventory::MupdateOverrideInventory;
 use sled_agent_types_versions::latest::inventory::MupdateOverrideNonBootInventory;
+use sled_agent_types_versions::latest::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
 use sled_agent_types_versions::latest::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types_versions::latest::inventory::RemoveMupdateOverrideInventory;
 use sled_agent_types_versions::latest::inventory::ZoneArtifactInventory;
-use sled_agent_types_versions::latest::inventory::ZoneImageResolverInventory;
 use sled_agent_types_versions::latest::inventory::ZoneKind;
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
@@ -60,11 +60,11 @@ pub struct ResolverStatus {
 
 impl ResolverStatus {
     /// Convert this status to the inventory format.
-    pub fn to_inventory(&self) -> ZoneImageResolverInventory {
-        ZoneImageResolverInventory {
+    pub fn to_inventory(&self) -> OmicronFileSourceResolverInventory {
+        OmicronFileSourceResolverInventory {
             zone_manifest: self.zone_manifest.to_inventory(),
+            measurement_manifest: self.measurement_manifest.to_inventory(),
             mupdate_override: self.mupdate_override.to_inventory(),
-            // Adding the measurement to inventory will come later
         }
     }
 }

@@ -17,7 +17,7 @@ use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    DiskTest, create_default_ip_pool, create_disk, create_instance,
+    DiskTest, create_default_ip_pools, create_disk, create_instance,
     create_project, grant_iam, object_create_error,
 };
 use nexus_test_utils::wait_for_producer;
@@ -123,7 +123,7 @@ async fn test_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await; // needed for instance create to work
+    create_default_ip_pools(&client).await; // needed for instance create to work
     DiskTest::new(cptestctx).await; // needed for disk create to work
 
     // Wait until Nexus registers as a producer with Oximeter.
@@ -468,7 +468,7 @@ async fn test_project_timeseries_query(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await; // needed for instance create to work
+    create_default_ip_pools(&client).await; // needed for instance create to work
 
     // Create two projects
     let p1 = create_project(&client, "project1").await;

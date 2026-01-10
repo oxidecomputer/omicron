@@ -19,11 +19,13 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
-use nexus_db_model::IpConfig;
+use nexus_db_model::IpVersion;
 use nexus_db_model::Probe;
 use nexus_db_model::VpcSubnet;
+use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::external_api::probe::ProbeInfo;
 use nexus_types::identity::Resource;
+use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -34,7 +36,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface as NetworkInterfaceV1;
 use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::ProbeUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -98,19 +100,11 @@ impl super::DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-            let interface = NetworkInterface {
-                vni: vni.0,
-                ..interface.into_internal(
-                    db_subnet.ipv4_block.0,
-                    db_subnet.ipv6_block.0,
-                )?
-            };
-
-            // TODO ProbeInfo still uses version 1 of the network interface. We
-            // need to support version 2, which allows dual-stack IP
-            // configurations.
-            // See https://github.com/oxidecomputer/omicron/issues/9248.
-            let interface = interface.try_into()?;
+            let mut interface_v1: NetworkInterfaceV1 = interface
+                .into_internal(db_subnet.ipv4_block.0, db_subnet.ipv6_block.0)?
+                .try_into()?;
+            interface_v1.vni = vni.0;
+            let interface: NetworkInterface = interface_v1.try_into()?;
 
             result.push(ProbeInfo {
                 id: probe.id(),
@@ -151,17 +145,11 @@ impl super::DataStore {
 
         let vni = self.resolve_vpc_to_vni(opctx, interface.vpc_id).await?;
 
-        let interface = NetworkInterface {
-            vni: vni.0,
-            ..interface
-                .into_internal(db_subnet.ipv4_block.0, db_subnet.ipv6_block.0)?
-        };
-
-        // TODO ProbeInfo still uses version 1 of the network interface. We
-        // need to support version 2, which allows dual-stack IP
-        // configurations.
-        // See https://github.com/oxidecomputer/omicron/issues/9248.
-        let interface = interface.try_into()?;
+        let mut interface_v1: NetworkInterfaceV1 = interface
+            .into_internal(db_subnet.ipv4_block.0, db_subnet.ipv6_block.0)?
+            .try_into()?;
+        interface_v1.vni = vni.0;
+        let interface: NetworkInterface = interface_v1.try_into()?;
 
         Ok(ProbeInfo {
             id: probe.id(),
@@ -231,6 +219,7 @@ impl super::DataStore {
         authz_project: &authz::Project,
         probe: &Probe,
         ip_pool: Option<authz::IpPool>,
+        ip_version: Option<IpVersion>,
     ) -> CreateResult<Probe> {
         // TODO-correctness: These need to be in a transaction.
         // See https://github.com/oxidecomputer/omicron/issues/9340.
@@ -243,6 +232,7 @@ impl super::DataStore {
                 Uuid::new_v4(),
                 probe.id(),
                 ip_pool,
+                ip_version,
             )
             .await?;
 
@@ -270,7 +260,7 @@ impl super::DataStore {
                     probe.name(),
                 ),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_dual_stack(),
             None, //Request MAC address assignment
         )?;
 

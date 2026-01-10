@@ -13,10 +13,10 @@ use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_errors::TransactionError;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::IncompleteNetworkInterface;
-use nexus_db_model::IpConfig;
 use nexus_db_model::IpPool;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::external_api::instance::PrivateIpStackCreate;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IpVersion;
@@ -440,10 +440,14 @@ impl DataStore {
         }
 
         let ip_config = match &nic.ip_config {
-            PrivateIpConfig::V4(ipv4) => IpConfig::from_ipv4(*ipv4.ip()),
-            PrivateIpConfig::V6(ipv6) => IpConfig::from_ipv6(*ipv6.ip()),
+            PrivateIpConfig::V4(ipv4) => {
+                PrivateIpStackCreate::from_ipv4(*ipv4.ip())
+            }
+            PrivateIpConfig::V6(ipv6) => {
+                PrivateIpStackCreate::from_ipv6(*ipv6.ip())
+            }
             PrivateIpConfig::DualStack { v4, v6 } => {
-                IpConfig::new_dual_stack(*v4.ip(), *v6.ip())
+                PrivateIpStackCreate::new_dual_stack(*v4.ip(), *v6.ip())
             }
         };
         let nic_arg = IncompleteNetworkInterface::new_service(

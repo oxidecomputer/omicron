@@ -71,6 +71,7 @@ members = [
     "internal-dns/cli",
     "internal-dns/resolver",
     "internal-dns/types",
+    "internal-dns/types/versions",
     "ipcc",
     "key-manager",
     "live-tests",
@@ -153,6 +154,8 @@ members = [
     "trust-quorum/protocol",
     "trust-quorum/test-utils",
     "trust-quorum/tqdb",
+    "trust-quorum/types",
+    "trust-quorum/types/versions",
     "typed-rng",
     "update-common",
     "update-engine",
@@ -241,6 +244,7 @@ default-members = [
     "internal-dns/cli",
     "internal-dns/resolver",
     "internal-dns/types",
+    "internal-dns/types/versions",
     "ipcc",
     "key-manager",
     "live-tests",
@@ -322,6 +326,8 @@ default-members = [
     "trust-quorum/protocol",
     "trust-quorum/test-utils",
     "trust-quorum/tqdb",
+    "trust-quorum/types",
+    "trust-quorum/types/versions",
     "test-utils",
     "typed-rng",
     "update-common",
@@ -388,6 +394,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
+async-recursion = "1.1.1"
 async-trait = "0.1.89"
 attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
 atomicwrites = "0.4.4"
@@ -496,6 +503,8 @@ gfss = { path = "trust-quorum/gfss" }
 trust-quorum = { path = "trust-quorum" }
 trust-quorum-protocol = { path = "trust-quorum/protocol" }
 trust-quorum-test-utils = { path = "trust-quorum/test-utils" }
+trust-quorum-types = { path = "trust-quorum/types" }
+trust-quorum-types-versions = { path = "trust-quorum/types/versions" }
 glob = "0.3.2"
 guppy = "0.17.20"
 headers = "0.4.1"
@@ -535,6 +544,7 @@ installinator-common = { path = "installinator-common" }
 installinator-common-versions = { path = "installinator-common/versions" }
 internal-dns-resolver = { path = "internal-dns/resolver" }
 internal-dns-types = { path = "internal-dns/types" }
+internal-dns-types-versions = { path = "internal-dns/types/versions" }
 ipcc = { path = "ipcc" }
 ipnet = "2.9"
 itertools = "0.14.0"
@@ -559,8 +569,8 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "205b3ccf75b527ac7a565285fdcc0c78f4fcee95" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "205b3ccf75b527ac7a565285fdcc0c78f4fcee95" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -671,10 +681,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -691,7 +701,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
-rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
+rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "205b3ccf75b527ac7a565285fdcc0c78f4fcee95" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"

@@ -15,7 +15,7 @@ use http::{Method, StatusCode};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_project, object_create,
+    create_default_ip_pools, create_instance, create_project, object_create,
     object_delete, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
@@ -50,7 +50,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Setup - create IP pool and project (shared across all operations)
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     create_project(client, PROJECT_NAME).await;
     let mcast_pool = create_multicast_ip_pool_with_range(
         &client,
@@ -275,7 +275,7 @@ async fn test_multicast_group_attach_conflicts(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     create_project(client, PROJECT_NAME).await;
     let mcast_pool = create_multicast_ip_pool_with_range(
         &client,
@@ -364,7 +364,7 @@ async fn test_multicast_group_attach_limits(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     create_project(client, PROJECT_NAME).await;
     let mcast_pool = create_multicast_ip_pool(&client, "mcast-pool").await;
 
@@ -461,7 +461,7 @@ async fn test_multicast_group_instance_state_transitions(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     create_project(client, PROJECT_NAME).await;
     let mcast_pool = create_multicast_ip_pool(&client, "mcast-pool").await;
 
@@ -585,7 +585,7 @@ async fn test_multicast_group_persistence_through_stop_start(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     create_project(client, PROJECT_NAME).await;
     let mcast_pool = create_multicast_ip_pool(&client, "mcast-pool").await;
 
@@ -773,7 +773,7 @@ async fn test_multicast_concurrent_operations(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     create_project(client, PROJECT_NAME).await;
     let mcast_pool = create_multicast_ip_pool_with_range(
         &client,
@@ -941,7 +941,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
 
     // Setup: project, pools, group
     create_project(client, project_name).await;
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let mcast_pool = create_multicast_ip_pool_with_range(
         client,
         "never-started-pool",
@@ -978,7 +978,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -1130,7 +1130,7 @@ async fn test_multicast_group_membership_during_migration(
 
     // Setup: project, pools, and multicast group
     create_project(client, project_name).await;
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let mcast_pool = create_multicast_ip_pool_with_range(
         client,
         "migration-pool",
@@ -1417,7 +1417,7 @@ async fn test_multicast_group_concurrent_member_migrations(
 
     // Setup: project, pools, and multicast group
     create_project(client, project_name).await;
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let mcast_pool = create_multicast_ip_pool_with_range(
         client,
         "concurrent-migration-pool",

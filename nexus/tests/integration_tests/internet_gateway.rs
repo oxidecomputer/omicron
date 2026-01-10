@@ -19,7 +19,7 @@ use nexus_test_utils::{
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::{
     ExternalIpCreate, InstanceNetworkInterfaceAttachment,
-    InstanceNetworkInterfaceCreate,
+    InstanceNetworkInterfaceCreate, PrivateIpStackCreate,
 };
 use nexus_types::external_api::internet_gateway::{
     InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool,
@@ -372,10 +372,9 @@ async fn test_setup(c: &ClientTestContext) {
                 description: String::from("description"),
                 name: "noname".parse().unwrap(),
             },
-            ip: None,
+            ip_config: PrivateIpStackCreate::auto_ipv4(),
             subnet_name: "default".parse().unwrap(),
             vpc_name: VPC_NAME.parse().unwrap(),
-            transit_ips: vec![],
         },
     ]);
     let _inst = create_instance_with(
