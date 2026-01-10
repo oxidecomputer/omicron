@@ -165,6 +165,11 @@ async fn test_nexus_boots_before_dendrite() {
     starter.start_dendrite(SwitchLocation::Switch1).await;
     info!(log, "Started Dendrite");
 
+    info!(log, "Starting lldp");
+    starter.start_lldp(SwitchLocation::Switch0).await;
+    starter.start_lldp(SwitchLocation::Switch1).await;
+    info!(log, "Started lldp");
+
     info!(log, "Starting mgd");
     starter.start_mgd(SwitchLocation::Switch0).await;
     starter.start_mgd(SwitchLocation::Switch1).await;

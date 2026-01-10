@@ -6,47 +6,9 @@ use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::{
     LinkCreate, LinkId, LinkSettings, PortFec, PortSettings, PortSpeed, TxEq,
 };
-use internal_dns_types::names::ServiceName;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::db;
-use omicron_common::{address::MGD_PORT, api::external::SwitchLocation};
-use std::{
-    collections::HashMap,
-    net::{Ipv6Addr, SocketAddrV6},
-};
-
-pub(crate) async fn build_mgd_clients(
-    mappings: HashMap<SwitchLocation, std::net::Ipv6Addr>,
-    log: &slog::Logger,
-    resolver: &internal_dns_resolver::Resolver,
-) -> HashMap<SwitchLocation, mg_admin_client::Client> {
-    let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> = vec![];
-    for (location, addr) in &mappings {
-        let port = match resolver.lookup_all_socket_v6(ServiceName::Mgd).await {
-            Ok(addrs) => {
-                let port_map: HashMap<Ipv6Addr, u16> = addrs
-                    .into_iter()
-                    .map(|sockaddr| (*sockaddr.ip(), sockaddr.port()))
-                    .collect();
-
-                *port_map.get(&addr).unwrap_or(&MGD_PORT)
-            }
-            Err(e) => {
-                error!(log, "failed to  addresses"; "error" => %e);
-                MGD_PORT
-            }
-        };
-
-        let socketaddr =
-            std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
-        let client = mg_admin_client::Client::new(
-            format!("http://{}", socketaddr).as_str(),
-            log.clone(),
-        );
-        clients.push((*location, client));
-    }
-    clients.into_iter().collect::<HashMap<_, _>>()
-}
+use std::collections::HashMap;
 
 pub(crate) fn api_to_dpd_port_settings(
     settings: &SwitchPortSettingsCombinedResult,

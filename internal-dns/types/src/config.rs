@@ -399,6 +399,7 @@ impl DnsConfigBuilder {
         dendrite_port: u16,
         mgs_port: u16,
         mgd_port: u16,
+        lldpd_port: u16,
     ) -> anyhow::Result<()> {
         let zone = self.host_dendrite(sled_id, switch_zone_ip)?;
         self.service_backend_zone(ServiceName::Dendrite, &zone, dendrite_port)?;
@@ -407,7 +408,8 @@ impl DnsConfigBuilder {
             &zone,
             mgs_port,
         )?;
-        self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)
+        self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)?;
+        self.service_backend_zone(ServiceName::Lldpd, &zone, lldpd_port)
     }
 
     /// Higher-level shorthand for adding a Nexus zone with both its internal
