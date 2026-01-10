@@ -16,9 +16,9 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared::UninitializedSled;
-use nexus_types::external_api::views::Rack;
+use nexus_types::external_api::hardware;
+use nexus_types::external_api::hardware::UninitializedSled;
+use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::SledUuid;
@@ -186,7 +186,7 @@ async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
     let sled_id = NexusRequest::objects_post(
         external_client,
         add_url,
-        &params::UninitializedSledId {
+        &hardware::UninitializedSledId {
             serial: baseboard.serial.clone(),
             part: baseboard.part.clone(),
         },
@@ -202,7 +202,7 @@ async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
     let repeat_sled_id = NexusRequest::objects_post(
         external_client,
         add_url,
-        &params::UninitializedSledId {
+        &hardware::UninitializedSledId {
             serial: baseboard.serial.clone(),
             part: baseboard.part.clone(),
         },
@@ -247,7 +247,7 @@ async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
             http::StatusCode::BAD_REQUEST,
             http::Method::POST,
             add_url,
-            &params::UninitializedSledId {
+            &hardware::UninitializedSledId {
                 serial: baseboard.serial.clone(),
                 part: baseboard.part.clone(),
             },

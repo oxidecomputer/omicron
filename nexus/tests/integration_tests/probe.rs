@@ -6,9 +6,8 @@ use nexus_test_utils::{
     resource_helpers::{create_default_ip_pools, create_project},
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{
-    params, params::ProbeCreate, shared::ProbeInfo,
-};
+use nexus_types::external_api::ip_pool::PoolSelector;
+use nexus_types::external_api::probe::{ProbeCreate, ProbeInfo};
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IpVersion, Probe,
 };
@@ -40,7 +39,7 @@ async fn test_probe_basic_crud(ctx: &ControlPlaneTestContext) {
             name: "class1".parse().unwrap(),
             description: "subspace relay probe".to_owned(),
         },
-        pool_selector: params::PoolSelector::Explicit {
+        pool_selector: PoolSelector::Explicit {
             pool: v6_pool.identity.name.clone().into(),
         },
         sled: SLED_AGENT_UUID.parse().unwrap(),
@@ -147,9 +146,7 @@ async fn test_probe_pool_selector_ip_version(ctx: &ControlPlaneTestContext) {
             name: "probe-v6".parse().unwrap(),
             description: "IPv6 probe".to_owned(),
         },
-        pool_selector: params::PoolSelector::Auto {
-            ip_version: Some(IpVersion::V6),
-        },
+        pool_selector: PoolSelector::Auto { ip_version: Some(IpVersion::V6) },
         sled: SLED_AGENT_UUID.parse().unwrap(),
     };
 
@@ -195,9 +192,7 @@ async fn test_probe_pool_selector_ip_version(ctx: &ControlPlaneTestContext) {
             name: "probe-v4".parse().unwrap(),
             description: "IPv4 probe".to_owned(),
         },
-        pool_selector: params::PoolSelector::Auto {
-            ip_version: Some(IpVersion::V4),
-        },
+        pool_selector: PoolSelector::Auto { ip_version: Some(IpVersion::V4) },
         sled: SLED_AGENT_UUID.parse().unwrap(),
     };
 

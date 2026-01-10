@@ -24,7 +24,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::Logger;

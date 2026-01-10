@@ -19,11 +19,13 @@ use nexus_test_utils::resource_helpers::{
     object_delete, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment, MulticastGroupCreate,
+use nexus_types::external_api::instance::{
+    InstanceCreate, InstanceNetworkInterfaceAttachment,
+};
+use nexus_types::external_api::multicast::{
+    MulticastGroup, MulticastGroupCreate, MulticastGroupMember,
     MulticastGroupMemberAdd,
 };
-use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
 use omicron_common::api::external::{

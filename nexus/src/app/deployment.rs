@@ -416,7 +416,7 @@ mod tests {
     use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::sled::SledState;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::MupdateOverrideUuid;

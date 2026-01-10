@@ -19,7 +19,7 @@ use nexus_db_schema::schema::{
     switch_port_settings_port_config, switch_port_settings_route_config,
     tx_eq_config,
 };
-use nexus_types::external_api::params;
+use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::{BgpPeer, ImportExportPolicy};
@@ -47,23 +47,23 @@ impl_enum_type!(
     Sfp28x4 => b"Sfp28x4"
 );
 
-impl PartialEq<params::SwitchPortGeometry> for SwitchPortGeometry {
-    fn eq(&self, other: &params::SwitchPortGeometry) -> bool {
+impl PartialEq<networking_types::SwitchPortGeometry> for SwitchPortGeometry {
+    fn eq(&self, other: &networking_types::SwitchPortGeometry) -> bool {
         match self {
             Self::Qsfp28x1 => {
-                return matches!(other, params::SwitchPortGeometry::Qsfp28x1);
+                matches!(other, networking_types::SwitchPortGeometry::Qsfp28x1)
             }
             Self::Qsfp28x2 => {
-                return matches!(other, params::SwitchPortGeometry::Qsfp28x2);
+                matches!(other, networking_types::SwitchPortGeometry::Qsfp28x2)
             }
             Self::Sfp28x4 => {
-                return matches!(other, params::SwitchPortGeometry::Sfp28x4);
+                matches!(other, networking_types::SwitchPortGeometry::Sfp28x4)
             }
         }
     }
 }
 
-impl PartialEq<SwitchPortGeometry> for params::SwitchPortGeometry {
+impl PartialEq<SwitchPortGeometry> for networking_types::SwitchPortGeometry {
     fn eq(&self, other: &SwitchPortGeometry) -> bool {
         other.eq(self)
     }
@@ -193,16 +193,18 @@ impl From<SwitchLinkSpeed> for external::LinkSpeed {
     }
 }
 
-impl From<params::SwitchPortGeometry> for SwitchPortGeometry {
-    fn from(g: params::SwitchPortGeometry) -> Self {
+impl From<networking_types::SwitchPortGeometry> for SwitchPortGeometry {
+    fn from(g: networking_types::SwitchPortGeometry) -> Self {
         match g {
-            params::SwitchPortGeometry::Qsfp28x1 => {
+            networking_types::SwitchPortGeometry::Qsfp28x1 => {
                 SwitchPortGeometry::Qsfp28x1
             }
-            params::SwitchPortGeometry::Qsfp28x2 => {
+            networking_types::SwitchPortGeometry::Qsfp28x2 => {
                 SwitchPortGeometry::Qsfp28x2
             }
-            params::SwitchPortGeometry::Sfp28x4 => SwitchPortGeometry::Sfp28x4,
+            networking_types::SwitchPortGeometry::Sfp28x4 => {
+                SwitchPortGeometry::Sfp28x4
+            }
         }
     }
 }

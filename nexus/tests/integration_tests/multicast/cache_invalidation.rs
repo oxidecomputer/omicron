@@ -14,7 +14,7 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::params::MulticastGroupCreate;
+use nexus_types::external_api::multicast::MulticastGroupCreate;
 use nexus_types::inventory::SpType;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::Server;
@@ -66,7 +66,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
         mvlan: None,
     };
 
-    object_create::<_, nexus_types::external_api::views::MulticastGroup>(
+    object_create::<_, nexus_types::external_api::multicast::MulticastGroup>(
         client,
         &super::mcast_groups_url(),
         &params,
@@ -337,7 +337,7 @@ async fn test_cache_ttl_driven_refresh() {
         mvlan: None,
     };
 
-    object_create::<_, nexus_types::external_api::views::MulticastGroup>(
+    object_create::<_, nexus_types::external_api::multicast::MulticastGroup>(
         client,
         &super::mcast_groups_url(),
         &params,
@@ -548,7 +548,7 @@ async fn test_backplane_cache_ttl_expiry() {
         mvlan: None,
     };
 
-    object_create::<_, nexus_types::external_api::views::MulticastGroup>(
+    object_create::<_, nexus_types::external_api::multicast::MulticastGroup>(
         client,
         &super::mcast_groups_url(),
         &params,

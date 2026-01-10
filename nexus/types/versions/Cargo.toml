@@ -1,0 +1,37 @@
+[package]
+name = "nexus-types-versions"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+api_identity.workspace = true
+base64.workspace = true
+chrono.workspace = true
+daft.workspace = true
+dropshot.workspace = true
+http.workspace = true
+omicron-common.workspace = true
+omicron-passwords.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+openssl.workspace = true
+oxnet.workspace = true
+oxql-types.workspace = true
+parse-display.workspace = true
+regex.workspace = true
+schemars.workspace = true
+semver.workspace = true
+sled-hardware-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slog-error-chain.workspace = true
+strum.workspace = true
+tough.workspace = true
+tufaceous-artifact.workspace = true
+url.workspace = true
+uuid.workspace = true

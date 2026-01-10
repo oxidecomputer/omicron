@@ -15,8 +15,7 @@ use nexus_db_schema::schema::affinity_group;
 use nexus_db_schema::schema::affinity_group_instance_membership;
 use nexus_db_schema::schema::anti_affinity_group;
 use nexus_db_schema::schema::anti_affinity_group_instance_membership;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::affinity;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_uuid_kinds::AffinityGroupKind;
@@ -95,7 +94,10 @@ pub struct AffinityGroup {
 }
 
 impl AffinityGroup {
-    pub fn new(project_id: Uuid, params: params::AffinityGroupCreate) -> Self {
+    pub fn new(
+        project_id: Uuid,
+        params: affinity::AffinityGroupCreate,
+    ) -> Self {
         Self {
             identity: AffinityGroupIdentity::new(
                 Uuid::new_v4(),
@@ -108,7 +110,7 @@ impl AffinityGroup {
     }
 }
 
-impl From<AffinityGroup> for views::AffinityGroup {
+impl From<AffinityGroup> for affinity::AffinityGroup {
     fn from(group: AffinityGroup) -> Self {
         let identity = IdentityMetadata {
             id: group.identity.id,
@@ -135,8 +137,8 @@ pub struct AffinityGroupUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::AffinityGroupUpdate> for AffinityGroupUpdate {
-    fn from(params: params::AffinityGroupUpdate) -> Self {
+impl From<affinity::AffinityGroupUpdate> for AffinityGroupUpdate {
+    fn from(params: affinity::AffinityGroupUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
@@ -160,7 +162,7 @@ pub struct AntiAffinityGroup {
 impl AntiAffinityGroup {
     pub fn new(
         project_id: Uuid,
-        params: params::AntiAffinityGroupCreate,
+        params: affinity::AntiAffinityGroupCreate,
     ) -> Self {
         Self {
             identity: AntiAffinityGroupIdentity::new(
@@ -174,7 +176,7 @@ impl AntiAffinityGroup {
     }
 }
 
-impl From<AntiAffinityGroup> for views::AntiAffinityGroup {
+impl From<AntiAffinityGroup> for affinity::AntiAffinityGroup {
     fn from(group: AntiAffinityGroup) -> Self {
         let identity = IdentityMetadata {
             id: group.identity.id,
@@ -201,8 +203,8 @@ pub struct AntiAffinityGroupUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::AntiAffinityGroupUpdate> for AntiAffinityGroupUpdate {
-    fn from(params: params::AntiAffinityGroupUpdate) -> Self {
+impl From<affinity::AntiAffinityGroupUpdate> for AntiAffinityGroupUpdate {
+    fn from(params: affinity::AntiAffinityGroupUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

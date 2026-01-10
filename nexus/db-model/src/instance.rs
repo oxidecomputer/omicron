@@ -16,7 +16,7 @@ use diesel::pg;
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
 use nexus_db_schema::schema::{disk, external_ip, instance};
-use nexus_types::external_api::params;
+use nexus_types::external_api::instance as instance_types;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -111,7 +111,7 @@ impl Instance {
     pub fn new(
         instance_id: InstanceUuid,
         project_id: Uuid,
-        params: &params::InstanceCreate,
+        params: &instance_types::InstanceCreate,
     ) -> Self {
         let identity = InstanceIdentity::new(
             instance_id.into_untyped_uuid(),

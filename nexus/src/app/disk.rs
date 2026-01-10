@@ -5,7 +5,6 @@
 //! Disks
 
 use crate::app::sagas;
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::DiskTypeLocalStorage;
@@ -14,6 +13,8 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore;
+use nexus_types::external_api::disk;
+use nexus_types::external_api::project;
 use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -37,24 +38,27 @@ impl super::Nexus {
     pub fn disk_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        disk_selector: params::DiskSelector,
+        disk_selector: disk::DiskSelector,
     ) -> LookupResult<lookup::Disk<'a>> {
         match disk_selector {
-            params::DiskSelector { disk: NameOrId::Id(id), project: None } => {
+            disk::DiskSelector { disk: NameOrId::Id(id), project: None } => {
                 let disk =
                     LookupPath::new(opctx, &self.db_datastore).disk_id(id);
                 Ok(disk)
             }
-            params::DiskSelector {
+            disk::DiskSelector {
                 disk: NameOrId::Name(name),
                 project: Some(project),
             } => {
                 let disk = self
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .project_lookup(
+                        opctx,
+                        project::ProjectSelector { project },
+                    )?
                     .disk_name_owned(name.into());
                 Ok(disk)
             }
-            params::DiskSelector { disk: NameOrId::Id(_), .. } => {
+            disk::DiskSelector { disk: NameOrId::Id(_), .. } => {
                 Err(Error::invalid_request(
                     "when providing disk as an ID project should not be specified",
                 ))
@@ -68,7 +72,7 @@ impl super::Nexus {
     pub async fn disk_get(
         &self,
         opctx: &OpContext,
-        disk_selector: params::DiskSelector,
+        disk_selector: disk::DiskSelector,
     ) -> LookupResult<db::datastore::Disk> {
         let disk_lookup = self.disk_lookup(opctx, disk_selector)?;
 
@@ -82,15 +86,15 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        disk_source: &params::DiskSource,
+        disk_source: &disk::DiskSource,
         size: ByteCount,
     ) -> Result<u64, Error> {
         let block_size: u64 = match disk_source {
-            params::DiskSource::Blank { block_size }
-            | params::DiskSource::ImportingBlocks { block_size } => {
+            disk::DiskSource::Blank { block_size }
+            | disk::DiskSource::ImportingBlocks { block_size } => {
                 (*block_size).into()
             }
-            params::DiskSource::Snapshot { snapshot_id } => {
+            disk::DiskSource::Snapshot { snapshot_id } => {
                 let (.., db_snapshot) =
                     LookupPath::new(opctx, &self.db_datastore)
                         .snapshot_id(*snapshot_id)
@@ -117,7 +121,7 @@ impl super::Nexus {
 
                 db_snapshot.block_size.to_bytes().into()
             }
-            params::DiskSource::Image { image_id } => {
+            disk::DiskSource::Image { image_id } => {
                 let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
                     .image_id(*image_id)
                     .fetch()
@@ -154,10 +158,10 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        params: &params::DiskCreate,
+        params: &disk::DiskCreate,
     ) -> Result<(), Error> {
         let block_size: u64 = match &params.disk_backend {
-            params::DiskBackend::Distributed { disk_source, .. } => {
+            disk::DiskBackend::Distributed { disk_source, .. } => {
                 self.validate_crucible_disk_create_params(
                     opctx,
                     &authz_project,
@@ -167,7 +171,7 @@ impl super::Nexus {
                 .await?
             }
 
-            params::DiskBackend::Local { .. } => {
+            disk::DiskBackend::Local { .. } => {
                 // All LocalStorage disks have a 4k block size
                 4096
             }
@@ -215,7 +219,7 @@ impl super::Nexus {
 
         // Check for disk type specific restrictions
         match &params.disk_backend {
-            params::DiskBackend::Distributed { .. } => {
+            disk::DiskBackend::Distributed { .. } => {
                 // Reject disks where the size is greated than
                 // MAX_DISK_SIZE_BYTES. This restriction will be changed or
                 // removed when multi-subvolume Volumes can be created by Nexus,
@@ -231,7 +235,7 @@ impl super::Nexus {
                 }
             }
 
-            params::DiskBackend::Local {} => {
+            disk::DiskBackend::Local {} => {
                 // If a user requests some outlandish number of TB for local
                 // storage, and there isn't a sled allocation that can fulfill
                 // this, instance create will work but instance start (which
@@ -285,7 +289,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        params: &params::DiskCreate,
+        params: &disk::DiskCreate,
     ) -> CreateResult<db::datastore::Disk> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
@@ -501,7 +505,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
-        param: params::ImportBlocksBulkWrite,
+        param: disk::ImportBlocksBulkWrite,
     ) -> UpdateResult<()> {
         let (.., authz_disk) =
             disk_lookup.lookup_for(authz::Action::Modify).await?;
@@ -692,7 +696,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
-        finalize_params: &params::FinalizeDisk,
+        finalize_params: &disk::FinalizeDisk,
     ) -> UpdateResult<()> {
         let (authz_silo, authz_proj, authz_disk, _db_disk) =
             disk_lookup.fetch_for(authz::Action::Modify).await?;

@@ -4,7 +4,7 @@
 
 use crate::typed_uuid::DbTypedUuid;
 use nexus_db_schema::schema::disk_type_crucible;
-use nexus_types::external_api::params;
+use nexus_types::external_api::disk;
 use omicron_uuid_kinds::VolumeKind;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
@@ -43,16 +43,16 @@ impl DiskTypeCrucible {
     pub fn new(
         disk_id: Uuid,
         volume_id: VolumeUuid,
-        disk_source: &params::DiskSource,
+        disk_source: &disk::DiskSource,
     ) -> Self {
         let create_snapshot_id = match disk_source {
-            params::DiskSource::Snapshot { snapshot_id } => Some(*snapshot_id),
+            disk::DiskSource::Snapshot { snapshot_id } => Some(*snapshot_id),
             _ => None,
         };
 
         // XXX further enum here for different image types?
         let create_image_id = match disk_source {
-            params::DiskSource::Image { image_id } => Some(*image_id),
+            disk::DiskSource::Image { image_id } => Some(*image_id),
             _ => None,
         };
 

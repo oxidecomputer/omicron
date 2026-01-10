@@ -38,8 +38,8 @@ use nexus_db_queries::{
     context::OpContext,
     db::{DataStore, datastore::SwitchPortSettingsCombinedResult},
 };
-use nexus_types::identity::Asset;
-use nexus_types::{external_api::params, identity::Resource};
+use nexus_types::external_api::networking;
+use nexus_types::identity::{Asset, Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
@@ -616,7 +616,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 .datastore
                                 .bgp_announcement_list(
                                     opctx,
-                                    &params::BgpAnnounceSetSelector {
+                                    &networking::BgpAnnounceSetSelector {
                                         announce_set: bgp_config
                                             .bgp_announce_set_id
                                             .into(),
