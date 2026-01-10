@@ -251,7 +251,9 @@ impl From<v2025120300::instance::InstanceCreate> for InstanceCreate {
 }
 
 impl From<v2025121200::instance::EphemeralIpCreate> for EphemeralIpCreate {
-    fn from(old: v2025121200::instance::EphemeralIpCreate) -> EphemeralIpCreate {
+    fn from(
+        old: v2025121200::instance::EphemeralIpCreate,
+    ) -> EphemeralIpCreate {
         EphemeralIpCreate { pool: old.pool, ip_version: None }
     }
 }
@@ -262,9 +264,9 @@ impl From<v2025121200::instance::ExternalIpCreate> for ExternalIpCreate {
             v2025121200::instance::ExternalIpCreate::Ephemeral { pool } => {
                 ExternalIpCreate::Ephemeral { pool, ip_version: None }
             }
-            v2025121200::instance::ExternalIpCreate::Floating { floating_ip } => {
-                ExternalIpCreate::Floating { floating_ip }
-            }
+            v2025121200::instance::ExternalIpCreate::Floating {
+                floating_ip,
+            } => ExternalIpCreate::Floating { floating_ip },
         }
     }
 }
@@ -278,7 +280,11 @@ impl From<v2025121200::instance::InstanceCreate> for InstanceCreate {
             hostname: old.hostname,
             user_data: old.user_data,
             network_interfaces: old.network_interfaces,
-            external_ips: old.external_ips.into_iter().map(Into::into).collect(),
+            external_ips: old
+                .external_ips
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             multicast_groups: old.multicast_groups,
             disks: old.disks,
             boot_disk: old.boot_disk,
