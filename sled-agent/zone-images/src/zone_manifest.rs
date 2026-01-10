@@ -48,13 +48,20 @@ impl AllZoneManifests {
         file_name: &str,
         internal_disks: &InternalDisksWithBootDisk,
     ) -> Self {
+        const SUBDIR_NAME: &str = "measurements";
+
         // First read all the files.
         let files = AllInstallMetadataFiles::read_all_subdir(
             log,
             file_name,
             internal_disks,
-            "measurements",
-            |dataset_dir| synthesize_manifest(log, dataset_dir),
+            SUBDIR_NAME,
+            |dataset_dir| {
+                synthesize_measurement_manifest(
+                    log,
+                    &dataset_dir.join(SUBDIR_NAME),
+                )
+            },
         );
 
         // Validate files on the boot disk.
@@ -358,6 +365,81 @@ fn make_artifacts_result(
         manifest: manifest.value,
         data: artifacts.into_iter().collect(),
     }
+}
+
+fn synthesize_measurement_manifest(
+    log: &slog::Logger,
+    dataset_dir: &Utf8Path,
+) -> Result<Option<OmicronInstallManifest>, InstallMetadataReadError> {
+    let mut files = IdOrdMap::new();
+
+    // If the dataset path doesn't exist don't treat it as a
+    // fatal error, simply return an empty manifest
+    if !dataset_dir.is_dir() {
+        return Ok(Some(OmicronInstallManifest {
+            source: OmicronInstallManifestSource::SledAgent,
+            files,
+        }));
+    }
+
+    // Read all the files in the directory.
+    let entries = dataset_dir.read_dir_utf8().map_err(|error| {
+        InstallMetadataReadError::ReadDir {
+            dataset_dir: dataset_dir.to_owned(),
+            error: ArcIoError::new(error),
+        }
+    })?;
+
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| InstallMetadataReadError::ReadDir {
+                dataset_dir: dataset_dir.to_owned(),
+                error: ArcIoError::new(error),
+            })?;
+
+        let ft = entry.file_type().map_err(|error| {
+            InstallMetadataReadError::ReadFileType {
+                path: entry.path().to_owned(),
+                error: ArcIoError::new(error),
+            }
+        })?;
+        if !ft.is_file() {
+            info!(
+                log,
+                "skipping non-file entry in dataset directory";
+                "file_name" => entry.file_name().to_string(),
+            );
+            continue;
+        }
+
+        let mut f = File::open(entry.path()).map_err(|error| {
+            InstallMetadataReadError::ReadFile {
+                path: entry.path().to_owned(),
+                error: ArcIoError::new(error),
+            }
+        })?;
+
+        match compute_size_and_hash(&mut f) {
+            Ok((size, hash)) => {
+                files.insert_overwrite(OmicronInstallMetadata {
+                    file_name: entry.file_name().to_string(),
+                    file_size: size,
+                    hash,
+                });
+            }
+            Err(error) => {
+                return Err(InstallMetadataReadError::ReadFile {
+                    path: entry.path().to_owned(),
+                    error: ArcIoError::new(error),
+                });
+            }
+        }
+    }
+
+    Ok(Some(OmicronInstallManifest {
+        source: OmicronInstallManifestSource::SledAgent,
+        files,
+    }))
 }
 
 fn synthesize_manifest(
