@@ -24,6 +24,7 @@ use uuid::Uuid;
 pub enum StorageType {
     Disk,
     Snapshot,
+    Image,
 }
 
 impl From<StorageType> for crate::db::model::ResourceTypeProvisioned {
@@ -36,6 +37,9 @@ impl From<StorageType> for crate::db::model::ResourceTypeProvisioned {
             }
             StorageType::Snapshot => {
                 crate::db::model::ResourceTypeProvisioned::Snapshot
+            }
+            StorageType::Image => {
+                crate::db::model::ResourceTypeProvisioned::Image
             }
         }
     }
@@ -178,6 +182,23 @@ impl DataStore {
         .await
     }
 
+    pub async fn virtual_provisioning_collection_insert_project_image(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        project_id: Uuid,
+        disk_byte_diff: ByteCount,
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+        self.virtual_provisioning_collection_insert_storage(
+            opctx,
+            id,
+            project_id,
+            disk_byte_diff,
+            StorageType::Image,
+        )
+        .await
+    }
+
     /// Transitively updates all provisioned disk provisions from project -> fleet.
     async fn virtual_provisioning_collection_insert_storage(
         &self,
@@ -236,6 +257,22 @@ impl DataStore {
         .await
     }
 
+    pub async fn virtual_provisioning_collection_delete_project_image(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        project_id: Uuid,
+        disk_byte_diff: ByteCount,
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+        self.virtual_provisioning_collection_delete_storage(
+            opctx,
+            id,
+            project_id,
+            disk_byte_diff,
+        )
+        .await
+    }
+
     // Transitively updates all provisioned disk provisions from project -> fleet.
     async fn virtual_provisioning_collection_delete_storage(
         &self,
@@ -253,6 +290,59 @@ impl DataStore {
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| crate::db::queries::virtual_provisioning_collection_update::from_diesel(e))?;
+        self.virtual_provisioning_collection_producer
+            .append_disk_metrics(&provisions)?;
+        Ok(provisions)
+    }
+
+    /// Insert storage accounting for a silo-scoped image.
+    ///
+    /// This updates the Silo and Fleet collections (no Project).
+    pub async fn virtual_provisioning_collection_insert_silo_image(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        silo_id: Uuid,
+        disk_byte_diff: ByteCount,
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+        let provisions =
+            VirtualProvisioningCollectionUpdate::new_insert_silo_storage(
+                id,
+                disk_byte_diff,
+                silo_id,
+                StorageType::Image,
+            )
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                crate::db::queries::virtual_provisioning_collection_update::from_diesel(e)
+            })?;
+        self.virtual_provisioning_collection_producer
+            .append_disk_metrics(&provisions)?;
+        Ok(provisions)
+    }
+
+    /// Delete storage accounting for a silo-scoped image.
+    ///
+    /// This updates the Silo and Fleet collections (no Project).
+    pub async fn virtual_provisioning_collection_delete_silo_image(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        silo_id: Uuid,
+        disk_byte_diff: ByteCount,
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+        let provisions =
+            VirtualProvisioningCollectionUpdate::new_delete_silo_storage(
+                id,
+                disk_byte_diff,
+                silo_id,
+            )
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                crate::db::queries::virtual_provisioning_collection_update::from_diesel(e)
+            })?;
         self.virtual_provisioning_collection_producer
             .append_disk_metrics(&provisions)?;
         Ok(provisions)

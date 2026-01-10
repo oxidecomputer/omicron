@@ -6,6 +6,7 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::identity::Resource;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -37,8 +38,11 @@ pub(crate) struct Params {
 
 declare_saga_actions! {
     image_delete;
-    DELETE_IMAGE_RECORD -> "no_result1" {
+    DELETE_IMAGE_RECORD -> "no_result0" {
         + sid_delete_image_record
+    }
+    SPACE_ACCOUNT -> "no_result1" {
+        + sid_account_space
     }
 }
 
@@ -57,6 +61,7 @@ impl NexusSaga for SagaImageDelete {
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(delete_image_record_action());
+        builder.append(space_account_action());
 
         const DELETE_VOLUME_PARAMS: &'static str = "delete_volume_params";
 
@@ -91,6 +96,45 @@ impl NexusSaga for SagaImageDelete {
 }
 
 // image delete saga: action implementations
+
+async fn sid_account_space(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    match &params.image_param {
+        ImageParam::Project { image, .. } => {
+            osagactx
+                .datastore()
+                .virtual_provisioning_collection_delete_project_image(
+                    &opctx,
+                    image.id(),
+                    image.project_id,
+                    image.size,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        ImageParam::Silo { image, .. } => {
+            osagactx
+                .datastore()
+                .virtual_provisioning_collection_delete_silo_image(
+                    &opctx,
+                    image.id(),
+                    image.silo_id,
+                    image.size,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+    }
+    Ok(())
+}
 
 async fn sid_delete_image_record(
     sagactx: NexusActionContext,
