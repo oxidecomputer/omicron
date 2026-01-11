@@ -11,12 +11,10 @@
 //! - Cache TTL refresh: Verifies caches are refreshed when TTL expires
 //! - Backplane cache expiry: Tests that stale backplane mappings are cleaned up
 
-use std::time::Duration;
-
 use gateway_client::types::{PowerState, RotState, SpState};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_project,
+    create_default_ip_pools, create_project,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::SledFilter;
@@ -52,14 +50,14 @@ async fn test_sled_move_updates_multicast_port_mapping(
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
-        create_default_ip_pool(client),
+    ops::join3(
+        create_default_ip_pools(client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(client, "sled-move-pool"),
     )
     .await;
 
-    // Create instance (no multicast groups at creation, implicit model)
+    // Create instance (no multicast groups at creation - implicit model)
     let instance = instance_for_multicast_groups(
         cptestctx,
         PROJECT_NAME,
@@ -216,7 +214,11 @@ async fn test_sled_move_updates_multicast_port_mapping(
 
     // Verify stale port cleanup: fetch DPD state and ensure old port was removed
     let members = datastore
-        .multicast_group_members_list_by_instance(&opctx, instance_uuid)
+        .multicast_group_members_list_by_instance(
+            &opctx,
+            instance_uuid,
+            &DataPageParams::max_page(),
+        )
         .await
         .expect("Should list multicast members for instance");
     let member = members
@@ -267,45 +269,50 @@ async fn test_sled_move_updates_multicast_port_mapping(
     );
 }
 
-/// Test that cache TTL expiry automatically refreshes sled-to-port mappings:
+/// Test for cache TTL behavior.
 ///
-/// - Start test server with sled_cache_ttl = 1 second
+/// This test verifies that both sled and backplane cache TTL expiry work correctly:
+///
+/// Sled cache TTL with inventory change:
+/// - Start test server with short TTLs (sled=2s, backplane=1s)
 /// - Create multicast group and instance, wait for member to join
 /// - Insert new inventory with different `sp_slot` (simulating sled move)
-/// - Wait for TTL to expire (sleep 1.5 seconds)
-/// - Activate reconciler (which should refresh cache due to TTL)
-/// - Verify DPD uses the new rear port
+/// - Wait for sled cache TTL to expire
+/// - Verify DPD uses the new rear port after reconciler refreshes cache
+///
+/// Backplane cache TTL without change:
+/// - Wait for backplane cache TTL to expire (tests independent expiry)
+/// - Activate reconciler (refreshes expired backplane cache from DPD)
+/// - Verify port mapping still works after cache refresh
 #[tokio::test]
-async fn test_cache_ttl_driven_refresh() {
+async fn test_cache_ttl_behavior() {
     const PROJECT_NAME: &str = "ttl-test-project";
     const GROUP_NAME: &str = "ttl-test-group";
     const INSTANCE_NAME: &str = "ttl-test-instance";
 
-    // Test cache TTL values
-    const SLED_CACHE_TTL: Duration = Duration::from_millis(500);
-    const BACKPLANE_CACHE_TTL: Duration = Duration::from_millis(250);
-    // Buffer to ensure TTL has definitely expired
-    const TTL_EXPIRY_BUFFER: Duration = Duration::from_millis(100);
-
     // Start test server with custom config
-    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
-        "test_cache_ttl_driven_refresh",
-    )
-    .customize_nexus_config(&|config| {
-        // Set short cache TTLs for testing
-        config.pkg.background_tasks.multicast_reconciler.sled_cache_ttl_secs =
-            SLED_CACHE_TTL;
-        config
-            .pkg
-            .background_tasks
-            .multicast_reconciler
-            .backplane_cache_ttl_secs = BACKPLANE_CACHE_TTL;
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_cache_ttl_behavior")
+            .customize_nexus_config(&|config| {
+                // Set short cache TTLs for testing
+                config
+                    .pkg
+                    .background_tasks
+                    .multicast_reconciler
+                    .sled_cache_ttl_secs =
+                    chrono::TimeDelta::seconds(2).to_std().unwrap();
+                config
+                    .pkg
+                    .background_tasks
+                    .multicast_reconciler
+                    .backplane_cache_ttl_secs =
+                    chrono::TimeDelta::seconds(1).to_std().unwrap();
 
-        // Ensure multicast is enabled
-        config.pkg.multicast.enabled = true;
-    })
-    .start::<omicron_nexus::Server>()
-    .await;
+                // Ensure multicast is enabled
+                config.pkg.multicast.enabled = true;
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
 
     ensure_multicast_test_ready(&cptestctx).await;
 
@@ -318,14 +325,14 @@ async fn test_cache_ttl_driven_refresh() {
     let client = &cptestctx.external_client;
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
-        create_default_ip_pool(client),
+    ops::join3(
+        create_default_ip_pools(client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(client, "ttl-test-pool"),
     )
     .await;
 
-    // Create instance (no multicast groups at creation, implicit model)
+    // Create instance (no multicast groups at creation - implicit model)
     let instance = instance_for_multicast_groups(
         &cptestctx,
         PROJECT_NAME,
@@ -351,10 +358,12 @@ async fn test_cache_ttl_driven_refresh() {
     )
     .await;
 
-    // Verify initial port mapping (this populates the cache)
+    // Verify initial port mapping (this populates both caches)
     verify_inventory_based_port_mapping(&cptestctx, &instance_uuid)
         .await
         .expect("Should verify initial port mapping");
+
+    // Test sled cache TTL with inventory change
 
     // Get the sled this instance is running on
     let sled_id = nexus
@@ -393,7 +402,6 @@ async fn test_cache_ttl_driven_refresh() {
     let sled_part_number = sled.part_number().to_string();
 
     // Determine a valid target slot by querying DPD's backplane map.
-    // Prefer a different slot if available; otherwise fall back to the same.
     let dpd = nexus_test_utils::dpd_client(&cptestctx);
     let backplane = dpd
         .backplane_map()
@@ -442,8 +450,8 @@ async fn test_cache_ttl_driven_refresh() {
         .await
         .expect("Should insert new inventory collection");
 
-    // Wait for cache TTL to expire
-    tokio::time::sleep(SLED_CACHE_TTL + TTL_EXPIRY_BUFFER).await;
+    // Wait for sled cache TTL to expire (2 seconds)
+    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
 
     wait_for_condition_with_reconciler(
         &cptestctx.lockstep_client,
@@ -464,107 +472,19 @@ async fn test_cache_ttl_driven_refresh() {
             }
         },
         &POLL_INTERVAL,
-        &MEDIUM_TIMEOUT, // DPD update requires reconciler processing
+        &MULTICAST_OPERATION_TIMEOUT,
     )
     .await
-    .expect("DPD should update with new rear port after TTL expiry");
+    .expect("DPD should update with new rear port after sled cache TTL expiry");
 
-    cptestctx.teardown().await;
-}
+    // Test backplane cache TTL without change
 
-/// Test that backplane cache TTL expiry triggers automatic refresh from DPD.
-///
-/// This test verifies that the backplane map cache expires independently from
-/// the sled mapping cache and continues to work correctly after TTL expiry:
-///
-/// - Start test server with backplane_cache_ttl = 1 second (shorter than sled cache)
-/// - Create multicast group and instance, wait for member to join (populates both caches)
-/// - Verify initial port mapping works
-/// - Wait for backplane TTL to expire (sleep 2 seconds)
-/// - Trigger reconciler (which refreshes expired backplane cache from DPD)
-/// - Verify port mapping still works (confirms cache refresh succeeded)
-#[tokio::test]
-async fn test_backplane_cache_ttl_expiry() {
-    const PROJECT_NAME: &str = "backplane-ttl-project";
-    const GROUP_NAME: &str = "backplane-ttl-group";
-    const INSTANCE_NAME: &str = "backplane-ttl-instance";
+    // Wait for backplane cache TTL to expire (1 second)
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    // Cache TTL values: backplane shorter than sled to test them independently
-    const BACKPLANE_CACHE_TTL: Duration = Duration::from_millis(250);
-    const SLED_CACHE_TTL: Duration = Duration::from_secs(2);
-    // Buffer to ensure TTL has definitely expired (20% margin)
-    const TTL_EXPIRY_BUFFER: Duration = Duration::from_millis(50);
-
-    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
-        "test_backplane_cache_ttl_expiry",
-    )
-    .customize_nexus_config(&|config| {
-        // Set backplane cache TTL shorter than sled cache to test independently
-        config
-            .pkg
-            .background_tasks
-            .multicast_reconciler
-            .backplane_cache_ttl_secs = BACKPLANE_CACHE_TTL;
-
-        // Keep sled cache TTL longer to ensure we're testing backplane cache expiry
-        config.pkg.background_tasks.multicast_reconciler.sled_cache_ttl_secs =
-            SLED_CACHE_TTL;
-
-        // Ensure multicast is enabled
-        config.pkg.multicast.enabled = true;
-    })
-    .start::<omicron_nexus::Server>()
-    .await;
-
-    ensure_multicast_test_ready(&cptestctx).await;
-
-    let client = &cptestctx.external_client;
-
-    // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
-        create_default_ip_pool(client),
-        create_project(client, PROJECT_NAME),
-        create_multicast_ip_pool(client, "backplane-ttl-pool"),
-    )
-    .await;
-
-    // Create instance (no multicast groups at creation, implicit model)
-    let instance = instance_for_multicast_groups(
-        &cptestctx,
-        PROJECT_NAME,
-        INSTANCE_NAME,
-        true,
-        &[],
-    )
-    .await;
-
-    // Add instance to multicast group via instance-centric API
-    multicast_group_attach(&cptestctx, PROJECT_NAME, INSTANCE_NAME, GROUP_NAME)
-        .await;
-    wait_for_group_active(client, GROUP_NAME).await;
-
-    let instance_uuid = InstanceUuid::from_untyped_uuid(instance.identity.id);
-
-    // Wait for member to join (this populates both caches)
-    wait_for_member_state(
-        &cptestctx,
-        GROUP_NAME,
-        instance.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Joined,
-    )
-    .await;
-
-    // Verify initial port mapping (confirms both caches are populated)
-    verify_inventory_based_port_mapping(&cptestctx, &instance_uuid)
-        .await
-        .expect("Should verify initial port mapping");
-
-    // Wait for backplane cache TTL to expire but not sled cache
-    tokio::time::sleep(BACKPLANE_CACHE_TTL + TTL_EXPIRY_BUFFER).await;
-
-    // Force cache access by triggering reconciler
+    // Force cache access by activating reconciler
     // This will cause the reconciler to check backplane cache, find it expired,
-    // and refresh from DPD. The sled cache should still be valid.
+    // and refresh from DPD.
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Verify member is still on the right port after backplane cache refresh
@@ -572,12 +492,12 @@ async fn test_backplane_cache_ttl_expiry() {
         .await
         .expect("Port mapping should work after backplane cache TTL expiry");
 
-    // Verify member is still in "Joined" state
+    // Verify member is still in "Joined" state after all cache operations
     let members = list_multicast_group_members(client, GROUP_NAME).await;
     assert_eq!(members.len(), 1, "should still have exactly one member");
     assert_eq!(
         members[0].state, "Joined",
-        "member should remain in Joined state after backplane cache refresh"
+        "member should remain in Joined state after cache operations"
     );
     assert_eq!(
         members[0].instance_id, instance.identity.id,

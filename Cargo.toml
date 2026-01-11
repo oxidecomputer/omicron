@@ -6,6 +6,7 @@ members = [
     "clickhouse-admin",
     "clickhouse-admin/api",
     "clickhouse-admin/test-utils",
+    "clickhouse-admin/types/versions",
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
@@ -26,6 +27,7 @@ members = [
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
+    "cockroach-admin/types/versions",
     "cockroach-metrics",
     "common",
     "dev-tools/cert-dev",
@@ -64,10 +66,12 @@ members = [
     "illumos-utils",
     "installinator-api",
     "installinator-common",
+    "installinator-common/versions",
     "installinator",
     "internal-dns/cli",
     "internal-dns/resolver",
     "internal-dns/types",
+    "internal-dns/types/versions",
     "ipcc",
     "key-manager",
     "live-tests",
@@ -108,6 +112,7 @@ members = [
     "ntp-admin",
     "ntp-admin/api",
     "ntp-admin/types",
+    "ntp-admin/types/versions",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -120,6 +125,7 @@ members = [
     "oximeter/test-utils",
     "oximeter/timeseries-macro",
     "oximeter/types",
+    "oximeter/types/versions",
     "package",
     "parallel-task-set",
     "passwords",
@@ -129,6 +135,7 @@ members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
     "sled-agent/config-reconciler",
+    "sled-agent/health-monitor",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
@@ -146,6 +153,8 @@ members = [
     "trust-quorum/protocol",
     "trust-quorum/test-utils",
     "trust-quorum/tqdb",
+    "trust-quorum/types",
+    "trust-quorum/types/versions",
     "typed-rng",
     "update-common",
     "update-engine",
@@ -166,6 +175,7 @@ default-members = [
     "clickhouse-admin",
     "clickhouse-admin/api",
     "clickhouse-admin/types",
+    "clickhouse-admin/types/versions",
     "clickhouse-admin/test-utils",
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
@@ -187,6 +197,7 @@ default-members = [
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
+    "cockroach-admin/types/versions",
     "cockroach-metrics",
     "common",
     "dev-tools/cert-dev",
@@ -227,10 +238,12 @@ default-members = [
     "illumos-utils",
     "installinator-api",
     "installinator-common",
+    "installinator-common/versions",
     "installinator",
     "internal-dns/cli",
     "internal-dns/resolver",
     "internal-dns/types",
+    "internal-dns/types/versions",
     "ipcc",
     "key-manager",
     "live-tests",
@@ -271,6 +284,7 @@ default-members = [
     "ntp-admin",
     "ntp-admin/api",
     "ntp-admin/types",
+    "ntp-admin/types/versions",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -283,6 +297,7 @@ default-members = [
     "oximeter/test-utils",
     "oximeter/timeseries-macro",
     "oximeter/types",
+    "oximeter/types/versions",
     "package",
     "parallel-task-set",
     "passwords",
@@ -292,6 +307,7 @@ default-members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
     "sled-agent/config-reconciler",
+    "sled-agent/health-monitor",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
@@ -308,6 +324,8 @@ default-members = [
     "trust-quorum/protocol",
     "trust-quorum/test-utils",
     "trust-quorum/tqdb",
+    "trust-quorum/types",
+    "trust-quorum/types/versions",
     "test-utils",
     "typed-rng",
     "update-common",
@@ -374,6 +392,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
+async-recursion = "1.1.1"
 async-trait = "0.1.89"
 attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
 atomicwrites = "0.4.4"
@@ -405,11 +424,13 @@ clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-clien
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
 clickhouse-admin-single-client = { path = "clients/clickhouse-admin-single-client" }
 clickhouse-admin-types = { path = "clickhouse-admin/types" }
+clickhouse-admin-types-versions = { path = "clickhouse-admin/types/versions" }
 clickhouse-admin-test-utils = { path = "clickhouse-admin/test-utils" }
 clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "e3d9a1c35cf3cd04f9cb2e997b0ad88324d30737" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 cockroach-admin-types = { path = "cockroach-admin/types" }
+cockroach-admin-types-versions = { path = "cockroach-admin/types/versions" }
 colored = "2.1"
 const_format = "0.2.34"
 cookie = "0.18"
@@ -442,7 +463,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "ab30fa91227fd478bfe0e023310ca83dec0bc22b" }
 dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.2.4"
 dropshot-api-manager-types = "0.2.4"
@@ -480,6 +501,8 @@ gfss = { path = "trust-quorum/gfss" }
 trust-quorum = { path = "trust-quorum" }
 trust-quorum-protocol = { path = "trust-quorum/protocol" }
 trust-quorum-test-utils = { path = "trust-quorum/test-utils" }
+trust-quorum-types = { path = "trust-quorum/types" }
+trust-quorum-types-versions = { path = "trust-quorum/types/versions" }
 glob = "0.3.2"
 guppy = "0.17.20"
 headers = "0.4.1"
@@ -516,8 +539,10 @@ installinator = { path = "installinator" }
 installinator-api = { path = "installinator-api" }
 installinator-client = { path = "clients/installinator-client" }
 installinator-common = { path = "installinator-common" }
+installinator-common-versions = { path = "installinator-common/versions" }
 internal-dns-resolver = { path = "internal-dns/resolver" }
 internal-dns-types = { path = "internal-dns/types" }
+internal-dns-types-versions = { path = "internal-dns/types/versions" }
 ipcc = { path = "ipcc" }
 ipnet = "2.9"
 itertools = "0.14.0"
@@ -541,8 +566,9 @@ newtype_derive = "0.1.6"
 ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
+ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "205b3ccf75b527ac7a565285fdcc0c78f4fcee95" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "205b3ccf75b527ac7a565285fdcc0c78f4fcee95" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -577,6 +603,7 @@ nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 nix = { version = "0.30", features = ["fs", "net"] }
 nom = "7.1.3"
+nonempty = "0.12.0"
 num-integer = "0.1.46"
 num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
 omicron-clickhouse-admin = { path = "clickhouse-admin" }
@@ -624,6 +651,7 @@ oximeter-schema = { path = "oximeter/schema" }
 oximeter-test-utils = { path = "oximeter/test-utils" }
 oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 oximeter-types = { path = "oximeter/types" }
+oximeter-types-versions = { path = "oximeter/types/versions" }
 oxql-types = { path = "oximeter/oxql-types" }
 p256 = "0.13"
 parallel-task-set = { path = "parallel-task-set" }
@@ -650,10 +678,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -670,7 +698,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
-rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "0df320d42b356e689a3c7a7600eec9b16770237a" }
+rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "205b3ccf75b527ac7a565285fdcc0c78f4fcee95" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"
@@ -691,6 +719,7 @@ schemars = "0.8.22"
 scopeguard = "1.2.0"
 secrecy = "0.10.3"
 semver = { version = "1.0.26", features = ["std", "serde"] }
+seq-macro = "0.3.6"
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
@@ -715,6 +744,7 @@ sled = "=0.34.7"
 sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
+sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-types-versions = { path = "sled-agent/types/versions" }
 sled-agent-zone-images = { path = "sled-agent/zone-images" }

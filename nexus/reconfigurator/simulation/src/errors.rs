@@ -4,10 +4,11 @@
 
 use std::collections::BTreeSet;
 
+use chrono::{DateTime, Utc};
 use indent_write::indentable::Indentable as _;
 use itertools::Itertools;
 use omicron_common::api::external::{Generation, Name};
-use omicron_uuid_kinds::ReconfiguratorSimStateUuid;
+use omicron_uuid_kinds::{ReconfiguratorSimOpUuid, ReconfiguratorSimStateUuid};
 use swrite::{SWrite, swriteln};
 use thiserror::Error;
 
@@ -205,4 +206,65 @@ fn format_matches(matches: &[StateMatch]) -> String {
         );
     }
     output
+}
+
+/// An operation that matched a prefix query.
+#[derive(Clone, Debug)]
+pub struct OpMatch {
+    /// The operation ID.
+    pub id: ReconfiguratorSimOpUuid,
+    /// The operation description.
+    pub description: String,
+    /// The operation timestamp.
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Error when resolving an operation ID.
+#[derive(Clone, Debug, Error)]
+pub enum OperationIdResolveError {
+    /// No operation found with the given prefix.
+    #[error("no operation found with prefix '{0}'")]
+    NoMatch(String),
+
+    /// Multiple operations found with the given prefix.
+    #[error("prefix '{prefix}' is ambiguous: matches {count} operations\n{}", format_op_matches(.matches))]
+    Ambiguous { prefix: String, count: usize, matches: Vec<OpMatch> },
+
+    /// Operation not found by ID.
+    #[error("operation not found: {0}")]
+    NotFound(ReconfiguratorSimOpUuid),
+}
+
+fn format_op_matches(matches: &[OpMatch]) -> String {
+    let mut output = String::new();
+    for op_match in matches {
+        swriteln!(
+            output,
+            "  - {} ({}): {}",
+            op_match.id,
+            op_match.timestamp,
+            op_match.description
+        );
+    }
+    output
+}
+
+/// Error when performing operation log operations (undo/redo/restore).
+#[derive(Clone, Debug, Error)]
+pub enum OperationError {
+    /// Operation not found.
+    #[error("operation not found: {0}")]
+    NotFound(ReconfiguratorSimOpUuid),
+
+    /// State not found.
+    #[error("state not found: {0}")]
+    StateNotFound(ReconfiguratorSimStateUuid),
+
+    /// Cannot undo: already at root operation.
+    #[error("cannot undo: already at root operation")]
+    AtRoot,
+
+    /// Cannot redo: no operation to redo to.
+    #[error("cannot redo: no redo available")]
+    NoRedo,
 }

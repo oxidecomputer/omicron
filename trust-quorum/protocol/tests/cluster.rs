@@ -12,18 +12,19 @@ use proptest::collection::{btree_set, size_range};
 use proptest::prelude::*;
 use proptest::sample::Selector;
 use secrecy::ExposeSecret;
+use sled_hardware_types::BaseboardId;
 use slog::{Logger, info, o};
 use std::collections::BTreeSet;
 use test_strategy::{Arbitrary, proptest};
 use trust_quorum_protocol::{
-    BaseboardId, CoordinatorOperation, Epoch, NodeCallerCtx, NodeCommonCtx,
-    Threshold,
+    CoordinatorOperation, NodeCallerCtx, NodeCommonCtx,
 };
 use trust_quorum_test_utils::TqState;
 use trust_quorum_test_utils::{
     Event, EventLog,
     nexus::{NexusConfig, NexusOp, NexusReply},
 };
+use trust_quorum_types::types::{Epoch, Threshold};
 use uuid::Uuid;
 
 /// The state of our test

@@ -208,10 +208,20 @@ impl super::Nexus {
         opctx: &OpContext,
         id: SupportBundleUuid,
     ) -> DeleteResult {
-        let (authz_bundle, ..) = LookupPath::new(opctx, &self.db_datastore)
-            .support_bundle(id)
-            .lookup_for(authz::Action::Delete)
-            .await?;
+        let (authz_bundle, db_bundle) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .support_bundle(id)
+                .fetch_for(authz::Action::Delete)
+                .await?;
+
+        // Bundles in the "Failed" state have already had their storage cleaned
+        // up by the background task, so we can delete them immediately.
+        if db_bundle.state == SupportBundleState::Failed {
+            self.db_datastore
+                .support_bundle_delete(&opctx, &authz_bundle)
+                .await?;
+            return Ok(());
+        }
 
         // NOTE: We can't necessarily delete the support bundle
         // immediately - it might have state that needs cleanup

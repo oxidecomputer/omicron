@@ -33,7 +33,7 @@ use http::{Method, StatusCode};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_instance_with,
+    create_default_ip_pools, create_instance, create_instance_with,
     create_project, object_get, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
@@ -50,149 +50,69 @@ use crate::integration_tests::instances::{
     instance_simulate, instance_wait_for_state,
 };
 
-/// Test DPD communication failure and recovery with multiple groups.
-///
-/// This is the canonical test for DPD failure/recovery behavior. It verifies:
-/// - Multiple groups remain in "Creating" state when DPD is unavailable
-/// - Members stay in "Joining" or "Left" state during DPD failure
-/// - All groups recover to "Active" after DPD restart
-/// - Running instance members recover to "Joined" state
-///
-/// Uses multiple groups to verify the reconciler handles concurrent recovery
-/// correctly, and one DPD restart cycle to test the full recovery path.
 #[nexus_test]
 async fn test_multicast_group_dpd_communication_failure_recovery(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let project_name = "test-project";
-    let group1_name = "dpd-failure-group-1";
-    let group2_name = "dpd-failure-group-2";
-    let instance1_name = "dpd-failure-instance-1";
-    let instance2_name = "dpd-failure-instance-2";
+    let group_name = "dpd-failure-group";
+    let instance_name = "dpd-failure-instance";
 
     // Setup: project, pools - parallelize creation
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
 
-    // Create instance1 (will start running by default)
-    let instance1 = create_instance(client, project_name, instance1_name).await;
-    let instance1_id = InstanceUuid::from_untyped_uuid(instance1.identity.id);
-    let nexus = &cptestctx.server.server_context().nexus;
-    instance_simulate(nexus, &instance1_id).await;
-    instance_wait_for_state(client, instance1_id, InstanceState::Running).await;
-
-    // Create instance2 as stopped (won't start)
-    create_instance_with(
-        client,
-        project_name,
-        instance2_name,
-        &InstanceNetworkInterfaceAttachment::Default,
-        vec![],
-        vec![],
-        false, // don't start
-        None,
-        None,
-        vec![],
-    )
-    .await;
+    // Create instance first
+    create_instance(client, project_name, instance_name).await;
 
     // Stop DPD before implicit creation to test failure recovery
     cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
 
-    // Add instances to their respective groups via instance-centric API
-    ops::join2(
-        multicast_group_attach(
-            cptestctx,
-            project_name,
-            instance1_name,
-            group1_name,
-        ),
-        multicast_group_attach(
-            cptestctx,
-            project_name,
-            instance2_name,
-            group2_name,
-        ),
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
 
-    // Verify both groups are in "Creating" state since DPD is unavailable
-    for group_name in [group1_name, group2_name] {
-        let group_get_url = mcast_group_url(group_name);
-        let fetched_group: MulticastGroup =
-            object_get(client, &group_get_url).await;
+    // Verify group was implicitly created and is in "Creating" state since DPD is unavailable
+    // The reconciler can't progress the group to Active without DPD communication
+    let group_get_url = mcast_group_url(group_name);
+    let fetched_group: MulticastGroup =
+        object_get(client, &group_get_url).await;
 
-        assert_eq!(
-            fetched_group.state, "Creating",
-            "Group {group_name} should remain in Creating state when DPD is unavailable, found: {}",
-            fetched_group.state
-        );
-
-        // Verify member state during DPD failure
-        let members = list_multicast_group_members(client, group_name).await;
-        assert_eq!(
-            members.len(),
-            1,
-            "Group {group_name} should have one member"
-        );
-        assert!(
-            members[0].state == "Joining" || members[0].state == "Left",
-            "Member in {group_name} should be Joining or Left when DPD unavailable, got: {}",
-            members[0].state
-        );
-    }
-
-    // Restart DPD and kick off reconciler
-    cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
-    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
-
-    // Both groups should become "Active"
-    ops::join2(
-        wait_for_group_active(client, group1_name),
-        wait_for_group_active(client, group2_name),
-    )
-    .await;
-
-    // Running instance's member should recover to Joined
-    wait_for_member_state(
-        cptestctx,
-        group1_name,
-        instance1.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Joined,
-    )
-    .await;
-
-    let recovered_members =
-        list_multicast_group_members(client, group1_name).await;
     assert_eq!(
-        recovered_members[0].state, "Joined",
-        "Running instance member should recover to Joined after DPD restart"
+        fetched_group.state, "Creating",
+        "Group should remain in Creating state when DPD is unavailable, found: {}",
+        fetched_group.state
     );
 
-    // Stopped instance's member should stay in "Left" (group is "Active" but instance not running)
-    let group2_members =
-        list_multicast_group_members(client, group2_name).await;
+    // Verify group properties are maintained despite DPD issues
+    assert_eq!(fetched_group.identity.name.as_str(), group_name);
+
+    // Case: Verify member state during DPD failure
+    // Instance is running, so member has sled_id,
+    // but DPD is unavailable so it can't be programmed.
+    let members = list_multicast_group_members(client, group_name).await;
+    assert_eq!(members.len(), 1, "Should have exactly one member");
     assert_eq!(
-        group2_members[0].state, "Left",
-        "Stopped instance member should be Left even after group becomes Active"
+        members[0].state, "Joining",
+        "Member should be Joining when DPD unavailable (waiting to be programmed)"
     );
 
-    // Case: Lifecycle transitions: verify start/stop state changes
-
-    // Start the stopped instance2 → verify member transitions to "Joined"
-    let instance2_url =
-        format!("/v1/instances/{instance2_name}?project={project_name}");
-    let instance2: omicron_common::api::external::Instance =
-        object_get(client, &instance2_url).await;
-    let instance2_id = InstanceUuid::from_untyped_uuid(instance2.identity.id);
+    // Start instance so it has a valid VMM state for recovery
+    let instance: Instance = object_get(
+        client,
+        &format!("/v1/instances/{instance_name}?project={project_name}"),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    let nexus = &cptestctx.server.server_context().nexus;
 
     let start_url =
-        format!("/v1/instances/{instance2_name}/start?project={project_name}");
+        format!("/v1/instances/{instance_name}/start?project={project_name}");
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &start_url)
             .body(None as Option<&serde_json::Value>)
@@ -201,154 +121,15 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Should start instance2");
+    .expect("Should start instance");
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
-    instance_simulate(nexus, &instance2_id).await;
-    instance_wait_for_state(client, instance2_id, InstanceState::Running).await;
+    // Restart DPD and verify member recovers to "Joined"
+    cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    wait_for_member_state(
-        cptestctx,
-        group2_name,
-        instance2.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Joined,
-    )
-    .await;
-
-    let members_after_start =
-        list_multicast_group_members(client, group2_name).await;
-    assert_eq!(
-        members_after_start[0].state, "Joined",
-        "Member should transition to Joined when stopped instance starts"
-    );
-
-    // Stop the running instance1 → verify member transitions to "Left"
-    let stop_url =
-        format!("/v1/instances/{instance1_name}/stop?project={project_name}");
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &stop_url)
-            .body(None as Option<&serde_json::Value>)
-            .expect_status(Some(StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Should stop instance1");
-
-    instance_simulate(nexus, &instance1_id).await;
-    instance_wait_for_state(client, instance1_id, InstanceState::Stopped).await;
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
-    wait_for_member_state(
-        cptestctx,
-        group1_name,
-        instance1.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Left,
-    )
-    .await;
-
-    let members_after_stop =
-        list_multicast_group_members(client, group1_name).await;
-    assert_eq!(
-        members_after_stop[0].state, "Left",
-        "Member should transition to Left when running instance stops"
-    );
-
-    cleanup_instances(
-        cptestctx,
-        client,
-        project_name,
-        &[instance1_name, instance2_name],
-    )
-    .await;
-    ops::join2(
-        wait_for_group_deleted(client, group1_name),
-        wait_for_group_deleted(client, group2_name),
-    )
-    .await;
-}
-
-#[nexus_test]
-async fn test_dpd_failure_during_creating_state(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let project_name = "test-project";
-    let group_name = "creating-dpd-fail-group";
-    let instance_name = "creating-fail-instance";
-
-    // Setup: project, pools
-    let (_, _, _) = ops::join3(
-        create_project(&client, project_name),
-        create_default_ip_pool(&client),
-        create_multicast_ip_pool(&client, "mcast-pool"),
-    )
-    .await;
-
-    // Create instance first
-    create_instance(client, project_name, instance_name).await;
-
-    // Stop DPD before implicit creation
-    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
-
-    // Add instance to multicast group via instance-centric API
-    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
-        .await;
-
-    // Check group state should still be "Creating" since DPD is unavailable
-    let group_get_url = mcast_group_url(group_name);
-    let fetched_group: MulticastGroup =
-        object_get(client, &group_get_url).await;
-
-    // Group should remain in "Creating" state since DPD is down
-    assert_eq!(
-        fetched_group.state, "Creating",
-        "Group should remain in Creating state when DPD is unavailable during activation, found: {}",
-        fetched_group.state
-    );
-
-    // Verify group properties are maintained
-    assert_eq!(fetched_group.identity.name.as_str(), group_name);
-
-    // Case: Verify member state during DPD failure
-    let members = list_multicast_group_members(client, group_name).await;
-    assert_eq!(members.len(), 1, "Should have exactly one member");
-    assert!(
-        members[0].state == "Joining" || members[0].state == "Left",
-        "Member should be Joining or Left when DPD unavailable during Creating state, got: {}",
-        members[0].state
-    );
-
-    // Test cleanup - remove member, which triggers implicit deletion
-    // Don't wait for reconciler since DPD is still down
-    multicast_group_detach(client, project_name, instance_name, group_name)
-        .await;
-}
-
-#[nexus_test]
-async fn test_dpd_failure_during_active_state(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let project_name = "test-project";
-    let group_name = "active-dpd-fail-group";
-    let instance_name = "active-fail-instance";
-
-    // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
-        create_project(&client, project_name),
-        create_default_ip_pool(&client),
-        create_multicast_ip_pool(&client, "mcast-pool"),
-    )
-    .await;
-
-    let instance = create_instance(client, project_name, instance_name).await;
-
-    // Add instance to multicast group via instance-centric API
-    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
-        .await;
-
-    // Wait for group to become "Active" and member to reach "Joined" state
+    // Group should become Active and member should recover to Joined
     wait_for_group_active(client, group_name).await;
     wait_for_member_state(
         cptestctx,
@@ -358,139 +139,339 @@ async fn test_dpd_failure_during_active_state(
     )
     .await;
 
-    // Verify group is now "Active"
-    let group_get_url = mcast_group_url(group_name);
-    let active_group: MulticastGroup = object_get(client, &group_get_url).await;
-    assert_eq!(active_group.state, "Active");
-
-    // Now stop DPD while group is "Active" and member is "Joined"
-    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
-
-    // Wait for reconciler to process - tests DPD communication handling during "Active" state
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
-    // Check group state after reconciler processes with DPD unavailable
-    let fetched_group: MulticastGroup =
-        object_get(client, &group_get_url).await;
-
-    // Group should remain "Active" - existing "Active" groups shouldn't change state due to DPD failures
+    let recovered_members =
+        list_multicast_group_members(client, group_name).await;
     assert_eq!(
-        fetched_group.state, "Active",
-        "Active group should remain Active despite DPD communication failure, found: {}",
-        fetched_group.state
+        recovered_members[0].state, "Joined",
+        "Member should recover to Joined after DPD restart"
     );
 
-    // Verify group properties are maintained
-    assert_eq!(fetched_group.identity.name.as_str(), group_name);
-
-    // Case: Verify member state persists during DPD failure for Active groups
-    // Members that were already "Joined" should remain "Joined" even when DPD is unavailable
-    let members = list_multicast_group_members(client, group_name).await;
-    assert_eq!(members.len(), 1, "Should have exactly one member");
-    assert_eq!(
-        members[0].state, "Joined",
-        "Member should remain Joined when DPD fails after group reached Active state, got: {}",
-        members[0].state
-    );
-
-    // Test cleanup - remove member, which triggers implicit deletion
-    multicast_group_detach(client, project_name, instance_name, group_name)
-        .await;
-
-    // Wait for reconciler to process the deletion
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 #[nexus_test]
-async fn test_dpd_failure_during_deleting_state(
+async fn test_multicast_reconciler_state_consistency_validation(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let project_name = "test-project";
-    let group_name = "deleting-dpd-fail-group";
-    let instance_name = "deleting-fail-instance";
+    let group_name = "consistency-group";
+    let instance_name = "consistency-instance";
 
-    // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    // Setup: project and pools
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
 
-    // Create instance first
+    // Create instance first (group will be implicitly created when member attaches)
     create_instance(client, project_name, instance_name).await;
 
-    // Add instance to multicast group via instance-centric API
+    // Stop DPD before attaching member to test state consistency during failure
+    // Group will be implicitly created but stay in "Creating" state
+    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+
+    // Attach instance to group (triggers implicit creation)
+    // Since DPD is down, group will remain in "Creating" state
     multicast_group_attach(cptestctx, project_name, instance_name, group_name)
         .await;
 
-    // Wait for group to reach "Active" state before testing deletion
+    // Wait for reconciler to attempt processing (will fail due to DPD being down)
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+    // Verify group is in a consistent state (DPD failure prevents reconciliation)
+    let group_get_url = mcast_group_url(group_name);
+    let fetched_group: MulticastGroup =
+        object_get(client, &group_get_url).await;
+
+    // State should be "Creating" since DPD is down
+    assert_eq!(
+        fetched_group.state, "Creating",
+        "Group should remain in Creating state when DPD is unavailable, found: {}",
+        fetched_group.state
+    );
+
+    // Case: Verify member state during DPD failure
+    // Instance is running, so member has sled_id,
+    // but DPD is unavailable so it can't be programmed.
+    let members = list_multicast_group_members(client, group_name).await;
+    assert_eq!(members.len(), 1, "Group should have exactly one member");
+    assert_eq!(
+        members[0].state, "Joining",
+        "Member should be Joining when DPD unavailable"
+    );
+
+    // Verify group is still stuck in expected state before restarting DPD
+    // This explicitly validates that without DPD, groups cannot transition
+    verify_group_deleted_or_in_states(client, group_name, &["Creating"]).await;
+
+    // Restart DPD and verify group becomes Active
+    cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
     wait_for_group_active(client, group_name).await;
 
-    // Stop DPD before triggering deletion (by removing member)
-    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+    // Cleanup instance (group will be implicitly deleted when last member removed)
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
 
-    // Remove the member to trigger implicit deletion (group should go to "Deleting" state)
-    multicast_group_detach(client, project_name, instance_name, group_name)
-        .await;
+    // Verify group is deleted (implicit deletion completes with DPD available)
+    wait_for_group_deleted(cptestctx, group_name).await;
+}
 
-    // The group should now be in "Deleting" state and DPD is down
-    // Let's check the state before reconciler runs
-    // Group should be accessible via GET request
+/// Test DPD failures across all group states: Creating, Active, and Deleting.
+///
+/// This consolidated test verifies that DPD communication failures are handled
+/// correctly in each group lifecycle state:
+/// - Creating: Group stays in Creating, member stays in Joining
+/// - Active: Group stays Active, member stays Joined
+/// - Deleting: Group stays in Deleting until DPD is available
+#[nexus_test]
+async fn test_dpd_failure_across_group_states(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "test-project";
 
-    // Try to get group - should be accessible in "Deleting" state
-    let get_result = objects_list_page_authz::<MulticastGroup>(
-        client,
-        "/v1/multicast-groups",
+    // Setup: project, pools (shared across all cases)
+    ops::join3(
+        create_project(&client, project_name),
+        create_default_ip_pools(&client),
+        create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
 
-    let remaining_groups: Vec<_> = get_result
-        .items
-        .into_iter()
-        .filter(|g| g.identity.name == group_name)
-        .collect();
+    // -------------------------------------------------------------------------
+    // Case 1: DPD failure during Creating state
+    // -------------------------------------------------------------------------
+    {
+        let group_name = "creating-dpd-fail-group";
+        let instance_name = "creating-fail-instance";
 
-    if !remaining_groups.is_empty() {
-        let group = &remaining_groups[0];
-        assert_eq!(
-            group.state, "Deleting",
-            "Group should be in Deleting state after deletion request, found: {}",
-            group.state
-        );
-    }
+        // Create instance first
+        create_instance(client, project_name, instance_name).await;
 
-    // Wait for reconciler to attempt deletion with DPD down
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+        // Stop DPD before implicit creation
+        cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
 
-    // Check final state - group should remain in "Deleting" state since DPD is unavailable
-    // The reconciler cannot complete deletion without DPD communication
-    let final_result =
-        nexus_test_utils::resource_helpers::objects_list_page_authz::<
-            MulticastGroup,
-        >(client, "/v1/multicast-groups")
+        // Add instance to multicast group via instance-centric API
+        multicast_group_attach(
+            cptestctx,
+            project_name,
+            instance_name,
+            group_name,
+        )
         .await;
 
-    let final_groups: Vec<_> = final_result
-        .items
-        .into_iter()
-        .filter(|g| g.identity.name == group_name)
-        .collect();
+        // Wait for reconciler to process - tests DPD communication handling during "Creating" state
+        wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    if !final_groups.is_empty() {
-        let group = &final_groups[0];
+        // Check group state after reconciler processes with DPD unavailable
+        let group_get_url = mcast_group_url(group_name);
+        let fetched_group: MulticastGroup =
+            object_get(client, &group_get_url).await;
+
+        // Group should remain in "Creating" state since DPD is down
         assert_eq!(
-            group.state, "Deleting",
-            "Group should remain in Deleting state when DPD is unavailable during deletion, found: {}",
-            group.state
+            fetched_group.state, "Creating",
+            "Group should remain in Creating state when DPD is unavailable during activation, found: {}",
+            fetched_group.state
         );
 
-        // Verify group properties are maintained during failed deletion
-        assert_eq!(group.identity.name.as_str(), group_name);
+        // Verify group properties are maintained
+        assert_eq!(fetched_group.identity.name.as_str(), group_name);
+
+        // Verify member state during DPD failure
+        // Instance is running, so member has sled_id,
+        // but DPD is unavailable so it can't be programmed.
+        let members = list_multicast_group_members(client, group_name).await;
+        assert_eq!(members.len(), 1, "Should have exactly one member");
+        assert_eq!(
+            members[0].state, "Joining",
+            "Member should be Joining when DPD unavailable (waiting to be programmed)"
+        );
+
+        // Cleanup - remove member, which triggers implicit deletion
+        multicast_group_detach(client, project_name, instance_name, group_name)
+            .await;
+
+        wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+        // Restart DPD for next case
+        cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+
+        // Clean up instance
+        cleanup_instances(cptestctx, client, project_name, &[instance_name])
+            .await;
     }
-    // Note: If group is gone, that means deletion succeeded despite DPD being down,
-    // which would indicate the reconciler has fallback cleanup logic
+
+    // -------------------------------------------------------------------------
+    // Case 2: DPD failure during Active state
+    // -------------------------------------------------------------------------
+    {
+        let group_name = "active-dpd-fail-group";
+        let instance_name = "active-fail-instance";
+
+        let instance =
+            create_instance(client, project_name, instance_name).await;
+
+        // Add instance to multicast group via instance-centric API
+        multicast_group_attach(
+            cptestctx,
+            project_name,
+            instance_name,
+            group_name,
+        )
+        .await;
+
+        // Wait for group to become "Active" and member to reach "Joined" state
+        wait_for_group_active(client, group_name).await;
+        wait_for_member_state(
+            cptestctx,
+            group_name,
+            instance.identity.id,
+            nexus_db_model::MulticastGroupMemberState::Joined,
+        )
+        .await;
+
+        // Verify group is now "Active"
+        let group_get_url = mcast_group_url(group_name);
+        let active_group: MulticastGroup =
+            object_get(client, &group_get_url).await;
+        assert_eq!(active_group.state, "Active");
+
+        // Now stop DPD while group is "Active" and member is "Joined"
+        cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+
+        // Wait for reconciler to process - tests DPD communication handling during "Active" state
+        wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+        // Check group state after reconciler processes with DPD unavailable
+        let fetched_group: MulticastGroup =
+            object_get(client, &group_get_url).await;
+
+        // Group should remain "Active" - existing "Active" groups shouldn't change state due to DPD failures
+        assert_eq!(
+            fetched_group.state, "Active",
+            "Active group should remain Active despite DPD communication failure, found: {}",
+            fetched_group.state
+        );
+
+        // Verify group properties are maintained
+        assert_eq!(fetched_group.identity.name.as_str(), group_name);
+
+        // Verify member state persists during DPD failure for Active groups
+        // Members that were already "Joined" should remain "Joined" even when DPD is unavailable
+        let members = list_multicast_group_members(client, group_name).await;
+        assert_eq!(members.len(), 1, "Should have exactly one member");
+        assert_eq!(
+            members[0].state, "Joined",
+            "Member should remain Joined when DPD fails after group reached Active state, got: {}",
+            members[0].state
+        );
+
+        // Cleanup - remove member, which triggers implicit deletion
+        multicast_group_detach(client, project_name, instance_name, group_name)
+            .await;
+
+        // Wait for reconciler to process the deletion
+        wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+        // Restart DPD for next case
+        cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+
+        // Clean up instance
+        cleanup_instances(cptestctx, client, project_name, &[instance_name])
+            .await;
+    }
+
+    // -------------------------------------------------------------------------
+    // Case 3: DPD failure during Deleting state
+    // -------------------------------------------------------------------------
+    {
+        let group_name = "deleting-dpd-fail-group";
+        let instance_name = "deleting-fail-instance";
+
+        // Create instance first
+        create_instance(client, project_name, instance_name).await;
+
+        // Add instance to multicast group via instance-centric API
+        multicast_group_attach(
+            cptestctx,
+            project_name,
+            instance_name,
+            group_name,
+        )
+        .await;
+
+        // Wait for group to reach "Active" state before testing deletion
+        wait_for_group_active(client, group_name).await;
+
+        // Stop DPD before triggering deletion (by removing member)
+        cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+
+        // Remove the member to trigger implicit deletion (group should go to "Deleting" state)
+        multicast_group_detach(client, project_name, instance_name, group_name)
+            .await;
+
+        // The group should now be in "Deleting" state and DPD is down
+        // Try to get group - should be accessible in "Deleting" state
+        let get_result = objects_list_page_authz::<MulticastGroup>(
+            client,
+            "/v1/multicast-groups",
+        )
+        .await;
+
+        let remaining_groups: Vec<_> = get_result
+            .items
+            .into_iter()
+            .filter(|g| g.identity.name == group_name)
+            .collect();
+
+        if !remaining_groups.is_empty() {
+            let group = &remaining_groups[0];
+            assert_eq!(
+                group.state, "Deleting",
+                "Group should be in Deleting state after deletion request, found: {}",
+                group.state
+            );
+        }
+
+        // Wait for reconciler to attempt deletion with DPD down
+        wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+        // Check final state - group should remain in "Deleting" state since DPD is unavailable
+        // The reconciler cannot complete deletion without DPD communication
+        let final_result =
+            nexus_test_utils::resource_helpers::objects_list_page_authz::<
+                MulticastGroup,
+            >(client, "/v1/multicast-groups")
+            .await;
+
+        let final_groups: Vec<_> = final_result
+            .items
+            .into_iter()
+            .filter(|g| g.identity.name == group_name)
+            .collect();
+
+        if !final_groups.is_empty() {
+            let group = &final_groups[0];
+            assert_eq!(
+                group.state, "Deleting",
+                "Group should remain in Deleting state when DPD is unavailable during deletion, found: {}",
+                group.state
+            );
+
+            // Verify group properties are maintained during failed deletion
+            assert_eq!(group.identity.name.as_str(), group_name);
+        }
+
+        // Restart DPD and clean up instance
+        cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+        cleanup_instances(cptestctx, client, project_name, &[instance_name])
+            .await;
+        wait_for_group_deleted(cptestctx, group_name).await;
+    }
 }
 
 #[nexus_test]
@@ -503,9 +484,9 @@ async fn test_multicast_group_members_during_dpd_failure(
     let instance_name = "member-test-instance";
 
     // Setup: project, pools
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -558,11 +539,11 @@ async fn test_multicast_group_members_during_dpd_failure(
     );
 
     // Case: Verify member state during DPD failure
-    assert!(
-        members_during_failure[0].state == "Joining"
-            || members_during_failure[0].state == "Left",
-        "Member should be Joining or Left when DPD unavailable, got: {}",
-        members_during_failure[0].state
+    // Instance is running, so member has sled_id,
+    // but DPD is unavailable so it can't be programmed.
+    assert_eq!(
+        members_during_failure[0].state, "Joining",
+        "Member should be Joining when DPD unavailable (waiting to be programmed)"
     );
 
     // Verify group is still in "Creating" state
@@ -601,9 +582,9 @@ async fn test_implicit_creation_with_dpd_failure(
     let instance_name = "implicit-create-instance";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "implicit-create-pool"),
     )
     .await;
@@ -645,10 +626,11 @@ async fn test_implicit_creation_with_dpd_failure(
     assert_eq!(members[0].instance_id, instance.identity.id);
 
     // Case: Verify member state during DPD failure for implicit creation
-    assert!(
-        members[0].state == "Joining" || members[0].state == "Left",
-        "Member should be Joining or Left when DPD unavailable during implicit creation, got: {}",
-        members[0].state
+    // Instance is running, so member has sled_id,
+    // but DPD is unavailable so it can't be programmed.
+    assert_eq!(
+        members[0].state, "Joining",
+        "Member should be Joining when DPD unavailable (waiting to be programmed)"
     );
 
     multicast_group_detach(client, project_name, instance_name, group_name)
@@ -673,9 +655,9 @@ async fn test_implicit_deletion_with_dpd_failure(
     let instance_name = "implicit-delete-instance";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "implicit-delete-pool"),
     )
     .await;
@@ -727,15 +709,12 @@ async fn test_implicit_deletion_with_dpd_failure(
         );
         assert_eq!(group.identity.id, created_group.identity.id);
 
-        // Restart DPD and kick off reconciler (non-blocking)
+        // Restart DPD and verify cleanup completes
         cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
-        activate_multicast_reconciler(&cptestctx.lockstep_client).await;
 
         // Both group and orphaned members should be cleaned up
-        wait_for_group_deleted(client, group_name).await;
+        wait_for_group_deleted(cptestctx, group_name).await;
     }
-    // Note: If group is gone, implicit deletion succeeded despite DPD being down
-    // (possibly via database-only cleanup)
 }
 
 /// Test concurrent implicit creation race conditions.
@@ -752,9 +731,9 @@ async fn test_concurrent_implicit_creation_race(
     let group_name = "concurrent-implicit-create-group";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "concurrent-implicit-create-pool"),
     )
     .await;
@@ -767,7 +746,7 @@ async fn test_concurrent_implicit_creation_race(
             client,
             project_name,
             name,
-            &InstanceNetworkInterfaceAttachment::Default,
+            &InstanceNetworkInterfaceAttachment::DefaultIpv4,
             Vec::<InstanceDiskAttachment>::new(),
             Vec::<ExternalIpCreate>::new(),
             false, // start=false: Don't start instances to avoid timing issues
@@ -819,9 +798,7 @@ async fn test_concurrent_implicit_creation_race(
     }
 
     cleanup_instances(cptestctx, client, project_name, &instance_names).await;
-
-    // Wait for group to be implicitly deleted (may already be deleted if cleanup succeeded)
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test implicit deletion race with instance join.
@@ -839,9 +816,9 @@ async fn test_implicit_deletion_race_with_instance_join(
     let group_name = "delete-race-group";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "delete-race-pool"),
     )
     .await;
@@ -863,7 +840,7 @@ async fn test_implicit_deletion_race_with_instance_join(
     )
     .await;
 
-    // Wait for group to become Active
+    // Wait for group to become "Active"
     wait_for_group_active(client, group_name).await;
 
     // Now execute detach and add concurrently
@@ -881,7 +858,7 @@ async fn test_implicit_deletion_race_with_instance_join(
             let join_url = format!(
                 "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
             );
-            let join_params = InstanceMulticastGroupJoin { source_ips: None };
+            let join_params = InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
             async move {
                 // This might fail if group is deleted, or succeed if it beats the delete
                 let res = nexus_test_utils::http_testing::NexusRequest::new(
@@ -960,10 +937,7 @@ async fn test_implicit_deletion_race_with_instance_join(
 
     // Cleanup - delete instances; group is implicitly deleted when last member removed
     cleanup_instances(cptestctx, client, project_name, &instance_names).await;
-
-    // Implicit model: group is implicitly deleted when last member (instance) is removed
-    // Wait for group to be deleted (may already be deleted if no joins succeeded)
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test that joining a deleted instance to a multicast group returns NOT_FOUND.
@@ -981,9 +955,9 @@ async fn test_multicast_join_deleted_instance(
     let remaining_instance = "remaining-instance";
 
     // Setup: project and pools
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
     .await;
@@ -1013,7 +987,8 @@ async fn test_multicast_join_deleted_instance(
     let join_url = format!(
         "/v1/instances/{instance_to_delete}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &join_url)
             .body(Some(&join_params))
@@ -1027,7 +1002,7 @@ async fn test_multicast_join_deleted_instance(
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[remaining_instance])
         .await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test drift correction: DPD loses group state and reconciler re-syncs it.
@@ -1045,9 +1020,9 @@ async fn test_drift_correction_missing_group_in_dpd(
     let instance_name = "drift-test-instance";
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool(&client, "drift-pool"),
     )
     .await;
@@ -1114,7 +1089,7 @@ async fn test_drift_correction_missing_group_in_dpd(
     // Cleanup
     multicast_group_detach(client, project_name, instance_name, group_name)
         .await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test member state transition: "Joining" → "Left" when instance becomes invalid.
@@ -1132,8 +1107,8 @@ async fn test_member_joining_to_left_on_instance_stop(
     let instance_name = "joining-to-left-instance";
 
     // Setup: Create project and pools
-    let (_, _, _) = ops::join3(
-        create_default_ip_pool(&client),
+    ops::join3(
+        create_default_ip_pools(&client),
         create_project(client, project_name),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
@@ -1213,8 +1188,8 @@ async fn test_left_member_waits_for_group_active(
     let instance_name = "left-waits-instance";
 
     // Setup: Create project and pools
-    let (_, _, _) = ops::join3(
-        create_default_ip_pool(&client),
+    ops::join3(
+        create_default_ip_pools(&client),
         create_project(client, project_name),
         create_multicast_ip_pool(&client, "mcast-pool"),
     )
@@ -1225,7 +1200,7 @@ async fn test_left_member_waits_for_group_active(
         client,
         project_name,
         instance_name,
-        &InstanceNetworkInterfaceAttachment::Default,
+        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
         vec![],
         vec![],
         false,  // don't start
@@ -1245,7 +1220,8 @@ async fn test_left_member_waits_for_group_active(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_params)
         .await;
 
@@ -1333,7 +1309,7 @@ async fn test_multicast_group_underlay_collision_retry(
     // Setup: project, pools
     ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",

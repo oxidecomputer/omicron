@@ -8,7 +8,7 @@
 use anyhow::{Context, anyhow, bail, ensure};
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
@@ -36,7 +36,6 @@ use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::external_api::views::SledState;
-use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::PowerState;
@@ -62,17 +61,19 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::ManifestBootInventory;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
+use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
-use sled_agent_types::inventory::ZoneImageResolverInventory;
 use sled_agent_types::inventory::ZoneKind;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -1472,7 +1473,9 @@ impl Sled {
                     ),
                 ),
                 // XXX: return something more reasonable here?
-                zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                file_source_resolver:
+                    OmicronFileSourceResolverInventory::new_fake(),
+                health_monitor: HealthMonitorInventory::new(),
             }
         };
 
@@ -1650,7 +1653,8 @@ impl Sled {
             ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
-            zone_image_resolver: inv_sled_agent.zone_image_resolver.clone(),
+            file_source_resolver: inv_sled_agent.file_source_resolver.clone(),
+            health_monitor: HealthMonitorInventory::new(),
         };
 
         Sled {
@@ -1744,7 +1748,7 @@ impl Sled {
         boot_inventory: Result<ManifestBootInventory, String>,
     ) {
         self.inventory_sled_agent
-            .zone_image_resolver
+            .file_source_resolver
             .zone_manifest
             .boot_inventory = boot_inventory;
     }
@@ -2042,7 +2046,7 @@ impl Sled {
         let prev = mem::replace(
             &mut self
                 .inventory_sled_agent
-                .zone_image_resolver
+                .file_source_resolver
                 .mupdate_override
                 .boot_override,
             inv,

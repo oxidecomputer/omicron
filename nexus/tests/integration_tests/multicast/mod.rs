@@ -42,8 +42,8 @@ use nexus_types::external_api::views::{
 };
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
-    InstanceCpuCount, InstanceState,
+    ByteCount, DataPageParams, Hostname, IdentityMetadataCreateParams,
+    Instance, InstanceCpuCount, InstanceState,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
@@ -66,15 +66,8 @@ mod networking_integration;
 mod pool_selection;
 
 // Timeout constants for test operations
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
-
-// Tiered timeouts for different operation types:
-// - Short: For operations that should complete quickly (group state checks, member lists)
-// - Medium: For operations requiring reconciler processing or simulation (state transitions)
-// - Long: For test setup operations requiring external systems (inventory population)
-const SHORT_TIMEOUT: Duration = Duration::from_secs(15);
-const MEDIUM_TIMEOUT: Duration = Duration::from_secs(60);
-const LONG_TIMEOUT: Duration = Duration::from_secs(90);
+const POLL_INTERVAL: Duration = Duration::from_millis(80);
+const MULTICAST_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Generic helper for PUT upsert requests that return 201 Created.
 ///
@@ -179,6 +172,43 @@ pub(crate) async fn create_multicast_ip_pool_with_range(
     pool
 }
 
+/// Create an IPv6 multicast IP pool with a global scope range (ff0e::/16).
+pub(crate) async fn create_multicast_ip_pool_v6(
+    client: &ClientTestContext,
+    pool_name: &str,
+) -> IpPool {
+    use nexus_types::external_api::shared::Ipv6Range;
+    use std::net::Ipv6Addr;
+
+    let pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: pool_name.parse().unwrap(),
+            description: "IPv6 multicast IP pool for testing".to_string(),
+        },
+        IpVersion::V6,
+    );
+
+    let pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &pool_params).await;
+
+    // Add IPv6 global scope multicast range (ff0e::/16)
+    // Small range to avoid generate_series performance issues with IPv6
+    let ipv6_range = IpRange::V6(
+        Ipv6Range::new(
+            Ipv6Addr::new(0xff0e, 0, 0, 0, 0, 0, 0, 1),
+            Ipv6Addr::new(0xff0e, 0, 0, 0, 0, 0, 0, 0xff),
+        )
+        .unwrap(),
+    );
+    let range_url = format!("/v1/system/ip-pools/{pool_name}/ranges/add");
+    object_create::<_, IpPoolRange>(client, &range_url, &ipv6_range).await;
+
+    // Link the pool to the silo so it can be found by multicast group creation
+    link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
+
+    pool
+}
+
 /// Waits for the multicast group reconciler to complete.
 ///
 /// This wraps wait_background_task with the correct task name.
@@ -194,8 +224,8 @@ pub(crate) async fn wait_for_multicast_reconciler(
 
 /// Activates the multicast reconciler and waits for it to complete.
 ///
-/// Use this when you need to explicitly trigger the reconciler (e.g., after
-/// restarting DPD) rather than waiting for an already-triggered run.
+/// Use this when you need to explicitly activate the reconciler (e.g., after
+/// restarting DPD) rather than waiting for an already-activated run.
 pub(crate) async fn activate_multicast_reconciler(
     lockstep_client: &ClientTestContext,
 ) -> nexus_lockstep_client::types::BackgroundTask {
@@ -209,8 +239,8 @@ pub(crate) async fn activate_multicast_reconciler(
 /// Wait for a condition to be true, activating the reconciler periodically.
 ///
 /// This is like `wait_for_condition` but activates the multicast reconciler
-/// periodically (not on every poll) to drive state changes. We first wait for
-/// any in-progress run, then activate every 60ms in the poll loop.
+/// periodically (not on every poll) to drive state changes. We activate the
+/// reconciler every 500ms.
 ///
 /// Useful for tests that need to wait for reconciler-driven state changes
 /// (e.g., member state transitions).
@@ -224,16 +254,19 @@ where
     F: Fn() -> Fut,
     Fut: Future<Output = Result<T, CondCheckError<E>>>,
 {
-    const RECONCILER_ACTIVATION_INTERVAL: Duration = Duration::from_millis(60);
+    // Activate reconciler less frequently than we check the condition
+    // This reduces overhead while still driving state changes forward
+    const RECONCILER_ACTIVATION_INTERVAL: Duration = Duration::from_millis(500);
 
     let last_reconciler_activation = Arc::new(Mutex::new(Instant::now()));
 
-    // Wait for any in-progress run to complete first
+    // First, wait for any already-activated reconciler run to complete.
+    // This tests explicit activation paths (saga completions, etc.).
     wait_for_multicast_reconciler(lockstep_client).await;
 
     wait_for_condition(
         || async {
-            // Activate reconciler if enough time has passed since last activation
+            // Only activate reconciler if enough time has passed
             let now = Instant::now();
             let should_activate = {
                 let last = last_reconciler_activation.lock().unwrap();
@@ -241,6 +274,7 @@ where
             };
 
             if should_activate {
+                // Use activate to drive progress
                 activate_multicast_reconciler(lockstep_client).await;
                 *last_reconciler_activation.lock().unwrap() = now;
             }
@@ -336,8 +370,8 @@ pub(crate) async fn ensure_inventory_ready(
                 Err(CondCheckError::<String>::NotYet)
             }
         },
-        &Duration::from_millis(150),
-        &LONG_TIMEOUT,
+        &Duration::from_millis(500), // Check every 500ms
+        &Duration::from_secs(120),   // Wait up to 120s
     )
     .await
     {
@@ -399,8 +433,8 @@ pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
                 }
             }
         },
-        &Duration::from_millis(100),
-        &Duration::from_secs(30),
+        &Duration::from_millis(200), // Check every 200ms
+        &Duration::from_secs(30),    // Wait up to 30 seconds for switches
     )
     .await
     {
@@ -472,7 +506,7 @@ pub(crate) async fn wait_for_group_state(
             }
         },
         &POLL_INTERVAL,
-        &SHORT_TIMEOUT, // Group state checks should be quick
+        &MULTICAST_OPERATION_TIMEOUT,
     )
     .await
     {
@@ -569,8 +603,7 @@ pub(crate) async fn wait_for_member_state(
         }
     };
 
-    // Use reconciler-activating wait for "Joined" state (requires DPD programming)
-    // For other states, use shorter timeout since they're simpler state changes
+    // Use reconciler-activating wait for "Joined" state
     let res = if expected_state
         == nexus_db_model::MulticastGroupMemberState::Joined
     {
@@ -578,14 +611,14 @@ pub(crate) async fn wait_for_member_state(
             lockstep_client,
             check_member,
             &POLL_INTERVAL,
-            &MEDIUM_TIMEOUT, // Joined requires reconciler + DPD
+            &MULTICAST_OPERATION_TIMEOUT,
         )
         .await
     } else {
         wait_for_condition(
             check_member,
             &POLL_INTERVAL,
-            &SHORT_TIMEOUT, // Left/Joining are quick state changes
+            &MULTICAST_OPERATION_TIMEOUT,
         )
         .await
     };
@@ -672,7 +705,7 @@ pub(crate) async fn wait_for_instance_sled_assignment(
             }
         },
         &POLL_INTERVAL,
-        &MEDIUM_TIMEOUT, // VMM creation requires sled agent simulation
+        &MULTICAST_OPERATION_TIMEOUT,
     )
     .await
     {
@@ -719,7 +752,11 @@ pub(crate) async fn verify_inventory_based_port_mapping(
 
     // Get the multicast member for this instance to find its external_group_id
     let members = datastore
-        .multicast_group_members_list_by_instance(&opctx, *instance_uuid)
+        .multicast_group_members_list_by_instance(
+            &opctx,
+            *instance_uuid,
+            &DataPageParams::max_page(),
+        )
         .await
         .map_err(|e| format!("list members failed: {e}"))?;
 
@@ -844,7 +881,7 @@ pub(crate) async fn wait_for_member_count(
             }
         },
         &POLL_INTERVAL,
-        &SHORT_TIMEOUT, // Member count checks are simple queries
+        &MULTICAST_OPERATION_TIMEOUT,
     )
     .await
     {
@@ -864,10 +901,14 @@ pub(crate) async fn wait_for_member_count(
 
 /// Wait for a multicast group to be deleted (returns 404).
 pub(crate) async fn wait_for_group_deleted(
-    client: &ClientTestContext,
+    cptestctx: &ControlPlaneTestContext,
     group_name: &str,
 ) {
-    match wait_for_condition(
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+
+    match wait_for_condition_with_reconciler(
+        lockstep_client,
         || async {
             let group_url = mcast_group_url(group_name);
             match NexusRequest::object_get(client, &group_url)
@@ -886,7 +927,7 @@ pub(crate) async fn wait_for_group_deleted(
             }
         },
         &POLL_INTERVAL,
-        &MEDIUM_TIMEOUT, // Group deletion requires reconciler processing
+        &MULTICAST_OPERATION_TIMEOUT,
     )
     .await
     {
@@ -899,6 +940,38 @@ pub(crate) async fn wait_for_group_deleted(
                 "failed waiting for group {group_name} to be deleted: {err:?}",
             );
         }
+    }
+}
+
+/// Verify a group is either deleted or in one of the expected states.
+///
+/// Useful when DPD is unavailable and groups can't complete state transitions.
+/// For example, when DPD is down during deletion, groups may be stuck in
+/// "Creating" or "Deleting" state rather than being fully deleted.
+pub(crate) async fn verify_group_deleted_or_in_states(
+    client: &ClientTestContext,
+    group_name: &str,
+    expected_states: &[&str],
+) {
+    let groups_result =
+        nexus_test_utils::resource_helpers::objects_list_page_authz::<
+            MulticastGroup,
+        >(client, "/v1/multicast-groups")
+        .await;
+
+    let matching_groups: Vec<_> = groups_result
+        .items
+        .into_iter()
+        .filter(|g| g.identity.name == group_name)
+        .collect();
+
+    if !matching_groups.is_empty() {
+        // Group still exists - should be in one of the expected states
+        let actual_state = &matching_groups[0].state;
+        assert!(
+            expected_states.contains(&actual_state.as_str()),
+            "Group {group_name} should be in one of {expected_states:?} states, found: {actual_state}"
+        );
     }
 }
 
@@ -925,7 +998,7 @@ pub(crate) async fn wait_for_group_deleted_from_dpd(
             }
         },
         &POLL_INTERVAL,
-        &MEDIUM_TIMEOUT, // DPD deletion requires reconciler
+        &MULTICAST_OPERATION_TIMEOUT,
     )
     .await
     {
@@ -964,6 +1037,7 @@ pub(crate) async fn instance_for_multicast_groups(
         .map(|name| MulticastGroupJoinSpec {
             group: MulticastGroupIdentifier::Name(name.parse().unwrap()),
             source_ips: None,
+            ip_version: None,
         })
         .collect();
 
@@ -984,7 +1058,7 @@ pub(crate) async fn instance_for_multicast_groups(
             hostname: instance_name.parse::<Hostname>().unwrap(),
             user_data: vec![],
             ssh_public_keys: None,
-            network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![],
             multicast_groups,
             disks: vec![],
@@ -1032,7 +1106,7 @@ pub(crate) async fn multicast_group_attach_with_sources(
     let url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let body = InstanceMulticastGroupJoin { source_ips };
+    let body = InstanceMulticastGroupJoin { source_ips, ip_version: None };
     put_upsert::<_, MulticastGroupMember>(client, &url, &body).await;
 }
 

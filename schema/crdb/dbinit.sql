@@ -1506,7 +1506,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk (
      */
     attach_instance_id UUID,
     state_generation INT NOT NULL,
-    slot INT2 CHECK (slot >= 0 AND slot < 8),
+    slot INT2 CHECK (slot >= 0 AND slot < 12),
     time_state_updated TIMESTAMPTZ NOT NULL,
 
     /* Disk configuration */
@@ -1883,9 +1883,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
     is_primary BOOL NOT NULL,
 
     /*
-     * A supplementary list of addresses/CIDR blocks which a NIC is
+     * A supplementary list of IPv4 addresses/CIDR blocks which a NIC is
      * *allowed* to send/receive traffic on, in addition to its
      * assigned address.
+     *
+     * NOTE: Despite the name, these are always IPv4 networks or addresses.
+     * We've kept the original name since renaming columns idempotently is difficult
+     * in CRDB right now.
      */
     transit_ips INET[] NOT NULL DEFAULT ARRAY[],
 
@@ -1895,11 +1899,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
      */
     ipv6 INET,
 
+    /*
+     * A supplementary list of IPv6 addresses/CIDR blocks which a NIC is
+     * *allowed* to send/receive traffic on, in addition to its
+     * assigned address.
+     */
+    transit_ips_v6 INET[] NOT NULL DEFAULT ARRAY[],
+
     /* Constraint ensuring we have at least one IP address from either family.
      * Both may be specified.
      */
     CONSTRAINT at_least_one_ip_address CHECK (
         ip IS NOT NULL OR ipv6 IS NOT NULL
+    ),
+
+    /* Constraint ensuring that if we have transit IPs of a specific version, we
+     * also have a corresponding IP address.
+     */
+    CONSTRAINT transit_ips_require_ip_address CHECK (
+        (array_length(transit_ips, 1) = 0 OR ip IS NOT NULL) AND
+        (array_length(transit_ips_v6, 1) = 0 OR ipv6 IS NOT NULL)
     )
 );
 
@@ -1923,7 +1942,8 @@ SELECT
     ipv6,
     slot,
     is_primary,
-    transit_ips
+    transit_ips as transit_ips_v4,
+    transit_ips_v6
 FROM
     omicron.public.network_interface
 WHERE
@@ -2284,6 +2304,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
     resource_type omicron.public.ip_pool_resource_type NOT NULL,
     resource_id UUID NOT NULL,
     is_default BOOL NOT NULL,
+    -- Denormalized from ip_pool for efficient default pool lookups
+    pool_type omicron.public.ip_pool_type NOT NULL,
+    ip_version omicron.public.ip_version NOT NULL,
     -- TODO: timestamps for soft deletes?
 
     -- resource_type is redundant because resource IDs are globally unique, but
@@ -2291,9 +2314,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
     PRIMARY KEY (ip_pool_id, resource_type, resource_id)
 );
 
--- a given resource can only have one default ip pool
-CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.public.ip_pool_resource (
-    resource_id
+-- One default pool per (resource, pool_type, ip_version) combination
+-- Allows silos to have separate default pools for each IP version and pool type
+CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource_type_version ON omicron.public.ip_pool_resource (
+    resource_id,
+    pool_type,
+    ip_version
 ) where
     is_default = true;
 
@@ -3914,6 +3940,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     --
     -- The path to the boot disk image file.
     zone_manifest_boot_disk_path TEXT NOT NULL,
+
     -- The source of the zone manifest on the boot disk: from installinator or
     -- sled-agent (synthetic). NULL means there is an error reading the zone manifest.
     zone_manifest_source omicron.public.inv_zone_manifest_source,
@@ -3942,6 +3969,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- The sled's CPU family. This is also duplicated with the `sled` table,
     -- similar to `usable_hardware_threads` and friends above.
     cpu_family omicron.public.sled_cpu_family NOT NULL,
+
+    -- Columns making up the resolver's measurement manifest description 
+    --
+    -- The path to the boot disk file
+    measurement_manifest_boot_disk_path TEXT NOT NULL,
+    -- The source of the measurement manifest on the boot disk: from installinator or
+    -- sled-agent (synthetic). NULL means there is an error reading the measurement manifest.
+    measurement_manifest_source omicron.public.inv_zone_manifest_source,
+    -- The mupdate ID that created the measurement manifest if this is from installinator. If
+    -- this is NULL, then either the measurement manifest is synthetic or there was an
+    -- error reading the measurement manifest.
+    measurement_manifest_mupdate_id UUID,
+    -- Message describing the status of the measurement manifest on the boot disk. If
+    -- this is NULL, then the measurement manifest was successfully read, and the
+    -- inv_zone_manifest_measurement table has entries corresponding to the zone
+    -- manifest.
+    measurement_manifest_boot_disk_error TEXT,
+
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
@@ -3977,6 +4022,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
             zone_manifest_source IS NULL
             AND zone_manifest_mupdate_id IS NULL
             AND zone_manifest_boot_disk_error IS NOT NULL
+        )
+    ),
+
+    -- For the measurement manifest, there are three valid states:
+    -- 1. Successfully read from installinator (has mupdate_id, no error)
+    -- 2. Synthetic from sled-agent (no mupdate_id, no error)
+    -- 3. Error reading (no mupdate_id, has error)
+    --
+    -- This is equivalent to Result<OmicronZoneManifestSource, String>.
+    CONSTRAINT measurement_manifest_consistency CHECK (
+        (measurement_manifest_source = 'installinator'
+            AND measurement_manifest_mupdate_id IS NOT NULL
+            AND measurement_manifest_boot_disk_error IS NULL)
+        OR (measurement_manifest_source = 'sled-agent'
+            AND measurement_manifest_mupdate_id IS NULL
+            AND measurement_manifest_boot_disk_error IS NULL)
+        OR (
+            measurement_manifest_source IS NULL
+            AND measurement_manifest_mupdate_id IS NULL
+            AND measurement_manifest_boot_disk_error IS NOT NULL
         )
     ),
 
@@ -4227,9 +4292,34 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- NULL is translated to `HostPhase2DesiredContents::CurrentContents`
     host_phase_2_desired_slot_a STRING(64),
     host_phase_2_desired_slot_b STRING(64),
+    
+    -- the set of artifact hashes used with trust quorum, can be empty
+    measurements STRING(64)[],
 
     PRIMARY KEY (inv_collection_id, id)
 );
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_measurements (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+ 
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- file name of the measurement file
+    file_name TEXT NOT NULL,
+
+    -- full path to the measurement file
+    path TEXT NOT NULL,
+
+    -- error message; if NULL, an "ok" result
+    error_message TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id, file_name)
+);
+
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_disk_result (
     -- where this observation came from
@@ -4323,6 +4413,37 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_zone_result (
     PRIMARY KEY (inv_collection_id, sled_id, zone_id)
 );
 
+-- A table describing a single measurement file within a measurement manifest
+-- collected by inventory
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_measurement (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- measurement file name, part of the primary key within this table.
+    measurement_file_name TEXT NOT NULL,
+
+    -- The full path to the file.
+    path TEXT NOT NULL,
+    
+    -- The expected file size.
+    expected_size INT8 NOT NULL,
+    
+    -- The expected hash.
+    expected_sha256 STRING(64) NOT NULL,
+
+    -- The error while reading the zone or matching it to the manifest, if any.
+    -- NULL indicates success.
+    error TEXT ,
+
+    PRIMARY KEY (inv_collection_id, sled_id, measurement_file_name)
+);
+
+
 -- A table describing a single zone within a zone manifest collected by inventory.
 CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_zone (
     -- where this observation came from
@@ -4367,6 +4488,32 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_non_boot (
     non_boot_zpool_id UUID NOT NULL,
 
     -- The full path to the zone manifest.
+    path TEXT NOT NULL,
+
+    -- Whether the non-boot disk is in a valid state.
+    is_valid BOOLEAN NOT NULL,
+
+    -- A message attached to this disk.
+    message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, non_boot_zpool_id)
+);
+
+-- A table describing status for a single measurement manifest on a non-boot disk
+-- collected by inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_measurement_manifest_non_boot (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique ID for this non-boot disk
+    non_boot_zpool_id UUID NOT NULL,
+
+    -- The full path to the measurement manifest.
     path TEXT NOT NULL,
 
     -- Whether the non-boot disk is in a valid state.
@@ -4794,6 +4941,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
 
     -- the sled's /64 subnet on the underlay address
     subnet INET NOT NULL,
+
+    -- the last allocated IP within `subnet` used by the blueprint
+    last_allocated_ip_subnet_offset INT4
+        CHECK (last_allocated_ip_subnet_offset BETWEEN 0 AND 65535)
+        NOT NULL,
 
     PRIMARY KEY (blueprint_id, sled_id)
 );
@@ -7143,28 +7295,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
 
     /* Constraints */
     -- External groups: IPv4 multicast or non-admin-local IPv6
+    -- ff04::/16 (admin-local) is reserved for underlay multicast groups
     CONSTRAINT external_multicast_ip_valid CHECK (
         (family(multicast_ip) = 4 AND multicast_ip << '224.0.0.0/4') OR
         (family(multicast_ip) = 6 AND multicast_ip << 'ff00::/8' AND
-         NOT multicast_ip << 'ff04::/16' AND
-         NOT multicast_ip << 'ff05::/16' AND
-         NOT multicast_ip << 'ff08::/16')
+         NOT multicast_ip << 'ff04::/16')
     ),
 
-    -- Reserved range validation for IPv4
+    -- Reserved range validation for IPv4 (only link-local is blocked)
     CONSTRAINT external_ipv4_not_reserved CHECK (
-        family(multicast_ip) != 4 OR (
-            family(multicast_ip) = 4 AND
-            NOT multicast_ip << '224.0.0.0/24' AND     -- Link-local control block
-            NOT multicast_ip << '233.0.0.0/8' AND      -- GLOP addressing
-            NOT multicast_ip << '239.0.0.0/8'          -- Administratively scoped
-        )
+        family(multicast_ip) != 4 OR NOT multicast_ip << '224.0.0.0/24'
     ),
 
     -- Reserved range validation for IPv6
     CONSTRAINT external_ipv6_not_reserved CHECK (
         family(multicast_ip) != 6 OR (
             family(multicast_ip) = 6 AND
+            NOT multicast_ip << 'ff00::/16' AND         -- Reserved scope
             NOT multicast_ip << 'ff01::/16' AND         -- Interface-local scope
             NOT multicast_ip << 'ff02::/16'             -- Link-local scope
         )
@@ -7464,6 +7611,177 @@ ON
 WHERE
   time_deleted IS NULL;
 
+-- The state of a given trust quorum configuration
+CREATE TYPE IF NOT EXISTS omicron.public.trust_quorum_configuration_state AS ENUM (
+    -- Nexus is waiting for prepare acknowledgments by polling the coordinator
+    -- In this case, a normal trust quorum reconfiguration is being prepared
+    'preparing',
+    -- Nexus is waiting for prepare acknowledgments by polling the coordinator
+    -- In this case, an LRTQ upgrade is being prepared.
+    'preparing-lrtq-upgrade',
+    -- The configuration has committed to the dataabase, and nexus may still be
+    -- trying to inform nodes about the commit.
+    'committing',
+    -- All nodes in the trust quorum have committed the configuration and nexus
+    -- has no more work to do.
+    'committed',
+    -- Only some nodes have acknowledged commitment, but a new configuration
+    -- was inserted.
+    --
+    -- We set this value so that we can tell that nexus is done trying to commit
+    -- that old configuration.
+    'committed-partially',
+    -- The configuration has aborted and will not commit. The epoch can be
+    -- skipped.
+    'aborted'
+);
+
+-- Information for tracking trust quorum memberships over time
+CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
+    -- Foreign key into the rack table
+    rack_id UUID NOT NULL,
+
+    -- Monotonically increasing version per rack_id
+    epoch INT8 NOT NULL,
+
+    -- The last committed epoch that this configuration was validated against
+    --
+    -- Optional because initial configs don't have a last committed epoch
+    last_committed_epoch INT8,
+
+    -- The current state of this configuration
+    state omicron.public.trust_quorum_configuration_state NOT NULL,
+
+    -- The number of shares needed to compute the rack secret
+    --
+    -- In some documentation we call this the `K` parameter.
+    threshold INT2 NOT NULL CHECK (threshold > 0),
+
+    -- The number of additional nodes beyond threshold to commit
+    --
+    -- This represents the number of prepared nodes that can be offline after
+    -- a commit at Nexus and still allow the secret to be reconstructed during
+    -- rack unlock. If this number is equivalent to the total membership (`N`)
+    -- minus `threshold` nodes, then all nodes in the membership set for this
+    -- epoch must ack a prepare for a commit to occur. By varying this value we
+    -- allow commit to occur even if some nodes haven't prepared, thus providing
+    -- fault tolerance during the prepare phase and also during unlock.
+    --
+    -- In some documentation we call this the `Z` parameter.
+    commit_crash_tolerance INT2 NOT NULL CHECK (commit_crash_tolerance >= 0),
+
+    -- Which member is coordinating the prepare phase of the protocol this epoch
+    -- Foreign key into the `hw_baseboard_id` table
+    coordinator UUID NOT NULL,
+
+    -- Encrypted rack secrets for prior committed epochs
+    --
+    -- These are only filled in during a reconfiguration and retrieved
+    -- during the prepare phase of the protocol by Nexus from the coordinator.
+    --
+    -- Salt is a hex-encoded string
+    -- TODO: Add a check constraint that both are null or not null
+    encrypted_rack_secrets_salt STRING(64),
+    encrypted_rack_secrets BYTES,
+
+    -- metadata for debugging only
+    time_created TIMESTAMPTZ NOT NULL,
+    time_committing TIMESTAMPTZ,
+    time_committed TIMESTAMPTZ,
+    time_aborted TIMESTAMPTZ,
+    abort_reason TEXT,
+
+    CONSTRAINT encrypted_rack_secrets_both_or_neither_null CHECK (
+        (encrypted_rack_secrets_salt IS NULL
+            AND encrypted_rack_secrets IS NULL)
+        OR
+        (encrypted_rack_secrets_salt IS NOT NULL
+            AND encrypted_rack_secrets IS NOT NULL)
+    ),
+
+    CONSTRAINT time_committing_and_time_committed CHECK (
+       (time_committing IS NULL AND time_committed IS NULL)
+       OR
+       (time_committing IS NOT NULL AND time_committed IS NULL)
+       OR
+       (time_committing IS NOT NULL AND time_committed IS NOT NULL)
+    ),
+
+    CONSTRAINT time_committing_or_abort_mutually_exlusive CHECK (
+       (time_committing IS NULL AND time_aborted IS NULL)
+       OR
+       (time_committing IS NOT NULL AND time_aborted IS NULL)
+       OR
+       (time_committing IS NULL AND time_aborted is NOT NULL)
+    ),
+
+    CONSTRAINT abort CHECK (
+       (time_aborted IS NULL AND abort_reason IS NULL AND state != 'aborted')
+       OR
+       (time_aborted IS NOT NULL AND abort_reason IS NOT NULL AND state = 'aborted')
+    ),
+
+    -- Each rack has its own trust quorum
+    PRIMARY KEY (rack_id, epoch DESC)
+);
+
+-- A partial index to retrieve all "active" trust quorum configurations.
+--
+-- These are configurations that are either still preparing or committing and
+-- therefore require work from Nexus.
+CREATE UNIQUE INDEX IF NOT EXISTS trust_quorum_active_configurations
+    on omicron.public.trust_quorum_configuration(rack_id, epoch DESC)
+    WHERE state = 'preparing'
+        OR state = 'preparing-lrtq-upgrade'
+        OR state = 'committing';
+
+-- Whether a node has prepared or committed yet
+CREATE TYPE IF NOT EXISTS omicron.public.trust_quorum_member_state AS ENUM (
+    -- The node has not acknowledged either a `Prepare` or `Commit` message
+    'unacked',
+    -- The node has acknoweledged a `Prepare` message
+    'prepared',
+    -- The node has acknowledged a `Commit` or `PrepareAndCommit` message
+    -- `committed` implies `prepared`
+    'committed'
+);
+
+-- Total group membership in trust quorum for a given epoch
+CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
+    -- Foreign key into the rack table
+    -- Foreign key into the `trust_quorum_configuration` table along with `epoch`
+    rack_id UUID NOT NULL,
+
+    -- Foreign key into the `trust_quorum_configuration` table along with `rack_id`
+    epoch INT8 NOT NULL,
+
+    -- Foreign key into the `hw_baseboard_id` table
+    hw_baseboard_id UUID NOT NULL,
+
+    -- Whether a node has acknowledged a prepare or commit yet
+    state omicron.public.trust_quorum_member_state NOT NULL,
+
+    -- The sha3-256 hash of the key share for this node. This is only filled in
+    -- after Nexus has retrieved the configuration from the coordinator during
+    -- the prepare phase of the protocol.
+    --
+    -- Hex formatted string
+    share_digest STRING(64),
+
+    -- For debugging only
+    time_prepared TIMESTAMPTZ,
+    time_committed TIMESTAMPTZ,
+
+    CONSTRAINT time_committed_and_committed CHECK (
+        (time_committed IS NULL AND state != 'committed')
+        OR
+        (time_committed IS NOT NULL AND state = 'committed')
+    ),
+
+    PRIMARY KEY (rack_id, epoch DESC, hw_baseboard_id)
+);
+
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -7473,7 +7791,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '214.0.0', NULL)
+    (TRUE, NOW(), NOW(), '220.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

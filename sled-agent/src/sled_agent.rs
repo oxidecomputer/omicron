@@ -65,6 +65,7 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
+use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -74,7 +75,7 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
 use sled_agent_types::probes::ProbeCreate;
-use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
@@ -86,6 +87,7 @@ use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -369,8 +371,14 @@ struct SledAgentInner {
     // A handle to the bootstore.
     bootstore: bootstore::NodeHandle,
 
+    // A handle to the trust quorum.
+    trust_quorum: trust_quorum::NodeTaskHandle,
+
     // A handle to the hardware monitor.
     hardware_monitor: HardwareMonitorHandle,
+
+    // A handle to the health monitor.
+    health_monitor: HealthMonitorHandle,
 
     // Object handling production of metrics for oximeter.
     _metrics_manager: MetricsManager,
@@ -679,8 +687,12 @@ impl SledAgent {
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
+                trust_quorum: long_running_task_handles.trust_quorum.clone(),
                 hardware_monitor: long_running_task_handles
                     .hardware_monitor
+                    .clone(),
+                health_monitor: long_running_task_handles
+                    .health_monitor
                     .clone(),
                 _metrics_manager: metrics_manager,
                 repo_depot,
@@ -1041,6 +1053,10 @@ impl SledAgent {
         self.inner.bootstore.clone()
     }
 
+    pub fn trust_quorum(&self) -> trust_quorum::NodeTaskHandle {
+        self.inner.trust_quorum.clone()
+    }
+
     pub fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
         self.inner.port_manager.vpc_routes_list()
     }
@@ -1125,8 +1141,10 @@ impl SledAgent {
         let reservoir_size = self.inner.instances.reservoir_size();
         let sled_role =
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
-        let zone_image_resolver =
+        let file_source_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
+
+        let health_monitor = self.inner.health_monitor.to_inventory();
 
         let ReconcilerInventory {
             disks,
@@ -1152,7 +1170,8 @@ impl SledAgent {
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
-            zone_image_resolver,
+            file_source_resolver,
+            health_monitor,
         })
     }
 
@@ -1454,7 +1473,7 @@ impl SledAgentFacilities for ReconcilerFacilities {
         Ok(zone)
     }
 
-    fn zone_image_resolver_status(&self) -> ResolverStatus {
+    fn file_source_resolver_status(&self) -> ResolverStatus {
         self.service_manager.zone_image_resolver().status()
     }
 

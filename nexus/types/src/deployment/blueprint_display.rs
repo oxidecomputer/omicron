@@ -56,6 +56,7 @@ pub mod constants {
     pub const STATE: &str = "state";
     pub const CONFIG_GENERATION: &str = "config generation";
     pub const SUBNET: &str = "subnet";
+    pub const LAST_ALLOCATED_IP: &str = "last allocated IP";
 }
 use constants::*;
 use std::fmt::Display;

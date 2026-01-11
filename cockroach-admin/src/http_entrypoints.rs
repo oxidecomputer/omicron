@@ -3,8 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::context::ServerContext;
-use cockroach_admin_api::*;
-use cockroach_admin_types::NodeDecommission;
+use cockroach_admin_api::{CockroachAdminApi, cockroach_admin_api_mod};
+use cockroach_admin_types::node::{
+    ClusterNodeStatus, LocalNodeId, NodeDecommission, NodeId,
+};
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;

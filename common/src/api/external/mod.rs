@@ -27,6 +27,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 use parse_display::Display;
 use parse_display::FromStr;
 use rand::Rng;
@@ -43,6 +44,7 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::num::ParseIntError;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::ops::Deref;
@@ -2613,18 +2615,118 @@ pub struct InstanceNetworkInterface {
     /// The MAC address assigned to this interface.
     pub mac: MacAddr,
 
-    /// The IP address assigned to this interface.
-    // TODO-correctness: We need to split this into an optional V4 and optional
-    // V6 address, at least one of which must be specified.
-    pub ip: IpAddr,
     /// True if this interface is the primary for the instance to which it's
     /// attached.
     pub primary: bool,
 
-    /// A set of additional networks that this interface may send and
+    /// The VPC-private IP stack for this interface.
+    pub ip_stack: PrivateIpStack,
+}
+
+/// The VPC-private IP stack for a network interface.
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum PrivateIpStack {
+    /// The interface has only an IPv4 stack.
+    V4(PrivateIpv4Stack),
+    /// The interface has only an IPv6 stack.
+    V6(PrivateIpv6Stack),
+    /// The interface is dual-stack IPv4 and IPv6.
+    DualStack { v4: PrivateIpv4Stack, v6: PrivateIpv6Stack },
+}
+
+impl PrivateIpStack {
+    /// Return the IPv4 stack, if it exists.
+    pub fn ipv4_stack(&self) -> Option<&PrivateIpv4Stack> {
+        match self {
+            PrivateIpStack::V4(v4) | PrivateIpStack::DualStack { v4, .. } => {
+                Some(v4)
+            }
+            PrivateIpStack::V6(_) => None,
+        }
+    }
+
+    /// Return the VPC-private IPv4 address, if it exists.
+    pub fn ipv4_addr(&self) -> Option<&Ipv4Addr> {
+        self.ipv4_stack().map(|s| &s.ip)
+    }
+
+    /// Return the IPv6 stack, if it exists.
+    pub fn ipv6_stack(&self) -> Option<&PrivateIpv6Stack> {
+        match self {
+            PrivateIpStack::V6(v6) | PrivateIpStack::DualStack { v6, .. } => {
+                Some(v6)
+            }
+            PrivateIpStack::V4(_) => None,
+        }
+    }
+
+    /// Return the VPC-private IPv6 address, if it exists.
+    pub fn ipv6_addr(&self) -> Option<&Ipv6Addr> {
+        self.ipv6_stack().map(|s| &s.ip)
+    }
+
+    /// Return true if this is an IPv4-only stack, and false otherwise.
+    pub fn is_ipv4_only(&self) -> bool {
+        matches!(self, PrivateIpStack::V4(_))
+    }
+
+    /// Return true if this is an IPv6-only stack, and false otherwise.
+    pub fn is_ipv6_only(&self) -> bool {
+        matches!(self, PrivateIpStack::V6(_))
+    }
+
+    /// Return true if this is dual-stack, and false otherwise.
+    pub fn is_dual_stack(&self) -> bool {
+        matches!(self, PrivateIpStack::DualStack { .. })
+    }
+
+    /// Return the IPv4 transit IPs, if they exist.
+    pub fn ipv4_transit_ips(&self) -> Option<&[Ipv4Net]> {
+        self.ipv4_stack().map(|c| c.transit_ips.as_slice())
+    }
+
+    /// Return the IPv6 transit IPs, if they exist.
+    pub fn ipv6_transit_ips(&self) -> Option<&[Ipv6Net]> {
+        self.ipv6_stack().map(|c| c.transit_ips.as_slice())
+    }
+
+    /// Return all transit IPs, of any IP version.
+    pub fn all_transit_ips(&self) -> impl Iterator<Item = IpNet> + '_ {
+        let v4 = self
+            .ipv4_transit_ips()
+            .into_iter()
+            .flatten()
+            .copied()
+            .map(Into::into);
+        let v6 = self
+            .ipv6_transit_ips()
+            .into_iter()
+            .flatten()
+            .copied()
+            .map(Into::into);
+        v4.chain(v6)
+    }
+}
+
+/// The VPC-private IPv4 stack for a network interface
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct PrivateIpv4Stack {
+    /// The VPC-private IPv4 address for the interface.
+    pub ip: Ipv4Addr,
+    /// A set of additional IPv4 networks that this interface may send and
     /// receive traffic on.
-    #[serde(default)]
-    pub transit_ips: Vec<IpNet>,
+    pub transit_ips: Vec<Ipv4Net>,
+}
+
+/// The VPC-private IPv6 stack for a network interface
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct PrivateIpv6Stack {
+    /// The VPC-private IPv6 address for the interface.
+    pub ip: Ipv6Addr,
+    /// A set of additional IPv6 networks that this interface may send and
+    /// receive traffic on.
+    pub transit_ips: Vec<Ipv6Net>,
 }
 
 #[derive(

@@ -9,7 +9,9 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::datastore::DbConnection;
 use crate::db::datastore::SQL_BATCH_SIZE;
+use crate::db::model::LocalStorageDatasetAllocation;
 use crate::db::model::RendezvousLocalStorageDataset;
 use crate::db::model::Zpool;
 use crate::db::model::to_db_typed_uuid;
@@ -18,6 +20,9 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::sql_types::BigInt;
+use diesel::sql_types::Nullable;
+use diesel::sql_types::Numeric;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use omicron_common::api::external::CreateResult;
@@ -30,6 +35,9 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
+
+// XXX is it bad that Numeric -> BigInt here?
+define_sql_function! { fn coalesce(x: Nullable<Numeric>, y: BigInt) -> BigInt; }
 
 impl DataStore {
     /// List all LocalStorage datasets, making as many queries as needed to get
@@ -151,5 +159,86 @@ impl DataStore {
                 ),
             })
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub(super) async fn delete_local_storage_dataset_allocation_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        local_storage_dataset_allocation_id: DatasetUuid,
+    ) -> Result<(), diesel::result::Error> {
+        use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
+
+        // If this is deleted already, then return Ok - this function should be
+        // idempotent, it is called from a saga node.
+
+        let id = to_db_typed_uuid(local_storage_dataset_allocation_id);
+
+        let allocation = dsl::local_storage_dataset_allocation
+            .filter(dsl::id.eq(id))
+            .select(LocalStorageDatasetAllocation::as_select())
+            .get_result_async(conn)
+            .await?;
+
+        if allocation.time_deleted.is_some() {
+            return Ok(());
+        }
+
+        // Set the time_deleted
+
+        diesel::update(dsl::local_storage_dataset_allocation)
+            .filter(dsl::id.eq(id))
+            .set(dsl::time_deleted.eq(Utc::now()))
+            .execute_async(conn)
+            .await?;
+
+        // Recompute the associated local storage dataset's size_used
+
+        let dataset_id: DatasetUuid = allocation.local_storage_dataset_id();
+
+        use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl as dataset_dsl;
+
+        diesel::update(dataset_dsl::rendezvous_local_storage_dataset)
+            .filter(dataset_dsl::id.eq(to_db_typed_uuid(dataset_id)))
+            .set(
+                dataset_dsl::size_used.eq(coalesce(
+                    dsl::local_storage_dataset_allocation
+                        .filter(
+                            dsl::local_storage_dataset_id
+                                .eq(to_db_typed_uuid(dataset_id)),
+                        )
+                        .filter(dsl::time_deleted.is_null())
+                        .select(diesel::dsl::sum(dsl::dataset_size))
+                        .single_value(),
+                    0,
+                )),
+            )
+            .execute_async(conn)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Mark the local storage dataset allocation as deleted, and re-compute the
+    /// appropriate local storage dataset size_used column.
+    pub async fn delete_local_storage_dataset_allocation(
+        &self,
+        opctx: &OpContext,
+        local_storage_dataset_allocation_id: DatasetUuid,
+    ) -> Result<(), Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper(
+            "delete_local_storage_dataset_allocation",
+        )
+        .transaction(&conn, |conn| async move {
+            Self::delete_local_storage_dataset_allocation_in_txn(
+                &conn,
+                local_storage_dataset_allocation_id,
+            )
+            .await
+        })
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
     }
 }

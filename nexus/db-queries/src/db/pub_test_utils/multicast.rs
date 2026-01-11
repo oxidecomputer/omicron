@@ -4,12 +4,18 @@
 
 //! Multicast-specific datastore test helpers.
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
+
+/// Empty source IPs slice for passing to functions that take `Option<&[IpAddr]>`.
+///
+/// Use `Some(NO_SOURCE_IPS)` to explicitly clear source IPs (switch to ASM),
+/// vs `None` which preserves existing source IPs on reactivation.
+pub const NO_SOURCE_IPS: &[IpAddr] = &[];
 
 use uuid::Uuid;
 
 use nexus_db_model::{
-    IncompleteVpc, IpPool, IpPoolReservationType, IpPoolResource,
+    IncompleteIpPoolResource, IncompleteVpc, IpPool, IpPoolReservationType,
     IpPoolResourceType, IpVersion,
 };
 use nexus_types::external_api::params;
@@ -133,7 +139,7 @@ pub async fn create_test_setup_with_range(
         .expect("Should add multicast range to pool");
 
     // Link pool to silo
-    let link = IpPoolResource {
+    let link = IncompleteIpPoolResource {
         resource_id: opctx.authn.silo_required().unwrap().id(),
         resource_type: IpPoolResourceType::Silo,
         ip_pool_id: ip_pool.id(),
@@ -195,6 +201,7 @@ pub async fn create_test_group_with_state(
         multicast_ip: Some(multicast_ip.parse().unwrap()),
         mvlan: None,
         has_sources: false,
+        ip_version: None,
     };
 
     let group = datastore

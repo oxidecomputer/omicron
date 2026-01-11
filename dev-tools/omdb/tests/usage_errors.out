@@ -763,6 +763,7 @@ Commands:
   running       List running sagas
   inject-error  Inject an error into a saga's currently running node(s)
   abandon       Prevent new Nexus processes from resuming execution of a saga
+  show          Show the execution of a saga
   help          Print this message or the help of the given subcommand(s)
 
 Options:
