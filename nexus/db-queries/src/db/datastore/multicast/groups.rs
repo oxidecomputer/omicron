@@ -56,8 +56,7 @@ use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 /// External multicast group with computed source IPs from members.
 ///
 /// The `source_ips` field contains the union of all member source IPs,
-/// computed via a separate query. This struct enables a clean `From`
-/// conversion to the API view.
+/// computed via a separate query.
 #[derive(Clone, Debug)]
 pub struct ExternalMulticastGroupWithSources {
     pub group: ExternalMulticastGroup,
