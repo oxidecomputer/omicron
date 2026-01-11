@@ -14,15 +14,15 @@ use http::{Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_project, object_create, object_delete,
+    create_default_ip_pools, create_project, object_create, object_delete,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
     EphemeralIpCreate, ExternalIpCreate, FloatingIpAttach, InstanceCreate,
-    InstanceNetworkInterfaceAttachment,
+    InstanceNetworkInterfaceAttachment, PoolSelector,
 };
 use nexus_types::external_api::views::FloatingIp;
-
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
     InstanceState, NameOrId,
@@ -51,9 +51,9 @@ async fn test_multicast_with_external_ip_basic(
     let instance_name = "external-ip-mcast-instance";
 
     // Setup: project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client), // For external IPs
+        create_default_ip_pools(client), // For external IPs
         create_multicast_ip_pool_with_range(
             client,
             "external-ip-mcast-pool",
@@ -74,7 +74,7 @@ async fn test_multicast_with_external_ip_basic(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![], // Start without external IP
         multicast_groups: vec![],
         disks: vec![],
@@ -126,7 +126,9 @@ async fn test_multicast_with_external_ip_basic(
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
             .body(Some(&EphemeralIpCreate {
-                pool: None, // Use default pool
+                pool_selector: PoolSelector::Auto {
+                    ip_version: Some(IpVersion::V4),
+                },
             }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
@@ -195,8 +197,7 @@ async fn test_multicast_with_external_ip_basic(
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    // Implicit deletion model: group is implicitly deleted when last member (instance) is removed
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Verify external IP allocation/deallocation lifecycle for multicast group members.
@@ -216,9 +217,9 @@ async fn test_multicast_external_ip_lifecycle(
     let instance_name = "external-ip-lifecycle-instance";
 
     // Setup in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "external-ip-lifecycle-pool",
@@ -239,7 +240,7 @@ async fn test_multicast_external_ip_lifecycle(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -295,7 +296,9 @@ async fn test_multicast_external_ip_lifecycle(
         NexusRequest::new(
             RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
                 .body(Some(&EphemeralIpCreate {
-                    pool: None, // Use default pool
+                    pool_selector: PoolSelector::Auto {
+                        ip_version: Some(IpVersion::V4),
+                    },
                 }))
                 .expect_status(Some(StatusCode::ACCEPTED)),
         )
@@ -362,7 +365,7 @@ async fn test_multicast_external_ip_lifecycle(
     }
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Verify instances can be created with both external IP and multicast group
@@ -382,9 +385,9 @@ async fn test_multicast_with_external_ip_at_creation(
     let instance_name = "creation-mixed-instance";
 
     // Setup - parallelize project and pool creation
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client),
+        create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
             client,
             "creation-mixed-pool",
@@ -395,7 +398,9 @@ async fn test_multicast_with_external_ip_at_creation(
     .await;
 
     // Create instance with external IP specified at creation
-    let external_ip_param = ExternalIpCreate::Ephemeral { pool: None };
+    let external_ip_param = ExternalIpCreate::Ephemeral {
+        pool_selector: PoolSelector::Auto { ip_version: Some(IpVersion::V4) },
+    };
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
@@ -407,7 +412,7 @@ async fn test_multicast_with_external_ip_at_creation(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![external_ip_param], // External IP at creation
         multicast_groups: vec![], // Will add to multicast group after creation
         disks: vec![],
@@ -467,7 +472,7 @@ async fn test_multicast_with_external_ip_at_creation(
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Verify instances can have both floating IPs and multicast group membership.
@@ -488,9 +493,9 @@ async fn test_multicast_with_floating_ip_basic(
     let floating_ip_name = "floating-ip-mcast-ip";
 
     // Setup: project and IP pools - parallelize creation
-    let (_, _, _) = ops::join3(
+    let (_, (v4_pool, _v6_pool), _) = ops::join3(
         create_project(client, project_name),
-        create_default_ip_pool(client), // For floating IPs
+        create_default_ip_pools(client), // For floating IPs
         create_multicast_ip_pool_with_range(
             client,
             "floating-ip-mcast-pool",
@@ -500,10 +505,15 @@ async fn test_multicast_with_floating_ip_basic(
     )
     .await;
 
-    // Create floating IP
-    let floating_ip =
-        create_floating_ip(client, floating_ip_name, project_name, None, None)
-            .await;
+    // Create floating IP (specify pool to avoid ambiguity with dual-stack default pools)
+    let floating_ip = create_floating_ip(
+        client,
+        floating_ip_name,
+        project_name,
+        None,
+        Some(v4_pool.identity.name.as_str()),
+    )
+    .await;
 
     // Create instance (will start by default)
     let instance_params = InstanceCreate {
@@ -516,7 +526,7 @@ async fn test_multicast_with_floating_ip_basic(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![], // Start without external IP
         multicast_groups: vec![],
         disks: vec![],
@@ -663,5 +673,5 @@ async fn test_multicast_with_floating_ip_basic(
     object_delete(client, &fip_delete_url).await;
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }

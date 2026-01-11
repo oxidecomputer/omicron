@@ -121,6 +121,10 @@ impl RunAllArgs {
             cptestctx.server.get_http_server_lockstep_address(),
         );
         println!(
+            "omicron-dev: sled agent API:         http://{:?}",
+            cptestctx.sled_agents[0].local_addr(),
+        );
+        println!(
             "omicron-dev: cockroachdb pid:        {}",
             cptestctx.database.pid(),
         );

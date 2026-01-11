@@ -11,10 +11,7 @@
 //! Triggered by RPW reconciler when a multicast group is in "Creating" state
 //! and needs dataplane updates.
 
-use std::net::IpAddr;
-
 use anyhow::Context;
-use ipnetwork::IpNetwork;
 use serde::{Deserialize, Serialize};
 use slog::{debug, warn};
 use steno::{ActionError, DagBuilder, Node};
@@ -27,6 +24,7 @@ use dpd_client::types::{
 use nexus_db_lookup::LookupDataStore;
 use nexus_db_model::{MulticastGroup, UnderlayMulticastGroup};
 use nexus_db_queries::authn;
+use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
@@ -49,6 +47,14 @@ pub(crate) struct Params {
 pub struct DataplaneUpdateResponse {
     underlay: MulticastGroupUnderlayResponse,
     external: MulticastGroupExternalResponse,
+}
+
+/// Fetched multicast group data for dataplane programming.
+#[derive(Debug, Deserialize, Serialize)]
+struct GroupData {
+    external_group: MulticastGroup,
+    underlay_group: UnderlayMulticastGroup,
+    source_filter: SourceFilterState,
 }
 
 declare_saga_actions! {
@@ -102,15 +108,13 @@ impl NexusSaga for SagaMulticastGroupDpdEnsure {
     }
 }
 
-/// Fetch multicast group data and member source IPs from database.
+/// Fetch multicast group data and member source filter state from database.
 ///
-/// Returns the external group, underlay group, and union of all member source IPs.
-/// Source IPs are required for SSM (Source-Specific Multicast) addresses like
-/// 232.x.x.x; DPD will reject SSM groups without sources.
+/// Returns the external group, underlay group, and source filter state.
+/// SSM addresses (232.x.x.x) require sources; ASM allows any source.
 async fn mgde_fetch_group_data(
     sagactx: NexusActionContext,
-) -> Result<(MulticastGroup, UnderlayMulticastGroup, Vec<IpAddr>), ActionError>
-{
+) -> Result<GroupData, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
@@ -163,17 +167,17 @@ async fn mgde_fetch_group_data(
         }
     }
 
-    // Fetch member source IPs for DPD.
+    // Fetch member source filter state for DPD.
     // SSM addresses (232.x.x.x, ff3x::/32) require at least one source.
     // ASM addresses can have empty sources (any source allowed).
     let group_id =
         MulticastGroupUuid::from_untyped_uuid(params.external_group_id);
-    let source_ips_map = osagactx
+    let filter_state_map = osagactx
         .datastore()
-        .multicast_groups_source_ips_union(&opctx, &[group_id])
+        .multicast_groups_source_filter_state(&opctx, &[group_id])
         .await
         .map_err(ActionError::action_failed)?;
-    let source_ips = source_ips_map
+    let source_filter = filter_state_map
         .get(&params.external_group_id)
         .cloned()
         .unwrap_or_default();
@@ -187,10 +191,11 @@ async fn mgde_fetch_group_data(
         "underlay_group_id" => %underlay_group.id,
         "underlay_ip" => %underlay_group.multicast_ip,
         "vni" => %u32::from(external_group.vni.0),
-        "source_ips_count" => source_ips.len()
+        "source_ips_count" => source_filter.specific_sources.len(),
+        "has_any_source_member" => source_filter.has_any_source_member
     );
 
-    Ok((external_group, underlay_group, source_ips))
+    Ok(GroupData { external_group, underlay_group, source_filter })
 }
 
 /// Apply external and underlay groups in dataplane atomically.
@@ -198,11 +203,8 @@ async fn mgde_update_dataplane(
     sagactx: NexusActionContext,
 ) -> Result<DataplaneUpdateResponse, ActionError> {
     let osagactx = sagactx.user_data();
-    let (external_group, underlay_group, source_ips) =
-        sagactx
-            .lookup::<(MulticastGroup, UnderlayMulticastGroup, Vec<IpAddr>)>(
-                "group_data",
-            )?;
+    let GroupData { external_group, underlay_group, source_filter } =
+        sagactx.lookup::<GroupData>("group_data")?;
 
     // Use MulticastDataplaneClient for consistent DPD operations
     let dataplane = MulticastDataplaneClient::new(
@@ -221,15 +223,12 @@ async fn mgde_update_dataplane(
         "external_ip" => %external_group.multicast_ip,
         "underlay_group_id" => %underlay_group.id,
         "underlay_ip" => %underlay_group.multicast_ip,
-        "source_ips_count" => source_ips.len(),
+        "source_ips_count" => source_filter.specific_sources.len(),
+        "has_any_source_member" => source_filter.has_any_source_member,
     );
 
-    // Pass member source IPs to DPD. SSM addresses (232.x.x.x) require at
-    // least one source. For ASM addresses, empty sources allow any source.
-    let sources_as_networks: Vec<IpNetwork> =
-        source_ips.iter().map(|ip| IpNetwork::from(*ip)).collect();
     let (underlay_response, external_response) = dataplane
-        .create_groups(&external_group, &underlay_group, &sources_as_networks)
+        .create_groups(&external_group, &underlay_group, &source_filter)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -255,11 +254,8 @@ async fn mgde_rollback_dataplane(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let (external_group, _, _) =
-        sagactx
-            .lookup::<(MulticastGroup, UnderlayMulticastGroup, Vec<IpAddr>)>(
-                "group_data",
-            )?;
+    let GroupData { external_group, .. } =
+        sagactx.lookup::<GroupData>("group_data")?;
 
     let multicast_tag = external_group.tag.clone().ok_or_else(|| {
         ActionError::action_failed(Error::internal_error(
@@ -308,11 +304,8 @@ async fn mgde_update_group_state(
         &sagactx,
         &params.serialized_authn,
     );
-    let (external_group, _, _) =
-        sagactx
-            .lookup::<(MulticastGroup, UnderlayMulticastGroup, Vec<IpAddr>)>(
-                "group_data",
-            )?;
+    let GroupData { external_group, .. } =
+        sagactx.lookup::<GroupData>("group_data")?;
 
     debug!(
         osagactx.log(),
@@ -351,7 +344,7 @@ mod test {
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, link_ip_pool, object_create,
+        create_default_ip_pools, link_ip_pool, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::params::IpPoolCreate;
@@ -448,7 +441,7 @@ mod test {
             underlay_group_id: Uuid::new_v4(), // Non-existent
         };
 
-        // Execute the saga - should fail gracefully when fetching non-existent groups
+        // Execute the saga: should fail gracefully when fetching non-existent groups
         let result = nexus
             .sagas
             .saga_execute::<SagaMulticastGroupDpdEnsure>(params)
@@ -475,7 +468,7 @@ mod test {
         let opctx = test_helpers::test_opctx(cptestctx);
 
         // Setup: Create IP pools
-        create_default_ip_pool(client).await;
+        create_default_ip_pools(client).await;
 
         // Create multicast IP pool
         let pool_name = "saga-state-pool";
@@ -518,6 +511,7 @@ mod test {
             },
             multicast_ip: Some(IpAddr::V4(Ipv4Addr::new(224, 70, 0, 100))),
             has_sources: false,
+            ip_version: None,
         };
 
         let external_group = datastore

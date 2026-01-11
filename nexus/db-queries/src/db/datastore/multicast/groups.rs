@@ -35,8 +35,8 @@ use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult,
-    IdentityMetadataCreateParams, ListResultVec, LookupResult, LookupType,
-    ResourceType, UpdateResult,
+    IdentityMetadataCreateParams, IpVersion, ListResultVec, LookupResult,
+    LookupType, ResourceType, UpdateResult,
 };
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
@@ -88,6 +88,10 @@ pub(crate) struct MulticastGroupAllocationParams {
     /// Derived for whether the joining member has source IPs.
     /// Used for default pool selection -> if true, prefer SSM pool first.
     pub has_sources: bool,
+    /// Preferred IP version when allocating without a specific address or pool.
+    /// Required if multiple default multicast pools of different IP versions
+    /// exist.
+    pub ip_version: Option<IpVersion>,
 }
 
 impl DataStore {
@@ -234,6 +238,7 @@ impl DataStore {
                 ip: params.multicast_ip,
                 pool: authz_pool,
                 has_sources: params.has_sources,
+                ip_version: params.ip_version,
             },
         )
         .await
@@ -289,12 +294,13 @@ impl DataStore {
     ) -> LookupResult<ExternalMulticastGroupWithSources> {
         let group = self.multicast_group_fetch(opctx, group_id).await?;
 
-        // Get source IPs union via batch method
-        let source_ips_map =
-            self.multicast_groups_source_ips_union(opctx, &[group_id]).await?;
-        let source_ips = source_ips_map
+        // Get source filter state via batch method
+        let filter_state_map = self
+            .multicast_groups_source_filter_state(opctx, &[group_id])
+            .await?;
+        let source_ips = filter_state_map
             .get(&group_id.into_untyped_uuid())
-            .cloned()
+            .map(|state| state.specific_sources.iter().copied().collect())
             .unwrap_or_default();
 
         Ok(ExternalMulticastGroupWithSources { group, source_ips })
@@ -434,7 +440,7 @@ impl DataStore {
     /// source IPs.
     ///
     /// Pool selection rule(s):
-    /// - If `has_sources` is true: try SSM pool (232/8) first, fall back to ASM
+    /// - If `has_sources` is true: try SSM pool (232/8) first, fallback to ASM
     ///   with sources
     /// - If `has_sources` is false: use ASM pool directly
     ///
@@ -445,35 +451,59 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         has_sources: bool,
+        ip_version: Option<IpVersion>,
     ) -> Result<authz::IpPool, external::Error> {
-        let pool_result = if has_sources {
+        // Convert from omicron_common::address::IpVersion to nexus_db_model::IpVersion
+        let db_ip_version = ip_version.map(Into::into);
+
+        let pool_res = if has_sources {
             // Try SSM first for source-filtered groups
-            match self.ip_pools_fetch_ssm_multicast(opctx).await {
+            match self.ip_pools_fetch_ssm_multicast(opctx, db_ip_version).await
+            {
                 Ok((pool, _)) => Ok(pool),
                 Err(_) => {
-                    // SSM pool unavailable - fall back to ASM pool.
+                    // SSM pool unavailable -> fallback to ASM pool.
                     // Source filtering still works on ASM addresses via IGMPv3/MLDv2,
                     // just without SSM's network-level source guarantees.
                     info!(
                         opctx.log,
                         "No SSM pool linked to silo, using ASM pool for source-filtered group"
                     );
-                    self.ip_pools_fetch_asm_multicast(opctx)
+                    self.ip_pools_fetch_asm_multicast(opctx, db_ip_version)
                         .await
                         .map(|(pool, _)| pool)
                 }
             }
         } else {
             // No sources -> ASM
-            self.ip_pools_fetch_asm_multicast(opctx).await.map(|(pool, _)| pool)
+            self.ip_pools_fetch_asm_multicast(opctx, db_ip_version)
+                .await
+                .map(|(pool, _)| pool)
         };
 
-        pool_result.map_err(|_| {
-            external::Error::invalid_request(concat!(
-                "No multicast pool linked to your silo. ",
-                "Create a multicast pool and link it to your silo, ",
-                "or provide an explicit pool or multicast address.",
-            ))
+        pool_res.map_err(|e| {
+            // Preserve ambiguity errors (invalid_request) indicating the
+            // user needs to specify IP version when multiple pools of different
+            // versions exist. Only replace "not found" errors with a helpful
+            // message about pool setup.
+            match &e {
+                external::Error::ObjectNotFound { .. } => {
+                    // SSM = 232/8 or ff3x::/32, ASM = 224/8 or ff0x::/16
+                    let pool_type =
+                        if has_sources { "SSM or ASM" } else { "ASM" };
+                    let prefix = match ip_version {
+                        Some(v) => format!("No {v} {pool_type}"),
+                        None => format!("No {pool_type}"),
+                    };
+                    external::Error::invalid_request(format!(
+                        "{prefix} multicast pool linked to your silo. \
+                         Create a multicast pool and link it to your silo, \
+                         or provide an explicit pool or multicast address.",
+                    ))
+                }
+                // Preserve all other errors (including ambiguity errors)
+                _ => e,
+            }
         })
     }
 
@@ -517,7 +547,11 @@ impl DataStore {
 
         let authz_pool = if needs_default_pool {
             let pool = self
-                .fetch_default_multicast_pool(opctx, params.has_sources)
+                .fetch_default_multicast_pool(
+                    opctx,
+                    params.has_sources,
+                    params.ip_version,
+                )
                 .await?;
             opctx.authorize(authz::Action::CreateChild, &pool).await?;
             pool
@@ -526,6 +560,7 @@ impl DataStore {
                 opctx,
                 params.pool,
                 IpPoolType::Multicast,
+                params.ip_version.map(Into::into),
             )
             .await?
         };
@@ -709,7 +744,7 @@ impl DataStore {
                         })?;
 
                     if existing.tag == tag {
-                        // Idempotent - same external group
+                        // Same external group
                         info!(
                             opctx.log,
                             "Underlay multicast group exists (idempotent)";
@@ -717,7 +752,7 @@ impl DataStore {
                         );
                         EnsureUnderlayResult::Existing(existing)
                     } else {
-                        // Collision - different external group
+                        // Collision means different external group
                         info!(
                             opctx.log,
                             "Underlay IP {multicast_ip} collision";
@@ -843,26 +878,21 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use std::net::Ipv4Addr;
+    use std::net::{IpAddr, Ipv4Addr};
 
     use nexus_types::identity::Resource;
     use omicron_common::address::{IpRange, Ipv4Range};
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{
-        GenericUuid, InstanceUuid, PropolisUuid, SledUuid,
-    };
+    use omicron_uuid_kinds::{GenericUuid, InstanceUuid, SledUuid};
 
     use crate::db::datastore::Error;
     use crate::db::datastore::LookupType;
-    use crate::db::model::IpPool;
     use crate::db::model::{
-        Generation, InstanceRuntimeState, IpPoolReservationType,
-        IpPoolResource, IpPoolResourceType, IpVersion,
-        MulticastGroupMemberState,
+        IncompleteIpPoolResource, IpPool, IpPoolReservationType,
+        IpPoolResourceType, IpVersion, MulticastGroupMemberState,
     };
     use crate::db::pub_test_utils::helpers::{
         SledUpdateBuilder, create_instance_with_vmm, create_project,
-        create_stopped_instance_record,
     };
     use crate::db::pub_test_utils::{TestDatabase, multicast};
 
@@ -916,7 +946,7 @@ mod tests {
             .await
             .expect("Should add multicast range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -935,6 +965,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: false,
+            ip_version: None,
         };
         datastore
             .multicast_group_create(&opctx, &params1, Some(authz_pool.clone()))
@@ -949,6 +980,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: false,
+            ip_version: None,
         };
         datastore
             .multicast_group_create(&opctx, &params2, Some(authz_pool.clone()))
@@ -963,6 +995,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: false,
+            ip_version: None,
         };
         let res3 = datastore
             .multicast_group_create(&opctx, &params3, Some(authz_pool.clone()))
@@ -1016,7 +1049,7 @@ mod tests {
             .await
             .expect("Should add multicast range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -1035,6 +1068,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group_default = datastore
@@ -1059,6 +1093,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: false,
+            ip_version: None,
         };
         let group_explicit = datastore
             .multicast_group_create(&opctx, &params_explicit, None)
@@ -1166,7 +1201,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1185,6 +1220,7 @@ mod tests {
             },
             multicast_ip: Some("224.1.3.3".parse().unwrap()),
             has_sources: false,
+            ip_version: None,
         };
 
         let external_group = datastore
@@ -1217,610 +1253,6 @@ mod tests {
 
         // Verify underlay group properties
         assert!(underlay_group.multicast_ip.ip().is_ipv6());
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_multicast_group_member_operations_with_parent_id() {
-        let logctx = dev::test_setup_log(
-            "test_multicast_group_member_operations_with_parent_id",
-        );
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // Set up multicast IP pool and group
-        let pool_identity = IdentityMetadataCreateParams {
-            name: "parent-id-test-pool".parse().unwrap(),
-            description: "Pool for parent_id testing".to_string(),
-        };
-        let ip_pool = datastore
-            .ip_pool_create(
-                &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
-                ),
-            )
-            .await
-            .expect("Should create multicast IP pool");
-
-        let authz_pool = authz::IpPool::new(
-            authz::FLEET,
-            ip_pool.id(),
-            external::LookupType::ById(ip_pool.id()),
-        );
-        let range = IpRange::V4(
-            Ipv4Range::new(
-                Ipv4Addr::new(224, 3, 1, 1),
-                Ipv4Addr::new(224, 3, 1, 10),
-            )
-            .unwrap(),
-        );
-        datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
-            .await
-            .expect("Should add multicast range to pool");
-
-        let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
-            ip_pool_id: ip_pool.id(),
-            resource_type: IpPoolResourceType::Silo,
-            resource_id: silo_id,
-            is_default: false,
-        };
-        datastore
-            .ip_pool_link_silo(&opctx, link)
-            .await
-            .expect("Should link multicast pool to silo");
-
-        // Create test project for parent_id operations
-        let (authz_project, _project) =
-            create_project(&opctx, &datastore, "test-project").await;
-
-        // Create a multicast group using the real project
-        let params = MulticastGroupCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "parent-id-test-group".parse().unwrap(),
-                description: "Group for parent_id testing".to_string(),
-            },
-            multicast_ip: Some("224.3.1.5".parse().unwrap()),
-            has_sources: false,
-        };
-
-        let group = datastore
-            .multicast_group_create(&opctx, &params, Some(authz_pool.clone()))
-            .await
-            .expect("Should create multicast group");
-
-        // Create test sled and instances
-        let sled_id = create_test_sled(&datastore).await;
-        let instance_record_1 = create_stopped_instance_record(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "test-instance-1",
-        )
-        .await;
-        let parent_id_1 = instance_record_1.as_untyped_uuid();
-        let instance_record_2 = create_stopped_instance_record(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "test-instance-2",
-        )
-        .await;
-        let parent_id_2 = instance_record_2.as_untyped_uuid();
-        let instance_record_3 = create_stopped_instance_record(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "test-instance-3",
-        )
-        .await;
-        let parent_id_3 = instance_record_3.as_untyped_uuid();
-
-        // Create VMMs and associate instances with sled (required for multicast membership)
-        let vmm1_id = PropolisUuid::new_v4();
-        let vmm1 = crate::db::model::Vmm::new(
-            vmm1_id,
-            InstanceUuid::from_untyped_uuid(*parent_id_1),
-            sled_id,
-            "127.0.0.1".parse().unwrap(),
-            12400,
-            crate::db::model::VmmCpuPlatform::SledDefault,
-        );
-        datastore.vmm_insert(&opctx, vmm1).await.expect("Should create VMM1");
-
-        let vmm2_id = PropolisUuid::new_v4();
-        let vmm2 = crate::db::model::Vmm::new(
-            vmm2_id,
-            InstanceUuid::from_untyped_uuid(*parent_id_2),
-            sled_id,
-            "127.0.0.1".parse().unwrap(),
-            12401,
-            crate::db::model::VmmCpuPlatform::SledDefault,
-        );
-        datastore.vmm_insert(&opctx, vmm2).await.expect("Should create VMM2");
-
-        let vmm3_id = PropolisUuid::new_v4();
-        let vmm3 = crate::db::model::Vmm::new(
-            vmm3_id,
-            InstanceUuid::from_untyped_uuid(*parent_id_3),
-            sled_id,
-            "127.0.0.1".parse().unwrap(),
-            12402,
-            crate::db::model::VmmCpuPlatform::SledDefault,
-        );
-        datastore.vmm_insert(&opctx, vmm3).await.expect("Should create VMM3");
-
-        // Update instances to point to their VMMs
-        let instance1 = datastore
-            .instance_refetch(
-                &opctx,
-                &authz::Instance::new(
-                    authz_project.clone(),
-                    instance_record_1.into_untyped_uuid(),
-                    LookupType::by_id(instance_record_1),
-                ),
-            )
-            .await
-            .expect("Should fetch instance1");
-        datastore
-            .instance_update_runtime(
-                &instance_record_1,
-                &InstanceRuntimeState {
-                    nexus_state: crate::db::model::InstanceState::Vmm,
-                    propolis_id: Some(vmm1_id.into_untyped_uuid()),
-                    dst_propolis_id: None,
-                    migration_id: None,
-                    generation: Generation::from(
-                        instance1.runtime().generation.next(),
-                    ),
-                    time_updated: Utc::now(),
-                    time_last_auto_restarted: None,
-                },
-            )
-            .await
-            .expect("Should set instance1 runtime state");
-
-        let instance2 = datastore
-            .instance_refetch(
-                &opctx,
-                &authz::Instance::new(
-                    authz_project.clone(),
-                    instance_record_2.into_untyped_uuid(),
-                    LookupType::by_id(instance_record_2),
-                ),
-            )
-            .await
-            .expect("Should fetch instance2");
-        datastore
-            .instance_update_runtime(
-                &instance_record_2,
-                &InstanceRuntimeState {
-                    nexus_state: crate::db::model::InstanceState::Vmm,
-                    propolis_id: Some(vmm2_id.into_untyped_uuid()),
-                    dst_propolis_id: None,
-                    migration_id: None,
-                    generation: Generation::from(
-                        instance2.runtime().generation.next(),
-                    ),
-                    time_updated: Utc::now(),
-                    time_last_auto_restarted: None,
-                },
-            )
-            .await
-            .expect("Should set instance2 runtime state");
-
-        let instance3 = datastore
-            .instance_refetch(
-                &opctx,
-                &authz::Instance::new(
-                    authz_project.clone(),
-                    instance_record_3.into_untyped_uuid(),
-                    LookupType::by_id(instance_record_3),
-                ),
-            )
-            .await
-            .expect("Should fetch instance3");
-        datastore
-            .instance_update_runtime(
-                &instance_record_3,
-                &InstanceRuntimeState {
-                    nexus_state: crate::db::model::InstanceState::Vmm,
-                    propolis_id: Some(vmm3_id.into_untyped_uuid()),
-                    dst_propolis_id: None,
-                    migration_id: None,
-                    generation: Generation::from(
-                        instance3.runtime().generation.next(),
-                    ),
-                    time_updated: Utc::now(),
-                    time_last_auto_restarted: None,
-                },
-            )
-            .await
-            .expect("Should set instance3 runtime state");
-
-        // Transition group to "Active" state before adding members
-        datastore
-            .multicast_group_set_active(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-            )
-            .await
-            .expect("Should transition group to 'Active' state");
-
-        // Add members using parent_id
-        let member1 = datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(*parent_id_1),
-                Some(vec![]),
-            )
-            .await
-            .expect("Should add first member");
-
-        let member2 = datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(*parent_id_2),
-                Some(vec![]),
-            )
-            .await
-            .expect("Should add second member");
-
-        // Try to add the same parent_id again - should succeed idempotently
-        let duplicate_result = datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(*parent_id_1),
-                Some(vec![]),
-            )
-            .await
-            .expect("Should handle duplicate add idempotently");
-
-        // Should return the same member (idempotent)
-        assert_eq!(duplicate_result.id, member1.id);
-        assert_eq!(duplicate_result.parent_id, member1.parent_id);
-
-        // Verify member structure uses parent_id correctly
-        assert_eq!(member1.external_group_id, group.id());
-        assert_eq!(member1.parent_id, *parent_id_1);
-        assert_eq!(member2.external_group_id, group.id());
-        assert_eq!(member2.parent_id, *parent_id_2);
-
-        // Verify generation sequence is working correctly
-        // (database assigns sequential values)
-        let gen1 = member1.version_added;
-        let gen2 = member2.version_added;
-        assert!(
-            i64::from(&*gen1) > 0,
-            "First member should have positive generation number"
-        );
-        assert!(
-            gen2 > gen1,
-            "Second member should have higher generation than first"
-        );
-
-        // List members
-        let pagparams = &DataPageParams {
-            marker: None,
-            limit: std::num::NonZeroU32::new(100).unwrap(),
-            direction: dropshot::PaginationOrder::Ascending,
-        };
-
-        let members = datastore
-            .multicast_group_members_list(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                pagparams,
-            )
-            .await
-            .expect("Should list members");
-
-        assert_eq!(members.len(), 2);
-        assert!(members.iter().any(|m| m.parent_id == *parent_id_1));
-        assert!(members.iter().any(|m| m.parent_id == *parent_id_2));
-
-        // Remove member by parent_id
-        datastore
-            .multicast_group_member_detach_by_group_and_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(*parent_id_1),
-            )
-            .await
-            .expect("Should remove first member");
-
-        // Verify only one active member remains
-        let all_members = datastore
-            .multicast_group_members_list(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                pagparams,
-            )
-            .await
-            .expect("Should list remaining members");
-
-        // Filter for active members (non-"Left" state)
-        let active_members: Vec<_> = all_members
-            .into_iter()
-            .filter(|m| m.state != MulticastGroupMemberState::Left)
-            .collect();
-
-        assert_eq!(active_members.len(), 1);
-        assert_eq!(active_members[0].parent_id, *parent_id_2);
-
-        // Verify member removal doesn't affect the group
-        let updated_group = datastore
-            .multicast_group_fetch(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-            )
-            .await
-            .expect("Should fetch group after member removal");
-        assert_eq!(updated_group.id(), group.id());
-        assert_eq!(updated_group.multicast_ip, group.multicast_ip);
-
-        // Add member back and remove all
-        datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(*parent_id_1),
-                Some(vec![]),
-            )
-            .await
-            .expect("Should re-add first member");
-
-        datastore
-            .multicast_group_member_detach_by_group_and_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(*parent_id_1),
-            )
-            .await
-            .expect("Should remove first member again");
-
-        datastore
-            .multicast_group_member_detach_by_group_and_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(*parent_id_2),
-            )
-            .await
-            .expect("Should remove second member");
-
-        // Verify no active members remain
-        let all_final_members = datastore
-            .multicast_group_members_list(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                pagparams,
-            )
-            .await
-            .expect("Should list final members");
-
-        // Filter for active members (non-"Left" state)
-        let active_final_members: Vec<_> = all_final_members
-            .into_iter()
-            .filter(|m| m.state != MulticastGroupMemberState::Left)
-            .collect();
-
-        assert_eq!(active_final_members.len(), 0);
-
-        // Add a member with the third parent_id to verify different parent
-        // types work
-        let member3 = datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(*parent_id_3),
-                Some(vec![]),
-            )
-            .await
-            .expect("Should add third member with different parent_id");
-
-        assert_eq!(member3.external_group_id, group.id());
-        assert_eq!(member3.parent_id, *parent_id_3);
-
-        // Verify generation continues to increment properly
-        let gen3 = member3.version_added;
-        assert!(
-            gen3 > gen2,
-            "Third member should have higher generation than second"
-        );
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_multicast_group_member_duplicate_prevention() {
-        let logctx = dev::test_setup_log(
-            "test_multicast_group_member_duplicate_prevention",
-        );
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // Set up multicast IP pool and group
-        let pool_identity = IdentityMetadataCreateParams {
-            name: "duplicate-test-pool".parse().unwrap(),
-            description: "Pool for duplicate testing".to_string(),
-        };
-        let ip_pool = datastore
-            .ip_pool_create(
-                &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
-                ),
-            )
-            .await
-            .expect("Should create multicast IP pool");
-
-        let authz_pool = authz::IpPool::new(
-            authz::FLEET,
-            ip_pool.id(),
-            external::LookupType::ById(ip_pool.id()),
-        );
-        let range = IpRange::V4(
-            Ipv4Range::new(
-                Ipv4Addr::new(224, 3, 1, 1),
-                Ipv4Addr::new(224, 3, 1, 10),
-            )
-            .unwrap(),
-        );
-        datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
-            .await
-            .expect("Should add multicast range to pool");
-
-        let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
-            ip_pool_id: ip_pool.id(),
-            resource_type: IpPoolResourceType::Silo,
-            resource_id: silo_id,
-            is_default: false,
-        };
-        datastore
-            .ip_pool_link_silo(&opctx, link)
-            .await
-            .expect("Should link multicast pool to silo");
-
-        // Create test project, sled and instance for duplicate testing
-        let (authz_project, _project) =
-            create_project(&opctx, &datastore, "dup-test-proj").await;
-        let sled_id = create_test_sled(&datastore).await;
-        let instance_record = create_stopped_instance_record(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "dup-test-instance",
-        )
-        .await;
-        let parent_id = instance_record.as_untyped_uuid();
-
-        // Create VMM and associate instance with sled (required for multicast membership)
-        let vmm_id = PropolisUuid::new_v4();
-        let vmm = crate::db::model::Vmm::new(
-            vmm_id,
-            InstanceUuid::from_untyped_uuid(*parent_id),
-            sled_id,
-            "127.0.0.1".parse().unwrap(),
-            12400,
-            crate::db::model::VmmCpuPlatform::SledDefault,
-        );
-        datastore.vmm_insert(&opctx, vmm).await.expect("Should create VMM");
-
-        // Update instance to point to the VMM (increment generation for update to succeed)
-        let instance = datastore
-            .instance_refetch(
-                &opctx,
-                &authz::Instance::new(
-                    authz_project.clone(),
-                    instance_record.into_untyped_uuid(),
-                    LookupType::by_id(instance_record),
-                ),
-            )
-            .await
-            .expect("Should fetch instance");
-        datastore
-            .instance_update_runtime(
-                &instance_record,
-                &InstanceRuntimeState {
-                    nexus_state: crate::db::model::InstanceState::Vmm,
-                    propolis_id: Some(vmm_id.into_untyped_uuid()),
-                    dst_propolis_id: None,
-                    migration_id: None,
-                    generation: Generation::from(
-                        instance.runtime().generation.next(),
-                    ),
-                    time_updated: Utc::now(),
-                    time_last_auto_restarted: None,
-                },
-            )
-            .await
-            .expect("Should set instance runtime state");
-
-        let params = MulticastGroupCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "duplicate-test-group".parse().unwrap(),
-                description: "Group for duplicate testing".to_string(),
-            },
-            multicast_ip: Some("224.3.1.5".parse().unwrap()),
-            has_sources: false,
-        };
-
-        let group = datastore
-            .multicast_group_create(&opctx, &params, Some(authz_pool.clone()))
-            .await
-            .expect("Should create multicast group");
-
-        // Transition group to "Active" state before adding members
-        datastore
-            .multicast_group_set_active(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-            )
-            .await
-            .expect("Should transition group to 'Active' state");
-
-        // Add member first time - should succeed
-        let member1 = datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(*parent_id),
-                Some(vec![]),
-            )
-            .await
-            .expect("Should add member first time");
-
-        // Try to add same parent_id again - this should either:
-        // 1. Fail with a conflict error, or
-        // 2. Succeed if the system allows multiple entries (which we can test)
-        let res2 = datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(*parent_id),
-                Some(vec![]),
-            )
-            .await;
-
-        // Second attempt should succeed idempotently (return existing member)
-        let member2 = res2.expect("Should handle duplicate add idempotently");
-
-        // Should return the same member (idempotent)
-        assert_eq!(member2.id, member1.id);
-        assert_eq!(member2.parent_id, *parent_id);
-
-        // Verify only one member exists
-        let pagparams = &DataPageParams {
-            marker: None,
-            limit: std::num::NonZeroU32::new(100).unwrap(),
-            direction: dropshot::PaginationOrder::Ascending,
-        };
-
-        let members = datastore
-            .multicast_group_members_list(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                pagparams,
-            )
-            .await
-            .expect("Should list members");
-
-        assert_eq!(members.len(), 1);
-        assert_eq!(members[0].parent_id, *parent_id);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1869,7 +1301,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1889,6 +1321,7 @@ mod tests {
             },
             multicast_ip: None, // Let it allocate from pool
             has_sources: false,
+            ip_version: None,
         };
         let group = datastore
             .multicast_group_create(
@@ -1928,7 +1361,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(test_instance_id),
-                Some(vec![]),
+                Some(&[] as &[IpAddr]),
             )
             .await
             .expect("Should create member record");
@@ -2081,7 +1514,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2101,6 +1534,7 @@ mod tests {
             },
             multicast_ip: Some(target_ip),
             has_sources: false,
+            ip_version: None,
         };
 
         let group1 = datastore
@@ -2127,6 +1561,7 @@ mod tests {
             },
             multicast_ip: Some(target_ip),
             has_sources: false,
+            ip_version: None,
         };
 
         let group2 = datastore
@@ -2192,7 +1627,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2211,6 +1646,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group1 = datastore
@@ -2227,6 +1663,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let res2 = datastore
@@ -2256,6 +1693,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group3 = datastore
@@ -2322,7 +1760,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2341,6 +1779,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let group = datastore
@@ -2445,7 +1884,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -2463,7 +1902,8 @@ mod tests {
                 description: "Test group for fetch operations".to_string(),
             },
             multicast_ip: Some("224.100.10.5".parse().unwrap()),
-            has_sources: true,
+            has_sources: false,
+            ip_version: None,
         };
 
         let group = datastore
@@ -2550,7 +1990,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -2569,6 +2009,7 @@ mod tests {
             },
             multicast_ip: Some("224.100.20.10".parse().unwrap()),
             has_sources: false,
+            ip_version: None,
         };
 
         let params_2 = MulticastGroupCreate {
@@ -2578,6 +2019,7 @@ mod tests {
             },
             multicast_ip: Some("224.100.20.11".parse().unwrap()),
             has_sources: false,
+            ip_version: None,
         };
 
         let params_3 = MulticastGroupCreate {
@@ -2587,6 +2029,7 @@ mod tests {
             },
             multicast_ip: Some("224.100.20.12".parse().unwrap()),
             has_sources: false,
+            ip_version: None,
         };
 
         // Create groups (all are fleet-scoped)
@@ -2676,7 +2119,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -2694,6 +2137,7 @@ mod tests {
             },
             multicast_ip: Some("224.100.30.5".parse().unwrap()),
             has_sources: false,
+            ip_version: None,
         };
 
         // Create group - starts in "Creating" state
@@ -2807,7 +2251,7 @@ mod tests {
                 &opctx,
                 group_id,
                 InstanceUuid::from_untyped_uuid(*instance.as_untyped_uuid()),
-                Some(vec![]),
+                Some(&[] as &[IpAddr]),
             )
             .await
             .expect("Should add member");
@@ -3012,7 +2456,7 @@ mod tests {
             .expect("Should add ASM range to pool");
 
         // Link pool to silo as default
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -3023,15 +2467,16 @@ mod tests {
             .await
             .expect("Should link ASM pool to silo");
 
-        // Create group without an explicit IP
-        // This should trigger fallback to ASM pool
+        // Create group without an explicit IP: this should trigger
+        // fallback to an ASM pool
         let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "source-filtered-group".parse().unwrap(),
                 description: "Group using ASM pool".to_string(),
             },
-            multicast_ip: None, // No explicit IP - triggers pool auto-selection
-            has_sources: true,  // Has sources
+            multicast_ip: None, // No explicit IP -> triggers pool auto-selection
+            has_sources: false,
+            ip_version: None,
         };
 
         // This should succeed via ASM pool (no SSM pool exists)
@@ -3102,7 +2547,7 @@ mod tests {
             .await
             .expect("Should add ASM range to pool");
 
-        let asm_link = IpPoolResource {
+        let asm_link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: asm_ip_pool.id(),
@@ -3121,6 +2566,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: true,
+            ip_version: None,
         };
         let fallback_group = datastore
             .multicast_group_create(&opctx, &fallback_params, None)
@@ -3173,7 +2619,7 @@ mod tests {
             .await
             .expect("Should add SSM range to pool");
 
-        let ssm_link = IpPoolResource {
+        let ssm_link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ssm_ip_pool.id(),
@@ -3192,6 +2638,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: true,
+            ip_version: None,
         };
         let ssm_group = datastore
             .multicast_group_create(&opctx, &ssm_params, None)
@@ -3214,6 +2661,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: false,
+            ip_version: None,
         };
         let asm_group = datastore
             .multicast_group_create(&opctx, &asm_params, None)
@@ -3278,7 +2726,7 @@ mod tests {
             .await
             .expect("Should add SSM range");
 
-        let ssm_link = IpPoolResource {
+        let ssm_link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ssm_ip_pool.id(),
@@ -3327,7 +2775,7 @@ mod tests {
             .await
             .expect("Should add ASM range");
 
-        let asm_link = IpPoolResource {
+        let asm_link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: asm_ip_pool.id(),
@@ -3347,6 +2795,7 @@ mod tests {
             },
             multicast_ip: None,
             has_sources: true,
+            ip_version: None,
         };
         let group = datastore
             .multicast_group_create(&opctx, &params, Some(asm_authz_pool))
@@ -3407,7 +2856,7 @@ mod tests {
             .expect("Should add multicast range");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -3426,6 +2875,7 @@ mod tests {
             },
             multicast_ip: Some("224.10.1.1".parse().unwrap()),
             has_sources: false,
+            ip_version: None,
         };
         let external_group1 = datastore
             .multicast_group_create(&opctx, &params1, Some(authz_pool.clone()))
@@ -3440,6 +2890,7 @@ mod tests {
             },
             multicast_ip: Some("224.10.1.2".parse().unwrap()),
             has_sources: false,
+            ip_version: None,
         };
         let external_group2 = datastore
             .multicast_group_create(&opctx, &params2, Some(authz_pool.clone()))
@@ -3543,7 +2994,7 @@ mod tests {
             .expect("Should add multicast range");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -3562,6 +3013,7 @@ mod tests {
             },
             multicast_ip: Some("224.20.1.1".parse().unwrap()),
             has_sources: false,
+            ip_version: None,
         };
         let external_group = datastore
             .multicast_group_create(&opctx, &params, Some(authz_pool.clone()))

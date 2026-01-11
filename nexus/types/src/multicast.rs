@@ -4,7 +4,7 @@
 
 //! Internal multicast types used by Nexus.
 
-use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::{IdentityMetadataCreateParams, IpVersion};
 use std::net::IpAddr;
 
 /// Internal parameters for creating a multicast group.
@@ -27,4 +27,8 @@ pub struct MulticastGroupCreate {
     /// - If true: prefer SSM pool (232/8), fall back to ASM (224/8)
     /// - If false: use ASM pool directly
     pub has_sources: bool,
+    /// Preferred IP version when allocating without a specific address.
+    /// Only used when `multicast_ip` is `None`. Required if multiple default
+    /// multicast pools of different IP versions exist.
+    pub ip_version: Option<IpVersion>,
 }

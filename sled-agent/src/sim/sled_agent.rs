@@ -50,6 +50,7 @@ use propolis_client::{
     Client as PropolisClient, types::InstanceInitializationMethod,
 };
 use range_requests::PotentialRange;
+use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
@@ -62,8 +63,8 @@ use sled_agent_types::instance::{
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
     HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
-    ZoneImageResolverInventory,
+    InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    OmicronZonesConfig, SledRole,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 
@@ -113,6 +114,7 @@ pub struct SledAgent {
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
+    health_monitor: HealthMonitorHandle,
 }
 
 impl SledAgent {
@@ -166,6 +168,8 @@ impl SledAgent {
                 .await
                 .start(&log, &config.dropshot);
 
+        let health_monitor = HealthMonitorHandle::stub();
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -198,6 +202,7 @@ impl SledAgent {
             repo_depot,
             log,
             bootstore_network_config,
+            health_monitor,
         })
     }
 
@@ -806,6 +811,7 @@ impl SledAgent {
         let datasets_config =
             storage.datasets_config_list().unwrap_or_default();
         let zones_config = self.fake_zones.lock().unwrap().clone();
+        let health_monitor = self.health_monitor.to_inventory();
 
         let sled_config = OmicronSledConfig {
             generation: zones_config.generation,
@@ -814,6 +820,7 @@ impl SledAgent {
             zones: zones_config.zones.into_iter().collect(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: Default::default(),
         };
 
         Ok(Inventory {
@@ -886,8 +893,10 @@ impl SledAgent {
             last_reconciliation: Some(
                 ConfigReconcilerInventory::debug_assume_success(sled_config),
             ),
-            // TODO: simulate the zone image resolver with greater fidelity
-            zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+            // TODO: simulate the file source resolver with greater fidelity
+            file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
+            ),
+            health_monitor,
         })
     }
 

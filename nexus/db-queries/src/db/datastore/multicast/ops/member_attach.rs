@@ -20,7 +20,7 @@
 //! Prevents TOCTOU races: group validation, instance sled_id lookup, and member
 //! upsert all happen in one atomic database operation.
 //!
-//! We use sentinel-based error handling (like `network_interface.rs`): validation
+//! We use sentinel-based error handling (like `network_interface`): validation
 //! failures trigger a CAST error with a sentinel string, which is decoded in
 //! error handling to return the appropriate error type.
 
@@ -36,10 +36,11 @@ use diesel::sql_types::{Array, Timestamptz};
 use ipnetwork::IpNetwork;
 use uuid::Uuid;
 
-use crate::db::true_or_cast_error::matches_sentinel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{MulticastGroupMember, MulticastGroupMemberState};
 use omicron_common::api::external;
+
+use crate::db::true_or_cast_error::matches_sentinel;
 
 // Sentinel strings for validation errors.
 // These trigger a CAST error when validation fails, allowing us to decode
@@ -68,7 +69,7 @@ pub(crate) enum AttachMemberError {
 }
 
 impl AttachMemberError {
-    /// Construct an `AttachMemberError` from a database error.
+    /// Construct an [`AttachMemberError`] from a database error.
     ///
     /// This catches the sentinel errors that indicate validation failures
     /// (group not found, instance not found) as well as constraint violations.
@@ -170,7 +171,7 @@ impl AttachMemberToGroupStatement {
     /// - `group_id`: Multicast group to attach to
     /// - `instance_id`: Instance being attached as member
     /// - `new_member_id`: UUID for new member row (if creating)
-    /// - `source_ips`: Source IPs for SSM (`None` preserves existing on reactivation)
+    /// - `source_ips`: Source IPs for filtering (`None` preserves existing on reactivation)
     ///
     /// CTEs atomically validate group is not in a "Deleting" state,
     /// that the instance exists, retrieves the current `sled_id` from
@@ -318,12 +319,13 @@ impl AttachMemberToGroupStatement {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
-        // Column order matches schema: id, time_created, time_modified,
-        // external_group_id, multicast_ip, parent_id, sled_id, source_ips, state
+        // Column order matches schema: id, time_created, time_modified, time_deleted,
+        // external_group_id, parent_id, sled_id, state, version_added, version_removed,
+        // multicast_ip, source_ips
         out.push_sql(
             "INSERT INTO multicast_group_member (\
                  id, time_created, time_modified, external_group_id, \
-                 multicast_ip, parent_id, sled_id, source_ips, state) SELECT ",
+                 parent_id, sled_id, state, multicast_ip, source_ips) SELECT ",
         );
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.new_member_id)?;
         out.push_sql(", ");
@@ -332,16 +334,16 @@ impl AttachMemberToGroupStatement {
         out.push_bind_param::<Timestamptz, _>(&self.time_modified)?;
         out.push_sql(", ");
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.group_id)?;
-        out.push_sql(", valid_group.multicast_ip, ");
+        out.push_sql(", ");
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.instance_id)?;
         out.push_sql(", instance_sled.sled_id, ");
-        out.push_bind_param::<Array<diesel::sql_types::Inet>, _>(
-            &self.source_ips_for_insert,
-        )?;
-        out.push_sql(", ");
         out.push_sql(super::member_state_as_sql_literal(
             MulticastGroupMemberState::Joining,
         ));
+        out.push_sql(", valid_group.multicast_ip, ");
+        out.push_bind_param::<Array<diesel::sql_types::Inet>, _>(
+            &self.source_ips_for_insert,
+        )?;
         out.push_sql(" FROM valid_group CROSS JOIN instance_sled ");
 
         // ON CONFLICT: only update "Left" members, preserve other states
@@ -385,10 +387,13 @@ impl AttachMemberToGroupStatement {
         out.push_sql(" ELSE multicast_group_member.source_ips END");
 
         // Return all columns so caller gets full member record
+        // Column order must match schema: id, time_created, time_modified, time_deleted,
+        // external_group_id, parent_id, sled_id, state, version_added, version_removed,
+        // multicast_ip, source_ips
         out.push_sql(
             " RETURNING id, time_created, time_modified, time_deleted, \
-             external_group_id, multicast_ip, parent_id, sled_id, state, \
-             source_ips, version_added, version_removed",
+             external_group_id, parent_id, sled_id, state, version_added, \
+             version_removed, multicast_ip, source_ips",
         );
         Ok(())
     }
@@ -401,10 +406,13 @@ impl AttachMemberToGroupStatement {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
+        // Column order must match schema: id, time_created, time_modified, time_deleted,
+        // external_group_id, parent_id, sled_id, state, version_added, version_removed,
+        // multicast_ip, source_ips
         out.push_sql(
             "SELECT id, time_created, time_modified, time_deleted, \
-             external_group_id, multicast_ip, parent_id, sled_id, state, \
-             source_ips, version_added, version_removed \
+             external_group_id, parent_id, sled_id, state, version_added, \
+             version_removed, multicast_ip, source_ips \
              FROM upserted_member",
         );
         Ok(())

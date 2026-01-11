@@ -26,14 +26,18 @@ use dpd_client::types as dpd_types;
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
+
+use crate::integration_tests::instances::{
+    instance_simulate, instance_wait_for_state,
+};
 use nexus_test_utils::dpd_client;
 use nexus_test_utils::http_testing::{
     AuthnMode, Collection, NexusRequest, RequestBuilder,
 };
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_project, object_create,
-    object_create_error, object_delete, object_delete_error, object_get,
-    object_get_error, object_put_error,
+    create_default_ip_pools, create_instance, create_project, link_ip_pool,
+    object_create, object_create_error, object_delete, object_delete_error,
+    object_get, object_get_error, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -49,9 +53,6 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::InstanceUuid;
 
 use super::*;
-use crate::integration_tests::instances::{
-    instance_simulate, instance_wait_for_state,
-};
 
 /// Test that multicast IP pools reject invalid ranges at the pool level
 #[nexus_test]
@@ -115,23 +116,49 @@ async fn test_multicast_ip_pool_range_validation(
     );
     object_create::<_, IpPoolRange>(client, range_url, &valid_ipv4_range).await;
 
-    // TODO: Remove this test once IPv6 is enabled for multicast pools.
-    // IPv6 ranges should currently be rejected (not yet supported)
-    let ipv6_range = IpRange::V6(
+    // Create IPv6 multicast pool
+    let ipv6_pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "test-v6-pool".parse().unwrap(),
+            description: "IPv6 multicast pool for validation tests".to_string(),
+        },
+        IpVersion::V6,
+    );
+    object_create::<_, IpPool>(
+        client,
+        "/v1/system/ip-pools",
+        &ipv6_pool_params,
+    )
+    .await;
+
+    let v6_range_url = "/v1/system/ip-pools/test-v6-pool/ranges/add";
+
+    // IPv6 link-local multicast range (ff02::/16) should be rejected
+    let ipv6_link_local_range = IpRange::V6(
+        Ipv6Range::new(
+            Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1),
+            Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 255),
+        )
+        .unwrap(),
+    );
+    object_create_error(
+        client,
+        v6_range_url,
+        &ipv6_link_local_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    // Valid IPv6 site-local multicast range (ff05::/16) should be accepted
+    let valid_ipv6_range = IpRange::V6(
         Ipv6Range::new(
             Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 1),
             Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 255),
         )
         .unwrap(),
     );
-    let error = object_create_error(
-        client,
-        range_url,
-        &ipv6_range,
-        StatusCode::BAD_REQUEST,
-    )
-    .await;
-    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
+    object_create::<_, IpPoolRange>(client, v6_range_url, &valid_ipv6_range)
+        .await;
 }
 
 #[nexus_test]
@@ -144,9 +171,9 @@ async fn test_multicast_group_member_operations(
     let instance_name = "test-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client), // For instance networking
+        create_default_ip_pools(&client), // For instance networking
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",
@@ -162,7 +189,8 @@ async fn test_multicast_group_member_operations(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     let added_member: MulticastGroupMember =
         put_upsert(client, &join_url, &join_params).await;
 
@@ -298,7 +326,7 @@ async fn test_multicast_group_member_operations(
 
     // Implicit deletion model: group is implicitly deleted when last member is removed
     // Wait for both Nexus group and DPD group to be deleted
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
     wait_for_group_deleted_from_dpd(cptestctx, external_multicast_ip).await;
 }
 
@@ -313,9 +341,9 @@ async fn test_instance_multicast_endpoints(
     let instance_name = "test-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",
@@ -353,7 +381,8 @@ async fn test_instance_multicast_endpoints(
     let instance_join_group1_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group1_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     // Use PUT method and expect 201 Created (implicitly creating group1)
     let member1: MulticastGroupMember =
         put_upsert(client, &instance_join_group1_url, &join_params).await;
@@ -397,7 +426,8 @@ async fn test_instance_multicast_endpoints(
     let join_group2_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group2_name}?project={project_name}"
     );
-    let join_params2 = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params2 =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     let member2: MulticastGroupMember =
         put_upsert(client, &join_group2_url, &join_params2).await;
     assert_eq!(member2.instance_id, instance.identity.id);
@@ -461,7 +491,7 @@ async fn test_instance_multicast_endpoints(
     object_delete(client, &instance_leave_group1_url).await;
 
     // Implicit deletion model: group1 should be deleted after last member leaves
-    wait_for_group_deleted(client, group1_name).await;
+    wait_for_group_deleted(cptestctx, group1_name).await;
 
     // Verify membership removed from both views
     // Check instance-centric view - should only show active memberships (group2)
@@ -515,8 +545,8 @@ async fn test_instance_multicast_endpoints(
 
     // Implicit deletion model: Groups should be implicitly deleted after last member removed
     ops::join2(
-        wait_for_group_deleted(client, group1_name),
-        wait_for_group_deleted(client, group2_name),
+        wait_for_group_deleted(cptestctx, group1_name),
+        wait_for_group_deleted(cptestctx, group2_name),
     )
     .await;
 }
@@ -531,9 +561,9 @@ async fn test_multicast_group_member_errors(
     let nonexistent_instance = "nonexistent-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",
@@ -558,7 +588,8 @@ async fn test_multicast_group_member_errors(
     let bad_join_url = format!(
         "/v1/instances/{nonexistent_instance}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     object_put_error(
         client,
         &bad_join_url,
@@ -568,7 +599,7 @@ async fn test_multicast_group_member_errors(
     .await;
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 #[nexus_test]
@@ -580,9 +611,9 @@ async fn test_lookup_multicast_group_by_ip(
     let group_name = "test-lookup-group";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",
@@ -621,7 +652,7 @@ async fn test_lookup_multicast_group_by_ip(
     object_get_error(client, &lookup_bad_url, StatusCode::NOT_FOUND).await;
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 #[nexus_test]
@@ -634,9 +665,9 @@ async fn test_instance_deletion_removes_multicast_memberships(
     let instance_name = "deletion-test-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "mcast-pool",
@@ -676,7 +707,6 @@ async fn test_instance_deletion_removes_multicast_memberships(
     assert_eq!(members[0].instance_id, instance.identity.id);
 
     // Case: Instance deletion should clean up multicast memberships
-    // Use the helper function for proper instance deletion (handles Starting state)
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
 
     // Verify instance is gone
@@ -686,7 +716,7 @@ async fn test_instance_deletion_removes_multicast_memberships(
     object_get_error(client, &instance_url, StatusCode::NOT_FOUND).await;
 
     // Implicit model: group is implicitly deleted when last member (instance) is removed
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 
     // Wait for reconciler to clean up DPD state (activates reconciler repeatedly until DPD confirms deletion)
     wait_for_group_deleted_from_dpd(cptestctx, multicast_ip).await;
@@ -704,9 +734,9 @@ async fn test_member_response_includes_multicast_ip(
     let instance_name = "test-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "test-pool",
@@ -723,7 +753,8 @@ async fn test_member_response_includes_multicast_ip(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     // Add member and verify multicast_ip field is present in response
     let added_member: MulticastGroupMember =
@@ -776,7 +807,7 @@ async fn test_member_response_includes_multicast_ip(
     .await
     .expect("Should remove member");
 
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 
     // Re-create group by adding member again
     let readded_member: MulticastGroupMember =
@@ -802,7 +833,7 @@ async fn test_member_response_includes_multicast_ip(
     .await
     .expect("Should remove member for cleanup");
 
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Test that we cannot delete a multicast IP pool when multicast groups are
@@ -824,9 +855,9 @@ async fn test_cannot_delete_multicast_pool_with_groups(
     let instance_name = "pool-test-instance";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             client,
             pool_name,
@@ -890,7 +921,7 @@ async fn test_cannot_delete_multicast_pool_with_groups(
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 
     // Now we should be able to delete the range
     NexusRequest::new(
@@ -944,9 +975,9 @@ async fn test_source_ip_validation_on_join(
     let ssm_ip = "232.1.0.100";
 
     // Create project and IP pools in parallel
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "source-ip-mcast-pool",
@@ -969,8 +1000,10 @@ async fn test_source_ip_validation_on_join(
     let join_url1 = format!(
         "/v1/instances/{instance_name}/multicast-groups/{ssm_ip}?project={project_name}"
     );
-    let join_body1 =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source1]) };
+    let join_body1 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source1]),
+        ip_version: None,
+    };
     put_upsert::<_, MulticastGroupMember>(client, &join_url1, &join_body1)
         .await;
 
@@ -983,8 +1016,10 @@ async fn test_source_ip_validation_on_join(
     let join_url2 = format!(
         "/v1/instances/{instance2_name}/multicast-groups/{ssm_ip}?project={project_name}"
     );
-    let join_body2 =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source1, source2]) };
+    let join_body2 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source1, source2]),
+        ip_version: None,
+    };
     put_upsert::<_, MulticastGroupMember>(client, &join_url2, &join_body2)
         .await;
 
@@ -1004,8 +1039,10 @@ async fn test_source_ip_validation_on_join(
     let join_url3 = format!(
         "/v1/instances/{instance3_name}/multicast-groups/{ssm_ip}?project={project_name}"
     );
-    let join_body3 =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![source3]) };
+    let join_body3 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source3]),
+        ip_version: None,
+    };
     put_upsert::<_, MulticastGroupMember>(client, &join_url3, &join_body3)
         .await;
 
@@ -1086,12 +1123,15 @@ async fn test_source_ip_validation_on_join(
         &[instance_name, instance2_name, instance3_name],
     )
     .await;
-    wait_for_group_deleted(client, ssm_ip).await;
+    wait_for_group_deleted(cptestctx, ssm_ip).await;
 }
 
 /// Test that source IP address family must match multicast group address family.
 ///
 /// IPv4 multicast groups can only have IPv4 source IPs, and vice versa.
+/// This test covers both directions:
+/// - IPv6 sources with IPv4 group (fails)
+/// - IPv4 sources with IPv6 group (fails)
 #[nexus_test]
 async fn test_source_ip_address_family_validation(
     cptestctx: &ControlPlaneTestContext,
@@ -1103,16 +1143,17 @@ async fn test_source_ip_address_family_validation(
     // IPv4 SSM address
     let ipv4_ssm_ip = "232.5.0.100";
 
-    // Create project and pools
-    ops::join3(
+    // Create project and both IPv4 and IPv6 multicast pools
+    ops::join4(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
-            "addr-family-mcast-pool",
+            "addr-family-mcast-pool-v4",
             (232, 5, 0, 1),
             (232, 5, 0, 255),
         ),
+        create_multicast_ip_pool_v6(&client, "addr-family-mcast-pool-v6"),
     )
     .await;
 
@@ -1123,8 +1164,10 @@ async fn test_source_ip_address_family_validation(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{ipv4_ssm_ip}?project={project_name}"
     );
-    let join_body =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![ipv6_source]) };
+    let join_body = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![ipv6_source]),
+        ip_version: None,
+    };
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &join_url)
@@ -1138,10 +1181,40 @@ async fn test_source_ip_address_family_validation(
     .parsed_body::<dropshot::HttpErrorResponseBody>()
     .expect("Should parse error body");
 
-    assert!(
-        error.message.contains("does not match multicast group address family"),
-        "Error should mention address family mismatch: {}",
-        error.message
+    assert_eq!(
+        error.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for IPv6 source with IPv4 group, got: {:?}",
+        error.error_code
+    );
+
+    // Try to join IPv6 group with IPv4 source - should fail
+    let ipv4_source: IpAddr = "10.0.0.1".parse().unwrap();
+    let join_url_v6 = format!(
+        "/v1/instances/{instance_name}/multicast-groups/ipv6-mismatch-group?project={project_name}"
+    );
+    let join_body_v6 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![ipv4_source]),
+        ip_version: Some(IpVersion::V6),
+    };
+
+    let error_v6 = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &join_url_v6)
+            .body(Some(&join_body_v6))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Request should complete")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .expect("Should parse error body");
+
+    assert_eq!(
+        error_v6.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for IPv4 source with IPv6 group, got: {:?}",
+        error_v6.error_code
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
@@ -1163,9 +1236,9 @@ async fn test_default_pool_on_implicit_creation(
     let instance_name = "default-pool-test-instance";
 
     // Setup: project and default IP pool in parallel (but no multicast pool yet)
-    let (_, _) = ops::join2(
+    ops::join2(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
     )
     .await;
     create_instance(client, project_name, instance_name).await;
@@ -1174,13 +1247,22 @@ async fn test_default_pool_on_implicit_creation(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     object_put_error(client, &join_url, &join_params, StatusCode::BAD_REQUEST)
         .await;
 
-    // Create a default multicast pool
-    let mcast_pool =
-        create_multicast_ip_pool(&client, "default-mcast-pool").await;
+    // Create a multicast pool using resource_helpers (doesn't auto-link)
+    let (mcast_pool, _) =
+        nexus_test_utils::resource_helpers::create_multicast_ip_pool(
+            &client,
+            "default-mcast-pool",
+            None,
+        )
+        .await;
+
+    // Link as default so it can be auto-discovered when joining by name
+    link_ip_pool(&client, "default-mcast-pool", &DEFAULT_SILO.id(), true).await;
 
     // Case: Joining when multicast pool exists - should succeed (pool auto-discovered)
     multicast_group_attach(cptestctx, project_name, instance_name, group_name2)
@@ -1193,7 +1275,7 @@ async fn test_default_pool_on_implicit_creation(
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name2).await;
+    wait_for_group_deleted(cptestctx, group_name2).await;
 }
 
 /// Test pool range allocation for multicast groups.
@@ -1207,9 +1289,9 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
 
     // Create project and IP pools in parallel
     // Multicast pool has small range (3 IPs: 224.10.0.1-224.10.0.3)
-    let (_, _, _) = ops::join3(
+    ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "small-range-pool",
@@ -1245,7 +1327,8 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
     let join_url4 = format!(
         "/v1/instances/{instance_name4}/multicast-groups/{group_name4}?project={project_name}"
     );
-    let join_params4 = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params4 =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     let error = object_put_error(
         client,
         &join_url4,
@@ -1253,18 +1336,17 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
         StatusCode::INSUFFICIENT_STORAGE, // or appropriate error code
     )
     .await;
-    assert!(
-        error.message.contains("IP")
-            || error.message.contains("exhausted")
-            || error.message.contains("available"),
-        "Error should mention IP exhaustion: {}",
-        error.message
+    assert_eq!(
+        error.error_code,
+        Some("InsufficientCapacity".to_string()),
+        "Expected InsufficientCapacity for pool exhaustion, got: {:?}",
+        error.error_code
     );
 
     // Case: Delete one group (by removing all members)
     cleanup_instances(cptestctx, client, project_name, &[instance_names[0]])
         .await;
-    wait_for_group_deleted(client, "range-group-0").await;
+    wait_for_group_deleted(cptestctx, "range-group-0").await;
 
     // Case: Create new group - should succeed (IP reclaimed)
     let group_name_new = "range-group-new";
@@ -1286,112 +1368,6 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
     .await;
 }
 
-/// Test that groups are allocated from the auto-discovered pool.
-///
-/// Pool selection is automatic - when multiple pools exist, the first one
-/// alphabetically is used (after preferring any default pool).
-#[nexus_test]
-async fn test_automatic_pool_selection(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let project_name = "pool-selection-test-project";
-    let instance_name = "pool-selection-instance";
-
-    // Setup: project and default IP pool in parallel
-    let (_, _) = ops::join2(
-        create_project(&client, project_name),
-        create_default_ip_pool(&client),
-    )
-    .await;
-    create_instance(client, project_name, instance_name).await;
-
-    // Create a multicast pool (after instance, to test auto-discovery)
-    let mcast_pool = create_multicast_ip_pool_with_range(
-        &client,
-        "mcast-pool",
-        (224, 20, 0, 1),
-        (224, 20, 0, 10),
-    )
-    .await;
-
-    // Case: Join group - pool is auto-discovered
-    let group_name = "auto-pool-group";
-    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
-        .await;
-
-    let group_view: MulticastGroup =
-        object_get(client, &mcast_group_url(group_name)).await;
-    // Pool is auto-discovered from available multicast pools
-    assert_eq!(group_view.ip_pool_id, mcast_pool.identity.id);
-    // Verify IP is in pool's range (224.20.0.x)
-    if let IpAddr::V4(ip) = group_view.multicast_ip {
-        assert_eq!(ip.octets()[0], 224);
-        assert_eq!(ip.octets()[1], 20);
-    } else {
-        panic!("Expected IPv4 multicast address");
-    }
-
-    // Cleanup
-    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(client, group_name).await;
-}
-
-/// Test validation errors for pool exhaustion.
-#[nexus_test]
-async fn test_pool_exhaustion(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let project_name = "pool-exhaustion-test-project";
-
-    // Create project and IP pools in parallel (multicast pool has single IP)
-    let (_, _, _) = ops::join3(
-        create_project(&client, project_name),
-        create_default_ip_pool(&client),
-        create_multicast_ip_pool_with_range(
-            &client,
-            "empty-pool",
-            (224, 99, 0, 1),
-            (224, 99, 0, 1), // Single IP
-        ),
-    )
-    .await;
-
-    // Use the single IP
-    let instance_name = "pool-exhaust-instance";
-    create_instance(client, project_name, instance_name).await;
-    let group_exhaust = "exhaust-empty-pool";
-    multicast_group_attach(
-        cptestctx,
-        project_name,
-        instance_name,
-        group_exhaust,
-    )
-    .await;
-
-    // Now try to create another group - should fail
-    let instance2_name = "pool-exhaust-instance-2";
-    create_instance(client, project_name, instance2_name).await;
-    let group_fail = "fail-empty-pool";
-    let join_url_fail = format!(
-        "/v1/instances/{instance2_name}/multicast-groups/{group_fail}?project={project_name}"
-    );
-    let join_params_fail = InstanceMulticastGroupJoin { source_ips: None };
-    object_put_error(
-        client,
-        &join_url_fail,
-        &join_params_fail,
-        StatusCode::INSUFFICIENT_STORAGE,
-    )
-    .await;
-
-    // Cleanup
-    cleanup_instances(
-        cptestctx,
-        client,
-        project_name,
-        &[instance_name, instance2_name],
-    )
-    .await;
-}
-
 /// Test multiple instances joining different SSM groups from the same SSM pool.
 ///
 /// Verifies:
@@ -1408,7 +1384,7 @@ async fn test_multiple_ssm_groups_same_pool(
     // Create project and IP pools in parallel
     let (_, _, ssm_pool) = ops::join3(
         create_project(&client, project_name),
-        create_default_ip_pool(&client),
+        create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
             "ssm-shared-pool",
@@ -1439,6 +1415,7 @@ async fn test_multiple_ssm_groups_same_pool(
         );
         let join_params = InstanceMulticastGroupJoin {
             source_ips: Some(vec![source_ip.parse().unwrap()]),
+            ip_version: None,
         };
         put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_params)
             .await;
@@ -1524,8 +1501,10 @@ async fn test_multiple_ssm_groups_same_pool(
     let join_url_diff_source = format!(
         "/v1/instances/{instance4_name}/multicast-groups/ssm-group-1?project={project_name}"
     );
-    let join_params_diff_source =
-        InstanceMulticastGroupJoin { source_ips: Some(vec![different_source]) };
+    let join_params_diff_source = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![different_source]),
+        ip_version: None,
+    };
     put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url_diff_source,
@@ -1550,6 +1529,90 @@ async fn test_multiple_ssm_groups_same_pool(
 
     // Verify all groups are deleted
     for (group_name, _) in &group_configs {
-        wait_for_group_deleted(client, group_name).await;
+        wait_for_group_deleted(cptestctx, group_name).await;
     }
+}
+
+/// Test multicast pool selection with custom ASM range.
+///
+/// Verifies that joining a multicast group by name correctly allocates
+/// from a linked multicast pool, and that joining by explicit IP also works.
+///
+/// Note: The V4+V6 conflict scenario (where both default pools exist and the
+/// system cannot determine which to use) is tested at the datastore level in
+/// `nexus/db-queries/src/db/datastore/ip_pool.rs::test_ip_pools_fetch_asm_multicast_version_conflict`
+/// because IPv6 ranges cannot be added via the HTTP API (they're rejected).
+#[nexus_test]
+async fn test_multicast_group_ip_version_conflict(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Setup: create project and default unicast IP pool
+    let project_name = "ip-version-conflict-project";
+    let instance_name = "ip-version-conflict-instance";
+    ops::join2(
+        create_project(client, project_name),
+        create_default_ip_pools(client),
+    )
+    .await;
+
+    // Create IPv4 multicast pool using local helper (creates + adds range + links)
+    let v4_pool = create_multicast_ip_pool_with_range(
+        client,
+        "v4-mcast-conflict-pool",
+        (224, 11, 0, 1),
+        (224, 11, 0, 100),
+    )
+    .await;
+
+    // Create instance for joining
+    create_instance(client, project_name, instance_name).await;
+
+    // Join by name should succeed (V4 pool auto-discovered)
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/conflict-test-group?project={project_name}"
+    );
+    put_upsert::<_, MulticastGroupMember>(
+        client,
+        &join_url,
+        &InstanceMulticastGroupJoin { source_ips: None, ip_version: None },
+    )
+    .await;
+
+    // Join by explicit IP should also succeed (pool auto-discovered from IP)
+    let explicit_ip = "224.11.0.50";
+    let explicit_ip_join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{explicit_ip}?project={project_name}"
+    );
+    put_upsert::<_, MulticastGroupMember>(
+        client,
+        &explicit_ip_join_url,
+        &InstanceMulticastGroupJoin { source_ips: None, ip_version: None },
+    )
+    .await;
+
+    // Wait for group to become active
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+    // Verify the group was created with IPv4 address from V4 pool
+    let groups: ResultsPage<MulticastGroup> =
+        object_get(client, "/v1/multicast-groups").await;
+    let group = groups
+        .items
+        .iter()
+        .find(|g| g.multicast_ip == explicit_ip.parse::<IpAddr>().unwrap())
+        .expect("Should find group with explicit IP");
+
+    assert!(group.multicast_ip.is_ipv4(), "Expected IPv4 address");
+    assert_eq!(group.ip_pool_id, v4_pool.identity.id, "Should use V4 pool");
+
+    // Cleanup
+    let ip_based_group_name =
+        format!("mcast-{}", explicit_ip.replace('.', "-"));
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+
+    // Wait for both groups to be deleted (test creates two groups)
+    wait_for_group_deleted(cptestctx, "conflict-test-group").await;
+    wait_for_group_deleted(cptestctx, &ip_based_group_name).await;
 }

@@ -177,6 +177,7 @@ impl HostPhase2SledAgentContext {
 struct HostPhase2SledAgentImpl;
 
 mod api_impl {
+
     use super::HostPhase2SledAgentContext;
     use super::HostPhase2SledAgentImpl;
     use camino::Utf8PathBuf;
@@ -240,15 +241,16 @@ mod api_impl {
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::ConfigReconcilerInventory;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HealthMonitorInventory;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::Inventory;
     use sled_agent_types::inventory::ManifestInventory;
     use sled_agent_types::inventory::MupdateOverrideInventory;
+    use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
-    use sled_agent_types::inventory::ZoneImageResolverInventory;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::support_bundle::RangeRequestHeaders;
@@ -268,6 +270,7 @@ mod api_impl {
     use sled_agent_types::zone_bundle::ZonePathParam;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
     use std::time::Duration;
 
     // We only implement endpoints required for testing host OS updates. All
@@ -339,6 +342,7 @@ mod api_impl {
                     slot_a: HostPhase2DesiredContents::CurrentContents,
                     slot_b: HostPhase2DesiredContents::CurrentContents,
                 },
+                measurements: BTreeSet::new(),
             };
 
             Ok(HttpResponseOk(Inventory {
@@ -364,11 +368,20 @@ mod api_impl {
                     datasets: BTreeMap::new(),
                     orphaned_datasets: IdOrdMap::new(),
                     zones: BTreeMap::new(),
+                    measurements: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
-                zone_image_resolver: ZoneImageResolverInventory {
+                file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {
+                        boot_disk_path: Utf8PathBuf::new(),
+                        boot_inventory: Err(
+                            "not implemented by HostPhase2SledAgentImpl"
+                                .to_string(),
+                        ),
+                        non_boot_status: IdOrdMap::new(),
+                    },
+                    measurement_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
                         boot_inventory: Err(
                             "not implemented by HostPhase2SledAgentImpl"
@@ -385,6 +398,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
+                health_monitor: HealthMonitorInventory::new(),
             }))
         }
 
@@ -932,6 +946,81 @@ mod api_impl {
             _request_context: RequestContext<Self::Context>,
             _path_params: Path<LocalStoragePathParam>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_reconfigure(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<trust_quorum_types::messages::ReconfigureMsg>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_upgrade_from_lrtq(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<trust_quorum_types::messages::LrtqUpgradeMsg>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<trust_quorum_types::messages::CommitRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_coordinator_status(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<
+                Option<trust_quorum_types::status::CoordinatorStatus>,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_prepare_and_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                trust_quorum_types::messages::PrepareAndCommitRequest,
+            >,
+        ) -> Result<
+            HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_proxy_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::ProxyCommitRequest,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_proxy_prepare_and_commit(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::ProxyPrepareAndCommitRequest,
+            >,
+        ) -> Result<
+            HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_proxy_status(
+            _request_context: RequestContext<Self::Context>,
+            _query_params: Query<sled_hardware_types::BaseboardId>,
+        ) -> Result<
+            HttpResponseOk<trust_quorum_types::status::NodeStatus>,
+            HttpError,
+        > {
             unimplemented!()
         }
     }

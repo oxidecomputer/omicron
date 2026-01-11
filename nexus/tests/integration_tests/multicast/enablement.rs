@@ -7,7 +7,7 @@
 //! TODO: Remove once we have full multicast support in PROD.
 
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_project, object_get,
+    create_default_ip_pools, create_project, object_get,
 };
 use omicron_common::api::external::{Instance, InstanceState};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
@@ -38,8 +38,8 @@ async fn test_multicast_enablement() {
     let client = &cptestctx.external_client;
 
     // Create project and pools in parallel
-    let (_, _, _) = ops::join3(
-        create_default_ip_pool(&client),
+    ops::join3(
+        create_default_ip_pools(&client),
         create_project(client, PROJECT_NAME),
         create_multicast_ip_pool(client, "test-pool"),
     )
@@ -237,10 +237,11 @@ async fn test_multicast_enablement() {
     // Verify the error message indicates multicast is disabled
     let error: dropshot::HttpErrorResponseBody =
         attach_response.parsed_body().expect("Should parse error body");
-    assert!(
-        error.message.contains("multicast functionality is currently disabled"),
-        "Error message should indicate multicast is disabled, got: {}",
-        error.message
+    assert_eq!(
+        error.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for multicast disabled, got: {:?}",
+        error.error_code
     );
 
     cptestctx.teardown().await;

@@ -8,14 +8,6 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-chrono.workspace = true
-csv.workspace = true
-omicron-common.workspace = true
+cockroach-admin-types-versions.workspace = true
 omicron-workspace-hack.workspace = true
-schemars.workspace = true
 serde.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
-proptest.workspace = true
-test-strategy.workspace = true

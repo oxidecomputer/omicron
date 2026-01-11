@@ -21,7 +21,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -227,14 +227,10 @@ impl DataStore {
         // For this blueprint: The set of all expunged Nexus zones that are
         // ready for cleanup
         let invalid_nexus_zones = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
-            .filter_map(|(_sled, zone)| {
-                if zone.zone_type.is_nexus() {
-                    Some(zone.id.into_untyped_uuid())
-                } else {
-                    None
-                }
-            })
+            .expunged_nexus_zones_ready_for_cleanup(
+                BlueprintExpungedZoneAccessReason::NexusSupportBundleReassign,
+            )
+            .map(|(_sled, zone, _nexus_config)| zone.id.into_untyped_uuid())
             .collect::<Vec<Uuid>>();
 
         // For this blueprint: The set of expunged debug datasets
@@ -544,6 +540,7 @@ mod test {
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::SimRngState;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;

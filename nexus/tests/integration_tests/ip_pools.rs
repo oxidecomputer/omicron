@@ -594,7 +594,7 @@ async fn cannot_unlink_ip_pool_with_outstanding_instance_ips(
     let nexus = &apictx.nexus;
 
     // Create a project and add a default IP Pool.
-    const POOL_NAME: &str = "default";
+    const POOL_NAME: &str = "default-v4";
     let proj = create_project_and_pool(client).await;
 
     // Create an instance, which allocates an IP address.
@@ -650,7 +650,7 @@ async fn cannot_unlink_ip_pool_with_outstanding_floating_ips(
     let client = &cptestctx.external_client;
 
     // Create a project and add a default IP Pool.
-    const POOL_NAME: &str = "default";
+    const POOL_NAME: &str = "default-v4";
     let proj = create_project_and_pool(client).await;
 
     // Create a floating IP from the pool.
@@ -1159,74 +1159,6 @@ async fn test_bad_ip_ranges(
         );
         assert_eq!(error.message, expected_message);
     }
-}
-
-// Support for IPv6 ranges removed in
-// https://github.com/oxidecomputer/omicron/pull/5107
-// Delete this test when we support IPv6 again.
-#[nexus_test]
-async fn test_ip_pool_range_rejects_v6(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-
-    create_ip_pool(client, "p0", None).await;
-
-    let range = IpRange::V6(
-        Ipv6Range::new(
-            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
-            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
-        )
-        .unwrap(),
-    );
-
-    let add_url = "/v1/system/ip-pools/p0/ranges/add";
-    let error =
-        object_create_error(client, add_url, &range, StatusCode::BAD_REQUEST)
-            .await;
-
-    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
-
-    // same deal with service pool
-    let add_url = "/v1/system/ip-pools-service/ranges/add";
-    let error =
-        object_create_error(client, add_url, &range, StatusCode::BAD_REQUEST)
-            .await;
-    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
-}
-
-// Support for IPv6 multicast ranges not enabled yet.
-// Delete this test when we support IPv6 multicast ranges.
-#[nexus_test]
-async fn test_ip_pool_multicast_range_rejects_v6(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    // Create a multicast pool
-    let pool_params = IpPoolCreate::new_multicast(
-        IdentityMetadataCreateParams {
-            name: "mcast-p0".parse().unwrap(),
-            description: "Multicast pool for IPv6 rejection test".to_string(),
-        },
-        IpVersion::V4,
-    );
-    object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
-        .await;
-
-    // Try to add an IPv6 multicast range (ff30::/12 is SSM)
-    let range = IpRange::V6(
-        Ipv6Range::new(
-            std::net::Ipv6Addr::new(0xff30, 0, 0, 0, 0, 0, 0, 10),
-            std::net::Ipv6Addr::new(0xff30, 0, 0, 0, 0, 0, 0, 20),
-        )
-        .unwrap(),
-    );
-
-    let add_url = "/v1/system/ip-pools/mcast-p0/ranges/add";
-    let error =
-        object_create_error(client, add_url, &range, StatusCode::BAD_REQUEST)
-            .await;
-
-    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
 }
 
 /// Test that multicast pools reject reserved IPv4 multicast address ranges.

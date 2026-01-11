@@ -1272,7 +1272,7 @@ pub struct ClickhouseClusterConfigDiffTables {
 
 impl ClickhouseClusterConfigDiffTables {
     pub fn diff_collection_and_blueprint(
-        before: &clickhouse_admin_types::ClickhouseKeeperClusterMembership,
+        before: &clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership,
         after: &ClickhouseClusterConfig,
     ) -> Self {
         let leader_committed_log_index = if before.leader_committed_log_index
@@ -1526,7 +1526,7 @@ impl ClickhouseClusterConfigDiffTables {
     /// We are diffing a `Collection` and `Blueprint` but  the latest blueprint
     /// does not have a ClickhouseClusterConfig.
     pub fn removed_from_collection(
-        before: &clickhouse_admin_types::ClickhouseKeeperClusterMembership,
+        before: &clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership,
     ) -> Self {
         // There's only so much information in a collection. Show what we can.
         let metadata = KvList::new(

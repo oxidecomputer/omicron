@@ -46,20 +46,12 @@
 //! for collision avoidance.
 //!
 //! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
-//!
-//! # TODO: Egress Support
-//!
-//! The current implementation supports **ingress-into-the-rack multicast**:
-//! external multicast sources sending traffic to instances within the rack.
-//! Egress multicast (instances sending to external receivers out-of-the-rack)
-//! is not yet supported.
 
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use ipnetwork::IpNetwork;
 use ref_cast::RefCast;
-use slog::error;
+use slog::{debug, error};
 
 use nexus_db_lookup::{LookupPath, lookup};
 use nexus_db_model::Name;
@@ -109,11 +101,9 @@ pub(crate) mod dataplane;
 /// - `Err` if SSM address without sources
 pub(crate) fn validate_ssm_sources(
     group_ip: std::net::IpAddr,
-    source_ips: &Option<Vec<std::net::IpAddr>>,
+    source_ips: Option<&[std::net::IpAddr]>,
 ) -> Result<(), external::Error> {
-    if is_ssm_address(group_ip)
-        && source_ips.as_ref().is_none_or(|s| s.is_empty())
-    {
+    if is_ssm_address(group_ip) && source_ips.is_none_or(|s| s.is_empty()) {
         return Err(external::Error::invalid_request(
             "SSM multicast addresses require at least one source IP",
         ));
@@ -248,12 +238,14 @@ impl super::Nexus {
     ) -> Result<views::MulticastGroup, external::Error> {
         let group_id = MulticastGroupUuid::from_untyped_uuid(group.identity.id);
 
-        let source_ips_map = self
+        let filter_state_map = self
             .db_datastore
-            .multicast_groups_source_ips_union(opctx, &[group_id])
+            .multicast_groups_source_filter_state(opctx, &[group_id])
             .await?;
-        let source_ips =
-            source_ips_map.get(&group.identity.id).cloned().unwrap_or_default();
+        let source_ips = filter_state_map
+            .get(&group.identity.id)
+            .map(|state| state.specific_sources.iter().copied().collect())
+            .unwrap_or_default();
 
         Ok(ExternalMulticastGroupWithSources { group, source_ips }.into())
     }
@@ -309,17 +301,19 @@ impl super::Nexus {
             .iter()
             .map(|g| MulticastGroupUuid::from_untyped_uuid(g.identity.id))
             .collect();
-        let source_ips_map = self
+        let filter_state_map = self
             .db_datastore
-            .multicast_groups_source_ips_union(opctx, &group_ids)
+            .multicast_groups_source_filter_state(opctx, &group_ids)
             .await?;
 
         Ok(groups
             .into_iter()
             .map(|group| {
-                let source_ips = source_ips_map
+                let source_ips = filter_state_map
                     .get(&group.identity.id)
-                    .cloned()
+                    .map(|state| {
+                        state.specific_sources.iter().copied().collect()
+                    })
                     .unwrap_or_default();
                 ExternalMulticastGroupWithSources { group, source_ips }.into()
             })
@@ -339,12 +333,14 @@ impl super::Nexus {
     /// - **IP/name joins**: Creates the group implicitly if it doesn't exist
     /// - **ID joins**: The group must already exist (returns error otherwise)
     /// - **Source IPs**: Optional for ASM, required for SSM addresses (232/8, ff3x::/32)
+    /// - **IP version**: Required when joining by name if multiple default pools exist
     pub(crate) async fn instance_join_multicast_group(
         self: &Arc<Self>,
         opctx: &OpContext,
         group_identifier: &params::MulticastGroupIdentifier,
         instance_lookup: &lookup::Instance<'_>,
-        source_ips: &Option<Vec<IpAddr>>,
+        source_ips: Option<&[IpAddr]>,
+        ip_version: Option<external::IpVersion>,
     ) -> CreateResult<db::model::MulticastGroupMember> {
         // Check if multicast is enabled
         if !self.multicast_enabled() {
@@ -369,6 +365,7 @@ impl super::Nexus {
                     opctx,
                     name.clone().into(),
                     source_ips,
+                    ip_version,
                 )
                 .await?
             }
@@ -377,11 +374,6 @@ impl super::Nexus {
             }
         };
 
-        // Convert source IPs to IpNetwork for storage.
-        let source_networks: Option<Vec<IpNetwork>> = source_ips
-            .as_ref()
-            .map(|ips| ips.iter().copied().map(IpNetwork::from).collect());
-
         // Attach the member with its source IPs
         let member = self
             .db_datastore
@@ -389,7 +381,7 @@ impl super::Nexus {
                 opctx,
                 group_id,
                 InstanceUuid::from_untyped_uuid(authz_instance.id()),
-                source_networks,
+                source_ips,
             )
             .await?;
 
@@ -409,7 +401,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         ip: IpAddr,
-        source_ips: &Option<Vec<IpAddr>>,
+        source_ips: Option<&[IpAddr]>,
     ) -> Result<MulticastGroupUuid, external::Error> {
         // Source IPs must match the multicast group's address family
         validate_source_address_family(ip, source_ips)?;
@@ -447,6 +439,8 @@ impl super::Nexus {
             },
             multicast_ip: Some(ip),
             has_sources,
+            // IP version is determined by the multicast IP address itself
+            ip_version: None,
         };
 
         // Create the group; on conflict -> re-lookup
@@ -489,7 +483,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name: Name,
-        source_ips: &Option<Vec<IpAddr>>,
+        source_ips: Option<&[IpAddr]>,
+        ip_version: Option<external::IpVersion>,
     ) -> Result<MulticastGroupUuid, external::Error> {
         let selector = params::MulticastGroupSelector {
             multicast_group: params::MulticastGroupIdentifier::Name(
@@ -524,6 +519,7 @@ impl super::Nexus {
             },
             multicast_ip: None,
             has_sources,
+            ip_version,
         };
 
         // Create the group; on conflict -> re-lookup
@@ -581,7 +577,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         id: uuid::Uuid,
-        source_ips: &Option<Vec<IpAddr>>,
+        source_ips: Option<&[IpAddr]>,
     ) -> Result<MulticastGroupUuid, external::Error> {
         let selector = params::MulticastGroupSelector {
             multicast_group: params::MulticastGroupIdentifier::Id(id),
@@ -652,11 +648,13 @@ impl super::Nexus {
     ///
     /// - Address family mismatch between group and source IPs
     /// - SSM address without sources (any identifier type)
+    /// - Multiple default pools with different IP versions without `ip_version`
     pub(crate) async fn resolve_multicast_group_identifier_with_sources(
         &self,
         opctx: &OpContext,
         identifier: &params::MulticastGroupIdentifier,
-        source_ips: &Option<Vec<IpAddr>>,
+        source_ips: Option<&[IpAddr]>,
+        ip_version: Option<external::IpVersion>,
     ) -> Result<MulticastGroupUuid, external::Error> {
         match identifier {
             params::MulticastGroupIdentifier::Ip(ip) => {
@@ -668,6 +666,7 @@ impl super::Nexus {
                     opctx,
                     name.clone().into(),
                     source_ips,
+                    ip_version,
                 )
                 .await
             }
@@ -732,15 +731,22 @@ impl super::Nexus {
         // The NOT EXISTS guard in the datastore method prevents race conditions
         // where a concurrent join could slip in between a "list members" check
         // and the mark-for-removal call.
-        let _ = self
+        if self
             .db_datastore
             .mark_multicast_group_for_removal_if_no_members(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(authz_group.id()),
             )
-            .await?;
+            .await?
+        {
+            debug!(
+                opctx.log,
+                "marked multicast group for removal (last member left)";
+                "group_id" => %authz_group.id(),
+            );
+        }
 
-        // Activate reconciler to process the member removal (and group deletion if triggered)
+        // Activate reconciler to process the member removal (and group deletion if applicable)
         self.background_tasks.task_multicast_reconciler.activate();
         Ok(())
     }
@@ -787,29 +793,24 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> ListResultVec<views::MulticastGroupMember> {
+        pagparams: &DataPageParams<'_, uuid::Uuid>,
+    ) -> ListResultVec<db::model::MulticastGroupMember> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Read).await?;
-        let members = self
-            .db_datastore
+        self.db_datastore
             .multicast_group_members_list_by_instance(
                 opctx,
                 InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                pagparams,
             )
-            .await?;
-        members
-            .into_iter()
-            .map(views::MulticastGroupMember::try_from)
-            .collect::<Result<Vec<_>, _>>()
+            .await
     }
 }
-
-// Private helpers for join logic
 
 /// Validate that source IPs match the multicast group's address family.
 fn validate_source_address_family(
     multicast_ip: IpAddr,
-    source_ips: &Option<Vec<IpAddr>>,
+    source_ips: Option<&[IpAddr]>,
 ) -> Result<(), external::Error> {
     let Some(sources) = source_ips else {
         return Ok(());
