@@ -418,7 +418,7 @@ impl Zpool {
     }
 
     /// Lists zpools that are in a unhealthy non-functional state. Specifically
-    /// if they are in the follwoing states:
+    /// if they are in the following states:
     ///
     ///  - Faulted
     ///  - Offline
@@ -479,6 +479,73 @@ ONLINE  rpool
             vec!["fakepool1".to_string(), "fakepool2".to_string()]
         );
         assert_eq!(result.errors.len(), 0);
+        assert!(result.time_of_status.is_some());
+    }
+
+    #[test]
+    fn test_unhealthy_zpool_parse_none_success() {
+        let output = r#"DEGRADED fakepool1
+ONLINE   fakepool2
+ONLINE   rpool
+"#;
+
+        let log = log();
+        let result = UnhealthyZpoolsResult::parse(&log, output.as_bytes());
+
+        // We want to make sure we only have zero unhealthy pools
+        assert_eq!(result.zpools.len(), 0);
+        assert_eq!(result.errors.len(), 0);
+        assert!(result.time_of_status.is_some());
+    }
+
+    #[test]
+    fn test_unhealthy_zpool_empty_success() {
+        let output = r#""#;
+
+        let log = log();
+        let result = UnhealthyZpoolsResult::parse(&log, output.as_bytes());
+
+        // We want to make sure we only have zero unhealthy pools
+        assert_eq!(result.zpools.len(), 0);
+        assert_eq!(result.errors.len(), 0);
+        assert!(result.time_of_status.is_some());
+    }
+
+    #[test]
+    fn test_unhealthy_zpool_parse_unknown_status_fail() {
+        let output = r#"BARNACLES! fakepool1
+FAULTED fakepool2
+ONLINE  rpool
+"#;
+
+        let log = log();
+        let result = UnhealthyZpoolsResult::parse(&log, output.as_bytes());
+
+        assert_eq!(result.zpools, vec!["fakepool2".to_string()]);
+        assert_eq!(
+            result.errors,
+            vec![
+                "Failed to parse output: Unrecognized zpool 'health': BARNACLES!"
+                .to_string(),
+            ]
+        );
+        assert!(result.time_of_status.is_some());
+    }
+
+    #[test]
+    fn test_unhealthy_zpool_parse_zpool_fail() {
+        let output = r#"FAULTED
+ONLINE  rpool
+"#;
+
+        let log = log();
+        let result = UnhealthyZpoolsResult::parse(&log, output.as_bytes());
+
+        assert_eq!(result.zpools.len(), 0);
+        assert_eq!(
+            result.errors,
+            vec!["Unexpected output line: FAULTED".to_string(),],
+        );
         assert!(result.time_of_status.is_some());
     }
 
