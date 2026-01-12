@@ -1391,6 +1391,69 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Assert that two sitreps are equal, skipping timestamp fields in ereports
+    /// and sitrep metadata. These timestamps may lose precision when
+    /// round-tripping through cockroachdb and may no longer be "equal".
+    ///
+    /// NOTE FOR FUTURE GENERATIONS: If we add other top-level child records
+    /// other than cases, we should also assert that they match here.
+    #[track_caller]
+    fn assert_sitreps_eq(this: &Sitrep, that: &Sitrep) {
+        // Verify the sitrep metadata matches --- ignore the timestamp.
+        assert_eq!(this.id(), that.id());
+        assert_eq!(this.metadata.creator_id, that.metadata.creator_id);
+        assert_eq!(this.metadata.comment, that.metadata.comment);
+        assert_eq!(this.metadata.parent_sitrep_id, None);
+
+        // Verify all the expected cases exist in both sitreps
+        assert_eq!(this.cases.len(), that.cases.len());
+        for case in &that.cases {
+            let fm::Case {
+                id,
+                created_sitrep_id,
+                closed_sitrep_id,
+                comment,
+                de,
+                ereports,
+            } = dbg!(case);
+            let Some(expected) = this.cases.get(&case.id) else {
+                panic!("expected case {id} to exist in the original sitrep")
+            };
+            // N.B.: we must assert each bit of the case manually, as ereports
+            // contain `time_collected` timestamps which will lose a bit of
+            // precision when roundtripped through the database.
+            // :(
+            assert_eq!(id, &expected.id);
+            assert_eq!(created_sitrep_id, &expected.created_sitrep_id);
+            assert_eq!(closed_sitrep_id, &expected.closed_sitrep_id);
+            assert_eq!(comment, &expected.comment);
+            assert_eq!(de, &expected.de);
+
+            // Now, check that all the ereports are present in both cases.
+            assert_eq!(ereports.len(), expected.ereports.len());
+            for expected in &expected.ereports {
+                let Some(ereport) = ereports.get(&expected.ereport.id()) else {
+                    panic!(
+                        "expected ereport {id} to exist in the original case"
+                    )
+                };
+                let fm::case::CaseEreport {
+                    id,
+                    ereport,
+                    assigned_sitrep_id,
+                    comment,
+                } = dbg!(ereport);
+                assert_eq!(id, &expected.id);
+                // This is where we go out of our way to avoid the timestamp,
+                // btw.
+                assert_eq!(ereport.id(), expected.ereport.id());
+                assert_eq!(assigned_sitrep_id, &expected.assigned_sitrep_id);
+                assert_eq!(comment, &expected.comment);
+            }
+            eprintln!();
+        }
+    }
+
     async fn list_orphans(
         datastore: &DataStore,
         opctx: &OpContext,
@@ -1570,55 +1633,7 @@ mod tests {
             .await
             .expect("failed to read sitrep");
 
-        // Verify the sitrep metadata matches --- ignore the timestamp.
-        assert_eq!(read_sitrep.id(), sitrep.id());
-        assert_eq!(read_sitrep.metadata.creator_id, sitrep.metadata.creator_id);
-        assert_eq!(read_sitrep.metadata.comment, sitrep.metadata.comment);
-        assert_eq!(read_sitrep.metadata.parent_sitrep_id, None);
-
-        // Verify all the expected cases were read back
-        for case in &read_sitrep.cases {
-            let fm::Case {
-                id,
-                created_sitrep_id,
-                closed_sitrep_id,
-                comment,
-                de,
-                ereports,
-            } = dbg!(case);
-            let Some(expected) = sitrep.cases.get(&case.id) else {
-                panic!("expected case {id} to exist in the original sitrep")
-            };
-            // N.B.: we must assert each bit of the case manually, as ereports
-            // contain `time_collected` timestamps which will lose a bit of
-            // precision when roundtripped through the database.
-            // :(
-            assert_eq!(id, &expected.id);
-            assert_eq!(created_sitrep_id, &expected.created_sitrep_id);
-            assert_eq!(closed_sitrep_id, &expected.closed_sitrep_id);
-            assert_eq!(comment, &expected.comment);
-            assert_eq!(de, &expected.de);
-            for expected in &expected.ereports {
-                let Some(ereport) = ereports.get(&expected.ereport.id()) else {
-                    panic!(
-                        "expected ereport {id} to exist in the original case"
-                    )
-                };
-                let fm::case::CaseEreport {
-                    id,
-                    ereport,
-                    assigned_sitrep_id,
-                    comment,
-                } = dbg!(ereport);
-                assert_eq!(id, &expected.id);
-                // This is where we go out of our way to avoid the timestamp,
-                // btw.
-                assert_eq!(ereport.id(), expected.ereport.id());
-                assert_eq!(assigned_sitrep_id, &expected.assigned_sitrep_id);
-                assert_eq!(comment, &expected.comment);
-            }
-            eprintln!();
-        }
+        assert_sitreps_eq(&sitrep, &read_sitrep);
 
         // Clean up
         db.terminate().await;
@@ -1714,6 +1729,170 @@ mod tests {
         );
 
         // Clean up
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that concurrent read and delete operations on sitreps collections do
+    // not result in torn reads. With the fix for issue #9594, fm_sitrep_read
+    // checks for the top-level sitrep record at the END of reading, so if a
+    // concurrent delete has started (which deletes the top-level record first),
+    // the read will fail rather than returning partial data.
+    //
+    // This test spawns concurrent readers and a deleter to exercise the race
+    // condition. Readers should either get the complete original collection
+    // OR an error - never partial/torn data.
+    #[tokio::test]
+    async fn test_concurrent_sitrep_read_delete() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+
+        const TEST_NAME: &str = "test_concurrent_sitrep_read_delete";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a sitrep and insert it.
+        let sitrep = make_sitrep_with_cases(opctx, datastore).await;
+        let sitrep_id = sitrep.metadata.id;
+        datastore
+            .fm_sitrep_insert(opctx, sitrep.clone())
+            .await
+            .expect("failed to insert sitrep");
+
+        // Verify we can read it back correctly
+        let read_back = datastore
+            .fm_sitrep_read(&opctx, sitrep_id)
+            .await
+            .expect("failed to read sitrep");
+        assert_sitreps_eq(&sitrep, &read_back);
+
+        // Note that we must also insert a second sitrep which is a child of the
+        // sitrep we intend to delete, as the sitrep insert operation makes a
+        // sitrep the current sitrep, and a sitrep cannot be deleted if it is
+        // current.
+        datastore
+            .fm_sitrep_insert(
+                opctx,
+                fm::Sitrep {
+                    metadata: fm::SitrepMetadata {
+                        parent_sitrep_id: Some(sitrep_id),
+                        id: SitrepUuid::new_v4(),
+                        time_created: Utc::now(),
+                        creator_id: OmicronZoneUuid::new_v4(),
+                        comment: "my cool sitrep".to_string(),
+                        inv_collection_id: CollectionUuid::new_v4(),
+                    },
+                    cases: Default::default(),
+                },
+            )
+            .await
+            .expect("failed to insert second sitrep");
+
+        // Track results from concurrent readers
+        let successful_reads = Arc::new(AtomicUsize::new(0));
+        let error_count = Arc::new(AtomicUsize::new(0));
+        let delete_completed = Arc::new(AtomicBool::new(false));
+
+        // Signal when at least one read has completed, so we know readers are
+        // running before we start deleting
+        let (first_read_tx, first_read_rx) =
+            tokio::sync::oneshot::channel::<()>();
+        let first_read_tx =
+            Arc::new(std::sync::Mutex::new(Some(first_read_tx)));
+
+        // Spawn reader tasks that loop until deletion completes
+        const NUM_READERS: usize = 10;
+        let mut reader_handles = Vec::new();
+
+        for n in 0..NUM_READERS {
+            let datastore = datastore.clone();
+            let opctx = opctx.child(
+                std::iter::once(("reader".to_string(), n.to_string()))
+                    .collect(),
+            );
+            let sitrep = sitrep.clone();
+            let successful_reads = successful_reads.clone();
+            let error_count = error_count.clone();
+            let delete_completed = delete_completed.clone();
+            let first_read_tx = first_read_tx.clone();
+
+            reader_handles.push(tokio::spawn(async move {
+                loop {
+                    match datastore.fm_sitrep_read(&opctx, sitrep_id).await {
+                        Ok(read_sitrep) => {
+                            // If the read sitrep is not equal to the original,
+                            // this indicates a torn read!
+                            assert_sitreps_eq(&sitrep, &read_sitrep);
+                            successful_reads.fetch_add(1, Ordering::Relaxed);
+
+                            // Signal that at least one read completed (only
+                            // the first sender to take the channel will send)
+                            if let Some(tx) =
+                                first_read_tx.lock().unwrap().take()
+                            {
+                                let _ = tx.send(());
+                            }
+                        }
+                        Err(_) => {
+                            // Errors are expected after deletion - the
+                            // collection no longer exists. The specific error
+                            // varies depending on which query fails first.
+                            error_count.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+
+                    // Stop reading after delete completes
+                    if delete_completed.load(Ordering::Relaxed) {
+                        break;
+                    }
+                }
+            }));
+        }
+
+        // Wait for at least one successful read before deleting, so we know
+        // the reader tasks have started
+        first_read_rx.await.expect("no reader completed a read");
+
+        // Delete the sitrep while readers are running
+        datastore
+            .fm_sitrep_delete_all(&opctx, vec![sitrep_id])
+            .await
+            .expect("failed to delete sitrep");
+        delete_completed.store(true, Ordering::Relaxed);
+
+        // Wait for all readers to complete
+        for handle in reader_handles {
+            handle.await.expect("reader task panicked");
+        }
+
+        // Log results for debugging
+        let successful = successful_reads.load(Ordering::Relaxed);
+        let errors = error_count.load(Ordering::Relaxed);
+        eprintln!(
+            "Results: {} successful reads, {} errors",
+            successful, errors
+        );
+
+        // Key invariant: at least one successful read (we waited for this
+        // before deleting). Successful reads are validated inside the reader
+        // loop - they must match the original sitrep exactly, or the assert_eq!
+        // fails indicating a torn read. Errors after deletion are expected and
+        // don't need to be categorized.
+        assert!(
+            successful > 0,
+            "Expected at least one successful read (we wait for this)"
+        );
+
+        // Verify the sitrep is fully deleted
+        match datastore.fm_sitrep_read(&opctx, sitrep_id).await {
+            Ok(_sitrep) => panic!("sitrep not deleted"),
+            Err(Error::NotFound { message: _ }) => {}
+            Err(e) => panic!("unexpected error: {e}"),
+        }
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
