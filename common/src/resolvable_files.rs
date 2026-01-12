@@ -4,15 +4,16 @@
 
 use camino::Utf8PathBuf;
 
-/// Places to look for a zone's image.
+/// Places to look for a resolvable file's source.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ZoneImageFileSource {
+pub struct ResolvableFileSource {
     /// The file name to look for.
     pub file_name: String,
 
-    /// The paths to look for the zone image in.
+    /// The paths to look for the file in. This file may be a runnable
+    /// zone image or a regular file.
     ///
     /// This represents a high-confidence belief, but not a guarantee, that the
-    /// zone image will be found in one of these locations.
+    /// file will be found in one of these locations.
     pub search_paths: Vec<Utf8PathBuf>,
 }

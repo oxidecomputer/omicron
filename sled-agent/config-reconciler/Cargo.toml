@@ -56,7 +56,7 @@ proptest.workspace = true
 schemars.workspace = true
 scopeguard.workspace = true
 serde_json.workspace = true
-sled-agent-zone-images-examples.workspace = true
+sled-agent-resolvable-files-examples.workspace = true
 sled-storage = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true
 xshell.workspace = true

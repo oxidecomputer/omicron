@@ -9,7 +9,7 @@ use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_uuid_kinds::InternalZpoolUuid;
 use serde::de::DeserializeOwned;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
-use sled_agent_types::zone_images::{
+use sled_agent_types::resolvable_files::{
     ArcIoError, ArcSerdeJsonError, InstallMetadataReadError,
 };
 use std::fs;
