@@ -10,7 +10,7 @@ use super::params::RelativeUri;
 use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
-use omicron_common::api::external::Name;
+use omicron_common::api::external::{Name, SimpleIdentity};
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
@@ -696,6 +696,12 @@ pub struct SupportBundleInfo {
     pub reason_for_failure: Option<String>,
     pub user_comment: Option<String>,
     pub state: SupportBundleState,
+}
+
+impl SimpleIdentity for SupportBundleInfo {
+    fn id(&self) -> Uuid {
+        self.id.into_untyped_uuid()
+    }
 }
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]

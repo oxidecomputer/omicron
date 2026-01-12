@@ -7,7 +7,7 @@
 use crate::v2025121200;
 use crate::v2026010100;
 use nexus_types::external_api::params;
-use omicron_common::api::external;
+use omicron_common::api::external::{self, SimpleIdentity};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -42,6 +42,12 @@ pub struct Disk {
     pub state: external::DiskState,
     pub device_path: String,
     pub disk_type: DiskType,
+}
+
+impl SimpleIdentity for Disk {
+    fn id(&self) -> Uuid {
+        self.identity.id
+    }
 }
 
 impl From<Disk> for external::Disk {

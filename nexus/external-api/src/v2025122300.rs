@@ -55,7 +55,7 @@ use nexus_types::multicast::MulticastGroupCreate as InternalMulticastGroupCreate
 use omicron_common::api::external::{
     ByteCount, IdentityMetadata, IdentityMetadataCreateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, Name,
-    NameOrId, Nullable,
+    NameOrId, Nullable, SimpleIdentity,
 };
 use omicron_common::vlan::VlanID;
 
@@ -224,6 +224,12 @@ pub struct MulticastGroup {
     pub state: String,
 }
 
+impl SimpleIdentity for MulticastGroup {
+    fn id(&self) -> Uuid {
+        self.identity.id
+    }
+}
+
 impl From<views::MulticastGroup> for MulticastGroup {
     fn from(v: views::MulticastGroup) -> Self {
         Self {
@@ -258,6 +264,12 @@ pub struct MulticastGroupMember {
     pub instance_id: Uuid,
     /// Current state of the multicast group membership.
     pub state: String,
+}
+
+impl SimpleIdentity for MulticastGroupMember {
+    fn id(&self) -> Uuid {
+        self.id
+    }
 }
 
 impl From<views::MulticastGroupMember> for MulticastGroupMember {

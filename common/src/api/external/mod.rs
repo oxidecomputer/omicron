@@ -1394,6 +1394,12 @@ impl SimpleIdentityOrName for AffinityGroupMember {
     }
 }
 
+impl SimpleIdentity for AffinityGroupMember {
+    fn id(&self) -> Uuid {
+        SimpleIdentityOrName::id(self)
+    }
+}
+
 /// A member of an Anti-Affinity Group
 ///
 /// Membership in a group is not exclusive - members may belong to multiple
@@ -1429,6 +1435,12 @@ impl SimpleIdentityOrName for AntiAffinityGroupMember {
         match self {
             AntiAffinityGroupMember::Instance { name, .. } => name,
         }
+    }
+}
+
+impl SimpleIdentity for AntiAffinityGroupMember {
+    fn id(&self) -> Uuid {
+        SimpleIdentityOrName::id(self)
     }
 }
 
@@ -2789,6 +2801,12 @@ pub struct AddressLotCreateResponse {
     pub blocks: Vec<AddressLotBlock>,
 }
 
+impl SimpleIdentity for AddressLotCreateResponse {
+    fn id(&self) -> Uuid {
+        self.lot.identity.id
+    }
+}
+
 /// An address lot and associated blocks resulting from viewing an address lot.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AddressLotViewResponse {
@@ -2860,6 +2878,12 @@ pub struct LoopbackAddress {
     pub address: oxnet::IpNet,
 }
 
+impl SimpleIdentity for LoopbackAddress {
+    fn id(&self) -> Uuid {
+        self.id
+    }
+}
+
 /// A switch port represents a physical external port on a rack switch.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPort {
@@ -2921,6 +2945,12 @@ pub struct SwitchPortSettings {
 
     /// Layer 3 IP address settings.
     pub addresses: Vec<SwitchPortAddressView>,
+}
+
+impl SimpleIdentity for SwitchPortSettings {
+    fn id(&self) -> Uuid {
+        self.identity.id
+    }
 }
 
 /// This structure maps a port settings object to a port settings groups. Port

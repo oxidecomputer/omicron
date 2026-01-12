@@ -26,13 +26,58 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
+use schemars::JsonSchema;
+use serde::Serialize;
 use slog::Logger;
 use std::env;
 use std::future::Future;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use dropshot::{HttpError, HttpResponse};
+use dropshot::{
+    Body, HttpError, HttpResponse, HttpResponseAccepted, HttpResponseCreated,
+    HttpResponseDeleted, HttpResponseOk, HttpResponseUpdatedNoContent,
+};
+use http::Response;
+use omicron_common::api::external::SimpleIdentity;
+
+/// Trait for extracting resource ID from HTTP response types to record in
+/// the audit log. Implemented for response types that may contain a created
+/// resource.
+pub trait MaybeHasResourceId {
+    fn resource_id(&self) -> Option<Uuid> {
+        None
+    }
+}
+
+impl<T> MaybeHasResourceId for HttpResponseCreated<T>
+where
+    T: SimpleIdentity + Serialize + JsonSchema + Send + Sync + 'static,
+{
+    fn resource_id(&self) -> Option<Uuid> {
+        Some(self.0.id())
+    }
+}
+
+// We only pull the ID out of HttpResponseCreated responses. For the rest of
+// these, keep the default impl with no resource ID because the identifier is
+// there in the URL. Something to think about: the identifier in the URL can
+// be a name, which can then be reused after the thing is deleted or renamed,
+// so names don't actually identify things uniquely the way IDs do. So we may
+// end up needing to record the ID for delete or update operations as well.
+
+impl<T> MaybeHasResourceId for HttpResponseOk<T> where
+    T: Serialize + JsonSchema + Send + Sync + 'static
+{
+}
+impl MaybeHasResourceId for HttpResponseDeleted {}
+impl MaybeHasResourceId for HttpResponseUpdatedNoContent {}
+impl<T> MaybeHasResourceId for HttpResponseAccepted<T> where
+    T: Serialize + JsonSchema + Send + Sync + 'static
+{
+}
+// SCIM endpoints return raw Response<Body>
+impl MaybeHasResourceId for Response<Body> {}
 
 /// Indicates the kind of HTTP server.
 #[derive(Clone, Copy)]
@@ -352,7 +397,7 @@ pub async fn audit_and_time<F, Fut, R>(
 where
     F: FnOnce(Arc<OpContext>, Arc<Nexus>) -> Fut,
     Fut: Future<Output = Result<R, HttpError>>,
-    R: HttpResponse,
+    R: HttpResponse + MaybeHasResourceId,
 {
     let apictx = rqctx.context();
     let nexus = Arc::clone(&apictx.context.nexus);
@@ -360,6 +405,15 @@ where
         let opctx = Arc::new(op_context_for_external_api(rqctx).await?);
         let audit = nexus.audit_log_entry_init(&opctx, rqctx).await?;
         let result = handler(Arc::clone(&opctx), Arc::clone(&nexus)).await;
+        // TODO: pass resource_id to audit_log_entry_complete once
+        // the schema supports it
+        let resource_id = result.as_ref().ok().and_then(|r| r.resource_id());
+        slog::debug!(
+            rqctx.log,
+            "audit_and_time: extracted resource_id";
+            "resource_id" => ?resource_id,
+            "request_id" => %rqctx.request_id,
+        );
         // Ignore error: unlike the init line, audit log failures cannot cause
         // the request to fail because the primary operation has already taken
         // place. The complete function retries internally and logs on failure.

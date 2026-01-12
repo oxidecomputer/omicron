@@ -454,12 +454,24 @@ pub struct IpPoolSiloLink {
     pub is_default: bool,
 }
 
+impl SimpleIdentity for IpPoolSiloLink {
+    fn id(&self) -> Uuid {
+        self.ip_pool_id
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolRange {
     pub id: Uuid,
     pub ip_pool_id: Uuid,
     pub time_created: DateTime<Utc>,
     pub range: IpRange,
+}
+
+impl SimpleIdentity for IpPoolRange {
+    fn id(&self) -> Uuid {
+        self.id
+    }
 }
 
 // SUBNET POOLS
@@ -754,6 +766,12 @@ impl From<TrustQuorumConfig> for RackMembershipStatus {
 pub struct SledId {
     #[schemars(with = "Uuid")]
     pub id: SledUuid,
+}
+
+impl SimpleIdentity for SledId {
+    fn id(&self) -> Uuid {
+        self.id.into_untyped_uuid()
+    }
 }
 
 /// An operator's view of a Sled.
@@ -1102,6 +1120,12 @@ pub struct User {
     pub silo_id: Uuid,
 }
 
+impl SimpleIdentity for User {
+    fn id(&self) -> Uuid {
+        self.id.into_untyped_uuid()
+    }
+}
+
 // SESSION
 
 // Add silo name to User because the console needs to display it
@@ -1396,6 +1420,14 @@ pub struct AlertSubscriptionCreated {
     pub subscription: shared::AlertSubscription,
 }
 
+impl SimpleIdentity for AlertSubscriptionCreated {
+    fn id(&self) -> Uuid {
+        // AlertSubscription is a pattern string, not a resource with a UUID.
+        // Return nil UUID as a sentinel value.
+        Uuid::nil()
+    }
+}
+
 /// The possible alert delivery mechanisms for an alert receiver.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "kind")]
@@ -1484,6 +1516,12 @@ pub struct WebhookSecret {
 
     /// The UTC timestamp at which this secret was created.
     pub time_created: DateTime<Utc>,
+}
+
+impl SimpleIdentity for WebhookSecret {
+    fn id(&self) -> Uuid {
+        self.id
+    }
 }
 
 /// A delivery of a webhook event.
@@ -1725,6 +1763,12 @@ pub struct AlertDeliveryId {
     pub delivery_id: Uuid,
 }
 
+impl SimpleIdentity for AlertDeliveryId {
+    fn id(&self) -> Uuid {
+        self.delivery_id
+    }
+}
+
 /// Data describing the result of an alert receiver liveness probe attempt.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct AlertProbeResult {
@@ -1762,6 +1806,12 @@ pub struct UpdatesTrustRoot {
     /// The trusted root role itself, a JSON document as described by The Update
     /// Framework.
     pub root_role: TufSignedRootRole,
+}
+
+impl SimpleIdentity for UpdatesTrustRoot {
+    fn id(&self) -> Uuid {
+        self.id
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1876,6 +1926,12 @@ pub struct ScimClientBearerTokenValue {
     pub time_created: DateTime<Utc>,
     pub time_expires: Option<DateTime<Utc>>,
     pub bearer_token: String,
+}
+
+impl SimpleIdentity for ScimClientBearerTokenValue {
+    fn id(&self) -> Uuid {
+        self.id
+    }
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
