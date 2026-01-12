@@ -117,6 +117,20 @@ async fn test_unauthorized() {
                     .unwrap(),
                 id_routes,
             ),
+            SetupReq::Put { url, body } => {
+                let url_str: &str = url.as_str();
+                NexusRequest::new(
+                    RequestBuilder::new(client, Method::PUT, url_str)
+                        .body(Some(&body))
+                        .expect_status(Some(StatusCode::CREATED)),
+                )
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .map_err(|e| panic!("Failed to PUT to URL: {url_str}, {e}"))
+                .unwrap();
+                continue; // Put doesn't store results
+            }
         };
 
         setup_results.insert(url, result.clone());
@@ -238,6 +252,10 @@ enum SetupReq {
         url: &'static str,
         body: serde_json::Value,
         id_routes: Vec<&'static str>,
+    },
+    Put {
+        url: &'static LazyLock<String>,
+        body: serde_json::Value,
     },
 }
 
@@ -380,11 +398,11 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
                 .unwrap(),
             id_routes: vec![],
         },
-        // Create a multicast group in the Project
-        SetupReq::Post {
-            url: &MULTICAST_GROUPS_URL,
-            body: serde_json::to_value(&*DEMO_MULTICAST_GROUP_CREATE).unwrap(),
-            id_routes: vec!["/v1/multicast-groups/{id}"],
+        // Create a multicast group by having an instance join (implicit creation)
+        SetupReq::Put {
+            url: &DEMO_INSTANCE_MULTICAST_GROUP_JOIN_URL,
+            body: serde_json::to_value(&*DEMO_INSTANCE_MULTICAST_GROUP_JOIN)
+                .unwrap(),
         },
         // Create an affinity group in the Project
         SetupReq::Post {

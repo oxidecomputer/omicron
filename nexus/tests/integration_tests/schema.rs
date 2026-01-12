@@ -4035,7 +4035,7 @@ mod migration_219 {
     }
 }
 
-mod migration_220 {
+mod migration_221 {
     use super::*;
     use pretty_assertions::assert_eq;
 
@@ -4061,7 +4061,7 @@ mod migration_220 {
                     discoverable, authentication_mode, user_provision_type,
                     mapped_fleet_roles, rcgen
                 ) VALUES (
-                    '{TEST_SILO_ID}', 'migration-220-silo', 'Test silo',
+                    '{TEST_SILO_ID}', 'migration-221-silo', 'Test silo',
                     now(), now(), true, 'local', 'jit', '{{}}', 1
                 );
 
@@ -4084,7 +4084,7 @@ mod migration_220 {
                 INSERT INTO omicron.public.project (
                     id, name, description, time_created, time_modified, silo_id, rcgen
                 ) VALUES (
-                    '{TEST_PROJECT_ID}', 'migration-220-project', 'Test project',
+                    '{TEST_PROJECT_ID}', 'migration-221-project', 'Test project',
                     now(), now(), '{TEST_SILO_ID}', 1
                 );
 
@@ -4362,10 +4362,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
             .after(migration_219::after),
     );
     map.insert(
-        Version::new(220, 0, 0),
+        Version::new(221, 0, 0),
         DataMigrationFns::new()
-            .before(migration_220::before)
-            .after(migration_220::after),
+            .before(migration_221::before)
+            .after(migration_221::after),
     );
     map
 }
