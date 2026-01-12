@@ -435,7 +435,7 @@ impl Zpool {
         log: &Logger,
     ) -> Result<UnhealthyZpoolsResult, ExecutionError> {
         let mut command = Command::new(ZPOOL);
-        let cmd = command.args(&["list", "-Hpo", "name,health"]);
+        let cmd = command.args(&["list", "-Hpo", "health,name"]);
         info!(log, "Retrieving information from zpools");
         let output = execute_async(cmd).await?;
         let zpool_result = UnhealthyZpoolsResult::parse(&log, &output.stdout);
