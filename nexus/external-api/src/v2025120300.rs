@@ -6,7 +6,7 @@
 
 use std::net::IpAddr;
 
-use omicron_common::api::external::SwitchLocation;
+use omicron_common::api::external;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +29,7 @@ pub struct BgpPeerStatus {
     pub state_duration_millis: u64,
 
     /// Switch with the peer session.
-    pub switch: SwitchLocation,
+    pub switch: external::SwitchLocation,
 }
 
 /// The current state of a BGP peer.

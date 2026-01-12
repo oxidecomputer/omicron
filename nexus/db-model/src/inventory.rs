@@ -35,15 +35,17 @@ use nexus_db_schema::schema::{
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
     inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
     inv_internal_dns, inv_last_reconciliation_dataset_result,
-    inv_last_reconciliation_disk_result,
+    inv_last_reconciliation_disk_result, inv_last_reconciliation_measurements,
     inv_last_reconciliation_orphaned_dataset,
-    inv_last_reconciliation_zone_result, inv_mupdate_override_non_boot,
-    inv_ntp_timesync, inv_nvme_disk_firmware, inv_omicron_sled_config,
-    inv_omicron_sled_config_dataset, inv_omicron_sled_config_disk,
-    inv_omicron_sled_config_zone, inv_omicron_sled_config_zone_nic,
-    inv_physical_disk, inv_root_of_trust, inv_root_of_trust_page,
-    inv_service_processor, inv_sled_agent, inv_sled_boot_partition,
-    inv_sled_config_reconciler, inv_zpool, sw_caboose, sw_root_of_trust_page,
+    inv_last_reconciliation_zone_result, inv_measurement_manifest_non_boot,
+    inv_mupdate_override_non_boot, inv_ntp_timesync, inv_nvme_disk_firmware,
+    inv_omicron_sled_config, inv_omicron_sled_config_dataset,
+    inv_omicron_sled_config_disk, inv_omicron_sled_config_zone,
+    inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
+    inv_root_of_trust_page, inv_service_processor, inv_sled_agent,
+    inv_sled_boot_partition, inv_sled_config_reconciler,
+    inv_zone_manifest_measurement, inv_zpool, sw_caboose,
+    sw_root_of_trust_page,
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
@@ -84,11 +86,13 @@ use sled_agent_types::inventory::ManifestNonBootInventory;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::MupdateOverrideInventory;
 use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
+use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
+use sled_agent_types::inventory::OmicronSingleMeasurement;
 use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::ReconciledSingleMeasurement;
 use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_agent_types::inventory::ZoneArtifactInventory;
-use sled_agent_types::inventory::ZoneImageResolverInventory;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
@@ -916,7 +920,7 @@ pub struct InvSledAgent {
     pub reconciler_status: InvConfigReconcilerStatus,
 
     #[diesel(embed)]
-    pub zone_image_resolver: InvZoneImageResolver,
+    pub file_source_resolver: InvOmicronFileSourceResolver,
 }
 
 /// See [`sled_agent_types::inventory::ConfigReconcilerInventoryStatus`].
@@ -1286,7 +1290,7 @@ impl InvSledAgent {
         sled_agent: &nexus_types::inventory::SledAgent,
         ledgered_sled_config: Option<OmicronSledConfigUuid>,
         reconciler_status: InvConfigReconcilerStatus,
-        zone_image_resolver: InvZoneImageResolver,
+        file_source_resolver: InvOmicronFileSourceResolver,
     ) -> Result<InvSledAgent, anyhow::Error> {
         // It's irritating to have to check this case at runtime.  The challenge
         // is that if this sled agent does have a baseboard id, we don't know
@@ -1327,7 +1331,7 @@ impl InvSledAgent {
                 reservoir_size: ByteCount::from(sled_agent.reservoir_size),
                 ledgered_sled_config: ledgered_sled_config.map(From::from),
                 reconciler_status,
-                zone_image_resolver,
+                file_source_resolver,
             })
         }
     }
@@ -1364,6 +1368,66 @@ impl InvLastReconciliationDiskResult {
 
 impl From<InvLastReconciliationDiskResult> for ConfigReconcilerInventoryResult {
     fn from(result: InvLastReconciliationDiskResult) -> Self {
+        match result.error_message {
+            None => Self::Ok,
+            Some(message) => Self::Err { message },
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_last_reconciliation_measurements)]
+pub struct InvLastReconciliationMeasurements {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+
+    pub file_name: String,
+    pub path: String,
+    pub error_message: Option<String>,
+}
+
+impl InvLastReconciliationMeasurements {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        file_name: String,
+        path: String,
+        result: ConfigReconcilerInventoryResult,
+    ) -> Self {
+        let error_message = match result {
+            ConfigReconcilerInventoryResult::Ok => None,
+            ConfigReconcilerInventoryResult::Err { message } => Some(message),
+        };
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+
+            path,
+            file_name,
+            error_message,
+        }
+    }
+}
+
+impl From<InvLastReconciliationMeasurements> for ReconciledSingleMeasurement {
+    fn from(row: InvLastReconciliationMeasurements) -> Self {
+        Self {
+            file_name: row.file_name,
+            path: row.path.into(),
+            result: match row.error_message {
+                None => ConfigReconcilerInventoryResult::Ok,
+                Some(message) => {
+                    ConfigReconcilerInventoryResult::Err { message }
+                }
+            },
+        }
+    }
+}
+
+impl From<InvLastReconciliationMeasurements>
+    for ConfigReconcilerInventoryResult
+{
+    fn from(result: InvLastReconciliationMeasurements) -> Self {
         match result.error_message {
             None => Self::Ok,
             Some(message) => Self::Err { message },
@@ -1529,20 +1593,25 @@ impl_enum_type!(
 /// Rows corresponding to the zone image resolver in `inv_sled_agent`.
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_agent)]
-pub struct InvZoneImageResolver {
+pub struct InvOmicronFileSourceResolver {
     pub zone_manifest_boot_disk_path: String,
     pub zone_manifest_source: Option<InvZoneManifestSourceEnum>,
     pub zone_manifest_mupdate_id: Option<DbTypedUuid<MupdateKind>>,
     pub zone_manifest_boot_disk_error: Option<String>,
+
+    pub measurement_manifest_boot_disk_path: String,
+    pub measurement_manifest_source: Option<InvZoneManifestSourceEnum>,
+    pub measurement_manifest_mupdate_id: Option<DbTypedUuid<MupdateKind>>,
+    pub measurement_manifest_boot_disk_error: Option<String>,
 
     pub mupdate_override_boot_disk_path: String,
     pub mupdate_override_id: Option<DbTypedUuid<MupdateOverrideKind>>,
     pub mupdate_override_boot_disk_error: Option<String>,
 }
 
-impl InvZoneImageResolver {
-    /// Construct a new `InvZoneImageResolver`.
-    pub fn new(inv: &ZoneImageResolverInventory) -> Self {
+impl InvOmicronFileSourceResolver {
+    /// Construct a new `InvOmicronFileSourceResolver`.
+    pub fn new(inv: &OmicronFileSourceResolverInventory) -> Self {
         let zone_manifest_boot_disk_path =
             inv.zone_manifest.boot_disk_path.clone().into();
         let (
@@ -1550,6 +1619,26 @@ impl InvZoneImageResolver {
             zone_manifest_mupdate_id,
             zone_manifest_boot_disk_error,
         ) = match &inv.zone_manifest.boot_inventory {
+            Ok(manifest) => match manifest.source {
+                OmicronInstallManifestSource::Installinator { mupdate_id } => (
+                    Some(InvZoneManifestSourceEnum::Installinator),
+                    Some(mupdate_id.into()),
+                    None,
+                ),
+                OmicronInstallManifestSource::SledAgent => {
+                    (Some(InvZoneManifestSourceEnum::SledAgent), None, None)
+                }
+            },
+            Err(error) => (None, None, Some(error.to_string())),
+        };
+
+        let measurement_manifest_boot_disk_path =
+            inv.measurement_manifest.boot_disk_path.clone().into();
+        let (
+            measurement_manifest_source,
+            measurement_manifest_mupdate_id,
+            measurement_manifest_boot_disk_error,
+        ) = match &inv.measurement_manifest.boot_inventory {
             Ok(manifest) => match manifest.source {
                 OmicronInstallManifestSource::Installinator { mupdate_id } => (
                     Some(InvZoneManifestSourceEnum::Installinator),
@@ -1581,6 +1670,10 @@ impl InvZoneImageResolver {
             zone_manifest_source,
             zone_manifest_mupdate_id,
             zone_manifest_boot_disk_error,
+            measurement_manifest_boot_disk_path,
+            measurement_manifest_source,
+            measurement_manifest_mupdate_id,
+            measurement_manifest_boot_disk_error,
             mupdate_override_boot_disk_path,
             mupdate_override_id,
             mupdate_override_boot_disk_error,
@@ -1591,11 +1684,15 @@ impl InvZoneImageResolver {
     pub fn into_inventory(
         self,
         artifacts: Option<IdOrdMap<ZoneArtifactInventory>>,
+        measurement_artifacts: Option<IdOrdMap<ZoneArtifactInventory>>,
         zone_manifest_non_boot: Option<IdOrdMap<ManifestNonBootInventory>>,
+        measurement_manifest_non_boot: Option<
+            IdOrdMap<ManifestNonBootInventory>,
+        >,
         mupdate_override_non_boot: Option<
             IdOrdMap<MupdateOverrideNonBootInventory>,
         >,
-    ) -> anyhow::Result<ZoneImageResolverInventory> {
+    ) -> anyhow::Result<OmicronFileSourceResolverInventory> {
         // Build up the ManifestInventory struct.
         let zone_manifest = {
             let boot_inventory = if let Some(error) =
@@ -1645,6 +1742,55 @@ impl InvZoneImageResolver {
             }
         };
 
+        let measurement_manifest = {
+            let boot_inventory = if let Some(error) =
+                self.measurement_manifest_boot_disk_error
+            {
+                Err(error)
+            } else {
+                let source = match self.measurement_manifest_source {
+                    Some(InvZoneManifestSourceEnum::Installinator) => {
+                        OmicronInstallManifestSource::Installinator {
+                            mupdate_id: self
+                                .measurement_manifest_mupdate_id
+                                .context(
+                                    "illegal database state (CHECK constraint broken?!): \
+                                     if the source is Installinator, then the \
+                                     db schema guarantees that mupdate_id is Some",
+                                )?
+                                .into(),
+                        }
+                    }
+                    Some(InvZoneManifestSourceEnum::SledAgent) => {
+                        OmicronInstallManifestSource::SledAgent
+                    }
+                    None => {
+                        bail!(
+                            "illegal database state (CHECK constraint broken?!): \
+                             if the source is None, then the db schema guarantees \
+                             that there was an error",
+                        )
+                    }
+                };
+
+                Ok(ManifestBootInventory {
+                    source,
+                    // Artifacts might really be None in case no zones were found.
+                    // (This is unusual but permitted by the data model, so any
+                    // checks around this should happen at a higher level.)
+                    artifacts: measurement_artifacts.unwrap_or_default(),
+                })
+            };
+
+            ManifestInventory {
+                boot_disk_path: self.measurement_manifest_boot_disk_path.into(),
+                boot_inventory,
+                // This might be None if no non-boot disks were found.
+                non_boot_status: measurement_manifest_non_boot
+                    .unwrap_or_default(),
+            }
+        };
+
         // Build up the mupdate override struct.
         let boot_override = if let Some(error) =
             self.mupdate_override_boot_disk_error
@@ -1664,7 +1810,57 @@ impl InvZoneImageResolver {
             non_boot_status: mupdate_override_non_boot.unwrap_or_default(),
         };
 
-        Ok(ZoneImageResolverInventory { zone_manifest, mupdate_override })
+        Ok(OmicronFileSourceResolverInventory {
+            zone_manifest,
+            measurement_manifest,
+            mupdate_override,
+        })
+    }
+}
+
+/// Represents a measurement file entry from the measurement manifest on a sled.
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_zone_manifest_measurement)]
+pub struct InvZoneManifestMeasurement {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub measurement_file_name: String,
+    pub path: String,
+    pub expected_size: i64,
+    pub expected_sha256: ArtifactHash,
+    pub error: Option<String>,
+}
+
+impl InvZoneManifestMeasurement {
+    pub fn new(
+        collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        artifact: &ZoneArtifactInventory,
+    ) -> Self {
+        Self {
+            inv_collection_id: collection_id.into(),
+            sled_id: sled_id.into(),
+            measurement_file_name: artifact.file_name.clone(),
+            path: artifact.path.clone().into(),
+            expected_size: artifact.expected_size.try_into().unwrap(),
+            expected_sha256: artifact.expected_hash.into(),
+            error: artifact.status.as_ref().err().cloned(),
+        }
+    }
+}
+
+impl From<InvZoneManifestMeasurement> for ZoneArtifactInventory {
+    fn from(row: InvZoneManifestMeasurement) -> Self {
+        Self {
+            file_name: row.measurement_file_name,
+            path: row.path.into(),
+            expected_size: row.expected_size.try_into().unwrap(),
+            expected_hash: row.expected_sha256.into(),
+            status: match row.error {
+                None => Ok(()),
+                Some(error) => Err(error),
+            },
+        }
     }
 }
 
@@ -1713,6 +1909,46 @@ impl TryFrom<InvZoneManifestZone> for ZoneArtifactInventory {
                 Some(error) => Err(error),
             },
         })
+    }
+}
+
+/// Represents a non-boot zpool entry from the zone manifest on a sled.
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_measurement_manifest_non_boot)]
+pub struct InvMeasurementManifestNonBoot {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub non_boot_zpool_id: DbTypedUuid<InternalZpoolKind>,
+    pub path: String,
+    pub is_valid: bool,
+    pub message: String,
+}
+
+impl InvMeasurementManifestNonBoot {
+    pub fn new(
+        collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        non_boot: &ManifestNonBootInventory,
+    ) -> Self {
+        Self {
+            inv_collection_id: collection_id.into(),
+            sled_id: sled_id.into(),
+            non_boot_zpool_id: non_boot.zpool_id.into(),
+            path: non_boot.path.clone().into(),
+            is_valid: non_boot.is_valid,
+            message: non_boot.message.clone(),
+        }
+    }
+}
+
+impl From<InvMeasurementManifestNonBoot> for ManifestNonBootInventory {
+    fn from(row: InvMeasurementManifestNonBoot) -> Self {
+        Self {
+            zpool_id: row.non_boot_zpool_id.into(),
+            path: row.path.into(),
+            is_valid: row.is_valid,
+            message: row.message,
+        }
     }
 }
 
@@ -2126,6 +2362,8 @@ pub struct InvOmicronSledConfig {
 
     #[diesel(embed)]
     pub host_phase_2: DbHostPhase2DesiredSlots,
+    #[diesel(embed)]
+    pub measurements: DbOmicronMeasurements,
 }
 
 impl InvOmicronSledConfig {
@@ -2135,6 +2373,7 @@ impl InvOmicronSledConfig {
         generation: external::Generation,
         remove_mupdate_override: Option<MupdateOverrideUuid>,
         host_phase_2: HostPhase2DesiredSlots,
+        measurements: BTreeSet<OmicronSingleMeasurement>,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
@@ -2142,6 +2381,33 @@ impl InvOmicronSledConfig {
             generation: Generation(generation),
             remove_mupdate_override: remove_mupdate_override.map(From::from),
             host_phase_2: host_phase_2.into(),
+            measurements: measurements.into(),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_sled_config)]
+pub struct DbOmicronMeasurements {
+    pub measurements: Option<Vec<ArtifactHash>>,
+}
+
+impl From<BTreeSet<OmicronSingleMeasurement>> for DbOmicronMeasurements {
+    fn from(value: BTreeSet<OmicronSingleMeasurement>) -> Self {
+        let remapped =
+            value.into_iter().map(|x| ArtifactHash(x.hash)).collect();
+        Self { measurements: Some(remapped) }
+    }
+}
+
+impl From<DbOmicronMeasurements> for BTreeSet<OmicronSingleMeasurement> {
+    fn from(value: DbOmicronMeasurements) -> Self {
+        match value.measurements {
+            None => BTreeSet::new(),
+            Some(s) => s
+                .into_iter()
+                .map(|ArtifactHash(hash)| OmicronSingleMeasurement { hash })
+                .collect(),
         }
     }
 }

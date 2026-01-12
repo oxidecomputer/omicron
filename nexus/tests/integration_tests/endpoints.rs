@@ -660,8 +660,9 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         network_interfaces:
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
-            ip_version: None,
+            pool_selector: params::PoolSelector::Explicit {
+                pool: DEMO_IP_POOL_NAME.clone().into(),
+            },
         }],
         disks: vec![],
         boot_disk: None,
@@ -685,8 +686,9 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         network_interfaces:
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
-            ip_version: None,
+            pool_selector: params::PoolSelector::Explicit {
+                pool: DEMO_IP_POOL_NAME.clone().into(),
+            },
         }],
         disks: vec![],
         boot_disk: None,
@@ -767,17 +769,7 @@ pub static DEMO_MULTICAST_GROUP_URL: LazyLock<String> = LazyLock::new(|| {
 });
 pub static DEMO_MULTICAST_GROUP_MEMBERS_URL: LazyLock<String> =
     LazyLock::new(|| {
-        format!(
-            "/v1/multicast-groups/{}/members?project={}",
-            *DEMO_MULTICAST_GROUP_NAME, *DEMO_PROJECT_NAME
-        )
-    });
-pub static DEMO_MULTICAST_GROUP_MEMBER_URL: LazyLock<String> =
-    LazyLock::new(|| {
-        format!(
-            "/v1/multicast-groups/{}/members/{}?project={}",
-            *DEMO_MULTICAST_GROUP_NAME, *DEMO_INSTANCE_NAME, *DEMO_PROJECT_NAME
-        )
+        format!("/v1/multicast-groups/{}/members", *DEMO_MULTICAST_GROUP_NAME)
     });
 pub static DEMO_INSTANCE_MULTICAST_GROUPS_URL: LazyLock<String> =
     LazyLock::new(|| {
@@ -793,34 +785,11 @@ pub static DEMO_INSTANCE_MULTICAST_GROUP_JOIN_URL: LazyLock<String> =
             *DEMO_INSTANCE_NAME, *DEMO_MULTICAST_GROUP_NAME, *DEMO_PROJECT_NAME
         )
     });
-pub static DEMO_MULTICAST_GROUP_BY_IP_URL: LazyLock<String> =
-    LazyLock::new(|| {
-        "/v1/system/multicast-groups/by-ip/224.0.1.100".to_string()
-    });
-pub static DEMO_MULTICAST_GROUP_CREATE: LazyLock<params::MulticastGroupCreate> =
-    LazyLock::new(|| params::MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DEMO_MULTICAST_GROUP_NAME.clone(),
-            description: String::from("demo multicast group"),
-        },
-        multicast_ip: Some("224.0.1.100".parse().unwrap()),
-        pool: Some(DEMO_MULTICAST_IP_POOL_NAME.clone().into()),
-        source_ips: Some(Vec::new()),
-        mvlan: None,
-    });
-pub static DEMO_MULTICAST_GROUP_UPDATE: LazyLock<params::MulticastGroupUpdate> =
-    LazyLock::new(|| params::MulticastGroupUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some("updated description".to_string()),
-        },
-        source_ips: Some(Vec::new()),
-        mvlan: None,
-    });
-pub static DEMO_MULTICAST_MEMBER_ADD: LazyLock<
-    params::MulticastGroupMemberAdd,
-> = LazyLock::new(|| params::MulticastGroupMemberAdd {
-    instance: DEMO_INSTANCE_NAME.clone().into(),
+pub static DEMO_INSTANCE_MULTICAST_GROUP_JOIN: LazyLock<
+    params::InstanceMulticastGroupJoin,
+> = LazyLock::new(|| params::InstanceMulticastGroupJoin {
+    source_ips: None,
+    ip_version: None,
 });
 
 // Switch port settings and status
@@ -1054,10 +1023,11 @@ pub static DEMO_MULTICAST_IP_POOL_SILOS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/silos", *DEMO_MULTICAST_IP_POOL_URL));
 pub static DEMO_MULTICAST_IP_POOL_RANGE: LazyLock<IpRange> =
     LazyLock::new(|| {
+        // Use 224.1.0.x to avoid reserved addresses in 224.0.1.x (PTP, NTP, etc.)
         IpRange::V4(
             Ipv4Range::new(
-                Ipv4Addr::new(224, 0, 1, 100),
-                Ipv4Addr::new(224, 0, 1, 200),
+                Ipv4Addr::new(224, 1, 0, 100),
+                Ipv4Addr::new(224, 1, 0, 200),
             )
             .unwrap(),
         )
@@ -1178,9 +1148,10 @@ pub static DEMO_FLOAT_IP_CREATE: LazyLock<params::FloatingIpCreate> =
             name: DEMO_FLOAT_IP_NAME.clone(),
             description: String::from("a new IP pool"),
         },
-        ip: Some(Ipv4Addr::new(10, 0, 0, 141).into()),
-        pool: None,
-        ip_version: None,
+        address_selector: params::AddressSelector::Explicit {
+            ip: Ipv4Addr::new(10, 0, 0, 141).into(),
+            pool: None,
+        },
     });
 
 pub static DEMO_FLOAT_IP_UPDATE: LazyLock<params::FloatingIpUpdate> =
@@ -1198,8 +1169,7 @@ pub static DEMO_FLOAT_IP_ATTACH: LazyLock<params::FloatingIpAttach> =
     });
 pub static DEMO_EPHEMERAL_IP_ATTACH: LazyLock<params::EphemeralIpCreate> =
     LazyLock::new(|| params::EphemeralIpCreate {
-        pool: None,
-        ip_version: None,
+        pool_selector: params::PoolSelector::Auto { ip_version: None },
     });
 // Identity providers
 pub const IDENTITY_PROVIDERS_URL: &'static str =
@@ -3173,61 +3143,27 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
 
             // Multicast groups
 
-            // Multicast groups are fleet-scoped and allow any authenticated user
-            // (including unprivileged) to create, read, modify, and delete groups
-            // to enable cross-project and cross-silo multicast communication.
+            // Multicast groups are fleet-scoped. Any authenticated user in
+            // their fleet can list/read groups. Member operations require
+            // Instance::Modify permission on the instance being attached.
+            // Groups are created/deleted implicitly via member add/remove.
             VerifyEndpoint {
                 url: &MULTICAST_GROUPS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::Full,
-                allowed_methods: vec![
-                    AllowedMethod::Get,
-                    AllowedMethod::Post(
-                        serde_json::to_value(&*DEMO_MULTICAST_GROUP_CREATE).unwrap(),
-                    ),
-                ],
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &DEMO_MULTICAST_GROUP_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::Full,
-                allowed_methods: vec![
-                    AllowedMethod::Get,
-                    AllowedMethod::Put(
-                        serde_json::to_value(&*DEMO_MULTICAST_GROUP_UPDATE).unwrap(),
-                    ),
-                    AllowedMethod::Delete,
-                ],
+                allowed_methods: vec![AllowedMethod::Get],
             },
-            // Multicast member endpoints have asymmetric authorization:
-            // - GET operations only check fleet-scoped group Read permission (accessible to all authenticated users)
-            // - POST/DELETE operations require project-scoped instance Modify permission
-            //
-            // When unprivileged users try to add/remove instances from inaccessible projects,
-            // the instance lookup fails with 404 (not 403) to prevent information leakage.
-            // This is correct security behavior.
-            //
-            // Configuration: Protected + ReadOnly
-            // - GET: Not tested for unprivileged access here (verified in authorization.rs tests)
-            // - POST/DELETE: Correctly expect 404 when instance is in inaccessible project
             VerifyEndpoint {
                 url: &DEMO_MULTICAST_GROUP_MEMBERS_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::ReadOnly,
-                allowed_methods: vec![
-                    AllowedMethod::GetVolatile,
-                    AllowedMethod::Post(
-                        serde_json::to_value(&*DEMO_MULTICAST_MEMBER_ADD).unwrap(),
-                    ),
-                ],
-            },
-            VerifyEndpoint {
-                url: &DEMO_MULTICAST_GROUP_MEMBER_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::ReadOnly,
-                allowed_methods: vec![
-                    AllowedMethod::Delete,
-                ],
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::Full,
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &DEMO_INSTANCE_MULTICAST_GROUPS_URL,
@@ -3240,15 +3176,9 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::Put(serde_json::to_value(()).unwrap()),
+                    AllowedMethod::Put(serde_json::to_value(&*DEMO_INSTANCE_MULTICAST_GROUP_JOIN).unwrap()),
                     AllowedMethod::Delete,
                 ],
-            },
-            VerifyEndpoint {
-                url: &DEMO_MULTICAST_GROUP_BY_IP_URL,
-                visibility: Visibility::Public,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
             },
             // Audit log
             VerifyEndpoint {
