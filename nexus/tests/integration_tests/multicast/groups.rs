@@ -1163,8 +1163,7 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
         // Verify pool reference
         assert_eq!(
             group.ip_pool_id, ssm_pool.identity.id,
-            "Group {} should reference the shared SSM pool",
-            group_name
+            "Group {group_name} should reference the shared SSM pool"
         );
 
         // Verify SSM range (232.x.x.x)
@@ -1172,31 +1171,27 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
             assert_eq!(
                 ip.octets()[0],
                 232,
-                "Group {} should have IP in SSM range (232.x.x.x)",
-                group_name
+                "Group {group_name} should have IP in SSM range (232.x.x.x)"
             );
             assert_eq!(
                 ip.octets()[1],
                 1,
-                "Group {} should have IP from pool range (232.1.x.x)",
-                group_name
+                "Group {group_name} should have IP from pool range (232.1.x.x)"
             );
         } else {
-            panic!("Expected IPv4 multicast address for group {}", group_name);
+            panic!("Expected IPv4 multicast address for group {group_name}");
         }
 
         // Verify source IPs
         assert_eq!(
             group.source_ips.len(),
             1,
-            "Group {} should have exactly 1 source IP",
-            group_name
+            "Group {group_name} should have exactly 1 source IP"
         );
         assert_eq!(
             group.source_ips[0].to_string(),
             *expected_source,
-            "Group {} should have correct source IP",
-            group_name
+            "Group {group_name} should have correct source IP"
         );
 
         // Collect allocated IP for uniqueness check
@@ -1218,8 +1213,7 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(
             members.len(),
             1,
-            "Group {} should have exactly 1 member",
-            group_name
+            "Group {group_name} should have exactly 1 member"
         );
     }
 

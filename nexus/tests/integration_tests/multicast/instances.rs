@@ -9,7 +9,7 @@
 //! Instance lifecycle tests:
 //!
 //! - Full lifecycle: Create, attach, start, stop, delete flows
-//! - Attach conflicts: Cannot attach same instance twice to same group
+//! - Idempotency: Duplicate attach operations succeed without creating duplicates
 //! - Attach limits: Validates per-instance multicast group limits
 //! - State transitions: Member states change with instance state
 //! - Persistence: Memberships survive instance stop/start cycles
@@ -1094,8 +1094,7 @@ async fn test_source_ips_preserved_on_instance_restart(
 
     // Simulate and wait for running
     let nexus = &cptestctx.server.server_context().nexus;
-    instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+    instance_wait_for_running_with_simulation(cptestctx, instance_id).await;
 
     // Join SSM multicast group with source_ips
     let ssm_ip = "232.50.0.100";
@@ -1151,10 +1150,9 @@ async fn test_source_ips_preserved_on_instance_restart(
     .expect("Should restart instance");
 
     // Simulate and wait for running
-    instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+    instance_wait_for_running_with_simulation(cptestctx, instance_id).await;
 
-    // Verify source_ips are PRESERVED after restart
+    // Verify source_ips are preserved after restart
     // Get the member via the group members list
     let expected_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
     let members_url =
@@ -1889,7 +1887,7 @@ async fn test_group_with_all_members_left(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // Now add a second instance to the SAME group
+    // Now add a second instance to the same group
     let instance2 = instance_for_multicast_groups(
         cptestctx,
         project_name,

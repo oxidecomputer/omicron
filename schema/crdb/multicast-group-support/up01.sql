@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     version_removed INT8,
 
     /* Constraints */
-    -- External groups: IPv4 multicast or non-admin-local IPv6
+    -- External groups: IPv4 multicast or non-admin-scoped IPv6
     CONSTRAINT external_multicast_ip_valid CHECK (
         (family(multicast_ip) = 4 AND multicast_ip << '224.0.0.0/4') OR
         (family(multicast_ip) = 6 AND multicast_ip << 'ff00::/8' AND
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     )
 );
 
--- Underlay multicast groups (admin-local IPv6 for VPC internal forwarding)
+-- Underlay multicast groups (admin-scoped IPv6 for VPC internal forwarding)
 CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     /* Identity */
     id UUID PRIMARY KEY,
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    /* Admin-local IPv6 multicast address (NAT target) */
+    /* Admin-scoped IPv6 multicast address (NAT target) */
     multicast_ip INET NOT NULL,
 
     /* DPD tag to couple external/underlay state for this group */
@@ -230,7 +230,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS underlay_multicast_group_version_removed ON om
     time_deleted
 );
 
--- Admin-local IPv6 address uniqueness
+-- Admin-scoped IPv6 address uniqueness
 -- Supports: SELECT ... WHERE multicast_ip = ? AND time_deleted IS NULL
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_underlay_multicast_by_ip ON omicron.public.underlay_multicast_group (
     multicast_ip

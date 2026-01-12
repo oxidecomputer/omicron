@@ -729,6 +729,66 @@ pub(crate) async fn wait_for_instance_sled_assignment(
     }
 }
 
+/// Wait for an instance to reach Running state, driving simulation on each poll.
+///
+/// More robust than passively waiting, as it actively drives instance
+/// simulation while polling for the Running state.
+///
+/// Only use for Running transitions. For Stopped state, use `instance_simulate`
+/// once followed by `instance_wait_for_state`, as the VMM gets removed during
+/// stop and repeated simulation will fail.
+pub(crate) async fn instance_wait_for_running_with_simulation(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: InstanceUuid,
+) -> Instance {
+    let expected_state = InstanceState::Running;
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let url = format!("/v1/instances/{instance_id}");
+
+    match wait_for_condition(
+        || async {
+            instance_helpers::instance_simulate(nexus, &instance_id).await;
+
+            let response = NexusRequest::object_get(client, &url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .map_err(|e| {
+                    CondCheckError::<String>::Failed(format!(
+                        "request failed: {e}"
+                    ))
+                })?;
+
+            let instance: Instance = response.parsed_body().map_err(|e| {
+                CondCheckError::<String>::Failed(format!("parse failed: {e}"))
+            })?;
+
+            if instance.runtime.run_state == expected_state {
+                Ok(instance)
+            } else {
+                Err(CondCheckError::<String>::NotYet)
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    {
+        Ok(instance) => instance,
+        Err(poll::Error::TimedOut(elapsed)) => {
+            panic!(
+                "instance {instance_id} did not reach {expected_state:?} within {elapsed:?}"
+            );
+        }
+        Err(poll::Error::PermanentError(err)) => {
+            panic!(
+                "failed waiting for instance {instance_id} to reach {expected_state:?}: {err}"
+            );
+        }
+    }
+}
+
 /// Verify that inventory-based sled-to-switch-port mapping is correct.
 ///
 /// This validates the entire flow:
@@ -940,38 +1000,6 @@ pub(crate) async fn wait_for_group_deleted(
                 "failed waiting for group {group_name} to be deleted: {err:?}",
             );
         }
-    }
-}
-
-/// Verify a group is either deleted or in one of the expected states.
-///
-/// Useful when DPD is unavailable and groups can't complete state transitions.
-/// For example, when DPD is down during deletion, groups may be stuck in
-/// "Creating" or "Deleting" state rather than being fully deleted.
-pub(crate) async fn verify_group_deleted_or_in_states(
-    client: &ClientTestContext,
-    group_name: &str,
-    expected_states: &[&str],
-) {
-    let groups_result =
-        nexus_test_utils::resource_helpers::objects_list_page_authz::<
-            MulticastGroup,
-        >(client, "/v1/multicast-groups")
-        .await;
-
-    let matching_groups: Vec<_> = groups_result
-        .items
-        .into_iter()
-        .filter(|g| g.identity.name == group_name)
-        .collect();
-
-    if !matching_groups.is_empty() {
-        // Group still exists - should be in one of the expected states
-        let actual_state = &matching_groups[0].state;
-        assert!(
-            expected_states.contains(&actual_state.as_str()),
-            "Group {group_name} should be in one of {expected_states:?} states, found: {actual_state}"
-        );
     }
 }
 

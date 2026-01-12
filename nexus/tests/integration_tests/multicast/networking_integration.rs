@@ -8,7 +8,8 @@
 //!
 //! - External IPs: Instances with ephemeral/floating IPs can join multicast groups
 //! - Floating IP attach/detach: Multicast membership unaffected by IP changes
-//! - Complex network configs: Multiple NICs, VPCs, subnets with multicast
+
+use std::time::Duration;
 
 use http::{Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -25,21 +26,20 @@ use nexus_types::external_api::views::FloatingIp;
 use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
-    InstanceState, NameOrId,
+    NameOrId,
 };
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 
 use super::*;
-use crate::integration_tests::instances::{
-    fetch_instance_external_ips, instance_simulate, instance_wait_for_state,
-};
+use crate::integration_tests::instances::fetch_instance_external_ips;
 
 /// Consolidated test for external IP scenarios with multicast group membership.
 ///
 /// This test covers three scenarios with shared setup:
-/// - Case 1: Basic external IP attach/detach with multicast
-/// - Case 2: Lifecycle with 1-2 attach/detach cycles
-/// - Case 3: External IP at instance creation
+/// - Basic external IP attach/detach with multicast
+/// - Lifecycle with 1-2 attach/detach cycles
+/// - External IP at instance creation
 #[nexus_test]
 async fn test_multicast_external_ip_scenarios(
     cptestctx: &nexus_test_utils::ControlPlaneTestContext<
@@ -47,7 +47,6 @@ async fn test_multicast_external_ip_scenarios(
     >,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.server_context().nexus;
     let project_name = "external-ip-scenarios-project";
 
     // Shared setup: project and IP pools
@@ -66,9 +65,8 @@ async fn test_multicast_external_ip_scenarios(
     // Ensure multicast test prerequisites (inventory + DPD) are ready
     ensure_multicast_test_ready(cptestctx).await;
 
-    // -------------------------------------------------------------------------
-    // Case 1: Basic external IP attach/detach with multicast
-    // -------------------------------------------------------------------------
+    // Case: Basic external IP attach/detach with multicast
+    //
     // Verify instances can have both external IPs and multicast group membership.
     // External IP allocation works for multicast group members, multicast state
     // persists through external IP operations.
@@ -106,8 +104,7 @@ async fn test_multicast_external_ip_scenarios(
 
         // Transition instance to Running state
         let instance_uuid = InstanceUuid::from_untyped_uuid(instance_id);
-        instance_simulate(nexus, &instance_uuid).await;
-        instance_wait_for_state(client, instance_uuid, InstanceState::Running)
+        instance_wait_for_running_with_simulation(cptestctx, instance_uuid)
             .await;
 
         wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
@@ -208,15 +205,14 @@ async fn test_multicast_external_ip_scenarios(
             "Instance should have at most SNAT IP remaining"
         );
 
-        // Cleanup Case 1
+        // Cleanup
         cleanup_instances(cptestctx, client, project_name, &[instance_name])
             .await;
         wait_for_group_deleted(cptestctx, group_name).await;
     }
 
-    // -------------------------------------------------------------------------
-    // Case 2: Lifecycle with 1-2 attach/detach cycles
-    // -------------------------------------------------------------------------
+    // Case: Lifecycle with 1-2 attach/detach cycles
+    //
     // Verify external IP allocation/deallocation lifecycle for multicast group
     // members. Multiple external IP attach/detach cycles don't affect multicast
     // state and dataplane configuration remains consistent throughout.
@@ -254,8 +250,7 @@ async fn test_multicast_external_ip_scenarios(
 
         // Start instance and add to multicast group
         let instance_uuid = InstanceUuid::from_untyped_uuid(instance_id);
-        instance_simulate(nexus, &instance_uuid).await;
-        instance_wait_for_state(client, instance_uuid, InstanceState::Running)
+        instance_wait_for_running_with_simulation(cptestctx, instance_uuid)
             .await;
 
         wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
@@ -368,15 +363,14 @@ async fn test_multicast_external_ip_scenarios(
             );
         }
 
-        // Cleanup Case 2
+        // Cleanup
         cleanup_instances(cptestctx, client, project_name, &[instance_name])
             .await;
         wait_for_group_deleted(cptestctx, group_name).await;
     }
 
-    // -------------------------------------------------------------------------
-    // Case 3: External IP at instance creation
-    // -------------------------------------------------------------------------
+    // Case: External IP at instance creation
+    //
     // Verify instances can be created with both external IP and multicast group
     // simultaneously. Instance creation with both features works without
     // conflicts during initial setup.
@@ -419,8 +413,7 @@ async fn test_multicast_external_ip_scenarios(
 
         // Transition to running
         let instance_uuid = InstanceUuid::from_untyped_uuid(instance_id);
-        instance_simulate(nexus, &instance_uuid).await;
-        instance_wait_for_state(client, instance_uuid, InstanceState::Running)
+        instance_wait_for_running_with_simulation(cptestctx, instance_uuid)
             .await;
 
         wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
@@ -464,7 +457,7 @@ async fn test_multicast_external_ip_scenarios(
             "Instance should retain external IP"
         );
 
-        // Cleanup Case 3
+        // Cleanup
         cleanup_instances(cptestctx, client, project_name, &[instance_name])
             .await;
         wait_for_group_deleted(cptestctx, group_name).await;
@@ -538,21 +531,34 @@ async fn test_multicast_with_floating_ip_basic(
         object_create(client, &instance_url, &instance_params).await;
     let instance_id = instance.identity.id;
 
-    // Transition instance to Running state
-    let nexus = &cptestctx.server.server_context().nexus;
     let instance_uuid = InstanceUuid::from_untyped_uuid(instance_id);
-    instance_simulate(nexus, &instance_uuid).await;
-    instance_wait_for_state(client, instance_uuid, InstanceState::Running)
-        .await;
+    wait_for_instance_sled_assignment(cptestctx, &instance_uuid).await;
+    instance_wait_for_running_with_simulation(cptestctx, instance_uuid).await;
 
     // Ensure multicast test prerequisites (inventory + DPD) are ready
     ensure_multicast_test_ready(cptestctx).await;
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Add instance to multicast group via instance-centric API
     multicast_group_attach(cptestctx, project_name, instance_name, group_name)
         .await;
-    wait_for_group_active(client, group_name).await;
+    // Group activation is reconciler-driven; explicitly drive it to avoid flakes.
+    wait_for_condition_with_reconciler(
+        &cptestctx.lockstep_client,
+        || async {
+            let group = get_multicast_group(client, group_name).await;
+            if group.state == "Active" {
+                Ok(())
+            } else {
+                Err(CondCheckError::<String>::NotYet)
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        panic!("group {group_name} did not reach Active state in time: {e:?}")
+    });
 
     // Wait for multicast member to reach "Joined" state
     wait_for_member_state(
@@ -610,16 +616,32 @@ async fn test_multicast_with_floating_ip_basic(
     );
 
     // Check that floating IP is properly attached
-    let external_ips_after_attach =
-        fetch_instance_external_ips(client, instance_name, project_name).await;
-    assert!(
-        !external_ips_after_attach.is_empty(),
-        "Instance should have external IP"
-    );
-    // Find the floating IP among the external IPs (there may also be SNAT IP)
-    let has_floating_ip =
-        external_ips_after_attach.iter().any(|ip| ip.ip() == floating_ip.ip);
-    assert!(has_floating_ip, "Instance should have the floating IP attached");
+    wait_for_condition(
+        || async {
+            let external_ips = fetch_instance_external_ips(
+                client,
+                instance_name,
+                project_name,
+            )
+            .await;
+            let has_floating_ip =
+                external_ips.iter().any(|ip| ip.ip() == floating_ip.ip);
+            if has_floating_ip {
+                Ok(())
+            } else {
+                Err(CondCheckError::<String>::NotYet)
+            }
+        },
+        &Duration::from_millis(200),
+        &Duration::from_secs(30),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        panic!(
+            "instance did not show floating IP {} as attached within 30s: {e:?}",
+            floating_ip.ip
+        )
+    });
 
     // Detach floating IP and verify multicast is unaffected
     let detach_url = format!(
@@ -636,9 +658,6 @@ async fn test_multicast_with_floating_ip_basic(
     .parsed_body::<FloatingIp>()
     .unwrap();
 
-    // Wait for operations to settle
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
     // Verify multicast membership is still intact after floating IP removal
     let members_after_detach =
         list_multicast_group_members(client, group_name).await;
@@ -654,14 +673,32 @@ async fn test_multicast_with_floating_ip_basic(
     );
 
     // Verify floating IP is detached (SNAT IP may still be present)
-    let external_ips_after_detach =
-        fetch_instance_external_ips(client, instance_name, project_name).await;
-    let still_has_floating_ip =
-        external_ips_after_detach.iter().any(|ip| ip.ip() == floating_ip.ip);
-    assert!(
-        !still_has_floating_ip,
-        "Instance should not have the floating IP attached anymore"
-    );
+    wait_for_condition(
+        || async {
+            let external_ips = fetch_instance_external_ips(
+                client,
+                instance_name,
+                project_name,
+            )
+            .await;
+            let still_has_floating_ip =
+                external_ips.iter().any(|ip| ip.ip() == floating_ip.ip);
+            if !still_has_floating_ip {
+                Ok(())
+            } else {
+                Err(CondCheckError::<String>::NotYet)
+            }
+        },
+        &Duration::from_millis(200),
+        &Duration::from_secs(30),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        panic!(
+            "instance still showed floating IP {} as attached after 30s: {e:?}",
+            floating_ip.ip
+        )
+    });
 
     // Cleanup floating IP
     let fip_delete_url =

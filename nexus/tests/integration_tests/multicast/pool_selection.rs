@@ -54,14 +54,13 @@ async fn test_pool_selection_ssm_asm(cptestctx: &ControlPlaneTestContext) {
 
     // Case: SSM->ASM fallback when only ASM pool exists
     //
-    // When `has_sources=true` and no SSM pool is linked to the silo, the system
+    // When sources are provided and no SSM pool is linked to the silo, the system
     // should fall back to using an ASM pool. This is valid because source filtering
     // still works on ASM addresses via IGMPv3/MLDv2, just without SSM's network-level
     // source guarantees.
 
-    // Join a group BY NAME with sources:
-    // - has_sources=true (sources provided)
-    // - Pool selection will try SSM first
+    // Join a group by name with sources:
+    // - Sources provided, so pool selection will try SSM first
     // - No SSM pool -> should fall back to ASM pool
     // - Group will be created with ASM IP (224.x.x.x)
     let join_url1 = format!(

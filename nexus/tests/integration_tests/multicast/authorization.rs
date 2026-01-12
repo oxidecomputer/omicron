@@ -12,6 +12,7 @@
 
 use http::StatusCode;
 
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::test_params::UserPassword;
 use nexus_test_utils::resource_helpers::{
@@ -150,11 +151,13 @@ async fn test_silo_user_multicast_permissions(
     let client = &cptestctx.external_client;
 
     // Common setup: create pools (mcast pool auto-links to DEFAULT_SILO)
-    create_default_ip_pools(&client).await;
-    create_multicast_ip_pool(&client, "mcast-pool").await;
+    ops::join2(
+        create_default_ip_pools(&client),
+        create_multicast_ip_pool(&client, "mcast-pool"),
+    )
+    .await;
 
     // Get the DEFAULT silo (same silo as PrivilegedUser)
-    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
     let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name);
     let silo: Silo = object_get(client, &silo_url).await;
 
@@ -258,7 +261,7 @@ async fn test_silo_user_multicast_permissions(
         anti_affinity_groups: Vec::new(),
     };
 
-    let second_instance: Instance = NexusRequest::new(
+    let instance2: Instance = NexusRequest::new(
         RequestBuilder::new(
             client,
             http::Method::POST,
@@ -277,7 +280,7 @@ async fn test_silo_user_multicast_permissions(
     // User can attach additional instance to existing multicast group
     let join_url = format!(
         "/v1/instances/{}/multicast-groups/{}?project=second-project",
-        second_instance.identity.name, group.identity.name
+        instance2.identity.name, group.identity.name
     );
     let join_params =
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
@@ -293,7 +296,7 @@ async fn test_silo_user_multicast_permissions(
     .expect("User should be able to attach their instance to the group");
 
     // Case: Authenticated users can read multicast groups
-    // Regular silo user (with no Fleet roles) can GET the multicast group
+    // Regular silo user (no Fleet roles) can GET the multicast group
     let get_group_url = mcast_group_url(&group.identity.name.to_string());
     let read_group: MulticastGroup = NexusRequest::new(
         RequestBuilder::new(client, http::Method::GET, &get_group_url)
@@ -309,23 +312,29 @@ async fn test_silo_user_multicast_permissions(
     assert_eq!(read_group.identity.id, group.identity.id);
     assert_eq!(read_group.identity.name, group.identity.name);
 
-    // Regular silo user can also LIST multicast groups
-    let list_groups: Vec<MulticastGroup> = NexusRequest::iter_collection_authn(
-        client,
-        "/v1/multicast-groups",
-        "",
-        None,
-    )
-    .await
-    .expect("Silo user should be able to list multicast groups")
-    .all_items;
+    // Regular silo user can also list multicast groups
+    let list_response: dropshot::ResultsPage<MulticastGroup> =
+        NexusRequest::new(
+            RequestBuilder::new(
+                client,
+                http::Method::GET,
+                "/v1/multicast-groups",
+            )
+            .expect_status(Some(StatusCode::OK)),
+        )
+        .authn_as(AuthnMode::SiloUser(reader_user.id))
+        .execute()
+        .await
+        .expect("Silo user should be able to list multicast groups")
+        .parsed_body()
+        .unwrap();
 
     assert!(
-        list_groups.iter().any(|g| g.identity.id == group.identity.id),
+        list_response.items.iter().any(|g| g.identity.id == group.identity.id),
         "Multicast group should appear in list for silo user"
     );
 
-    // Regular silo user can also lookup group by IP address
+    // Regular silo user can also look up group by IP address
     let multicast_ip = group.multicast_ip;
     let ip_lookup_url = format!("/v1/multicast-groups/{multicast_ip}");
     let ip_lookup_group: MulticastGroup = NexusRequest::new(
@@ -335,16 +344,49 @@ async fn test_silo_user_multicast_permissions(
     .authn_as(AuthnMode::SiloUser(reader_user.id))
     .execute()
     .await
-    .expect("Silo user should be able to lookup group by IP")
+    .expect("Silo user should be able to look up group by IP")
     .parsed_body()
     .unwrap();
 
     assert_eq!(ip_lookup_group.identity.id, group.identity.id);
     assert_eq!(ip_lookup_group.multicast_ip, multicast_ip);
 
+    // Case: Lookup group by nonexistent IP returns 404
+    let nonexistent_ip = "224.99.99.99";
+    let nonexistent_ip_url = format!("/v1/multicast-groups/{nonexistent_ip}");
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::GET, &nonexistent_ip_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::SiloUser(reader_user.id))
+    .execute()
+    .await
+    .expect("Lookup by nonexistent IP should return 404");
+
     // Case: Project-only users can access multicast groups in their project
-    // Project-only user CAN LIST multicast groups (no silo roles needed)
-    let list_response: dropshot::ResultsPage<MulticastGroup> =
+    //
+    // We sanity-check the group exists using a privileged iterator helper
+    // (which always uses PrivilegedUser), then exercise the list endpoint using
+    // `project_user` with a single-page GET.
+    let list_response: Vec<MulticastGroup> =
+        NexusRequest::iter_collection_authn(
+            client,
+            "/v1/multicast-groups",
+            "",
+            None,
+        )
+        .await
+        .expect("Should be able to list multicast groups")
+        .all_items;
+
+    // Verify the group exists in the full list first
+    assert!(
+        list_response.iter().any(|g| g.identity.id == group.identity.id),
+        "Multicast group should exist in the fleet-wide list"
+    );
+
+    // Now verify project_user specifically can access the list endpoint
+    let project_user_list: dropshot::ResultsPage<MulticastGroup> =
         NexusRequest::object_get(client, "/v1/multicast-groups")
             .authn_as(AuthnMode::SiloUser(project_user.id))
             .execute()
@@ -354,11 +396,14 @@ async fn test_silo_user_multicast_permissions(
             .unwrap();
 
     assert!(
-        list_response.items.iter().any(|g| g.identity.id == group.identity.id),
+        project_user_list
+            .items
+            .iter()
+            .any(|g| g.identity.id == group.identity.id),
         "Project-only user should see multicast groups in list"
     );
 
-    // Project-only user CAN READ individual multicast group
+    // Project-only user can read individual multicast group
     let read_group_by_project_user: MulticastGroup = NexusRequest::new(
         RequestBuilder::new(client, http::Method::GET, &get_group_url)
             .expect_status(Some(StatusCode::OK)),
@@ -372,8 +417,8 @@ async fn test_silo_user_multicast_permissions(
 
     assert_eq!(read_group_by_project_user.identity.id, group.identity.id);
 
-    // Project-only user CAN CREATE a multicast group via instance join
-    // They create an instance in their project, then add it as a member
+    // A project-only user can create a multicast group via instance join.
+    // They create an instance in their project, then add it as a member.
     let project_instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: "project-user-instance".parse().unwrap(),
@@ -440,7 +485,7 @@ async fn test_silo_user_multicast_permissions(
         "created-by-project-user"
     );
 
-    // Project-only user CAN CREATE a second instance and attach to existing group
+    // A project-only user can create a second instance and attach to existing group
     let instance_name2 = "project-user-instance-2";
     let instances_url =
         format!("/v1/instances?project={}", project_only.identity.id);
@@ -521,8 +566,8 @@ async fn test_unauthenticated_access_denied(
     let client = &cptestctx.external_client;
     create_default_ip_pools(&client).await;
 
-    // Get current silo info
-    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
+    // Get DEFAULT_SILO info (pools are linked to DEFAULT_SILO)
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name);
     let silo: Silo = object_get(client, &silo_url).await;
 
     // Create multicast pool (auto-links to DEFAULT_SILO)
@@ -623,8 +668,8 @@ async fn test_unprivileged_users_can_list_group_members(
     let client = &cptestctx.external_client;
     create_default_ip_pools(&client).await;
 
-    // Get current silo info
-    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
+    // Get DEFAULT_SILO info (pools are linked to DEFAULT_SILO)
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name);
     let silo: Silo = object_get(client, &silo_url).await;
 
     // Create multicast pool (auto-links to DEFAULT_SILO)
@@ -876,7 +921,7 @@ async fn test_cross_silo_multicast_isolation(
     // linking the same pool to multiple silos (pool linking = access control)
     link_ip_pool(&client, "mcast-pool", &silo_b.identity.id, false).await;
 
-    // Create Silo C - NOT linked to mcast-pool (for unlinked pool tests)
+    // Create Silo C - not linked to mcast-pool (for unlinked pool tests)
     let silo_c_params = SiloCreate {
         identity: IdentityMetadataCreateParams {
             name: "silo-c-unlinked".parse().unwrap(),
@@ -977,7 +1022,7 @@ async fn test_cross_silo_multicast_isolation(
     )
     .await;
 
-    // Both silo admins CAN READ each other's groups (fleet-scoped visibility)
+    // Both silo admins can read each other's groups (fleet-scoped visibility)
     let read_b_by_a: MulticastGroup = NexusRequest::new(
         RequestBuilder::new(
             client,
@@ -1202,11 +1247,7 @@ async fn test_cross_silo_multicast_isolation(
             .parsed_body()
             .unwrap();
 
-    assert_eq!(
-        members_by_a.items.len(),
-        2,
-        "Admin A should see both members"
-    );
+    assert_eq!(members_by_a.items.len(), 2, "Admin A should see both members");
 
     let members_by_b: dropshot::ResultsPage<MulticastGroupMember> =
         NexusRequest::object_get(client, &members_url)
@@ -1217,11 +1258,7 @@ async fn test_cross_silo_multicast_isolation(
             .parsed_body()
             .unwrap();
 
-    assert_eq!(
-        members_by_b.items.len(),
-        2,
-        "Admin B should see both members"
-    );
+    assert_eq!(members_by_b.items.len(), 2, "Admin B should see both members");
 
     // Admin A cannot detach Admin B's instance (404 - can't see Silo B's instance)
     let member_delete_b_by_a_url = format!(
@@ -1381,7 +1418,6 @@ async fn test_both_member_endpoints_have_same_permissions(
     // Get the DEFAULT silo (same silo as PrivilegedUser)
     // This ensures that when we create a project using AuthnMode::PrivilegedUser,
     // it will be created in the same silo as our users
-    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
     let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name);
     let silo: Silo = object_get(client, &silo_url).await;
 
@@ -1404,7 +1440,7 @@ async fn test_both_member_endpoints_have_same_permissions(
     .await;
 
     // Create User B (unprivileged) in the same silo
-    // User B intentionally has NO silo-level roles - they're just a regular user
+    // User B intentionally has no silo-level roles - they're just a regular user
     let user_b = create_local_user(
         client,
         &silo,
@@ -1518,7 +1554,8 @@ async fn test_both_member_endpoints_have_same_permissions(
     )
     .await;
 
-    // Create a second instance in the project (User A still owns it, but User B now has access)
+    // Create a second instance in the project
+    // (User A still owns it, but User B now has access)
     let instance_b = create_instance(
         client,
         project_a.identity.name.as_str(),
@@ -1526,7 +1563,8 @@ async fn test_both_member_endpoints_have_same_permissions(
     )
     .await;
 
-    // User B should now succeed via the instance-centric endpoint (has Instance::Modify permission)
+    // User B should now succeed via the instance-centric endpoint
+    // (has Instance::Modify permission)
     let join_url_b = format!(
         "/v1/instances/{}/multicast-groups/{}?project={}",
         instance_b.identity.id, group_a.identity.name, project_a.identity.name
@@ -1556,7 +1594,8 @@ async fn test_both_member_endpoints_have_same_permissions(
     )
     .await;
 
-    // User B should ALSO succeed via the instance-centric endpoint (same permission check)
+    // User B should also succeed via the instance-centric endpoint
+    // (same permission check)
     let instance_centric_url_c = format!(
         "/v1/instances/{}/multicast-groups/{}",
         instance_c.identity.id, group_a.identity.id
@@ -1574,8 +1613,4 @@ async fn test_both_member_endpoints_have_same_permissions(
     .expect(
         "User B should succeed via instance-centric endpoint with permission",
     );
-
-    // This verifies both endpoints have identical permission behavior:
-    // - Without permission: both return 404
-    // - With project-level access granted: both succeed with 201 Created
 }
