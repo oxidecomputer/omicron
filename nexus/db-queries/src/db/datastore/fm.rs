@@ -148,9 +148,6 @@ impl DataStore {
         id: SitrepUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<Sitrep, Error> {
-        let metadata =
-            self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
-
         // Fetch all ereports assigned to cases in this sitrep. We do this by
         // querying the `fm_ereport_in_case` table for all entries with this
         // sitrep ID, paginated by the ereport assignment's UUID. This query is
@@ -288,6 +285,17 @@ impl DataStore {
 
             cases
         };
+
+        // Finally, fetch the sitrep's metadata from the `fm_sitrep` table. We
+        // load this record last, because if a concurrent delete operation has
+        // started, we will observe that the top-level metadata record has been
+        // deleted, and return `NotFound`. This prevents us from returning a
+        // potentially torn sitrep where child records were deleted after
+        // loading the metadata record.
+        // 
+        // See https://github.com/oxidecomputer/omicron/issues/9594 for details.
+        let metadata =
+            self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
         Ok(Sitrep { metadata, cases })
     }
