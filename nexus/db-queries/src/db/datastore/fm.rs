@@ -131,6 +131,8 @@ impl DataStore {
                 )?;
             let version: fm::SitrepVersion = match version {
                 Some(version) => version.into(),
+                // If there is no current sitrep version, that means no sitreps
+                // exist; return `None`.
                 None => return Ok(None),
             };
             match self.fm_sitrep_read_on_conn(version.id, &conn).await {
