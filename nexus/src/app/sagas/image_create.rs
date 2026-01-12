@@ -332,30 +332,36 @@ async fn simc_create_image_record_undo(
     // can safely skip the delete operation.
     match &params.image_type {
         ImageType::Project { .. } => {
-            let lookup_result = LookupPath::new(&opctx, osagactx.datastore())
+            match LookupPath::new(&opctx, osagactx.datastore())
                 .project_image_id(image_id)
                 .fetch()
-                .await;
-
-            if let Ok((.., authz_image, db_image)) = lookup_result {
-                osagactx
-                    .datastore()
-                    .project_image_delete(&opctx, &authz_image, db_image)
-                    .await?;
+                .await
+            {
+                Ok((.., authz_image, db_image)) => {
+                    osagactx
+                        .datastore()
+                        .project_image_delete(&opctx, &authz_image, db_image)
+                        .await?;
+                }
+                Err(Error::ObjectNotFound { .. }) => {}
+                Err(e) => return Err(e.into()),
             }
         }
 
         ImageType::Silo { .. } => {
-            let lookup_result = LookupPath::new(&opctx, osagactx.datastore())
+            match LookupPath::new(&opctx, osagactx.datastore())
                 .silo_image_id(image_id)
                 .fetch()
-                .await;
-
-            if let Ok((.., authz_image, db_image)) = lookup_result {
-                osagactx
-                    .datastore()
-                    .silo_image_delete(&opctx, &authz_image, db_image)
-                    .await?;
+                .await
+            {
+                Ok((.., authz_image, db_image)) => {
+                    osagactx
+                        .datastore()
+                        .silo_image_delete(&opctx, &authz_image, db_image)
+                        .await?;
+                }
+                Err(Error::ObjectNotFound { .. }) => {}
+                Err(e) => return Err(e.into()),
             }
         }
     }
