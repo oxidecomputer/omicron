@@ -1398,7 +1398,7 @@ mod test {
         let log = opctx.log;
 
         // Check to ensure that the nat entry for the address has made it onto switch1 dendrite.
-        // Note: ipv4_nat_trigger_update() triggers dendrite's RPW asynchronously and returns
+        // Note: nat_trigger_update() triggers dendrite's RPW asynchronously and returns
         // immediately, but dendrite still needs time to process the update and create the NAT
         // entries. Tests need to poll/wait for entries rather than checking immediately, or
         // they'll be flaky.
