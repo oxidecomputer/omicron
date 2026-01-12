@@ -27,6 +27,8 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use dropshot::PaginationOrder;
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
@@ -292,7 +294,7 @@ impl DataStore {
         // deleted, and return `NotFound`. This prevents us from returning a
         // potentially torn sitrep where child records were deleted after
         // loading the metadata record.
-        // 
+        //
         // See https://github.com/oxidecomputer/omicron/issues/9594 for details.
         let metadata =
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
@@ -767,45 +769,58 @@ impl DataStore {
             .map(|id| id.into_untyped_uuid())
             .collect::<Vec<_>>();
 
-        // Delete case ereport assignments
-        let case_ereports_deleted = diesel::delete(
-            case_ereport_dsl::fm_ereport_in_case
-                .filter(case_ereport_dsl::sitrep_id.eq_any(ids.clone())),
-        )
-        .execute_async(&*conn)
-        .await
-        .map_err(|e| {
-            public_error_from_diesel(e, ErrorHandler::Server)
-                .internal_context("failed to delete case ereport assignments")
-        })?;
+        struct SitrepDeleteResult {
+            sitreps_deleted: usize,
+            case_ereports_deleted: usize,
+            cases_deleted: usize,
+        }
 
-        // Delete case metadata records.
-        let cases_deleted = diesel::delete(
-            case_dsl::fm_case.filter(case_dsl::sitrep_id.eq_any(ids.clone())),
-        )
-        .execute_async(&*conn)
-        .await
-        .map_err(|e| {
-            public_error_from_diesel(e, ErrorHandler::Server)
-                .internal_context("failed to delete case metadata")
-        })?;
+        let SitrepDeleteResult {
+            sitreps_deleted,
+            case_ereports_deleted,
+            cases_deleted,
+        } = self
+            // Sitrep deletion is transactional to prevent a sitrep from being
+            // left in a partially-deleted state should the Nexus instance
+            // attempting the delete operation die suddenly.
+            .transaction_retry_wrapper("fm_sitrep_delete_all")
+            .transaction(&conn, |conn| {
+                let ids = ids.clone();
+                async move {
+                    // Delete case ereport assignments
+                    let case_ereports_deleted = diesel::delete(
+                        case_ereport_dsl::fm_ereport_in_case.filter(
+                            case_ereport_dsl::sitrep_id.eq_any(ids.clone()),
+                        ),
+                    )
+                    .execute_async(&conn)
+                    .await?;
 
-        // Delete the sitrep metadata entries *last*. This is necessary because
-        // the rest of the delete operation is unsynchronized, and it is
-        // possible for a Nexus to die before it has "fully deleted" a sitrep,
-        // but deleted some of its records. The `fm_sitrep` (metadata) table is
-        // the one that is used to determine whether a sitrep "exists" so that
-        // the sitrep GC task can determine if it needs to be deleted, so don't
-        // touch it until all the other records are gone.
-        let sitreps_deleted = diesel::delete(
-            sitrep_dsl::fm_sitrep.filter(sitrep_dsl::id.eq_any(ids.clone())),
-        )
-        .execute_async(&*conn)
-        .await
-        .map_err(|e| {
-            public_error_from_diesel(e, ErrorHandler::Server)
-                .internal_context("failed to delete sitrep metadata")
-        })?;
+                    // Delete case metadata records.
+                    let cases_deleted = diesel::delete(
+                        case_dsl::fm_case
+                            .filter(case_dsl::sitrep_id.eq_any(ids.clone())),
+                    )
+                    .execute_async(&conn)
+                    .await?;
+
+                    // Delete sitrep metadata records.
+                    let sitreps_deleted = diesel::delete(
+                        sitrep_dsl::fm_sitrep
+                            .filter(sitrep_dsl::id.eq_any(ids.clone())),
+                    )
+                    .execute_async(&conn)
+                    .await?;
+
+                    Ok(SitrepDeleteResult {
+                        sitreps_deleted,
+                        cases_deleted,
+                        case_ereports_deleted,
+                    })
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         slog::debug!(
             &opctx.log,
