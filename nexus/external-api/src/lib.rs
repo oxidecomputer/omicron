@@ -70,6 +70,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026011100, MULTICAST_JOIN_LEAVE_DOCS),
     (2026010800, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
     (2026010500, POOL_SELECTION_ENUMS),
     (2026010300, DUAL_STACK_NICS),
@@ -3420,32 +3421,16 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseCreated<v2025121200::MulticastGroupMember>, HttpError>;
 
-    /// Join a multicast group.
+    /// Join a multicast group by name, IP address, or UUID.
     ///
-    /// This is functionally equivalent to adding the instance via the group's
-    /// member management endpoint or updating the instance's `multicast_groups`
-    /// field. All approaches modify the same membership and trigger reconciliation.
+    /// Groups can be referenced by name, IP address, or UUID. If the group
+    /// doesn't exist, it's implicitly created with an auto-allocated IP from a
+    /// multicast pool linked to the caller's silo. When referencing by UUID,
+    /// the group must already exist.
     ///
-    /// Authorization: requires Modify on the instance identified in the URL path
-    /// (checked first) and Read on the multicast group. Checking instance permission
-    /// first prevents creating orphaned groups when the instance check fails.
-    ///
-    /// Group Identification: Groups can be referenced by name, IP address,
-    /// or UUID. All three are fleet-wide unique identifiers:
-    /// - By name: If group doesn't exist, it's implicitly created with an
-    ///   auto-allocated IP from a multicast pool linked to the caller's silo.
-    ///   Pool selection prefers the default pool; if none, selects alphabetically.
-    /// - By IP: If group doesn't exist, it's implicitly created using that
-    ///   IP. The pool is determined by which pool contains the IP.
-    /// - By UUID: Group must already exist.
-    ///
-    /// Source IP filtering:
-    /// - Duplicate IPs in the request are automatically deduplicated.
-    /// - Maximum of 64 source IPs allowed (per RFC 3376, IGMPv3).
-    /// - ASM: Sources are optional. Providing sources enables source
-    ///   filtering via IGMPv3/MLDv2 even for ASM addresses.
-    /// - SSM: Sources are required. SSM addresses (232.0.0.0/8 for IPv4,
-    ///   ff3x::/32 for IPv6) must have at least one source specified.
+    /// Source IPs are optional for ASM addresses but required for SSM addresses
+    /// (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate IPs in the request
+    /// are automatically deduplicated, with a maximum of 64 source IPs allowed.
     #[endpoint {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
@@ -3477,17 +3462,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Leave a multicast group.
-    ///
-    /// The group can be specified by name, UUID, or multicast IP address.
-    /// All three are fleet-wide unique identifiers.
-    ///
-    /// This is functionally equivalent to removing the instance via the group's
-    /// member management endpoint or updating the instance's `multicast_groups`
-    /// field. All approaches modify the same membership and trigger reconciliation.
-    ///
-    /// Authorization: requires Modify on the instance (checked first) and Read
-    /// on the multicast group.
+    /// Leave a multicast group by name, IP address, or UUID.
     #[endpoint {
         method = DELETE,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
