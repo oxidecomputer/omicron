@@ -224,6 +224,12 @@ impl UnhealthyZpoolsResult {
         Self { zpools: vec![], errors: vec![], time_of_status: None }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.zpools.is_empty()
+            && self.errors.is_empty()
+            && self.time_of_status == None
+    }
+
     #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
     fn parse(log: &Logger, data: &[u8]) -> Self {
         let mut zpools = vec![];

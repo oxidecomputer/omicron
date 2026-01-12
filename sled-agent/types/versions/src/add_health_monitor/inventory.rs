@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use illumos_utils::svcs::SvcsInMaintenanceResult;
+use illumos_utils::zpool::UnhealthyZpoolsResult;
 use omicron_common::api::external::ByteCount;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
@@ -92,21 +93,28 @@ pub struct HealthMonitorInventory {
         schema_with = "SnakeCaseResult::<SvcsInMaintenanceResult, String>::json_schema"
     )]
     pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
-    // TODO: Other health check results will live here as well
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<UnhealthyZpoolsResult, String>::json_schema"
+    )]
+    pub unhealthy_zpools: Result<UnhealthyZpoolsResult, String>,
 }
 
 impl HealthMonitorInventory {
     pub fn new() -> Self {
-        Self { smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()) }
+        Self {
+            smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+            unhealthy_zpools: Ok(UnhealthyZpoolsResult::new()),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        let Self { smf_services_in_maintenance } = self;
-
-        if let Ok(svcs) = smf_services_in_maintenance {
-            svcs.is_empty()
-        } else {
-            false
-        }
+        self.smf_services_in_maintenance
+            .as_ref()
+            .is_ok_and(|svcs| svcs.is_empty())
+            && self
+                .unhealthy_zpools
+                .as_ref()
+                .is_ok_and(|zpools| zpools.is_empty())
     }
 }
