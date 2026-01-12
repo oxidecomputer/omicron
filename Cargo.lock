@@ -13626,7 +13626,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210#dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=1b01d737447c6c72380a5fe51ebb1dd0f111de1f#1b01d737447c6c72380a5fe51ebb1dd0f111de1f"
 dependencies = [
  "anyhow",
  "attest-data 0.4.0",
@@ -13659,7 +13659,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls-test-utils"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210#dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=1b01d737447c6c72380a5fe51ebb1dd0f111de1f#1b01d737447c6c72380a5fe51ebb1dd0f111de1f"
 dependencies = [
  "camino",
  "pki-playground",
