@@ -50,6 +50,7 @@ use propolis_client::{
     Client as PropolisClient, types::InstanceInitializationMethod,
 };
 use range_requests::PotentialRange;
+use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
@@ -62,8 +63,8 @@ use sled_agent_types::instance::{
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
     HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
-    ZoneImageResolverInventory,
+    InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    OmicronZonesConfig, SledRole,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 
@@ -113,6 +114,7 @@ pub struct SledAgent {
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
+    health_monitor: HealthMonitorHandle,
 }
 
 impl SledAgent {
@@ -166,6 +168,8 @@ impl SledAgent {
                 .await
                 .start(&log, &config.dropshot);
 
+        let health_monitor = HealthMonitorHandle::stub();
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -198,6 +202,7 @@ impl SledAgent {
             repo_depot,
             log,
             bootstore_network_config,
+            health_monitor,
         })
     }
 
@@ -215,9 +220,10 @@ impl SledAgent {
             metadata,
             ..
         } = instance;
+        let v1_spec = crate::instance::spec_v0_to_v1(vmm_spec.0.clone());
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
-        let ncpus = vmm_spec.0.board.cpus;
+        let ncpus = v1_spec.board.cpus;
         if ncpus > 16 {
             return Err(Error::internal_error(
                 &"could not allocate an instance: ran out of CPUs!",
@@ -284,36 +290,41 @@ impl SledAgent {
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
             if !self.vmms.contains_key(&instance_id.into_untyped_uuid()).await {
-                let metadata = propolis_client::types::InstanceMetadata {
-                    project_id: metadata.project_id,
-                    silo_id: metadata.silo_id,
-                    sled_id: self.id.into_untyped_uuid(),
-                    sled_model: self
-                        .config
-                        .hardware
-                        .baseboard
-                        .model()
-                        .to_string(),
-                    sled_revision: self.config.hardware.baseboard.revision(),
-                    sled_serial: self
-                        .config
-                        .hardware
-                        .baseboard
-                        .identifier()
-                        .to_string(),
-                };
-                let properties = propolis_client::types::InstanceProperties {
-                    id: propolis_id.into_untyped_uuid(),
-                    name: local_config.hostname.to_string(),
-                    description: "sled-agent-sim created instance".to_string(),
-                    metadata,
-                };
+                let metadata =
+                    propolis_client::instance_spec::InstanceMetadata {
+                        project_id: metadata.project_id,
+                        silo_id: metadata.silo_id,
+                        sled_id: self.id.into_untyped_uuid(),
+                        sled_model: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .model()
+                            .to_string(),
+                        sled_revision: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .revision(),
+                        sled_serial: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .identifier()
+                            .to_string(),
+                    };
+                let properties =
+                    propolis_client::instance_spec::InstanceProperties {
+                        id: propolis_id.into_untyped_uuid(),
+                        name: local_config.hostname.to_string(),
+                        description: "sled-agent-sim created instance"
+                            .to_string(),
+                        metadata,
+                    };
 
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
-                    init: InstanceInitializationMethod::Spec {
-                        spec: vmm_spec.0.clone(),
-                    },
+                    init: InstanceInitializationMethod::Spec { spec: v1_spec },
                 };
 
                 // Try to create the instance
@@ -806,6 +817,7 @@ impl SledAgent {
         let datasets_config =
             storage.datasets_config_list().unwrap_or_default();
         let zones_config = self.fake_zones.lock().unwrap().clone();
+        let health_monitor = self.health_monitor.to_inventory();
 
         let sled_config = OmicronSledConfig {
             generation: zones_config.generation,
@@ -814,6 +826,7 @@ impl SledAgent {
             zones: zones_config.zones.into_iter().collect(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: Default::default(),
         };
 
         Ok(Inventory {
@@ -886,8 +899,10 @@ impl SledAgent {
             last_reconciliation: Some(
                 ConfigReconcilerInventory::debug_assume_success(sled_config),
             ),
-            // TODO: simulate the zone image resolver with greater fidelity
-            zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+            // TODO: simulate the file source resolver with greater fidelity
+            file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
+            ),
+            health_monitor,
         })
     }
 

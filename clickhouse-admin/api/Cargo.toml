@@ -8,7 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-clickhouse-admin-types.workspace = true
+clickhouse-admin-types-versions.workspace = true
 dropshot.workspace = true
 dropshot-api-manager-types.workspace = true
 omicron-common.workspace = true

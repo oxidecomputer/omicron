@@ -42,9 +42,8 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 
 use futures::future::try_join_all;
-use ipnetwork::IpNetwork;
 use oxnet::MulticastMac;
-use slog::{Logger, debug, error, info};
+use slog::{Logger, debug, error, info, warn};
 
 use dpd_client::Error as DpdError;
 use dpd_client::types::{
@@ -58,6 +57,7 @@ use dpd_client::types::{
 use internal_dns_resolver::Resolver;
 
 use nexus_db_model::{ExternalMulticastGroup, UnderlayMulticastGroup};
+use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{Error, SwitchLocation};
@@ -147,7 +147,7 @@ pub(crate) struct GroupUpdateParams<'a> {
     pub external_group: &'a ExternalMulticastGroup,
     pub underlay_group: &'a UnderlayMulticastGroup,
     pub new_name: &'a str,
-    pub new_sources: &'a [IpNetwork],
+    pub source_filter: &'a SourceFilterState,
 }
 
 impl MulticastDataplaneClient {
@@ -357,14 +357,14 @@ impl MulticastDataplaneClient {
 
     /// Apply multicast group configuration across switches (via DPD).
     ///
-    /// The `sources` parameter is the union of source IPs from all members.
-    /// Source IPs are stored per-member in the database, but DPD stores them
-    /// per-group. Pass empty slice for ASM (any-source multicast).
+    /// The `source_filter` contains the aggregated source filtering state from
+    /// all members. If any member wants "any source", switch-level filtering
+    /// is disabled.
     pub(crate) async fn create_groups(
         &self,
         external_group: &ExternalMulticastGroup,
         underlay_group: &UnderlayMulticastGroup,
-        sources: &[IpNetwork],
+        source_filter: &SourceFilterState,
     ) -> MulticastDataplaneResult<(
         MulticastGroupUnderlayResponse,
         MulticastGroupExternalResponse,
@@ -380,7 +380,8 @@ impl MulticastDataplaneClient {
             "switch_count" => self.switch_count(),
             "multicast_scope" => if external_group.multicast_ip.ip().is_ipv4() { "IPv4_External" } else { "IPv6_External" },
             "address_mode" => if is_ssm_address(external_group.multicast_ip.ip()) { "SSM" } else { "ASM" },
-            "has_sources" => !sources.is_empty(),
+            "has_any_source_member" => source_filter.has_any_source_member,
+            "specific_sources_count" => source_filter.specific_sources.len(),
             "dpd_operation" => "create_groups"
         );
 
@@ -417,17 +418,27 @@ impl MulticastDataplaneClient {
 
         let external_group_ip = external_group.multicast_ip.ip();
 
-        // TODO: ASM source filtering will be accepted in dendrite in a follow-up
-        // PR stacked on this one. For now, we only send sources to DPD for SSM
-        // groups. ASM groups get `None`, meaning "any source allowed".
+        // Source filtering logic per RFC 4607:
+        // - SSM (232/8, ff3x::/32): MUST use specific sources. SSM semantically
+        //   requires source specification; `has_any_source_member` is ignored
+        //   because API validation prevents SSM joins without sources.
+        // - ASM: Use `has_any_source_member` to decide filtering behavior.
+        //
+        // TODO: Once Dendrite accepts ASM source filtering, enable it for ASM
+        // groups where `has_any_source_member=false`. Currently ASM always gets
+        // `None` because Dendrite only supports SSM filtering.
         let sources_dpd = if is_ssm_address(external_group_ip) {
+            // SSM: always use specific sources (RFC 4607 compliance)
             Some(
-                sources
+                source_filter
+                    .specific_sources
                     .iter()
-                    .map(|ip| IpSrc::Exact(ip.ip()))
+                    .map(|ip| IpSrc::Exact(*ip))
                     .collect::<Vec<_>>(),
             )
         } else {
+            // ASM: Dendrite doesn't support ASM filtering yet
+            // TODO: check `has_any_source_member` to enable/disable filtering
             None
         };
 
@@ -566,18 +577,28 @@ impl MulticastDataplaneClient {
         let new_name_str = params.new_name.to_string();
         let external_group_ip = params.external_group.multicast_ip.ip();
 
-        // TODO: ASM source filtering will be accepted in dendrite in a follow-up
-        // PR stacked on this one. For now, we only send sources to DPD for SSM
-        // groups. ASM groups get `None`, meaning "any source allowed".
+        // Source filtering logic per RFC 4607:
+        // - SSM (232/8, ff3x::/32): MUST use specific sources. SSM semantically
+        //   requires source specification; `has_any_source_member` is ignored
+        //   because API validation prevents SSM joins without sources.
+        // - ASM: Use `has_any_source_member` to decide filtering behavior.
+        //
+        // TODO: Once Dendrite accepts ASM source filtering, enable it for ASM
+        // groups where `has_any_source_member=false`. Currently ASM always gets
+        // `None` because Dendrite only supports SSM filtering.
         let sources_dpd = if is_ssm_address(external_group_ip) {
+            // SSM: always use specific sources (RFC 4607 compliance)
             Some(
                 params
-                    .new_sources
+                    .source_filter
+                    .specific_sources
                     .iter()
-                    .map(|ip| IpSrc::Exact(ip.ip()))
+                    .map(|ip| IpSrc::Exact(*ip))
                     .collect::<Vec<_>>(),
             )
         } else {
+            // ASM: Dendrite doesn't support ASM filtering yet
+            // TODO: check `has_any_source_member` to enable/disable filtering
             None
         };
 
@@ -744,11 +765,96 @@ impl MulticastDataplaneClient {
             let operation_name = operation_name.clone();
 
             async move {
-                // Get current underlay group state
-                let current_group = client
-                    .multicast_group_get_underlay(&underlay_ip.into_admin_scoped()?)
-                    .await
-                    .map_err(|e| {
+                let underlay_ip_admin = underlay_ip.into_admin_scoped()?;
+
+                // Get current underlay group state, create if missing
+                let current_group_res = client
+                    .multicast_group_get_underlay(&underlay_ip_admin)
+                    .await;
+
+                let (current_members, current_tag) = match current_group_res {
+                    Ok(response) => {
+                        let inner = response.into_inner();
+                        (inner.members, inner.tag)
+                    }
+                    Err(DpdError::ErrorResponse(ref resp))
+                        if resp.status() == reqwest::StatusCode::NOT_FOUND =>
+                    {
+                        // Underlay group doesn't exist -> recreate it with empty members.
+                        // This can happen when all members have left and the group was
+                        // cleaned up by DPD, yet the external group still exists.
+                        info!(
+                            log,
+                            "underlay group not found, creating before member operation";
+                            "underlay_ip" => %underlay_ip,
+                            "switch" => %location,
+                            "operation" => %operation_name,
+                            "dpd_operation" => "modify_group_membership_recreate"
+                        );
+
+                        let create_entry = MulticastGroupCreateUnderlayEntry {
+                            group_ip: underlay_ip_admin.clone(),
+                            members: Vec::new(),
+                            tag: underlay_group.tag.clone(),
+                        };
+
+                        match client
+                            .multicast_group_create_underlay(&create_entry)
+                            .await
+                        {
+                            Ok(response) => {
+                                let created = response.into_inner();
+                                (created.members, created.tag)
+                            }
+                            Err(DpdError::ErrorResponse(ref resp))
+                                if resp.status() == reqwest::StatusCode::CONFLICT =>
+                            {
+                                // Race condition: another request created the group
+                                // between our GET (404) and CREATE. Re-fetch it.
+                                debug!(
+                                    log,
+                                    "underlay group created by concurrent request, fetching";
+                                    "underlay_ip" => %underlay_ip,
+                                    "switch" => %location,
+                                    "dpd_operation" => "modify_group_membership_recreate"
+                                );
+
+                                let fetched = client
+                                    .multicast_group_get_underlay(&underlay_ip_admin)
+                                    .await
+                                    .map_err(|e| {
+                                        error!(
+                                            log,
+                                            "underlay re-fetch after conflict failed";
+                                            "underlay_ip" => %underlay_ip,
+                                            "switch" => %location,
+                                            "error" => %e,
+                                            "dpd_operation" => "modify_group_membership_recreate"
+                                        );
+                                        Error::internal_error(&format!(
+                                            "underlay re-fetch after conflict failed on {location}: {e}"
+                                        ))
+                                    })?
+                                    .into_inner();
+
+                                (fetched.members, fetched.tag)
+                            }
+                            Err(e) => {
+                                error!(
+                                    log,
+                                    "underlay recreate failed";
+                                    "underlay_ip" => %underlay_ip,
+                                    "switch" => %location,
+                                    "error" => %e,
+                                    "dpd_operation" => "modify_group_membership_recreate"
+                                );
+                                return Err(Error::internal_error(&format!(
+                                    "underlay recreate failed on {location}: {e}"
+                                )));
+                            }
+                        }
+                    }
+                    Err(e) => {
                         error!(
                             log,
                             "underlay get failed";
@@ -757,44 +863,120 @@ impl MulticastDataplaneClient {
                             "error" => %e,
                             "dpd_operation" => "modify_group_membership_get"
                         );
-                        Error::internal_error("underlay get failed")
-                    })?;
-
-                // Apply the modification function
-                let current_group_inner = current_group.into_inner();
-                let updated_members = modify_fn(current_group_inner.members, member.clone());
-
-                let update_entry = MulticastGroupUpdateUnderlayEntry {
-                    members: updated_members,
-                    tag: current_group_inner.tag,
+                        return Err(Error::internal_error(&format!(
+                            "underlay get failed on {location}: {e}"
+                        )));
+                    }
                 };
 
-                client
-                    .multicast_group_update_underlay(&underlay_ip.into_admin_scoped()?, &update_entry)
-                    .await
-                    .map_err(|e| {
+                // Extract member info for logging before consuming member
+                let member_port_id = member.port_id.clone();
+                let member_link_id = member.link_id;
+                let member_direction = member.direction;
+
+                // Pre-compute dpd_operation for logging
+                let dpd_operation_done =
+                    format!("{operation_name}_member_in_underlay_group");
+
+                // Apply the modification function (consumes member)
+                let updated_members = modify_fn(current_members, member);
+
+                // Try to update the underlay group (move updated_members)
+                let update_entry = MulticastGroupUpdateUnderlayEntry {
+                    members: updated_members,
+                    tag: current_tag.clone(),
+                };
+
+                let update_res = client
+                    .multicast_group_update_underlay(&underlay_ip_admin, &update_entry)
+                    .await;
+
+                match update_res {
+                    Ok(_) => {}
+                    Err(DpdError::ErrorResponse(ref resp))
+                        if resp.status() == reqwest::StatusCode::NOT_FOUND
+                            || resp.status()
+                                == reqwest::StatusCode::INTERNAL_SERVER_ERROR =>
+                    {
+                        // 404: Group disappeared (race or external cleanup)
+                        // 500: ASIC state inconsistent with DPD DB
+                        //
+                        // In both cases, delete and recreate with the updated members.
+                        info!(
+                            log,
+                            "underlay update failed, attempting delete+recreate";
+                            "underlay_ip" => %underlay_ip,
+                            "switch" => %location,
+                            "operation" => %operation_name,
+                            "status" => %resp.status(),
+                            "dpd_operation" => "modify_group_membership_recreate"
+                        );
+
+                        // Delete the stale underlay group
+                        if let Err(e) = client
+                            .multicast_group_delete(&underlay_ip)
+                            .await
+                        {
+                            warn!(
+                                log,
+                                "underlay delete failed during recovery (continuing)";
+                                "underlay_ip" => %underlay_ip,
+                                "switch" => %location,
+                                "error" => %e
+                            );
+                        }
+
+                        // Recreate with the updated members (reuse from update_entry)
+                        // Use authoritative tag from underlay_group, not stale current_tag
+                        let create_entry = MulticastGroupCreateUnderlayEntry {
+                            group_ip: underlay_ip_admin.clone(),
+                            members: update_entry.members,
+                            tag: underlay_group.tag.clone(),
+                        };
+
+                        client
+                            .multicast_group_create_underlay(&create_entry)
+                            .await
+                            .map_err(|e| {
+                                error!(
+                                    log,
+                                    "underlay recreate with members failed";
+                                    "underlay_ip" => %underlay_ip,
+                                    "switch" => %location,
+                                    "error" => %e,
+                                    "dpd_operation" => "modify_group_membership_recreate"
+                                );
+                                Error::internal_error(&format!(
+                                    "underlay recreate with members failed on {location}: {e}"
+                                ))
+                            })?;
+                    }
+                    Err(e) => {
                         error!(
                             log,
                             "underlay member modify failed";
-                            "operation_name" => operation_name.as_str(),
+                            "operation_name" => %operation_name,
                             "underlay_ip" => %underlay_ip,
                             "switch" => %location,
                             "error" => %e,
                             "dpd_operation" => "modify_group_membership_update"
                         );
-                        Error::internal_error("underlay member modify failed")
-                    })?;
+                        return Err(Error::internal_error(&format!(
+                            "underlay member modify failed on {location}: {e}"
+                        )));
+                    }
+                }
 
                 info!(
                     log,
                     "DPD multicast member operation completed on switch";
-                    "operation_name" => operation_name.as_str(),
+                    "operation_name" => %operation_name,
                     "underlay_group_ip" => %underlay_ip,
-                    "member_port_id" => %member.port_id,
-                    "member_link_id" => %member.link_id,
-                    "member_direction" => ?member.direction,
+                    "member_port_id" => %member_port_id,
+                    "member_link_id" => %member_link_id,
+                    "member_direction" => ?member_direction,
                     "switch_location" => %location,
-                    "dpd_operation" => %format!("{}_member_in_underlay_group", operation_name.as_str())
+                    "dpd_operation" => %dpd_operation_done
                 );
 
                 Ok::<(), Error>(())
@@ -931,7 +1113,7 @@ impl MulticastDataplaneClient {
     ///
     /// Queries all switches to detect configuration drift. If any switch has
     /// different state (missing group, different config), it will return the
-    /// found state, so the reconciler can trigger an UPDATE
+    /// found state, so the reconciler can initiate an UPDATE
     /// saga that will fix all switches atomically.
     pub(crate) async fn fetch_external_group_for_drift_check(
         &self,

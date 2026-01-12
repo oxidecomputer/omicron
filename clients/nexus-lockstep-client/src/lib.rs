@@ -33,6 +33,7 @@ progenitor::generate_api!(
         "oxnet" = "0.1.0",
     },
     replace = {
+        BaseboardId = sled_hardware_types::BaseboardId,
         // It's kind of unfortunate to pull in such a complex and unstable type
         // as "blueprint" this way, but we have really useful functionality
         // (e.g., diff'ing) that's implemented on our local type.

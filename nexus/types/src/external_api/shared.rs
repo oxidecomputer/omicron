@@ -11,7 +11,7 @@ use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Name;
-use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface as NetworkInterfaceV1;
+use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
@@ -23,6 +23,7 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::de::Error as _;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use strum::EnumIter;
 use uuid::Uuid;
@@ -354,6 +355,12 @@ pub struct Baseboard {
     pub serial: String,
     pub part: String,
     pub revision: u32,
+}
+
+impl From<Baseboard> for BaseboardId {
+    fn from(value: crate::external_api::shared::Baseboard) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
 }
 
 /// A sled that has not been added to an initialized rack yet
@@ -698,12 +705,7 @@ pub struct ProbeInfo {
     #[schemars(with = "Uuid")]
     pub sled: SledUuid,
     pub external_ips: Vec<ProbeExternalIp>,
-    // NOTE: This type currently appears in both the external and internal APIs.
-    // It's not used in the internal API anymore, and we've not yet expanded the
-    // external API to support dual-stack NICs. When we do, this whole type
-    // needs a new version in the external API, and the internal API needs to
-    // continue to refer to this original version.
-    pub interface: NetworkInterfaceV1,
+    pub interface: NetworkInterface,
 }
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]

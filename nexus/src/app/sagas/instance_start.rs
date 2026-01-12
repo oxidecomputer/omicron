@@ -6,10 +6,12 @@
 
 use std::net::Ipv6Addr;
 
-use super::{
-    NexusActionContext, NexusSaga, SagaInitError,
-    instance_common::allocate_vmm_ipv6,
-};
+use super::NexusActionContext;
+use super::NexusSaga;
+use super::SagaInitError;
+use super::instance_common::allocate_vmm_ipv6;
+use crate::app::InlineErrorChain;
+use crate::app::MAX_DISKS_PER_INSTANCE;
 use crate::app::instance::{
     InstanceEnsureRegisteredApiResources, InstanceRegisterReason,
     InstanceStateChangeError,
@@ -17,12 +19,21 @@ use crate::app::instance::{
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
+use nexus_db_queries::db::datastore::Disk;
+use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
+use paste::paste;
+use seq_macro::seq;
 use serde::{Deserialize, Serialize};
-use slog::{error, info};
+use sled_agent_client::types::LocalStorageDatasetEnsureRequest;
+use slog::error;
+use slog::info;
 use steno::ActionError;
 
 /// Parameters to the instance start saga.
@@ -78,6 +89,15 @@ declare_saga_actions! {
     MARK_AS_STARTING -> "started_record" {
         + sis_move_to_starting
         - sis_move_to_starting_undo
+    }
+
+    LIST_LOCAL_STORAGE -> "local_storage_records" {
+        + sis_list_local_storage
+    }
+
+    ENSURE_LOCAL_STORAGE (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) -> "ensure_local_storage" {
+        + sis_ensure_local_storage
+        // No undo action for this, that is handled in the disk delete saga!
     }
 
     // TODO(#3879) This can be replaced with an action that triggers the NAT RPW
@@ -144,12 +164,26 @@ impl NexusSaga for SagaInstanceStart {
         builder.append(alloc_propolis_ip_action());
         builder.append(create_vmm_record_action());
         builder.append(mark_as_starting_action());
+
+        // After the instance's state has moved to starting, this should block
+        // out all disk attach and detach requests. List all the possible local
+        // storage disks attached to this instance, and ensure that they exist
+        // so they can be delegated into the propolis zone.
+        builder.append(list_local_storage_action());
+
+        // Changing MAX_DISKS_PER_INSTANCE requires changing this saga
+        static_assertions::const_assert!(MAX_DISKS_PER_INSTANCE == 12);
+        seq!(N in 0..12 {
+            builder.append(paste!([<ensure_local_storage_ N _action>]()));
+        });
+
         builder.append(dpd_ensure_action());
         builder.append(v2p_ensure_action());
         builder.append(ensure_registered_action());
         builder.append(update_multicast_sled_id_action());
         builder.append(add_virtual_resources_action());
         builder.append(ensure_running_action());
+
         Ok(builder.build()?)
     }
 }
@@ -514,6 +548,158 @@ async fn sis_account_virtual_resources_undo(
         .map_err(ActionError::action_failed)?;
     Ok(())
 }
+
+async fn sis_list_local_storage(
+    sagactx: NexusActionContext,
+) -> Result<Vec<LocalStorageDisk>, ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let datastore = osagactx.datastore();
+
+    let db_instance =
+        sagactx.lookup::<db::model::Instance>("started_record")?;
+    let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
+
+    let (_, _, authz_instance, ..) = LookupPath::new(&opctx, datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .fetch_for(authz::Action::Read)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let disks = datastore
+        .instance_list_disks(
+            &opctx,
+            &authz_instance,
+            &PaginatedBy::Name(DataPageParams {
+                marker: None,
+                direction: dropshot::PaginationOrder::Ascending,
+                limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                    .unwrap(),
+            }),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let records = disks
+        .into_iter()
+        .filter_map(|disk| match disk {
+            Disk::LocalStorage(disk) => Some(disk),
+            Disk::Crucible(_) => None,
+        })
+        .collect();
+
+    Ok(records)
+}
+
+async fn sis_ensure_local_storage(
+    sagactx: NexusActionContext,
+    which: usize,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    // Get this node's record
+
+    let local_storage_records =
+        sagactx.lookup::<Vec<LocalStorageDisk>>("local_storage_records")?;
+
+    if local_storage_records.is_empty()
+        || (which >= local_storage_records.len())
+    {
+        return Ok(());
+    }
+
+    let LocalStorageDisk {
+        disk,
+        disk_type_local_storage: _,
+        local_storage_dataset_allocation,
+    } = &local_storage_records[which];
+
+    // Make sure this was a complete allocation.
+
+    let Some(local_storage_dataset_allocation) =
+        local_storage_dataset_allocation
+    else {
+        return Err(ActionError::action_failed(format!(
+            "local storage record {which} has a None allocation!",
+        )));
+    };
+
+    // All local storage volumes will be created with 4k blocks. Double check
+    // here.
+
+    if disk.block_size.to_bytes() != 4096 {
+        return Err(ActionError::action_failed(format!(
+            "local storage record {} has block size {}!",
+            which,
+            disk.block_size.to_bytes(),
+        )));
+    }
+
+    let dataset_id = local_storage_dataset_allocation.id();
+    let pool_id = local_storage_dataset_allocation.pool_id();
+    let sled_id = local_storage_dataset_allocation.sled_id();
+    let dataset_size = local_storage_dataset_allocation.dataset_size.into();
+    let volume_size = disk.size.into();
+
+    // Get a sled agent client
+
+    let sled_agent_client = osagactx
+        .nexus()
+        .sled_client(&sled_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    // Ensure that the local storage is created
+
+    let ensure_operation = || async {
+        sled_agent_client
+            .local_storage_dataset_ensure(
+                &pool_id,
+                &dataset_id,
+                &LocalStorageDatasetEnsureRequest { dataset_size, volume_size },
+            )
+            .await
+    };
+
+    let gone_check = || async {
+        osagactx.datastore().check_sled_in_service(&opctx, sled_id).await?;
+
+        // `check_sled_in_service` returns an error if the sled is no longer in
+        // service; if it succeeds, the sled is not gone.
+        Ok(false)
+    };
+
+    ProgenitorOperationRetry::new(ensure_operation, gone_check)
+        .run(osagactx.log())
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to ensure local storage: {}",
+                InlineErrorChain::new(&e)
+            ))
+        })?;
+
+    Ok(())
+}
+
+seq!(M in 0..12 {
+    async fn sis_ensure_local_storage_~M(
+        sagactx: NexusActionContext,
+    ) -> Result<(), ActionError> {
+        sis_ensure_local_storage(sagactx, M).await
+    }
+});
 
 async fn sis_dpd_ensure(
     sagactx: NexusActionContext,
@@ -916,13 +1102,12 @@ mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project, object_create,
+        create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{
-        ByteCount, DataPageParams, IdentityMetadataCreateParams,
-        InstanceCpuCount, Name,
+        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
     };
     use omicron_common::api::internal::shared::SwitchLocation;
     use omicron_test_utils::dev::poll;
@@ -937,7 +1122,7 @@ mod test {
     const INSTANCE_NAME: &str = "test-instance";
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(&client, PROJECT_NAME).await;
         project.identity.id
     }
@@ -960,7 +1145,7 @@ mod test {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::Default,
+                    params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,

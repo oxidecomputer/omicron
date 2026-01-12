@@ -1731,7 +1731,7 @@ mod test {
     use nexus_db_queries::db::DataStore;
     use nexus_db_queries::db::datastore::Disk;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-    use nexus_test_utils::resource_helpers::create_default_ip_pool;
+    use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
@@ -1956,7 +1956,7 @@ mod test {
     async fn create_project_and_disk_and_pool(
         client: &ClientTestContext,
     ) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         create_project(client, PROJECT_NAME).await;
         create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id
     }

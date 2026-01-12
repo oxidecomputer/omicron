@@ -27,6 +27,7 @@ humantime.workspace = true
 iddqd.workspace = true
 illumos-utils.workspace = true
 indent_write.workspace = true
+ipnet.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 newtype_derive.workspace = true
@@ -41,6 +42,7 @@ schemars = { workspace = true, features = ["chrono", "uuid1", "url"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
+sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
@@ -51,7 +53,10 @@ test-strategy.workspace = true
 textwrap.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+trust-quorum-protocol.workspace = true
+trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
+
 newtype-uuid.workspace = true
 update-engine.workspace = true
 unicode-width.workspace = true
@@ -79,4 +84,5 @@ omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
 sled-agent-types-versions = { workspace = true, features = ["testing"] }
+sled-hardware-types = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true

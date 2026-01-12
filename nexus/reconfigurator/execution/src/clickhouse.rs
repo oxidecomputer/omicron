@@ -10,21 +10,23 @@ use camino::Utf8PathBuf;
 use clickhouse_admin_keeper_client::Client as ClickhouseKeeperClient;
 use clickhouse_admin_server_client::Client as ClickhouseServerClient;
 use clickhouse_admin_single_client::Client as ClickhouseSingleClient;
-use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
-use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
-use clickhouse_admin_types::ClickhouseHost;
-use clickhouse_admin_types::KeeperConfigurableSettings;
-use clickhouse_admin_types::KeeperSettings;
-use clickhouse_admin_types::RaftServerSettings;
-use clickhouse_admin_types::ServerConfigurableSettings;
-use clickhouse_admin_types::ServerSettings;
+use clickhouse_admin_types::config::{ClickhouseHost, RaftServerSettings};
+use clickhouse_admin_types::keeper::{
+    KeeperConfigurableSettings, KeeperSettings,
+};
+use clickhouse_admin_types::server::{
+    ServerConfigurableSettings, ServerSettings,
+};
+use clickhouse_admin_types::{
+    CLICKHOUSE_KEEPER_CONFIG_DIR, CLICKHOUSE_SERVER_CONFIG_DIR,
+};
 use futures::future::Either;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -45,9 +47,9 @@ pub(crate) async fn deploy_nodes(
     blueprint: &Blueprint,
     clickhouse_cluster_config: &ClickhouseClusterConfig,
 ) -> Result<(), Vec<anyhow::Error>> {
-    // Important: We must continue to pass in `BlueprintZoneDisposition::any`
-    // here, instead of `BlueprintZoneDisposition::is_in_service`, as would
-    // be expected.
+    // Important: We must look at all zones here, including expunged zones in
+    // both "not ready for cleanup" and "ready for cleanup" states, instead of
+    // just in-service zones, as would be expected.
     //
     // We can only add or remove one clickhouse keeper node at a time,
     // and the planner generates the `ClickhouseClusterConfig` under this
@@ -72,12 +74,11 @@ pub(crate) async fn deploy_nodes(
     //    `ClickhouseClusterConfig`.
     //
     // This is tracked in https://github.com/oxidecomputer/omicron/issues/7724
-    deploy_nodes_impl(
-        opctx,
-        blueprint.all_omicron_zones(BlueprintZoneDisposition::any),
-        clickhouse_cluster_config,
-    )
-    .await
+    use BlueprintExpungedZoneAccessReason::ClickhouseKeeperServerConfigIps;
+    let all_zones = blueprint
+        .all_in_service_and_expunged_zones(ClickhouseKeeperServerConfigIps);
+
+    deploy_nodes_impl(opctx, all_zones, clickhouse_cluster_config).await
 }
 
 async fn deploy_nodes_impl<'a, I>(
@@ -235,7 +236,7 @@ pub(crate) async fn deploy_single_node(
     deploy_single_node_impl(
         opctx,
         blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| z.zone_type.is_clickhouse()),
     )
     .await
@@ -380,10 +381,10 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use clickhouse_admin_types::ClickhouseHost;
-    use clickhouse_admin_types::KeeperId;
-    use clickhouse_admin_types::ServerId;
+    use clickhouse_admin_types::keeper::KeeperId;
+    use clickhouse_admin_types::server::ServerId;
     use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::blueprint_zone_type;

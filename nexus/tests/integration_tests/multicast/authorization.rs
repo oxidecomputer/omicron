@@ -15,8 +15,8 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::test_params::UserPassword;
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_local_user, create_project,
-    grant_iam, link_ip_pool, object_get,
+    create_default_ip_pools, create_instance, create_local_user,
+    create_project, grant_iam, link_ip_pool, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -82,7 +82,7 @@ async fn create_group_via_instance_join(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -109,7 +109,8 @@ async fn create_group_via_instance_join(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url)
@@ -142,7 +143,7 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Get current silo info
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
@@ -150,7 +151,7 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
 
     // Create multicast pool and link to silo
     create_multicast_ip_pool(&client, "mcast-pool").await;
-    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    link_ip_pool(&client, "default-v4", &silo.identity.id, true).await;
     link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
 
     // Create a regular silo user
@@ -209,7 +210,7 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
         hostname: "second-instance".parse::<Hostname>().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -242,7 +243,8 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
         "/v1/instances/{}/multicast-groups/{}?project=second-project",
         instance.identity.name, group.identity.name
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url)
@@ -262,7 +264,7 @@ async fn test_authenticated_users_can_read_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Get current silo info
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
@@ -270,7 +272,7 @@ async fn test_authenticated_users_can_read_multicast_groups(
 
     // Create multicast pool and link to silo
     create_multicast_ip_pool(&client, "mcast-pool").await;
-    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    link_ip_pool(&client, "default-v4", &silo.identity.id, true).await;
     link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
 
     // Create a collaborator user who can create groups
@@ -372,8 +374,8 @@ async fn test_cross_project_instance_attachment_allowed(
     let client = &cptestctx.external_client;
 
     // Create pools and projects
-    let (_, _project1, _project2, _) = ops::join4(
-        create_default_ip_pool(&client),
+    ops::join4(
+        create_default_ip_pools(&client),
         create_project(client, "project1"),
         create_project(client, "project2"),
         create_multicast_ip_pool(&client, "mcast-pool"),
@@ -386,7 +388,8 @@ async fn test_cross_project_instance_attachment_allowed(
 
     // First instance join implicitly creates the group
     let join_url1 = "/v1/instances/instance1/multicast-groups/cross-project-group?project=project1";
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     put_upsert::<_, MulticastGroupMember>(client, join_url1, &join_params)
         .await;
 
@@ -411,14 +414,20 @@ async fn test_cross_project_instance_attachment_allowed(
     assert!(instance_ids.contains(&instance2.identity.id));
 }
 
-/// Verify that unauthenticated users cannot list multicast groups without
-/// proper authentication for the list endpoint.
+/// Verify that unauthenticated users cannot access any multicast API endpoints.
+///
+/// This consolidated test covers all unauthenticated access scenarios:
+/// - List groups (401)
+/// - Get single group (401)
+/// - List members (401)
+/// - Join group (401)
+/// - Leave group (401)
 #[nexus_test]
-async fn test_unauthenticated_cannot_list_multicast_groups(
+async fn test_unauthenticated_access_denied(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Get current silo info
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
@@ -426,61 +435,7 @@ async fn test_unauthenticated_cannot_list_multicast_groups(
 
     // Create multicast pool and link to silo
     create_multicast_ip_pool(&client, "mcast-pool").await;
-    link_ip_pool(&client, "default", &silo.identity.id, true).await;
-    link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
-
-    // Create a collaborator user who can create groups
-    let creator = create_local_user(
-        client,
-        &silo,
-        &"creator-user".parse().unwrap(),
-        UserPassword::LoginDisallowed,
-    )
-    .await;
-
-    grant_iam(
-        client,
-        &silo_url,
-        SiloRole::Collaborator,
-        creator.id,
-        AuthnMode::PrivilegedUser,
-    )
-    .await;
-
-    // Creator creates a multicast group via instance join
-    create_group_via_instance_join(
-        client,
-        creator.id,
-        "test-group",
-        "mcast-pool",
-    )
-    .await;
-
-    // Try to list multicast groups without authentication - should get 401 Unauthorized
-    let group_url = "/v1/multicast-groups";
-    RequestBuilder::new(client, http::Method::GET, group_url)
-        .expect_status(Some(StatusCode::UNAUTHORIZED))
-        .execute()
-        .await
-        .expect("Expected 401 Unauthorized for unauthenticated list request");
-}
-
-/// Verify that unauthenticated users cannot access member operations.
-/// This tests that member endpoints (list/add/remove) require authentication.
-#[nexus_test]
-async fn test_unauthenticated_cannot_access_member_operations(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
-
-    // Get current silo info
-    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
-    let silo: Silo = object_get(client, &silo_url).await;
-
-    // Create multicast pool and link to silo
-    create_multicast_ip_pool(&client, "mcast-pool").await;
-    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    link_ip_pool(&client, "default-v4", &silo.identity.id, true).await;
     link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
 
     // Create a collaborator user who can create groups
@@ -515,7 +470,26 @@ async fn test_unauthenticated_cannot_access_member_operations(
     let instance =
         create_instance(client, "test-project", "test-instance").await;
 
-    // Try to LIST members without authentication - should get 401
+    // List groups without authentication - should get 401
+    RequestBuilder::new(client, http::Method::GET, "/v1/multicast-groups")
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect(
+            "Expected 401 Unauthorized for unauthenticated list groups request",
+        );
+
+    // Get single group without authentication - should get 401
+    let group_url = mcast_group_url(&group.identity.name.to_string());
+    RequestBuilder::new(client, http::Method::GET, &group_url)
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect(
+            "Expected 401 Unauthorized for unauthenticated get group request",
+        );
+
+    // List members without authentication - should get 401
     let members_url = mcast_group_members_url(&group.identity.name.to_string());
     RequestBuilder::new(client, http::Method::GET, &members_url)
         .expect_status(Some(StatusCode::UNAUTHORIZED))
@@ -523,13 +497,14 @@ async fn test_unauthenticated_cannot_access_member_operations(
         .await
         .expect("Expected 401 Unauthorized for unauthenticated list members request");
 
-    // Try to JOIN without authentication - should get 401
+    // Join without authentication - should get 401
     // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
     let join_url = format!(
         "/v1/instances/{}/multicast-groups/{}?project=test-project",
         instance.identity.name, group.identity.name
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     RequestBuilder::new(client, http::Method::PUT, &join_url)
         .body(Some(&join_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
@@ -537,7 +512,7 @@ async fn test_unauthenticated_cannot_access_member_operations(
         .await
         .expect("Expected 401 Unauthorized for unauthenticated join request");
 
-    // Try to leave without authentication - should get 401
+    // Leave without authentication - should get 401
     // Uses instance-centric API: DELETE /v1/instances/{instance}/multicast-groups/{group}
     RequestBuilder::new(client, http::Method::DELETE, &join_url)
         .expect_status(Some(StatusCode::UNAUTHORIZED))
@@ -556,7 +531,7 @@ async fn test_unprivileged_users_can_list_group_members(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Get current silo info
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
@@ -564,7 +539,7 @@ async fn test_unprivileged_users_can_list_group_members(
 
     // Create multicast pool and link to silo
     create_multicast_ip_pool(&client, "mcast-pool").await;
-    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    link_ip_pool(&client, "default-v4", &silo.identity.id, true).await;
     link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
 
     // Create two regular silo users
@@ -648,8 +623,6 @@ async fn test_unprivileged_users_can_list_group_members(
 
     // Unprivileged user should get 404 (not 403) when trying to add/remove
     // instances from inaccessible projects
-
-    // The helper created an instance with a predictable name
     let instance_name = "asymmetric-test-group-instance";
     let project_name = "asymmetric-test-group-project";
 
@@ -660,7 +633,8 @@ async fn test_unprivileged_users_can_list_group_members(
         "/v1/instances/{}/multicast-groups/{}?project={}",
         instance_name, group.identity.name, project_name
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url)
@@ -752,8 +726,8 @@ async fn test_project_only_users_can_access_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    // create_default_ip_pool already links "default" pool to the DEFAULT_SILO
-    create_default_ip_pool(&client).await;
+    // create_default_ip_pools already links "default" pool to the DEFAULT_SILO
+    create_default_ip_pools(&client).await;
 
     // Create multicast pool (already linked to DEFAULT_SILO by helper)
     create_multicast_ip_pool(&client, "mcast-pool").await;
@@ -862,7 +836,7 @@ async fn test_project_only_users_can_access_multicast_groups(
         hostname: "project-user-instance".parse::<Hostname>().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -897,7 +871,8 @@ async fn test_project_only_users_can_access_multicast_groups(
         "/v1/instances/{}/multicast-groups/created-by-project-user?project={}",
         instance.identity.id, project.identity.id
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url)
@@ -934,7 +909,7 @@ async fn test_project_only_users_can_access_multicast_groups(
         hostname: instance_name2.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
@@ -996,7 +971,7 @@ async fn test_silo_admins_cannot_modify_other_silos_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Create multicast IP pool (fleet-scoped)
     create_multicast_ip_pool(&client, "mcast-pool").await;
@@ -1027,7 +1002,7 @@ async fn test_silo_admins_cannot_modify_other_silos_groups(
             .unwrap();
 
     let silo_a_url = format!("/v1/system/silos/{}", silo_a.identity.name);
-    link_ip_pool(&client, "default", &silo_a.identity.id, true).await;
+    link_ip_pool(&client, "default-v4", &silo_a.identity.id, true).await;
     link_ip_pool(&client, "mcast-pool", &silo_a.identity.id, false).await;
 
     // Create Silo B
@@ -1054,7 +1029,7 @@ async fn test_silo_admins_cannot_modify_other_silos_groups(
             .unwrap();
 
     let silo_b_url = format!("/v1/system/silos/{}", silo_b.identity.name);
-    link_ip_pool(&client, "default", &silo_b.identity.id, true).await;
+    link_ip_pool(&client, "default-v4", &silo_b.identity.id, true).await;
     link_ip_pool(&client, "mcast-pool", &silo_b.identity.id, false).await;
 
     // Create silo admin for Silo A
@@ -1164,7 +1139,7 @@ async fn test_cross_silo_instance_attachment(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Create multicast IP pool (fleet-scoped)
     create_multicast_ip_pool(&client, "mcast-pool").await;
@@ -1172,7 +1147,7 @@ async fn test_cross_silo_instance_attachment(
     // Get Silo A (default test silo)
     let silo_a_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
     let silo_a: Silo = object_get(client, &silo_a_url).await;
-    link_ip_pool(&client, "default", &silo_a.identity.id, true).await;
+    link_ip_pool(&client, "default-v4", &silo_a.identity.id, true).await;
     link_ip_pool(&client, "mcast-pool", &silo_a.identity.id, false).await;
 
     // Create Silo B
@@ -1200,7 +1175,7 @@ async fn test_cross_silo_instance_attachment(
             .unwrap();
 
     let silo_b_url = format!("/v1/system/silos/{}", silo_b.identity.name);
-    link_ip_pool(&client, "default", &silo_b.identity.id, true).await;
+    link_ip_pool(&client, "default-v4", &silo_b.identity.id, true).await;
     // Link mcast-pool to Silo B as well - cross-silo multicast works by
     // linking the same pool to multiple silos (pool linking = access control)
     link_ip_pool(&client, "mcast-pool", &silo_b.identity.id, false).await;
@@ -1288,7 +1263,7 @@ async fn test_cross_silo_instance_attachment(
         hostname: "instance-silo-a".parse::<Hostname>().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -1326,7 +1301,7 @@ async fn test_cross_silo_instance_attachment(
         hostname: "instance-silo-b".parse::<Hostname>().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -1360,7 +1335,8 @@ async fn test_cross_silo_instance_attachment(
         "/v1/instances/{}/multicast-groups/{}?project=project-silo-a",
         instance_a.identity.id, group_name
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url_a)
@@ -1592,8 +1568,8 @@ async fn test_both_member_endpoints_have_same_permissions(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    // create_default_ip_pool already links "default" pool to the DEFAULT_SILO
-    create_default_ip_pool(&client).await;
+    // create_default_ip_pools already links "default" pool to the DEFAULT_SILO
+    create_default_ip_pools(&client).await;
 
     // Create multicast pool (already linked to DEFAULT_SILO by helper)
     create_multicast_ip_pool(&client, "mcast-pool").await;
@@ -1659,7 +1635,7 @@ async fn test_both_member_endpoints_have_same_permissions(
         hostname: instance_a_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -1689,7 +1665,8 @@ async fn test_both_member_endpoints_have_same_permissions(
         "/v1/instances/{}/multicast-groups/{}?project={}",
         instance_a.identity.id, group_name, project_a.identity.name
     );
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &join_url_a)
@@ -1780,7 +1757,8 @@ async fn test_both_member_endpoints_have_same_permissions(
         "/v1/instances/{}/multicast-groups/{}",
         instance_c.identity.id, group_a.identity.id
     );
-    let join_body = InstanceMulticastGroupJoin { source_ips: None };
+    let join_body =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, &instance_centric_url_c)
             .body(Some(&join_body))
@@ -1809,7 +1787,7 @@ async fn test_silo_cannot_use_unlinked_pool(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Create multicast IP pool (fleet-scoped)
     create_multicast_ip_pool(&client, "mcast-pool").await;
@@ -1817,7 +1795,7 @@ async fn test_silo_cannot_use_unlinked_pool(
     // Get Silo A (default test silo) and link pools to it
     let silo_a_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
     let silo_a: Silo = object_get(client, &silo_a_url).await;
-    link_ip_pool(&client, "default", &silo_a.identity.id, true).await;
+    link_ip_pool(&client, "default-v4", &silo_a.identity.id, true).await;
     link_ip_pool(&client, "mcast-pool", &silo_a.identity.id, false).await;
 
     // Create Silo B (but do not link mcast-pool to it)
@@ -1846,7 +1824,7 @@ async fn test_silo_cannot_use_unlinked_pool(
     let silo_b_url = format!("/v1/system/silos/{}", silo_b.identity.name);
 
     // Link only the default pool to Silo B (not the mcast-pool)
-    link_ip_pool(&client, "default", &silo_b.identity.id, true).await;
+    link_ip_pool(&client, "default-v4", &silo_b.identity.id, true).await;
 
     // Create user in Silo B
     let user_b = create_local_user(
@@ -1894,7 +1872,7 @@ async fn test_silo_cannot_use_unlinked_pool(
         hostname: "instance-silo-b".parse::<Hostname>().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -1923,7 +1901,8 @@ async fn test_silo_cannot_use_unlinked_pool(
     // is not linked to Silo B
     // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
     let join_url = "/v1/instances/instance-silo-b/multicast-groups/test-group?project=project-silo-b";
-    let join_params = InstanceMulticastGroupJoin { source_ips: None };
+    let join_params =
+        InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, http::Method::PUT, join_url)
@@ -1938,10 +1917,10 @@ async fn test_silo_cannot_use_unlinked_pool(
     // Verify the error indicates no pool was found
     let error_body: dropshot::HttpErrorResponseBody =
         error.parsed_body().unwrap();
-    assert!(
-        error_body.message.contains("pool")
-            || error_body.message.contains("multicast"),
-        "Error should indicate no pool available, got: {}",
-        error_body.message
+    assert_eq!(
+        error_body.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for no pool available, got: {:?}",
+        error_body.error_code
     );
 }

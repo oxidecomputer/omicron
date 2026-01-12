@@ -548,6 +548,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .map(|(pool, silo_link)| views::SiloIpPool {
                     identity: pool.identity(),
                     is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
+                    pool_type: pool.pool_type.into(),
                 })
                 .collect();
 
@@ -1643,6 +1645,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .map(|(pool, silo_link)| views::SiloIpPool {
                     identity: pool.identity(),
                     is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
+                    pool_type: pool.pool_type.into(),
                 })
                 .collect();
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
@@ -1673,6 +1677,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(views::SiloIpPool {
                 identity: pool.identity(),
                 is_default: silo_link.is_default,
+                ip_version: pool.ip_version.into(),
+                pool_type: pool.pool_type.into(),
             }))
         };
         apictx
@@ -2512,7 +2518,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 results.into_iter().map(Into::into).collect(),
-                &|_, m: &v2025121200::MulticastGroupMember| m.id,
+                &|_, member: &v2025121200::MulticastGroupMember| member.id,
             )?))
         };
         apictx
@@ -2561,7 +2567,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 results,
-                &|_, m: &views::MulticastGroupMember| m.identity.id,
+                &|_, member: &views::MulticastGroupMember| member.identity.id,
             )?))
         };
         apictx
@@ -5383,8 +5389,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?
                 .into_iter()
-                .map(|d| d.into())
-                .collect();
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?;
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 interfaces,
@@ -5417,7 +5423,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &interface_params.into_inner(),
                 )
                 .await?;
-            Ok(HttpResponseCreated(iface.into()))
+            iface.try_into().map(HttpResponseCreated).map_err(HttpError::from)
         };
         apictx
             .context
@@ -5480,7 +5486,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_network_interface_lookup(&opctx, interface_selector)?
                 .fetch()
                 .await?;
-            Ok(HttpResponseOk(interface.into()))
+            interface.try_into().map(HttpResponseOk).map_err(HttpError::from)
         };
         apictx
             .context
@@ -5521,7 +5527,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     updated_iface,
                 )
                 .await?;
-            Ok(HttpResponseOk(InstanceNetworkInterface::from(interface)))
+            interface.try_into().map(HttpResponseOk).map_err(HttpError::from)
         };
         apictx
             .context
@@ -5581,11 +5587,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
+            let params::EphemeralIpCreate { pool_selector } =
+                ip_to_create.into_inner();
+            let (pool, ip_version) = match pool_selector {
+                params::PoolSelector::Explicit { pool } => (Some(pool), None),
+                params::PoolSelector::Auto { ip_version } => (None, ip_version),
+            };
             let ip = nexus
                 .instance_attach_ephemeral_ip(
                     &opctx,
                     &instance_lookup,
-                    ip_to_create.into_inner().pool,
+                    pool,
+                    ip_version,
                 )
                 .await?;
             Ok(HttpResponseAccepted(ip))
@@ -5635,7 +5648,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn instance_multicast_group_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<params::OptionalProjectSelector>,
+        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
         path_params: Path<params::InstancePath>,
     ) -> Result<
         HttpResponseOk<ResultsPage<views::MulticastGroupMember>>,
@@ -5648,25 +5661,36 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanById::from_query(&query)?;
 
             // Note: When instance is specified by UUID, project should be `None`
             // (UUIDs are globally unique). Project is only needed for name-based lookup.
             let instance_selector = params::InstanceSelector {
                 project: match &path.instance {
-                    NameOrId::Name(_) => query.project,
+                    NameOrId::Name(_) => scan_params.selector.project.clone(),
                     NameOrId::Id(_) => None,
                 },
                 instance: path.instance,
             };
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let memberships = nexus
-                .instance_list_multicast_groups(&opctx, &instance_lookup)
+            let members = nexus
+                .instance_list_multicast_groups(
+                    &opctx,
+                    &instance_lookup,
+                    &pag_params,
+                )
                 .await?;
-            Ok(HttpResponseOk(ResultsPage {
-                items: memberships,
-                next_page: None,
-            }))
+            let results = members
+                .into_iter()
+                .map(views::MulticastGroupMember::try_from)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                results,
+                &|_, member: &views::MulticastGroupMember| member.identity.id,
+            )?))
         };
         apictx
             .context
@@ -5707,7 +5731,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &opctx,
                     &path.multicast_group,
                     &instance_lookup,
-                    &body.source_ips,
+                    body.source_ips.as_deref(),
+                    body.ip_version,
                 )
                 .await?;
             Ok(HttpResponseCreated(views::MulticastGroupMember::try_from(
@@ -5851,7 +5876,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &opctx,
                     &path.multicast_group,
                     &instance_lookup,
-                    &None, // Old API version doesn't support source_ips
+                    None, // Old API version doesn't support source_ips
+                    None, // Old API version doesn't support ip_version
                 )
                 .await?;
             let member = views::MulticastGroupMember::try_from(result)?;
@@ -6308,8 +6334,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?
                 .into_iter()
-                .map(|interfaces| interfaces.into())
-                .collect();
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?;
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 interfaces,

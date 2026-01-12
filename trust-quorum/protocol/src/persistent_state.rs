@@ -7,7 +7,7 @@
 //! Note that this state is not necessarily directly serialized and saved.
 
 use crate::crypto::LrtqShare;
-use crate::{BaseboardId, Configuration, Epoch};
+use crate::{Configuration, Epoch};
 use bootstore::schemes::v0::SharePkgCommon as LrtqShareData;
 use daft::Diffable;
 use gfss::shamir::Share;
@@ -15,6 +15,11 @@ use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{GenericUuid, RackUuid};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+
+use trust_quorum_types::persistent_state::{
+    ExpungedMetadata, PersistentStateSummary,
+};
+pub use trust_quorum_types::status::NodePersistentStateSummary;
 
 /// All the persistent state for this protocol
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Diffable)]
@@ -127,29 +132,6 @@ impl PersistentState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExpungedMetadata {
-    /// The committed epoch, later than its current configuration at which the
-    /// node learned that it had been expunged.
-    pub epoch: Epoch,
-
-    /// Which node this commit information was learned from  
-    pub from: BaseboardId,
-}
-
-/// A subset of information stored in [`PersistentState`] that is useful
-/// for validation, testing, and informational purposes.
-#[derive(Debug, Clone)]
-pub struct PersistentStateSummary {
-    pub rack_id: Option<RackUuid>,
-    pub is_lrtq_only: bool,
-    pub is_uninitialized: bool,
-    pub latest_config: Option<Epoch>,
-    pub latest_committed_config: Option<Epoch>,
-    pub latest_share: Option<Epoch>,
-    pub expunged: Option<ExpungedMetadata>,
-}
-
 impl From<&PersistentState> for PersistentStateSummary {
     fn from(value: &PersistentState) -> Self {
         PersistentStateSummary {
@@ -159,6 +141,18 @@ impl From<&PersistentState> for PersistentStateSummary {
             latest_config: value.latest_config().map(|c| c.epoch),
             latest_committed_config: value.latest_committed_epoch(),
             latest_share: value.shares.keys().last().map(|e| *e),
+            expunged: value.expunged.clone(),
+        }
+    }
+}
+
+impl From<&PersistentState> for NodePersistentStateSummary {
+    fn from(value: &PersistentState) -> Self {
+        NodePersistentStateSummary {
+            has_lrtq_share: value.lrtq.is_some(),
+            configs: value.configs.iter().map(|c| c.epoch).collect(),
+            shares: value.shares.keys().cloned().collect(),
+            commits: value.commits.clone(),
             expunged: value.expunged.clone(),
         }
     }

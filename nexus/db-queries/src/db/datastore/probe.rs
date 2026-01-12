@@ -19,9 +19,10 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
-use nexus_db_model::IpConfig;
+use nexus_db_model::IpVersion;
 use nexus_db_model::Probe;
 use nexus_db_model::VpcSubnet;
+use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -106,12 +107,6 @@ impl super::DataStore {
                 )?
             };
 
-            // TODO ProbeInfo still uses version 1 of the network interface. We
-            // need to support version 2, which allows dual-stack IP
-            // configurations.
-            // See https://github.com/oxidecomputer/omicron/issues/9248.
-            let interface = interface.try_into()?;
-
             result.push(ProbeInfo {
                 id: probe.id(),
                 name: probe.name().clone(),
@@ -156,12 +151,6 @@ impl super::DataStore {
             ..interface
                 .into_internal(db_subnet.ipv4_block.0, db_subnet.ipv6_block.0)?
         };
-
-        // TODO ProbeInfo still uses version 1 of the network interface. We
-        // need to support version 2, which allows dual-stack IP
-        // configurations.
-        // See https://github.com/oxidecomputer/omicron/issues/9248.
-        let interface = interface.try_into()?;
 
         Ok(ProbeInfo {
             id: probe.id(),
@@ -231,6 +220,7 @@ impl super::DataStore {
         authz_project: &authz::Project,
         probe: &Probe,
         ip_pool: Option<authz::IpPool>,
+        ip_version: Option<IpVersion>,
     ) -> CreateResult<Probe> {
         // TODO-correctness: These need to be in a transaction.
         // See https://github.com/oxidecomputer/omicron/issues/9340.
@@ -243,6 +233,7 @@ impl super::DataStore {
                 Uuid::new_v4(),
                 probe.id(),
                 ip_pool,
+                ip_version,
             )
             .await?;
 
@@ -270,7 +261,7 @@ impl super::DataStore {
                     probe.name(),
                 ),
             },
-            IpConfig::auto_ipv4(),
+            PrivateIpStackCreate::auto_dual_stack(),
             None, //Request MAC address assignment
         )?;
 

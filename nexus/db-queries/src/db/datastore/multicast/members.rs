@@ -10,6 +10,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
+use serde::{Deserialize, Serialize};
 use slog::debug;
 use uuid::Uuid;
 
@@ -29,6 +30,39 @@ use crate::db::model::{
     DbTypedUuid, MulticastGroupMember, MulticastGroupMemberState,
 };
 use crate::db::pagination::paginated;
+
+/// Aggregated source filtering state for a multicast group.
+///
+/// Captures both the union of specific source IPs and whether any member
+/// wants "any source". Switch-level filtering behavior depends on address type:
+///
+/// - **SSM (232.0.0.0/8, ff3x::/32)**: Always use `specific_sources` per RFC 4607.
+///   The `has_any_source_member` flag is ignored because API validation
+///   prevents SSM joins without sources.
+/// - **ASM**: Currently always passes `None` to DPD (Dendrite doesn't support
+///   ASM filtering yet). TODO: if `has_any_source_member` is true, skip
+///   switch-level filtering; otherwise use `specific_sources`.
+/// - **OPTE**: Always uses per-member source lists for fine-grained filtering,
+///   regardless of switch-level behavior.
+///
+/// This follows the (S,G) model where the switch does coarse filtering
+/// and OPTE does fine-grained per-member filtering.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SourceFilterState {
+    /// Union of all specific source IPs from members (deduplicated).
+    ///
+    /// Contains only explicitly specified sources. Members with empty
+    /// `source_ips` (ASM members wanting any source) don't affect this field.
+    pub specific_sources: BTreeSet<IpAddr>,
+
+    /// True if any member has empty `source_ips` (wants any source).
+    ///
+    /// For ASM groups: currently unused (Dendrite doesn't support ASM filtering).
+    /// TODO: when true, switch-level filtering will be disabled.
+    /// For SSM groups: ignored per RFC 4607 (API validation prevents SSM joins
+    /// without sources).
+    pub has_any_source_member: bool,
+}
 
 impl DataStore {
     /// List members of a multicast group.
@@ -63,9 +97,13 @@ impl DataStore {
         opctx: &OpContext,
         group_id: MulticastGroupUuid,
         instance_id: InstanceUuid,
-        source_ips: Option<Vec<IpNetwork>>,
+        source_ips: Option<&[IpAddr]>,
     ) -> CreateResult<MulticastGroupMember> {
         let conn = self.pool_connection_authorized(opctx).await?;
+
+        // Convert IpAddr to IpNetwork for storage
+        let source_networks: Option<Vec<IpNetwork>> = source_ips
+            .map(|ips| ips.iter().copied().map(IpNetwork::from).collect());
 
         // Execute atomic CTE that validates group (not "Deleting"), validates
         // instance, gets `sled_id`, performs upsert, and returns full member
@@ -75,7 +113,7 @@ impl DataStore {
                 group_id.into_untyped_uuid(),
                 instance_id.into_untyped_uuid(),
                 Uuid::new_v4(),
-                source_ips,
+                source_networks,
             )
             .execute(&conn)
             .await
@@ -298,36 +336,42 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<MulticastGroupMember> {
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
-        dsl::multicast_group_member
+        paginated(dsl::multicast_group_member, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
-            .order(dsl::id.asc())
             .select(MulticastGroupMember::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Compute source IPs union for one or more groups in a single query.
+    /// Compute source filtering state for one or more groups in a single query.
     ///
-    /// Returns a map from `group_id` to the union of source IPs for that group.
-    /// Groups with no members or no source IPs will have empty vectors.
+    /// Returns a map from `group_id` to [`SourceFilterState`] containing:
+    /// - `specific_sources`: Union of all explicitly specified source IPs
+    /// - `has_any_source_member`: `true` if any member has empty `source_ips`
+    ///
+    /// Groups with no members will have empty `specific_sources` and
+    /// `has_any_source_member: false`.
     ///
     /// # Batch Usage
     ///
-    /// This function is designed for batch lookups to avoid n+1 query patterns.
+    /// Designed for batch lookups to avoid n+1 query patterns. Pass multiple
+    /// group IDs to fetch in a single database round-trip.
     ///
-    /// Pass multiple group IDs to fetch source IPs for all groups in a single
-    /// database round-trip. Used by `multicast_groups_list` to efficiently
-    /// populate the `source_ips` field for paginated group listings.
-    pub async fn multicast_groups_source_ips_union(
+    /// # DPD Source Filtering
+    ///
+    /// When `has_any_source_member` is true, pass `None` to DPD for sources
+    /// (disabling switch-level filtering). Otherwise, use `specific_sources`.
+    pub async fn multicast_groups_source_filter_state(
         &self,
         opctx: &OpContext,
         group_ids: &[MulticastGroupUuid],
-    ) -> Result<HashMap<Uuid, Vec<IpAddr>>, external::Error> {
+    ) -> Result<HashMap<Uuid, SourceFilterState>, external::Error> {
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
         if group_ids.is_empty() {
@@ -337,12 +381,11 @@ impl DataStore {
         let group_uuids: Vec<Uuid> =
             group_ids.iter().map(|id| id.into_untyped_uuid()).collect();
 
-        // Init result map with empty sets for each requested group
-        let mut res: HashMap<Uuid, BTreeSet<IpAddr>> =
-            group_uuids.iter().map(|id| (*id, BTreeSet::new())).collect();
+        let mut res: HashMap<Uuid, SourceFilterState> = group_uuids
+            .iter()
+            .map(|id| (*id, SourceFilterState::default()))
+            .collect();
 
-        // Select only the columns we need to avoid loading full member records
-        // unnecessarily
         let rows: Vec<(Uuid, Vec<IpNetwork>)> = dsl::multicast_group_member
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::external_group_id.eq_any(group_uuids))
@@ -351,14 +394,21 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        // Group by group_id and compute union for each
         for (group_id, source_ips) in rows {
-            if let Some(set) = res.get_mut(&group_id) {
-                set.extend(source_ips.iter().map(|ip| ip.ip()));
+            if let Some(state) = res.get_mut(&group_id) {
+                if source_ips.is_empty() {
+                    // Member wants any source (ASM behavior)
+                    state.has_any_source_member = true;
+                } else {
+                    // Member has specific sources
+                    state
+                        .specific_sources
+                        .extend(source_ips.iter().map(|ip| ip.ip()));
+                }
             }
         }
 
-        Ok(res.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect())
+        Ok(res)
     }
 
     /// Atomically reconcile a member in "Joining" state.
@@ -809,6 +859,7 @@ mod tests {
 
     use nexus_types::identity::Resource;
     use nexus_types::multicast::MulticastGroupCreate;
+    use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SledUuid;
@@ -818,6 +869,7 @@ mod tests {
         SledUpdateBuilder, attach_instance_to_vmm, create_instance_with_vmm,
         create_stopped_instance_record, create_vmm_for_instance,
     };
+    use crate::db::pub_test_utils::multicast::NO_SOURCE_IPS;
     use crate::db::pub_test_utils::{TestDatabase, multicast};
 
     // Note: These are datastore-level tests. They validate database state
@@ -882,6 +934,7 @@ mod tests {
             // Pool resolved via authz_pool argument to datastore call
             mvlan: None,
             has_sources: false,
+            ip_version: None,
         };
 
         let creating_group = datastore
@@ -911,7 +964,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(creating_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach to 'Creating' group");
@@ -923,7 +976,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(active_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance to active group");
@@ -947,7 +1000,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(active_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should handle duplicate attach to 'Joining' member");
@@ -985,7 +1038,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(active_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should handle attach to 'Joined' member");
@@ -1028,16 +1081,14 @@ mod tests {
         let time_after_left = member_left.time_modified;
 
         // Attach to member in "Left" state should reactivate it with new sources
-        let reactivation_sources = vec![
-            "10.0.0.1".parse::<IpAddr>().unwrap().into(),
-            "10.0.0.2".parse::<IpAddr>().unwrap().into(),
-        ];
+        let reactivation_sources: Vec<IpAddr> =
+            vec!["10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap()];
         let reactivated_member = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(active_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(reactivation_sources.clone()),
+                Some(reactivation_sources.as_slice()),
             )
             .await
             .expect("Should reactivate 'Left' member");
@@ -1056,8 +1107,11 @@ mod tests {
             "Reactivation should advance time_modified"
         );
         // Verify `source_ips` were updated on reactivation
+        // Database stores IpNetwork, so convert for comparison
+        let stored_ips: Vec<IpAddr> =
+            reactivated_member.source_ips.iter().map(|n| n.ip()).collect();
         assert_eq!(
-            reactivated_member.source_ips, reactivation_sources,
+            stored_ips, reactivation_sources,
             "Reactivation should update source_ips"
         );
 
@@ -1158,7 +1212,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 InstanceUuid::from_untyped_uuid(*instance1_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group1");
@@ -1168,7 +1222,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group2.id()),
                 InstanceUuid::from_untyped_uuid(*instance1_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group2");
@@ -1178,7 +1232,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 InstanceUuid::from_untyped_uuid(*instance2_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance2 to group1");
@@ -1213,7 +1267,7 @@ mod tests {
             "sled_id should be cleared"
         );
 
-        // Verify instance1 memberships transitioned to Left state
+        // Verify instance1 memberships transitioned to "Left" state
         datastore
             .multicast_group_members_list_by_id(
                 &opctx,
@@ -1252,7 +1306,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(active_group2_members.len(), 0);
 
-        // Test idempotency - detaching again should be idempotent
+        // Test idempotency: detaching again should be idempotent
         datastore
             .multicast_group_members_detach_by_instance(
                 &opctx,
@@ -1325,7 +1379,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(*instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance as member");
@@ -1336,10 +1390,16 @@ mod tests {
         assert_eq!(member.state, MulticastGroupMemberState::Joining);
 
         // Test member lookup by parent_id
+        let pagparams = &DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
         let member_memberships = datastore
             .multicast_group_members_list_by_instance(
                 &opctx,
                 InstanceUuid::from_untyped_uuid(*instance_id),
+                pagparams,
             )
             .await
             .expect("Should list memberships for instance");
@@ -1409,7 +1469,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 instance_id,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance as member first time");
@@ -1420,7 +1480,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 instance_id,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should handle duplicate add idempotently");
@@ -1482,7 +1542,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(test_instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should create member record");
@@ -1616,7 +1676,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(test_instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should create member record");
@@ -1950,7 +2010,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(fake_group_id),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
         assert!(result.is_err(), "Attach to non-existent group should fail");
@@ -1997,7 +2057,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(fake_instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
         assert!(result.is_err(), "Attach non-existent instance should fail");
@@ -2008,7 +2068,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should create member");
@@ -2113,7 +2173,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 instance_id,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add member");
@@ -2324,7 +2384,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 instance1_id,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group1");
@@ -2334,7 +2394,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group2.id()),
                 instance1_id,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group2");
@@ -2345,7 +2405,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 instance2_id,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance2 to group1");
@@ -2500,7 +2560,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 instance1_id,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group1");
@@ -2510,7 +2570,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group1.id()),
                 instance2_id,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance2 to group1");
@@ -2521,7 +2581,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group2.id()),
                 instance1_id,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance1 to group2");
@@ -2531,7 +2591,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group2.id()),
                 instance3_id,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add instance3 to group2");
@@ -2702,7 +2762,7 @@ mod tests {
                     &opctx1,
                     MulticastGroupUuid::from_untyped_uuid(group_id),
                     InstanceUuid::from_untyped_uuid(instance_id),
-                    Some(vec![]),
+                    Some(NO_SOURCE_IPS),
                 )
                 .await
         });
@@ -2713,7 +2773,7 @@ mod tests {
                     &opctx2,
                     MulticastGroupUuid::from_untyped_uuid(group_id),
                     InstanceUuid::from_untyped_uuid(instance_id),
-                    Some(vec![]),
+                    Some(NO_SOURCE_IPS),
                 )
                 .await
         });
@@ -2767,7 +2827,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(fake_group_id),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
 
@@ -2794,7 +2854,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(fake_instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
 
@@ -2852,7 +2912,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(creating_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should allow attach to 'Creating' group");
@@ -2887,7 +2947,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(deleting_group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
         assert!(res.is_err(), "Should reject attach to 'Deleting' group");
@@ -2935,14 +2995,13 @@ mod tests {
         let instance_id = *instance.as_untyped_uuid();
 
         // First attach with source IPs
-        let initial_sources =
-            vec!["192.168.1.1".parse::<IpAddr>().unwrap().into()];
+        let initial_sources: Vec<IpAddr> = vec!["192.168.1.1".parse().unwrap()];
         let member1 = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(initial_sources.clone()),
+                Some(initial_sources.as_slice()),
             )
             .await
             .expect("First attach should succeed");
@@ -2974,8 +3033,11 @@ mod tests {
             "Idempotent attach must not update time_modified"
         );
         // Verify  `source_ips` preserved after idempotent attach
+        // Database stores IpNetwork, so convert for comparison
+        let stored_ips: Vec<IpAddr> =
+            member_after_second.source_ips.iter().map(|n| n.ip()).collect();
         assert_eq!(
-            member_after_second.source_ips, initial_sources,
+            stored_ips, initial_sources,
             "Idempotent attach must preserve source_ips"
         );
 
@@ -2985,7 +3047,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Third attach should succeed");
@@ -3047,28 +3109,29 @@ mod tests {
         let instance_id = *instance.as_untyped_uuid();
 
         // First attach with source IPs
-        let initial_sources = vec![
-            "10.1.1.1".parse::<IpAddr>().unwrap().into(),
-            "10.1.1.2".parse::<IpAddr>().unwrap().into(),
-        ];
+        let initial_sources: Vec<IpAddr> =
+            vec!["10.1.1.1".parse().unwrap(), "10.1.1.2".parse().unwrap()];
         let member1 = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(initial_sources.clone()),
+                Some(initial_sources.as_slice()),
             )
             .await
             .expect("First attach should succeed");
 
         // Verify `source_ips` were stored
+        // Database stores IpNetwork, so convert for comparison
         let member_init = datastore
             .multicast_group_member_get_by_id(&opctx, member1.id, false)
             .await
             .expect("Should get member")
             .expect("Member should exist");
+        let stored_ips: Vec<IpAddr> =
+            member_init.source_ips.iter().map(|n| n.ip()).collect();
         assert_eq!(
-            member_init.source_ips, initial_sources,
+            stored_ips, initial_sources,
             "Initial source_ips should be stored"
         );
 
@@ -3131,8 +3194,11 @@ mod tests {
             "time_deleted should remain NULL (never set by detach_by_instance)"
         );
         // Verify `source_ips` preserved on reactivation with empty sources
+        // Database stores IpNetwork, so convert for comparison
+        let stored_ips: Vec<IpAddr> =
+            member.source_ips.iter().map(|n| n.ip()).collect();
         assert_eq!(
-            member.source_ips, initial_sources,
+            stored_ips, initial_sources,
             "Reactivation with empty sources should preserve existing source_ips"
         );
 
@@ -3179,21 +3245,20 @@ mod tests {
         let instance_id = *instance.as_untyped_uuid();
 
         // Initial attach with source IPs [A, B]
-        let original_sources = vec![
-            "10.0.0.1".parse::<IpAddr>().unwrap().into(),
-            "10.0.0.2".parse::<IpAddr>().unwrap().into(),
-        ];
+        let original_sources: Vec<IpAddr> =
+            vec!["10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap()];
         datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(original_sources.clone()),
+                Some(original_sources.as_slice()),
             )
             .await
             .expect("Should attach instance");
 
         // Verify original sources stored
+        // Database stores IpNetwork, so convert for comparison
         let member_initial = datastore
             .multicast_group_member_get_by_group_and_instance(
                 &opctx,
@@ -3203,7 +3268,9 @@ mod tests {
             .await
             .expect("Should get member")
             .expect("Member should exist");
-        assert_eq!(member_initial.source_ips, original_sources);
+        let stored_ips: Vec<IpAddr> =
+            member_initial.source_ips.iter().map(|n| n.ip()).collect();
+        assert_eq!(stored_ips, original_sources);
 
         // Transition to "Left" (simulating instance stop)
         datastore
@@ -3214,22 +3281,21 @@ mod tests {
             .await
             .expect("Should detach");
 
-        // Reactivate with a differsent set of non-empty sources [C, D]
-        let replacement_sources = vec![
-            "10.0.0.3".parse::<IpAddr>().unwrap().into(),
-            "10.0.0.4".parse::<IpAddr>().unwrap().into(),
-        ];
+        // Reactivate with a different set of non-empty sources [C, D]
+        let replacement_sources: Vec<IpAddr> =
+            vec!["10.0.0.3".parse().unwrap(), "10.0.0.4".parse().unwrap()];
         datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(replacement_sources.clone()),
+                Some(replacement_sources.as_slice()),
             )
             .await
             .expect("Reactivation should succeed");
 
         // Verify `source_ips` were replaced (not preserved)
+        // Database stores IpNetwork, so convert for comparison
         let member_reactivated = datastore
             .multicast_group_member_get_by_group_and_instance(
                 &opctx,
@@ -3239,13 +3305,15 @@ mod tests {
             .await
             .expect("Should get member")
             .expect("Member should exist");
+        let stored_ips: Vec<IpAddr> =
+            member_reactivated.source_ips.iter().map(|n| n.ip()).collect();
 
         assert_eq!(
-            member_reactivated.source_ips, replacement_sources,
+            stored_ips, replacement_sources,
             "Reactivation with non-empty sources should REPLACE existing sources"
         );
         assert_ne!(
-            member_reactivated.source_ips, original_sources,
+            stored_ips, original_sources,
             "Original sources should not be preserved when new sources provided"
         );
 
@@ -3296,7 +3364,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Attach should succeed");
@@ -3331,7 +3399,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should allow reattach of Left member");
@@ -3340,10 +3408,16 @@ mod tests {
         assert_eq!(member1.id, member2.id);
 
         // Verify only one member exists for this (group, instance) pair
+        let pagparams = &DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
         let members = datastore
             .multicast_group_members_list_by_instance(
                 &opctx,
                 InstanceUuid::from_untyped_uuid(instance_id),
+                pagparams,
             )
             .await
             .expect("List members should succeed");
@@ -3379,7 +3453,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(fake_group_id),
                 InstanceUuid::from_untyped_uuid(fake_instance_id),
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await;
 
@@ -3436,7 +3510,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 instance_id,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach stopped instance");
@@ -3499,26 +3573,30 @@ mod tests {
         )
         .await;
 
+        let member1_sources: Vec<IpAddr> =
+            vec!["10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap()];
         datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 group_id,
                 instance1,
-                Some(vec![
-                    "10.0.0.1".parse().unwrap(),
-                    "10.0.0.2".parse().unwrap(),
-                ]),
+                Some(member1_sources.as_slice()),
             )
             .await
             .expect("Should add member1");
 
-        // Verify union with single member
-        let union_map = datastore
-            .multicast_groups_source_ips_union(&opctx, &[group_id])
+        // Verify filter state with single member
+        let state_map = datastore
+            .multicast_groups_source_filter_state(&opctx, &[group_id])
             .await
-            .expect("Should get union");
-        let union = union_map.get(&group.id()).cloned().unwrap_or_default();
-        assert_eq!(union.len(), 2, "Union should have 2 IPs from member1");
+            .expect("Should get filter state");
+        let state = state_map.get(&group.id()).cloned().unwrap_or_default();
+        assert_eq!(
+            state.specific_sources.len(),
+            2,
+            "Should have 2 IPs from member1"
+        );
+        assert!(!state.has_any_source_member, "No ASM member yet");
 
         // Add member2 with source IPs [10.0.0.2, 10.0.0.3] (10.0.0.2 overlaps)
         let instance2 = create_stopped_instance_record(
@@ -3529,30 +3607,30 @@ mod tests {
         )
         .await;
 
+        let member2_sources: Vec<IpAddr> =
+            vec!["10.0.0.2".parse().unwrap(), "10.0.0.3".parse().unwrap()];
         datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 group_id,
                 instance2,
-                Some(vec![
-                    "10.0.0.2".parse().unwrap(),
-                    "10.0.0.3".parse().unwrap(),
-                ]),
+                Some(member2_sources.as_slice()),
             )
             .await
             .expect("Should add member2");
 
-        // Verify union deduplicates overlapping IPs
-        let union_map = datastore
-            .multicast_groups_source_ips_union(&opctx, &[group_id])
+        // Verify filter state deduplicates overlapping IPs
+        let state_map = datastore
+            .multicast_groups_source_filter_state(&opctx, &[group_id])
             .await
-            .expect("Should get union");
-        let union = union_map.get(&group.id()).cloned().unwrap_or_default();
+            .expect("Should get filter state");
+        let state = state_map.get(&group.id()).cloned().unwrap_or_default();
         assert_eq!(
-            union.len(),
+            state.specific_sources.len(),
             3,
-            "Union should have 3 unique IPs (10.0.0.1, 10.0.0.2, 10.0.0.3)"
+            "Should have 3 unique IPs (10.0.0.1, 10.0.0.2, 10.0.0.3)"
         );
+        assert!(!state.has_any_source_member, "Still no ASM member");
 
         // Add member3 with no source IPs (ASM member)
         let instance3 = create_stopped_instance_record(
@@ -3568,27 +3646,32 @@ mod tests {
                 &opctx,
                 group_id,
                 instance3,
-                Some(vec![]),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should add ASM member");
 
-        // Union should still be 3 (ASM member contributes nothing)
-        let union_map = datastore
-            .multicast_groups_source_ips_union(&opctx, &[group_id])
+        // specific_sources should still be 3 (ASM member contributes nothing)
+        // but has_any_source_member=true
+        let state_map = datastore
+            .multicast_groups_source_filter_state(&opctx, &[group_id])
             .await
-            .expect("Should get union");
-        let union = union_map.get(&group.id()).cloned().unwrap_or_default();
+            .expect("Should get filter state");
+        let state = state_map.get(&group.id()).cloned().unwrap_or_default();
         assert_eq!(
-            union.len(),
+            state.specific_sources.len(),
             3,
-            "Union should still be 3 (ASM member has no sources)"
+            "specific_sources should still be 3 (ASM member contributes nothing)"
+        );
+        assert!(
+            state.has_any_source_member,
+            "ASM member joined with empty sources"
         );
 
-        // Verify actual IPs in union
-        assert!(union.contains(&"10.0.0.1".parse().unwrap()));
-        assert!(union.contains(&"10.0.0.2".parse().unwrap()));
-        assert!(union.contains(&"10.0.0.3".parse().unwrap()));
+        // Verify actual IPs in specific_sources
+        assert!(state.specific_sources.contains(&"10.0.0.1".parse().unwrap()));
+        assert!(state.specific_sources.contains(&"10.0.0.2".parse().unwrap()));
+        assert!(state.specific_sources.contains(&"10.0.0.3".parse().unwrap()));
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -3601,9 +3684,9 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Call with empty slice - should return empty map without hitting DB
+        // Call with empty slice (should return empty map without hitting DB)
         let result = datastore
-            .multicast_groups_source_ips_union(&opctx, &[])
+            .multicast_groups_source_filter_state(&opctx, &[])
             .await
             .expect("Empty input should succeed");
 
@@ -3642,19 +3725,23 @@ mod tests {
 
         // Query source IPs for group with no members
         let result = datastore
-            .multicast_groups_source_ips_union(&opctx, &[group_id])
+            .multicast_groups_source_filter_state(&opctx, &[group_id])
             .await
             .expect("Should succeed for group with no members");
 
-        // Group should be in result map with empty vector (not missing)
+        // Group should be in result map with default state (not missing)
         assert!(
             result.contains_key(&group.id()),
             "Group should be present in result map"
         );
-        let sources = result.get(&group.id()).unwrap();
+        let state = result.get(&group.id()).unwrap();
         assert!(
-            sources.is_empty(),
-            "Group with no members should have empty source_ips"
+            state.specific_sources.is_empty(),
+            "Group with no members should have empty specific_sources"
+        );
+        assert!(
+            !state.has_any_source_member,
+            "Group with no members should have has_any_source_member=false"
         );
 
         db.terminate().await;
@@ -3711,7 +3798,7 @@ mod tests {
                 &opctx,
                 group_id,
                 instance,
-                Some(original_sources.clone()),
+                Some(original_sources.as_slice()),
             )
             .await
             .expect("Should add member with sources");
@@ -3815,7 +3902,7 @@ mod tests {
                 &opctx,
                 group_id,
                 instance,
-                Some(original_sources.clone()),
+                Some(original_sources.as_slice()),
             )
             .await
             .expect("Should add member with sources");
@@ -3847,7 +3934,7 @@ mod tests {
                 &opctx,
                 group_id,
                 instance,
-                Some(vec![]), // Some([]) = clear source_ips
+                Some(NO_SOURCE_IPS), // Some([]) = clear source_ips
             )
             .await
             .expect("Should reactivate member");

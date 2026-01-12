@@ -42,8 +42,8 @@ use nexus_types::external_api::views::{
 };
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
-    InstanceCpuCount, InstanceState,
+    ByteCount, DataPageParams, Hostname, IdentityMetadataCreateParams,
+    Instance, InstanceCpuCount, InstanceState,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
@@ -63,7 +63,6 @@ mod failures;
 mod groups;
 mod instances;
 mod networking_integration;
-mod omdb;
 mod pool_selection;
 
 // Timeout constants for test operations
@@ -173,6 +172,43 @@ pub(crate) async fn create_multicast_ip_pool_with_range(
     pool
 }
 
+/// Create an IPv6 multicast IP pool with a global scope range (ff0e::/16).
+pub(crate) async fn create_multicast_ip_pool_v6(
+    client: &ClientTestContext,
+    pool_name: &str,
+) -> IpPool {
+    use nexus_types::external_api::shared::Ipv6Range;
+    use std::net::Ipv6Addr;
+
+    let pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: pool_name.parse().unwrap(),
+            description: "IPv6 multicast IP pool for testing".to_string(),
+        },
+        IpVersion::V6,
+    );
+
+    let pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &pool_params).await;
+
+    // Add IPv6 global scope multicast range (ff0e::/16)
+    // Small range to avoid generate_series performance issues with IPv6
+    let ipv6_range = IpRange::V6(
+        Ipv6Range::new(
+            Ipv6Addr::new(0xff0e, 0, 0, 0, 0, 0, 0, 1),
+            Ipv6Addr::new(0xff0e, 0, 0, 0, 0, 0, 0, 0xff),
+        )
+        .unwrap(),
+    );
+    let range_url = format!("/v1/system/ip-pools/{pool_name}/ranges/add");
+    object_create::<_, IpPoolRange>(client, &range_url, &ipv6_range).await;
+
+    // Link the pool to the silo so it can be found by multicast group creation
+    link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
+
+    pool
+}
+
 /// Waits for the multicast group reconciler to complete.
 ///
 /// This wraps wait_background_task with the correct task name.
@@ -188,8 +224,8 @@ pub(crate) async fn wait_for_multicast_reconciler(
 
 /// Activates the multicast reconciler and waits for it to complete.
 ///
-/// Use this when you need to explicitly trigger the reconciler (e.g., after
-/// restarting DPD) rather than waiting for an already-triggered run.
+/// Use this when you need to explicitly activate the reconciler (e.g., after
+/// restarting DPD) rather than waiting for an already-activated run.
 pub(crate) async fn activate_multicast_reconciler(
     lockstep_client: &ClientTestContext,
 ) -> nexus_lockstep_client::types::BackgroundTask {
@@ -224,7 +260,8 @@ where
 
     let last_reconciler_activation = Arc::new(Mutex::new(Instant::now()));
 
-    // Activate once at the start to kick things off
+    // First, wait for any already-activated reconciler run to complete.
+    // This tests explicit activation paths (saga completions, etc.).
     wait_for_multicast_reconciler(lockstep_client).await;
 
     wait_for_condition(
@@ -237,7 +274,8 @@ where
             };
 
             if should_activate {
-                wait_for_multicast_reconciler(lockstep_client).await;
+                // Use activate to drive progress
+                activate_multicast_reconciler(lockstep_client).await;
                 *last_reconciler_activation.lock().unwrap() = now;
             }
 
@@ -714,7 +752,11 @@ pub(crate) async fn verify_inventory_based_port_mapping(
 
     // Get the multicast member for this instance to find its external_group_id
     let members = datastore
-        .multicast_group_members_list_by_instance(&opctx, *instance_uuid)
+        .multicast_group_members_list_by_instance(
+            &opctx,
+            *instance_uuid,
+            &DataPageParams::max_page(),
+        )
         .await
         .map_err(|e| format!("list members failed: {e}"))?;
 
@@ -859,10 +901,14 @@ pub(crate) async fn wait_for_member_count(
 
 /// Wait for a multicast group to be deleted (returns 404).
 pub(crate) async fn wait_for_group_deleted(
-    client: &ClientTestContext,
+    cptestctx: &ControlPlaneTestContext,
     group_name: &str,
 ) {
-    match wait_for_condition(
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+
+    match wait_for_condition_with_reconciler(
+        lockstep_client,
         || async {
             let group_url = mcast_group_url(group_name);
             match NexusRequest::object_get(client, &group_url)
@@ -924,10 +970,9 @@ pub(crate) async fn verify_group_deleted_or_in_states(
         let actual_state = &matching_groups[0].state;
         assert!(
             expected_states.contains(&actual_state.as_str()),
-            "Group {group_name} should be in one of {expected_states:?} states, found: \"{actual_state}\""
+            "Group {group_name} should be in one of {expected_states:?} states, found: {actual_state}"
         );
     }
-    // If group is gone, that's also valid - operation completed
 }
 
 /// Wait for a multicast group to be deleted from DPD (dataplane) with reconciler activation.
@@ -992,6 +1037,7 @@ pub(crate) async fn instance_for_multicast_groups(
         .map(|name| MulticastGroupJoinSpec {
             group: MulticastGroupIdentifier::Name(name.parse().unwrap()),
             source_ips: None,
+            ip_version: None,
         })
         .collect();
 
@@ -1012,7 +1058,7 @@ pub(crate) async fn instance_for_multicast_groups(
             hostname: instance_name.parse::<Hostname>().unwrap(),
             user_data: vec![],
             ssh_public_keys: None,
-            network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![],
             multicast_groups,
             disks: vec![],
@@ -1060,7 +1106,7 @@ pub(crate) async fn multicast_group_attach_with_sources(
     let url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
-    let body = InstanceMulticastGroupJoin { source_ips };
+    let body = InstanceMulticastGroupJoin { source_ips, ip_version: None };
     put_upsert::<_, MulticastGroupMember>(client, &url, &body).await;
 }
 

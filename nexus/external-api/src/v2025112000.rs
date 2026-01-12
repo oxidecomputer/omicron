@@ -4,6 +4,8 @@
 
 //! Nexus external types that changed from 2025112000 to 2025120300
 
+use crate::v2025121200;
+use crate::v2026010100;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use schemars::JsonSchema;
@@ -211,15 +213,16 @@ pub struct InstanceCreate {
 
     /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interfaces: params::InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: v2026010100::InstanceNetworkInterfaceAttachment,
 
     /// The external IP addresses provided to this instance.
     ///
     /// By default, all instances have outbound connectivity, but no inbound
     /// connectivity. These external addresses can be used to provide a fixed,
     /// known IP address for making inbound connections to the instance.
+    // Delegates through v2025121200 → params::ExternalIpCreate
     #[serde(default)]
-    pub external_ips: Vec<params::ExternalIpCreate>,
+    pub external_ips: Vec<v2025121200::ExternalIpCreate>,
 
     /// The multicast groups this instance should join.
     ///
@@ -299,9 +302,9 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<external::InstanceCpuPlatform>,
 }
 
-impl From<InstanceCreate> for params::InstanceCreate {
-    fn from(old: InstanceCreate) -> params::InstanceCreate {
-        params::InstanceCreate {
+impl From<InstanceCreate> for v2025121200::InstanceCreate {
+    fn from(old: InstanceCreate) -> v2025121200::InstanceCreate {
+        v2025121200::InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,
             memory: old.memory,
@@ -309,15 +312,7 @@ impl From<InstanceCreate> for params::InstanceCreate {
             user_data: old.user_data,
             network_interfaces: old.network_interfaces,
             external_ips: old.external_ips,
-            // Convert NameOrId to MulticastGroupJoinSpec (with no source_ips)
-            multicast_groups: old
-                .multicast_groups
-                .into_iter()
-                .map(|group| params::MulticastGroupJoinSpec {
-                    group: group.into(),
-                    source_ips: None,
-                })
-                .collect(),
+            multicast_groups: old.multicast_groups,
             disks: old.disks.into_iter().map(Into::into).collect(),
             boot_disk: old.boot_disk.map(Into::into),
             ssh_public_keys: old.ssh_public_keys,
