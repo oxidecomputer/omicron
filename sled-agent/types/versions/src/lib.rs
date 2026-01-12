@@ -45,6 +45,8 @@ pub mod v12;
 pub mod v13;
 #[path = "measurements/mod.rs"]
 pub mod v14;
+#[path = "add_health_monitor_zpools/mod.rs"]
+pub mod v15;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]

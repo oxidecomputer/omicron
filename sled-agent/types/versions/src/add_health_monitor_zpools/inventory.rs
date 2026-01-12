@@ -1,8 +1,5 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
-
 use illumos_utils::svcs::SvcsInMaintenanceResult;
+use illumos_utils::zpool::UnhealthyZpoolsResult;
 use omicron_common::api::external::ByteCount;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
@@ -16,11 +13,12 @@ use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
 use crate::v1::inventory::InventoryZpool;
 use crate::v1::inventory::SledRole;
-use crate::v1::inventory::ZoneImageResolverInventory;
-use crate::v11;
-pub use crate::v11::inventory::ConfigReconcilerInventory;
-pub use crate::v11::inventory::ConfigReconcilerInventoryStatus;
-pub use crate::v11::inventory::OmicronSledConfig;
+use crate::v12;
+use crate::v14;
+pub use crate::v14::inventory::ConfigReconcilerInventory;
+pub use crate::v14::inventory::ConfigReconcilerInventoryStatus;
+pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
+pub use crate::v14::inventory::OmicronSledConfig;
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -39,11 +37,11 @@ pub struct Inventory {
     pub ledgered_sled_config: Option<OmicronSledConfig>,
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub zone_image_resolver: ZoneImageResolverInventory,
+    pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub health_monitor: HealthMonitorInventory,
 }
 
-impl From<Inventory> for v11::inventory::Inventory {
+impl From<Inventory> for v14::inventory::Inventory {
     fn from(value: Inventory) -> Self {
         let Inventory {
             sled_id,
@@ -60,8 +58,8 @@ impl From<Inventory> for v11::inventory::Inventory {
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
-            zone_image_resolver,
-            health_monitor: _,
+            file_source_resolver,
+            health_monitor,
         } = value;
         Self {
             sled_id,
@@ -78,7 +76,8 @@ impl From<Inventory> for v11::inventory::Inventory {
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
-            zone_image_resolver,
+            file_source_resolver,
+            health_monitor: health_monitor.into(),
         }
     }
 }
@@ -92,4 +91,19 @@ pub struct HealthMonitorInventory {
         schema_with = "SnakeCaseResult::<SvcsInMaintenanceResult, String>::json_schema"
     )]
     pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<UnhealthyZpoolsResult, String>::json_schema"
+    )]
+    pub unhealthy_zpools: Result<UnhealthyZpoolsResult, String>,
+}
+
+impl From<HealthMonitorInventory> for v12::inventory::HealthMonitorInventory {
+    fn from(value: HealthMonitorInventory) -> Self {
+        let HealthMonitorInventory {
+            smf_services_in_maintenance,
+            unhealthy_zpools: _,
+        } = value;
+        Self { smf_services_in_maintenance }
+    }
 }

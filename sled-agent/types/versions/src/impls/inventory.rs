@@ -8,6 +8,8 @@ use std::net::{IpAddr, Ipv6Addr};
 
 use camino::Utf8PathBuf;
 use iddqd::IdOrdMap;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
+use illumos_utils::zpool::UnhealthyZpoolsResult;
 use indent_write::fmt::IndentWriter;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -19,11 +21,12 @@ use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    HostPhase2DesiredContents, HostPhase2DesiredSlots, ManifestBootInventory,
-    ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
-    MupdateOverrideInventory, MupdateOverrideNonBootInventory,
-    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
-    OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
+    HealthMonitorInventory, HostPhase2DesiredContents, HostPhase2DesiredSlots,
+    ManifestBootInventory, ManifestInventory, ManifestNonBootInventory,
+    MupdateOverrideBootInventory, MupdateOverrideInventory,
+    MupdateOverrideNonBootInventory, OmicronFileSourceResolverInventory,
+    OmicronSledConfig, OmicronZoneConfig, OmicronZoneImageSource,
+    OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
     ZoneArtifactInventory, ZoneKind,
 };
@@ -463,6 +466,25 @@ impl ConfigReconcilerInventory {
         self.orphaned_datasets = IdOrdMap::new();
         self.zones = zones;
         self.remove_mupdate_override = remove_mupdate_override;
+    }
+}
+
+impl HealthMonitorInventory {
+    pub fn new() -> Self {
+        Self {
+            smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+            unhealthy_zpools: Ok(UnhealthyZpoolsResult::new()),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.smf_services_in_maintenance
+            .as_ref()
+            .is_ok_and(|svcs| svcs.is_empty())
+            && self
+                .unhealthy_zpools
+                .as_ref()
+                .is_ok_and(|zpools| zpools.is_empty())
     }
 }
 

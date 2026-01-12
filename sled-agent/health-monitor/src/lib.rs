@@ -12,6 +12,7 @@
 //! The health checks we run are:
 //!
 //! * A task that checks for services in maintenance every minute.
+//! * A task that checks for unhealthy zpools every minute.
 
 pub mod handle;
 pub mod health_checks;
