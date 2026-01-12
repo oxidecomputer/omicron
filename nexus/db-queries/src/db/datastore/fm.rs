@@ -124,16 +124,54 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<Option<(fm::SitrepVersion, Sitrep)>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        let version = self
-            .fm_current_sitrep_version_on_conn(&conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        let version: fm::SitrepVersion = match version {
-            Some(version) => version.into(),
-            None => return Ok(None),
-        };
-        let sitrep = self.fm_sitrep_read_on_conn(version.id, &conn).await?;
-        Ok(Some((version, sitrep)))
+        loop {
+            let version =
+                self.fm_current_sitrep_version_on_conn(&conn).await.map_err(
+                    |e| public_error_from_diesel(e, ErrorHandler::Server),
+                )?;
+            let version: fm::SitrepVersion = match version {
+                Some(version) => version.into(),
+                None => return Ok(None),
+            };
+            match self.fm_sitrep_read_on_conn(version.id, &conn).await {
+                Ok(sitrep) => return Ok(Some((version, sitrep))),
+                // If `fm_sitrep_read_on_conn` returns `NotFound` for a sitrep
+                // ID that was returned by `fm_current_sitrep_version_on_conn`,
+                // this means that the sitrep we were attempting to read is no
+                // longer the current sitrep. There must, therefore, be a *new*
+                // current sitrep. This is because:
+                //
+                // - The `fm_sitrep_delete_all` query does not permit the
+                //   current sitrep to be deleted, and,
+                // - If a sitrep is the current sitrep, it will no longer be
+                //   the current sitrep if and only if a new current sitrep has
+                //   been inserted.
+                //
+                // Therefore, we can just retry, loading the current version
+                // again and trying to read the new current sitrep.
+                //
+                // This is a fairly unlikely situation, but it could occur if
+                // there is a particularly long delay between when we read the
+                // current version and when we attempt to actually load that
+                // sitrep, so we ought to handle it here. It would be incorrect
+                // to just return `None` in this case, as `None` means that *no
+                // current sitrep has ever been created*.
+                Err(e @ Error::NotFound { .. }) => {
+                    slog::debug!(
+                        opctx.log,
+                        "attempted to read current sitrep {}, but it seems to
+                         have been deleted out from under us! retrying...",
+                        version.id;
+                        "sitrep_id" => ?version.id,
+                        "sitrep_version" => ?version.version,
+                        "error" => %e,,
+                    );
+                    continue;
+                }
+                // Propagate any unanticipated errors.
+                Err(e) => return Err(e),
+            }
+        }
     }
 
     /// Reads the entire content of the sitrep with the provided ID, if one
