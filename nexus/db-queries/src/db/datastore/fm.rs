@@ -164,7 +164,7 @@ impl DataStore {
                         version.id;
                         "sitrep_id" => ?version.id,
                         "sitrep_version" => ?version.version,
-                        "error" => %e,,
+                        "error" => %e,
                     );
                     continue;
                 }
