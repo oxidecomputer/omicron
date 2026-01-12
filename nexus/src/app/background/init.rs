@@ -817,6 +817,7 @@ impl BackgroundTasksInitializer {
                     datastore.clone(),
                     sagas.clone(),
                     config.instance_reincarnation.disable,
+                    task_multicast_reconciler.clone(),
                 );
             driver.register(TaskDefinition {
                 name: "instance_reincarnation",
