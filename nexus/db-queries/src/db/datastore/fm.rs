@@ -62,7 +62,8 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let version = self
             .fm_current_sitrep_version_on_conn(&conn)
-            .await?
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .map(Into::into);
         Ok(version)
     }
@@ -70,14 +71,13 @@ impl DataStore {
     async fn fm_current_sitrep_version_on_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<Option<model::SitrepVersion>, Error> {
+    ) -> Result<Option<model::SitrepVersion>, DieselError> {
         history_dsl::fm_sitrep_history
             .order_by(history_dsl::version.desc())
             .select(model::SitrepVersion::as_select())
             .first_async(conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Reads the [`fm::SitrepMetadata`] describing the sitrep with the given
@@ -124,11 +124,14 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<Option<(fm::SitrepVersion, Sitrep)>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        let version: fm::SitrepVersion =
-            match self.fm_current_sitrep_version_on_conn(&conn).await? {
-                Some(version) => version.into(),
-                None => return Ok(None),
-            };
+        let version = self
+            .fm_current_sitrep_version_on_conn(&conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let version: fm::SitrepVersion = match version {
+            Some(version) => version.into(),
+            None => return Ok(None),
+        };
         let sitrep = self.fm_sitrep_read_on_conn(version.id, &conn).await?;
         Ok(Some((version, sitrep)))
     }
@@ -775,6 +778,7 @@ impl DataStore {
             cases_deleted: usize,
         }
 
+        let err = OptionalError::new();
         let SitrepDeleteResult {
             sitreps_deleted,
             case_ereports_deleted,
@@ -786,7 +790,20 @@ impl DataStore {
             .transaction_retry_wrapper("fm_sitrep_delete_all")
             .transaction(&conn, |conn| {
                 let ids = ids.clone();
+                let err = err.clone();
                 async move {
+                    // First, ensure that we are not deleting the current
+                    // sitrep, and bail out if we would.
+                    if let Some(model::SitrepVersion { sitrep_id, .. }) =
+                        self.fm_current_sitrep_version_on_conn(&conn).await?
+                    {
+                        if ids.contains(&sitrep_id.as_untyped_uuid()) {
+                            return Err(err.bail(TransactionError::CustomError(Error::conflict(format!(
+                                "cannot delete sitrep {sitrep_id}, as it is the current sitrep"
+                            )))));
+                        }
+                    }
+
                     // Delete case ereport assignments
                     let case_ereports_deleted = diesel::delete(
                         case_ereport_dsl::fm_ereport_in_case.filter(
@@ -820,9 +837,12 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| match err.take() {
+                Some(err) => err.into_public_ignore_retries(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
 
-        slog::debug!(
+        slog::info!(
             &opctx.log,
             "deleted {sitreps_deleted} of {} sitreps sitreps", ids.len();
             "ids" => ?ids,
