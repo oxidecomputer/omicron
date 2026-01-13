@@ -953,6 +953,7 @@ pub enum ResourceType {
     DeviceAccessToken,
     DeviceAuthRequest,
     Disk,
+    ExternalSubnet,
     Fleet,
     FloatingIp,
     IdentityProvider,
