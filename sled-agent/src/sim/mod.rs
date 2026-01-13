@@ -20,8 +20,9 @@ mod upstairs;
 
 pub use crate::updates::ConfigUpdates;
 pub use config::{
-    Baseboard, Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode,
-    TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM, ZpoolConfig,
+    Baseboard, Config, ConfigHardware, ConfigHealthMonitor, ConfigStorage,
+    ConfigZpool, SimMode, TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM,
+    ZpoolConfig,
 };
 pub use server::{RssArgs, Server, run_standalone_server};
 pub use sled_agent::SledAgent;

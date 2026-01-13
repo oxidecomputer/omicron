@@ -90,6 +90,7 @@ impl<'a> ControlPlaneBuilder<'a> {
             self.nextra_sled_agents,
             DEFAULT_SP_SIM_CONFIG.into(),
             false,
+            sim::ConfigHealthMonitor { enabled: false },
         )
         .await
     }
@@ -361,6 +362,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     config: &mut NexusConfig,
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
+    sled_agent_health_monitor: sim::ConfigHealthMonitor,
 ) -> Result<ControlPlaneTestContext<N>> {
     let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
 
@@ -388,6 +390,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
         extra_sled_agents,
         gateway_config_file,
         true,
+        sled_agent_health_monitor,
     )
     .await)
 }

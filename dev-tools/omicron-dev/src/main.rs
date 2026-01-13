@@ -11,6 +11,7 @@ use libc::SIGINT;
 use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
+use omicron_sled_agent::sim::ConfigHealthMonitor;
 use signal_hook_tokio::Signals;
 use std::fs;
 
@@ -57,6 +58,9 @@ struct RunAllArgs {
     /// Override the nexus configuration file.
     #[clap(long, default_value = DEFAULT_NEXUS_CONFIG)]
     nexus_config: Utf8PathBuf,
+    /// Enable the sled agent health monitor
+    #[clap(long, default_value_t = false, action)]
+    enable_sled_agent_health_monitor: bool,
 }
 
 impl RunAllArgs {
@@ -87,10 +91,19 @@ impl RunAllArgs {
                 .set_port(p);
         }
 
+        let sled_agent_health_monitor = ConfigHealthMonitor {
+            enabled: self.enable_sled_agent_health_monitor,
+        };
+
         println!("omicron-dev: setting up all services ... ");
         let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
             omicron_nexus::Server,
-        >(&mut config, 0, self.gateway_config.clone())
+        >(
+            &mut config,
+            0,
+            self.gateway_config.clone(),
+            sled_agent_health_monitor,
+        )
         .await
         .context("error setting up services")?;
 

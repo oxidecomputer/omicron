@@ -66,6 +66,12 @@ pub struct ConfigHardware {
     pub baseboard: Baseboard,
 }
 
+/// Configuration for the health monitor.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ConfigHealthMonitor {
+    pub enabled: bool,
+}
+
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
@@ -83,6 +89,8 @@ pub struct Config {
     pub updates: ConfigUpdates,
     /// configuration to emulate the sled agent's hardware
     pub hardware: ConfigHardware,
+    /// configuration for the sled agent's health monitor
+    pub health_monitor: ConfigHealthMonitor,
 }
 
 pub enum ZpoolConfig {
@@ -101,6 +109,7 @@ impl Config {
         update_directory: Option<&Utf8Path>,
         zpool_config: ZpoolConfig,
         cpu_family: SledCpuFamily,
+        health_monitor: ConfigHealthMonitor,
     ) -> Config {
         Self::for_testing_with_baseboard(
             id,
@@ -110,6 +119,7 @@ impl Config {
             zpool_config,
             cpu_family,
             None,
+            health_monitor,
         )
     }
 
@@ -121,6 +131,7 @@ impl Config {
         zpool_config: ZpoolConfig,
         cpu_family: SledCpuFamily,
         baseboard_serial: Option<String>,
+        health_monitor: ConfigHealthMonitor,
     ) -> Config {
         // This IP range is guaranteed by RFC 6666 to discard traffic.
         // For tests that don't use a Nexus, we use this address to simulate a
@@ -173,6 +184,7 @@ impl Config {
                     revision: 3,
                 },
             },
+            health_monitor,
         }
     }
 }
