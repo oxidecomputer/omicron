@@ -1080,6 +1080,57 @@ pub static DEMO_IP_POOL_SERVICE_RANGES_ADD_URL: LazyLock<String> =
 pub static DEMO_IP_POOL_SERVICE_RANGES_DEL_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/remove", *DEMO_IP_POOL_SERVICE_RANGES_URL));
 
+// Subnet Pools
+// TODO(#9453): These are stub endpoints that return "not implemented" errors.
+pub const DEMO_SUBNET_POOLS_URL: &'static str = "/v1/system/subnet-pools";
+pub static DEMO_SUBNET_POOL_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-subnet-pool".parse().unwrap());
+pub static DEMO_SUBNET_POOL_CREATE: LazyLock<params::SubnetPoolCreate> =
+    LazyLock::new(|| params::SubnetPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_SUBNET_POOL_NAME.clone(),
+            description: String::from("a subnet pool"),
+        },
+        ip_version: IpVersion::V4,
+    });
+pub static DEMO_SUBNET_POOL_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/system/subnet-pools/{}", *DEMO_SUBNET_POOL_NAME)
+});
+pub static DEMO_SUBNET_POOL_UPDATE: LazyLock<params::SubnetPoolUpdate> =
+    LazyLock::new(|| params::SubnetPoolUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some(String::from("an updated subnet pool")),
+        },
+    });
+pub static DEMO_SUBNET_POOL_SUBNETS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/subnets", *DEMO_SUBNET_POOL_URL));
+pub static DEMO_SUBNET_POOL_SUBNET_ADD: LazyLock<params::SubnetPoolSubnetAdd> =
+    LazyLock::new(|| params::SubnetPoolSubnetAdd {
+        identity: IdentityMetadataCreateParams {
+            name: "demo-subnet".parse().unwrap(),
+            description: String::from("a demo subnet"),
+        },
+        subnet: "10.0.0.0/16".parse().unwrap(),
+        min_alloc: None,
+        max_alloc: None,
+    });
+pub static DEMO_SUBNET_POOL_SILOS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/silos", *DEMO_SUBNET_POOL_URL));
+pub static DEMO_SUBNET_POOL_LINK_SILO: LazyLock<params::SubnetPoolLinkSilo> =
+    LazyLock::new(|| params::SubnetPoolLinkSilo {
+        silo: NameOrId::Id(DEFAULT_SILO.identity().id),
+        is_default: false,
+    });
+pub static DEMO_SUBNET_POOL_SILO_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("{}/silos/{}", *DEMO_SUBNET_POOL_URL, *DEMO_SILO_NAME)
+});
+pub static DEMO_SUBNET_POOL_SILO_UPDATE: LazyLock<
+    params::SubnetPoolSiloUpdate,
+> = LazyLock::new(|| params::SubnetPoolSiloUpdate { is_default: true });
+pub static DEMO_SUBNET_POOL_UTILIZATION_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/utilization", *DEMO_SUBNET_POOL_URL));
+
 // Snapshots
 pub static DEMO_SNAPSHOT_NAME: LazyLock<Name> =
     LazyLock::new(|| "demo-snapshot".parse().unwrap());
@@ -1672,6 +1723,76 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
                 )],
+            },
+            /* Subnet Pools */
+            // TODO(#9453): These are stub endpoints. Use GetUnimplemented
+            // since privileged GET requests will return 500 not 200.
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOLS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_SUBNET_POOL_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_SUBNET_POOL_UPDATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_SUBNETS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_SUBNET_POOL_SUBNET_ADD)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_SILOS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_SUBNET_POOL_LINK_SILO)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_SILO_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_SUBNET_POOL_SILO_UPDATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_UTILIZATION_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetUnimplemented],
             },
             /* Silos */
             VerifyEndpoint {

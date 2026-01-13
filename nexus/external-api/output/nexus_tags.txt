@@ -304,6 +304,22 @@ API operations found with tag "system/status"
 OPERATION ID                             METHOD   URL PATH
 ping                                     GET      /v1/ping
 
+API operations found with tag "system/subnet-pools"
+OPERATION ID                             METHOD   URL PATH
+subnet_pool_create                       POST     /v1/system/subnet-pools
+subnet_pool_delete                       DELETE   /v1/system/subnet-pools/{pool}
+subnet_pool_list                         GET      /v1/system/subnet-pools
+subnet_pool_silo_link                    POST     /v1/system/subnet-pools/{pool}/silos
+subnet_pool_silo_list                    GET      /v1/system/subnet-pools/{pool}/silos
+subnet_pool_silo_unlink                  DELETE   /v1/system/subnet-pools/{pool}/silos/{silo}
+subnet_pool_silo_update                  PUT      /v1/system/subnet-pools/{pool}/silos/{silo}
+subnet_pool_subnet_add                   POST     /v1/system/subnet-pools/{pool}/subnets/add
+subnet_pool_subnet_list                  GET      /v1/system/subnet-pools/{pool}/subnets
+subnet_pool_subnet_remove                POST     /v1/system/subnet-pools/{pool}/subnets/remove
+subnet_pool_update                       PUT      /v1/system/subnet-pools/{pool}
+subnet_pool_utilization_view             GET      /v1/system/subnet-pools/{pool}/utilization
+subnet_pool_view                         GET      /v1/system/subnet-pools/{pool}
+
 API operations found with tag "system/update"
 OPERATION ID                             METHOD   URL PATH
 system_update_repository_list            GET      /v1/system/update/repositories
