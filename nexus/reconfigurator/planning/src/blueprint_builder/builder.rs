@@ -507,9 +507,16 @@ pub struct BlueprintBuilder<'a> {
     /// The ID that the completed blueprint will have
     new_blueprint_id: BlueprintUuid,
 
+    // `sled_editors` contains only commissioned sleds. We still carry forward
+    // any decommissioned sleds (that were either already decommissioned in
+    // `parent_blueprint`, or that we ourselves decommissioned), but they're
+    // stored separately in `decommissioned_sleds` to avoid the possibility that
+    // we try to make additional changes after decommissioning.
+    sled_editors: BTreeMap<SledUuid, SledEditor>,
+    decommissioned_sleds: BTreeMap<SledUuid, EditedSled>,
+
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
-    sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     cockroachdb_fingerprint: String,
     target_release_minimum_generation: Generation,
@@ -575,14 +582,28 @@ impl<'a> BlueprintBuilder<'a> {
             "parent_id" => parent_blueprint.id.to_string(),
         ));
 
-        // Convert our parent blueprint's sled configs into `SledEditor`s.
+        // Convert our parent blueprint's sled configs into `SledEditor` (for
+        // commissioned sleds) or `EditedSled`s (with zero edits made, for
+        // decommissioned sleds).
         let mut sled_editors = BTreeMap::new();
+        let mut decommissioned_sleds = BTreeMap::new();
         for (sled_id, sled_cfg) in &parent_blueprint.sleds {
-            let editor = SledEditor::for_existing(sled_cfg.clone())
-                .with_context(|| {
-                    format!("failed to construct SledEditor for sled {sled_id}")
-                })?;
-            sled_editors.insert(*sled_id, editor);
+            match sled_cfg.state {
+                SledState::Active => {
+                    let editor = SledEditor::for_existing(sled_cfg.clone())
+                        .with_context(|| {
+                            format!(
+                                "failed to construct SledEditor \
+                                 for sled {sled_id}"
+                            )
+                        })?;
+                    sled_editors.insert(*sled_id, editor);
+                }
+                SledState::Decommissioned => {
+                    let edited = EditedSled::new(sled_cfg.clone());
+                    decommissioned_sleds.insert(*sled_id, edited);
+                }
+            }
         }
 
         // Copy the Oximeter read policy from our parent blueprint so we can
@@ -601,6 +622,7 @@ impl<'a> BlueprintBuilder<'a> {
             oximeter_read_policy,
             new_blueprint_id: rng.next_blueprint(),
             sled_editors,
+            decommissioned_sleds,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
             cockroachdb_fingerprint: parent_blueprint
@@ -873,12 +895,17 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn build(self, source: BlueprintSource) -> Blueprint {
         let blueprint_id = self.new_blueprint_id();
 
-        // Collect the Omicron zones config for all sleds, including sleds that
-        // are no longer in service and need expungement work.
+        // Collect the Omicron zones config for all sleds, including any
+        // decommissioned sleds, which we continue to carry forward.
         let mut sleds = BTreeMap::new();
-        for (sled_id, editor) in self.sled_editors {
-            let EditedSled { config, edit_counts, scalar_edits } =
-                editor.finalize();
+        let commissioned_sleds = self
+            .sled_editors
+            .into_iter()
+            .map(|(id, editor)| (id, editor.finalize()));
+        let all_sleds = commissioned_sleds.chain(self.decommissioned_sleds);
+
+        for (sled_id, edited_sled) in all_sleds {
+            let EditedSled { config, edit_counts, scalar_edits } = edited_sled;
             sleds.insert(sled_id, config);
             if edit_counts.has_nonzero_counts() || scalar_edits.has_edits() {
                 let EditedSledScalarEdits {
@@ -892,8 +919,10 @@ impl<'a> BlueprintBuilder<'a> {
                     "disk_edits" => ?edit_counts.disks,
                     "dataset_edits" => ?edit_counts.datasets,
                     "zone_edits" => ?edit_counts.zones,
-                    "debug_force_generation_bump" => debug_force_generation_bump,
-                    "remove_mupdate_override_modified" => remove_mupdate_override,
+                    "debug_force_generation_bump" =>
+                        debug_force_generation_bump,
+                    "remove_mupdate_override_modified" =>
+                        remove_mupdate_override,
                 );
             } else {
                 debug!(
@@ -945,18 +974,30 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Set the desired state of the given sled.
+    ///
+    /// Fails if the sled is not in the current set of commissioned sleds (i.e.,
+    /// the sled doesn't exist or exists but is already decommissioned).
     pub fn set_sled_decommissioned(
         &mut self,
         sled_id: SledUuid,
     ) -> Result<(), Error> {
-        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+        let editor = self.sled_editors.remove(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
                 "tried to set sled state for unknown sled {sled_id}"
             ))
         })?;
-        editor
-            .decommission()
-            .map_err(|err| Error::SledEditError { sled_id, err })
+        match editor.decommission() {
+            Ok(edited) => {
+                self.decommissioned_sleds.insert(sled_id, edited);
+                Ok(())
+            }
+            Err((editor, err)) => {
+                // We failed to decommission the sled but already removed it
+                // from `sled_editors`; put it back before returning.
+                self.sled_editors.insert(sled_id, editor);
+                Err(Error::SledEditError { sled_id, err })
+            }
+        }
     }
 
     /// This is a short human-readable string summarizing the changes reflected

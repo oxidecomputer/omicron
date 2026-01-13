@@ -210,8 +210,8 @@ impl SledEditor {
         }
     }
 
-    pub fn decommission(&mut self) -> Result<(), SledEditError> {
-        match &mut self.0 {
+    pub fn decommission(self) -> Result<EditedSled, (Self, SledEditError)> {
+        match self.0 {
             InnerSledEditor::Active(editor) => {
                 // Decommissioning a sled is a one-way trip that has many
                 // preconditions. We can't check all of them here (e.g., we
@@ -219,29 +219,20 @@ impl SledEditor {
                 // decommissioning, which is entirely outside the realm of
                 // `SledEditor`. But we can do some basic checks: all of the
                 // disks, datasets, and zones for this sled should be expunged.
-                editor.validate_decommisionable()?;
-
-                // We can't take ownership of `editor` from the `&mut self`
-                // reference we have, and we need ownership to call
-                // `finalize()`. Steal the contents via `mem::swap()` with an
-                // empty editor. This isn't panic safe (i.e., if we panic
-                // between the `mem::swap()` and the reassignment to `self.0`
-                // below, we'll be left in the active state with an empty sled
-                // editor), but omicron in general is not panic safe and aborts
-                // on panic. Plus `finalize()` should never panic.
-                let mut stolen = ActiveSledEditor::new_empty(Ipv6Subnet::new(
-                    Ipv6Addr::LOCALHOST,
-                ));
-                mem::swap(editor, &mut stolen);
-
-                let mut finalized = stolen.finalize();
-                finalized.config.state = SledState::Decommissioned;
-                self.0 = InnerSledEditor::Decommissioned(finalized);
+                match editor.validate_decommisionable() {
+                    Ok(()) => {
+                        let mut finalized = editor.finalize();
+                        finalized.config.state = SledState::Decommissioned;
+                        Ok(finalized)
+                    }
+                    Err(err) => {
+                        Err((Self(InnerSledEditor::Active(editor)), err))
+                    }
+                }
             }
             // If we're already decommissioned, there's nothing to do.
-            InnerSledEditor::Decommissioned(_) => (),
+            InnerSledEditor::Decommissioned(edited) => Ok(edited),
         }
-        Ok(())
     }
 
     pub fn alloc_underlay_ip(&mut self) -> Result<Ipv6Addr, SledEditError> {
@@ -530,7 +521,7 @@ pub(crate) struct EditedSled {
 }
 
 impl EditedSled {
-    fn new(config: BlueprintSledConfig) -> Self {
+    pub fn new(config: BlueprintSledConfig) -> Self {
         Self {
             config,
             edit_counts: SledEditCounts::zeroes(),
