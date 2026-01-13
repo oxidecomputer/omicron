@@ -129,6 +129,23 @@ impl TransientServer {
         log: &slog::Logger,
         dns_bind_address: SocketAddr,
     ) -> Result<Self, anyhow::Error> {
+        Self::new_with_addresses(
+            log,
+            dns_bind_address,
+            "[::1]:0".parse().unwrap(),
+        )
+        .await
+    }
+
+    /// Create a new TransientServer with specific addresses for both DNS and HTTP.
+    ///
+    /// This is useful for persistent mode where services need to be found at
+    /// the same addresses after restart.
+    pub async fn new_with_addresses(
+        log: &slog::Logger,
+        dns_bind_address: SocketAddr,
+        http_bind_address: SocketAddr,
+    ) -> Result<Self, anyhow::Error> {
         let storage_dir = tempfile::tempdir()?;
 
         let dns_log = log.new(o!("kind" => "dns"));
@@ -151,7 +168,7 @@ impl TransientServer {
             store,
             &dns_server::Config { bind_address: dns_bind_address },
             &dropshot::ConfigDropshot {
-                bind_address: "[::1]:0".parse().unwrap(),
+                bind_address: http_bind_address,
                 default_request_body_max_bytes: 4 * 1024 * 1024,
                 default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
                 log_headers: vec![],

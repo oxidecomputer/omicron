@@ -283,28 +283,62 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     config: &mut NexusConfig,
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
+    cockroach_store_dir: Option<Utf8PathBuf>,
 ) -> Result<ControlPlaneTestContext<N>> {
-    let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
+    // When cockroach_store_dir is provided, we're in persistent mode
+    // and should use fixed ports for all services.
+    let use_fixed_ports = cockroach_store_dir.is_some();
+
+    let starter = if use_fixed_ports {
+        ControlPlaneStarter::<N>::new_with_fixed_ports("omicron-dev", config)
+    } else {
+        ControlPlaneStarter::<N>::new("omicron-dev", config)
+    };
 
     let log = &starter.logctx.log;
-    debug!(log, "Ensuring seed tarball exists");
 
-    // Start up a ControlPlaneTestContext, which tautologically sets up
-    // everything needed for a simulated control plane.
-    let why_invalidate =
-        omicron_test_utils::dev::seed::should_invalidate_seed();
-    let (seed_tar, status) =
-        omicron_test_utils::dev::seed::ensure_seed_tarball_exists(
-            log,
-            why_invalidate,
-        )
-        .await
-        .context("error ensuring seed tarball exists")?;
-    status.log(log, &seed_tar);
+    // If the CockroachDB store_path is set and the database has already been initialized, populate from seed; else, no-op.
+    let using_existing_db = cockroach_store_dir.as_ref().is_some_and(|dir| {
+        let store_path = std::path::Path::new(dir.as_str());
+        store_path.exists()
+            && store_path.is_dir()
+            && store_path.join("MANIFEST-000001").exists()
+    });
+
+    // Use fixed port for CockroachDB when in persistent mode
+    let listen_port = if use_fixed_ports {
+        Some(crate::starter::FIXED_PORT_COCKROACHDB)
+    } else {
+        None
+    };
+
+    let populate = if using_existing_db {
+        let store_dir = cockroach_store_dir.unwrap();
+        debug!(log, "Using existing persistent database at {}", store_dir);
+        PopulateCrdb::Empty { store_dir: Some(store_dir), listen_port }
+    } else {
+        // Need to populate from seed tarball
+        debug!(log, "Ensuring seed tarball exists");
+        let why_invalidate =
+            omicron_test_utils::dev::seed::should_invalidate_seed();
+        let (seed_tar, status) =
+            omicron_test_utils::dev::seed::ensure_seed_tarball_exists(
+                log,
+                why_invalidate,
+            )
+            .await
+            .context("error ensuring seed tarball exists")?;
+        status.log(log, &seed_tar);
+        PopulateCrdb::FromSeed {
+            input_tar: seed_tar,
+            store_dir: cockroach_store_dir,
+            listen_port,
+        }
+    };
 
     Ok(setup_with_config_impl(
         starter,
-        PopulateCrdb::FromSeed { input_tar: seed_tar },
+        populate,
         sim::SimMode::Auto,
         None,
         extra_sled_agents,

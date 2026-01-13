@@ -170,12 +170,14 @@ pub async fn test_setup_database_seed(
 
     let mut db = super::setup_database(
         log,
-        super::StorageSource::PopulateLatest {
-            output_dir: tmp_seed_dir.path().to_owned(),
+        super::StorageSource::DoNotPopulate {
+            store_dir: Some(tmp_seed_dir.path().to_owned()),
+            listen_port: None,
         },
     )
     .await
     .context("failed to setup database")?;
+    db.populate().await.context("failed to populate database")?;
     db.cleanup_gracefully().await.context("failed to cleanup database")?;
 
     // See https://github.com/cockroachdb/cockroach/issues/74231 for context on

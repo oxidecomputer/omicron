@@ -34,7 +34,11 @@ pub async fn test_setup_database(log: &Logger) -> dev::db::CockroachInstance {
     let input_tar = seed_tar();
     dev::test_setup_database(
         log,
-        dev::StorageSource::CopyFromSeed { input_tar },
+        dev::StorageSource::CopyFromSeed {
+            input_tar,
+            store_dir: None,
+            listen_port: None,
+        },
     )
     .await
 }
@@ -44,8 +48,22 @@ pub async fn test_setup_database(log: &Logger) -> dev::db::CockroachInstance {
 /// Primarily used for schema change and migration testing.
 pub async fn test_setup_database_empty(
     log: &Logger,
+    store_dir: Option<Utf8PathBuf>,
 ) -> dev::db::CockroachInstance {
-    dev::test_setup_database(log, dev::StorageSource::DoNotPopulate).await
+    test_setup_database_empty_with_port(log, store_dir, None).await
+}
+
+/// Creates a new database with no data populated, on a specific port.
+pub async fn test_setup_database_empty_with_port(
+    log: &Logger,
+    store_dir: Option<Utf8PathBuf>,
+    listen_port: Option<u16>,
+) -> dev::db::CockroachInstance {
+    dev::test_setup_database(
+        log,
+        dev::StorageSource::DoNotPopulate { store_dir, listen_port },
+    )
+    .await
 }
 
 /// Wrapper around [`dev::test_setup_database`] which uses a seed tarball
@@ -53,10 +71,23 @@ pub async fn test_setup_database_empty(
 pub async fn test_setup_database_from_seed(
     log: &Logger,
     input_tar: Utf8PathBuf,
+    store_dir: Option<Utf8PathBuf>,
+) -> dev::db::CockroachInstance {
+    test_setup_database_from_seed_with_port(log, input_tar, store_dir, None)
+        .await
+}
+
+/// Wrapper around [`dev::test_setup_database`] which uses a seed tarball
+/// provided as an argument, on a specific port.
+pub async fn test_setup_database_from_seed_with_port(
+    log: &Logger,
+    input_tar: Utf8PathBuf,
+    store_dir: Option<Utf8PathBuf>,
+    listen_port: Option<u16>,
 ) -> dev::db::CockroachInstance {
     dev::test_setup_database(
         log,
-        dev::StorageSource::CopyFromSeed { input_tar },
+        dev::StorageSource::CopyFromSeed { input_tar, store_dir, listen_port },
     )
     .await
 }

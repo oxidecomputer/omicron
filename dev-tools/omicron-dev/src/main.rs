@@ -57,6 +57,10 @@ struct RunAllArgs {
     /// Override the nexus configuration file.
     #[clap(long, default_value = DEFAULT_NEXUS_CONFIG)]
     nexus_config: Utf8PathBuf,
+    /// CockroachDB storage directory. If provided, data
+    /// will be preserved across runs instead of using a temporary directory.
+    #[clap(long)]
+    cockroach_store_dir: Option<Utf8PathBuf>,
 }
 
 impl RunAllArgs {
@@ -90,7 +94,12 @@ impl RunAllArgs {
         println!("omicron-dev: setting up all services ... ");
         let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
             omicron_nexus::Server,
-        >(&mut config, 0, self.gateway_config.clone())
+        >(
+            &mut config,
+            0,
+            self.gateway_config.clone(),
+            self.cockroach_store_dir.clone(),
+        )
         .await
         .context("error setting up services")?;
 
@@ -191,10 +200,18 @@ impl RunAllArgs {
         // Wait for a signal.
         let caught_signal = signal_stream.next().await;
         assert_eq!(caught_signal.unwrap(), SIGINT);
-        eprintln!(
-            "omicron-dev: caught signal, shutting down and removing \
-            temporary directory"
-        );
+        if let Some(ref store_dir) = self.cockroach_store_dir {
+            eprintln!(
+                "omicron-dev: caught signal, shutting down \
+                (database preserved at {})",
+                store_dir
+            );
+        } else {
+            eprintln!(
+                "omicron-dev: caught signal, shutting down and removing \
+                temporary directory"
+            );
+        }
 
         cptestctx.teardown().await;
         Ok(())

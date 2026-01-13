@@ -89,7 +89,7 @@ impl TestDatabaseBuilder {
     async fn build(self, log: &Logger) -> TestDatabase {
         match (self.populate, self.interface) {
             (Populate::Nothing, interface) => {
-                let db = crdb::test_setup_database_empty(log).await;
+                let db = crdb::test_setup_database_empty(log, None).await;
                 match interface {
                     Interface::Nothing => {
                         TestDatabase { db, kind: TestKind::NoPool }

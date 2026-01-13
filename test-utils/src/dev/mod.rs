@@ -49,13 +49,20 @@ pub fn test_setup_log(test_name: &str) -> LogContext {
 
 /// Describes how to populate the database under test.
 pub enum StorageSource {
-    /// Do not populate anything. This is primarily used for migration testing.
-    DoNotPopulate,
-    /// Populate the latest version of the database.
-    PopulateLatest { output_dir: Utf8PathBuf },
+    /// Do not populate anything.
+    DoNotPopulate {
+        store_dir: Option<Utf8PathBuf>,
+        /// Optional fixed listen port. If None, a random port is used.
+        listen_port: Option<u16>,
+    },
     /// Copy the database from a seed tarball, which has previously
     /// been created with `PopulateLatest`.
-    CopyFromSeed { input_tar: Utf8PathBuf },
+    CopyFromSeed {
+        input_tar: Utf8PathBuf,
+        store_dir: Option<Utf8PathBuf>,
+        /// Optional fixed listen port. If None, a random port is used.
+        listen_port: Option<u16>,
+    },
 }
 
 /// Set up a [`db::CockroachInstance`] for running tests.
@@ -74,14 +81,26 @@ async fn setup_database(
     storage_source: StorageSource,
 ) -> Result<db::CockroachInstance> {
     let builder = db::CockroachStarterBuilder::new();
+
+    // Apply store_dir if provided
     let builder = match &storage_source {
-        StorageSource::DoNotPopulate | StorageSource::CopyFromSeed { .. } => {
-            builder
-        }
-        StorageSource::PopulateLatest { output_dir } => {
-            builder.store_dir(output_dir)
+        StorageSource::DoNotPopulate { store_dir: None, .. }
+        | StorageSource::CopyFromSeed { store_dir: None, .. } => builder,
+        StorageSource::DoNotPopulate { store_dir: Some(dir), .. }
+        | StorageSource::CopyFromSeed { store_dir: Some(dir), .. } => {
+            builder.store_dir(dir)
         }
     };
+
+    // Apply listen_port if provided
+    let builder = match &storage_source {
+        StorageSource::DoNotPopulate { listen_port: Some(port), .. }
+        | StorageSource::CopyFromSeed { listen_port: Some(port), .. } => {
+            builder.listen_port(*port)
+        }
+        _ => builder,
+    };
+
     let starter = builder.build().context("error building CockroachStarter")?;
     info!(
         &log,
@@ -92,9 +111,8 @@ async fn setup_database(
     // If we're going to copy the storage directory from the seed,
     // it is critical we do so before starting the DB.
     match &storage_source {
-        StorageSource::DoNotPopulate | StorageSource::PopulateLatest { .. } => {
-        }
-        StorageSource::CopyFromSeed { input_tar } => {
+        StorageSource::DoNotPopulate { .. } => {}
+        StorageSource::CopyFromSeed { input_tar, .. } => {
             info!(
                 &log,
                 "cockroach: copying from seed tarball ({}) to storage directory ({})",
@@ -134,15 +152,12 @@ async fn setup_database(
 
     database.disable_synchronization().await.expect("Failed to disable fsync");
 
-    // If we populate the storage directory by importing the '.sql'
-    // file, we must do so after the DB has started.
+    // DoNotPopulate means don't run dbinit.sql (either empty DB or existing).
+    // CopyFromSeed means we copied from a pre-populated tarball, so no need
+    // to run dbinit.sql.
     match &storage_source {
-        StorageSource::DoNotPopulate | StorageSource::CopyFromSeed { .. } => {}
-        StorageSource::PopulateLatest { .. } => {
-            info!(&log, "cockroach: populating");
-            database.populate().await.expect("failed to populate database");
-            info!(&log, "cockroach: populated");
-        }
+        StorageSource::DoNotPopulate { .. }
+        | StorageSource::CopyFromSeed { .. } => {}
     }
 
     Ok(database)

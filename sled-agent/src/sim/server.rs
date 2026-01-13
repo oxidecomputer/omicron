@@ -150,6 +150,43 @@ impl Server {
             let nexus_client = nexus_client.clone();
             let notify_nexus = || async {
                 debug!(log, "contacting server nexus");
+
+                // First, try to GET existing sled info to learn current
+                // generation. This allows the simulated sled agent to
+                // reconnect after a restart with a persistent database.
+                let generation = match nexus_client
+                    .sled_agent_get(&config.id)
+                    .await
+                {
+                    Ok(info) => {
+                        let next_gen = info.into_inner().generation.next();
+                        debug!(
+                            log,
+                            "found existing sled record, using next generation";
+                            "generation" => ?next_gen
+                        );
+                        next_gen
+                    }
+                    Err(e)
+                        if e.status()
+                            == Some(http::StatusCode::NOT_FOUND) =>
+                    {
+                        debug!(
+                            log,
+                            "no existing sled record, using initial generation"
+                        );
+                        Generation::new()
+                    }
+                    Err(e) => {
+                        debug!(
+                            log,
+                            "failed to get sled info, will retry";
+                            "error" => ?e
+                        );
+                        return Err(BackoffError::transient(e));
+                    }
+                };
+
                 nexus_client
                     .sled_agent_put(
                         &config.id,
@@ -183,7 +220,7 @@ impl Server {
                             )
                             .unwrap(),
                             cpu_family: config.hardware.cpu_family.convert(),
-                            generation: Generation::new(),
+                            generation,
                             decommissioned: false,
                         },
                     )

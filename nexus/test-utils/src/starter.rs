@@ -109,6 +109,17 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use uuid::Uuid;
 
+/// Fixed ports used for persistent mode to ensure services can be found after restart.
+/// These ports are in the 32000+ range to avoid conflicts with common services
+/// (e.g., 5353 is used by mDNS, 8123/9000 may be used by other ClickHouse instances).
+pub const FIXED_PORT_COCKROACHDB: u16 = 32221;
+pub const FIXED_PORT_CLICKHOUSE_HTTP: u16 = 32123;
+pub const FIXED_PORT_CLICKHOUSE_NATIVE: u16 = 32100;
+pub const FIXED_PORT_INTERNAL_DNS: u16 = 32353;
+pub const FIXED_PORT_INTERNAL_DNS_HTTP: u16 = 32354;
+pub const FIXED_PORT_EXTERNAL_DNS: u16 = 32355;
+pub const FIXED_PORT_EXTERNAL_DNS_HTTP: u16 = 32356;
+
 /// Starts the control plane for tests and tools
 ///
 /// This helper manges the configuration and startup of all the control plane
@@ -126,6 +137,11 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
 
     pub start_time: chrono::DateTime<chrono::Utc>,
     pub logctx: LogContext,
+
+    /// When true, use fixed ports for services instead of random ports.
+    /// This is required for persistent mode so services can be found after
+    /// restart.
+    use_fixed_ports: bool,
 
     pub external_client: Option<ClientTestContext>,
     pub techport_client: Option<ClientTestContext>,
@@ -173,6 +189,25 @@ type StepInitFn<'a, N> = Box<
 
 impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub fn new(test_name: &'a str, config: &'a mut NexusConfig) -> Self {
+        Self::new_impl(test_name, config, false)
+    }
+
+    /// Create a new ControlPlaneStarter that uses fixed ports for all services.
+    ///
+    /// This is useful for persistent mode where services need to be found at
+    /// the same addresses after restart.
+    pub fn new_with_fixed_ports(
+        test_name: &'a str,
+        config: &'a mut NexusConfig,
+    ) -> Self {
+        Self::new_impl(test_name, config, true)
+    }
+
+    fn new_impl(
+        test_name: &'a str,
+        config: &'a mut NexusConfig,
+        use_fixed_ports: bool,
+    ) -> Self {
         let start_time = chrono::Utc::now();
         let logctx = LogContext::new(test_name, &config.pkg.log);
 
@@ -186,6 +221,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             rack_init_builder: RackInitRequestBuilder::new(),
             start_time,
             logctx,
+            use_fixed_ports,
             external_client: None,
             techport_client: None,
             internal_client: None,
@@ -244,10 +280,15 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     }
 
     pub async fn start_crdb(&mut self, populate: bool) {
+        let listen_port = if self.use_fixed_ports {
+            Some(FIXED_PORT_COCKROACHDB)
+        } else {
+            None
+        };
         let populate = if populate {
             PopulateCrdb::FromEnvironmentSeed
         } else {
-            PopulateCrdb::Empty
+            PopulateCrdb::Empty { store_dir: None, listen_port }
         };
         self.start_crdb_impl(populate).await;
     }
@@ -264,10 +305,18 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 crdb::test_setup_database(log).await
             }
             #[cfg(feature = "omicron-dev")]
-            PopulateCrdb::FromSeed { input_tar } => {
-                crdb::test_setup_database_from_seed(log, input_tar).await
+            PopulateCrdb::FromSeed { input_tar, store_dir, listen_port } => {
+                crdb::test_setup_database_from_seed_with_port(
+                    log, input_tar, store_dir, listen_port,
+                )
+                .await
             }
-            PopulateCrdb::Empty => crdb::test_setup_database_empty(log).await,
+            PopulateCrdb::Empty { store_dir, listen_port } => {
+                crdb::test_setup_database_empty_with_port(
+                    log, store_dir, listen_port,
+                )
+                .await
+            }
         };
 
         eprintln!("DB URL: {}", database.pg_config());
@@ -335,12 +384,23 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_clickhouse(&mut self) {
         let log = &self.logctx.log;
         debug!(log, "Starting Clickhouse");
-        let clickhouse =
-            dev::clickhouse::ClickHouseDeployment::new_single_node(
+        let clickhouse = if self.use_fixed_ports {
+            let ports = dev::clickhouse::ClickHousePorts::new(
+                FIXED_PORT_CLICKHOUSE_HTTP,
+                FIXED_PORT_CLICKHOUSE_NATIVE,
+            )
+            .expect("fixed ClickHouse ports are valid");
+            dev::clickhouse::ClickHouseDeployment::new_single_node_with_ports(
                 &self.logctx,
+                ports,
             )
             .await
-            .unwrap();
+            .unwrap()
+        } else {
+            dev::clickhouse::ClickHouseDeployment::new_single_node(&self.logctx)
+                .await
+                .unwrap()
+        };
 
         let zone_id = OmicronZoneUuid::new_v4();
         let zpool_id = ZpoolUuid::new_v4();
@@ -1117,7 +1177,21 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_external_dns(&mut self) {
         let log = self.logctx.log.new(o!("component" => "external_dns_server"));
 
-        let dns = dns_server::TransientServer::new(&log).await.unwrap();
+        let dns = if self.use_fixed_ports {
+            let dns_addr: SocketAddr =
+                format!("[::1]:{}", FIXED_PORT_EXTERNAL_DNS).parse().unwrap();
+            let http_addr: SocketAddr =
+                format!("[::1]:{}", FIXED_PORT_EXTERNAL_DNS_HTTP)
+                    .parse()
+                    .unwrap();
+            dns_server::TransientServer::new_with_addresses(
+                &log, dns_addr, http_addr,
+            )
+            .await
+            .unwrap()
+        } else {
+            dns_server::TransientServer::new(&log).await.unwrap()
+        };
 
         let SocketAddr::V6(dns_address) = dns.dns_server.local_address() else {
             panic!("Unsupported IPv4 DNS address");
@@ -1199,7 +1273,21 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     /// Set up an internal DNS server on the first sled agent
     pub async fn start_internal_dns(&mut self) {
         let log = self.logctx.log.new(o!("component" => "internal_dns_server"));
-        let dns = dns_server::TransientServer::new(&log).await.unwrap();
+        let dns = if self.use_fixed_ports {
+            let dns_addr: SocketAddr =
+                format!("[::1]:{}", FIXED_PORT_INTERNAL_DNS).parse().unwrap();
+            let http_addr: SocketAddr =
+                format!("[::1]:{}", FIXED_PORT_INTERNAL_DNS_HTTP)
+                    .parse()
+                    .unwrap();
+            dns_server::TransientServer::new_with_addresses(
+                &log, dns_addr, http_addr,
+            )
+            .await
+            .unwrap()
+        } else {
+            dns_server::TransientServer::new(&log).await.unwrap()
+        };
 
         let SocketAddr::V6(dns_address) = dns.dns_server.local_address() else {
             panic!("Unsupported IPv4 DNS address");
@@ -1825,10 +1913,17 @@ pub(crate) enum PopulateCrdb {
 
     /// Populate Cockroach from the seed located at this path.
     #[cfg(feature = "omicron-dev")]
-    FromSeed { input_tar: camino::Utf8PathBuf },
+    FromSeed {
+        input_tar: camino::Utf8PathBuf,
+        store_dir: Option<camino::Utf8PathBuf>,
+        listen_port: Option<u16>,
+    },
 
     /// Do not populate Cockroach.
-    Empty,
+    Empty {
+        store_dir: Option<camino::Utf8PathBuf>,
+        listen_port: Option<u16>,
+    },
 }
 
 /// Starts a simulated sled agent
