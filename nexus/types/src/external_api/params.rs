@@ -1472,6 +1472,104 @@ pub struct IpPoolSiloUpdate {
     pub is_default: bool,
 }
 
+// Subnet Pools
+
+path_param!(SubnetPoolPath, pool, "subnet pool");
+
+/// Path parameters for subnet pool silo operations
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolSiloPath {
+    /// Name or ID of the subnet pool
+    pub pool: NameOrId,
+    /// Name or ID of the silo
+    pub silo: NameOrId,
+}
+
+/// Create a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// The IP version for this pool (IPv4 or IPv6). All subnets in the pool
+    /// must match this version.
+    pub ip_version: IpVersion,
+    /// Type of subnet pool (defaults to Unicast)
+    #[serde(default)]
+    pub pool_type: shared::IpPoolType,
+}
+
+impl SubnetPoolCreate {
+    /// Create parameters for a unicast subnet pool (the default)
+    pub fn new(
+        identity: IdentityMetadataCreateParams,
+        ip_version: IpVersion,
+    ) -> Self {
+        Self { identity, ip_version, pool_type: shared::IpPoolType::Unicast }
+    }
+
+    /// Create parameters for a multicast subnet pool
+    pub fn new_multicast(
+        identity: IdentityMetadataCreateParams,
+        ip_version: IpVersion,
+    ) -> Self {
+        Self { identity, ip_version, pool_type: shared::IpPoolType::Multicast }
+    }
+}
+
+/// Update a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+/// Add a member (subnet) to a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolMemberAdd {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// The subnet to add to the pool
+    pub subnet: IpNet,
+    /// Minimum prefix length for allocations from this subnet; a smaller prefix
+    /// means larger allocations are allowed (e.g. a /16 prefix yields larger
+    /// subnet allocations than a /24 prefix).
+    ///
+    /// Valid values: 0-32 for IPv4, 0-128 for IPv6.
+    /// Default if not specified is equal to the subnet's prefix length.
+    pub min_prefix_length: Option<u8>,
+    /// Maximum prefix length for allocations from this subnet; a larger prefix
+    /// means smaller allocations are allowed (e.g. a /24 prefix yields smaller
+    /// subnet allocations than a /16 prefix).
+    ///
+    /// Valid values: 0-32 for IPv4, 0-128 for IPv6.
+    /// Default if not specified is 32 for IPv4 and 128 for IPv6.
+    pub max_prefix_length: Option<u8>,
+}
+
+/// Remove a subnet from a pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolMemberRemove {
+    /// The subnet to remove from the pool. Must match an existing entry exactly.
+    pub subnet: IpNet,
+}
+
+/// Link a subnet pool to a silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolLinkSilo {
+    /// The silo to link
+    pub silo: NameOrId,
+    /// Whether this is the default subnet pool for the silo. When true,
+    /// external subnet allocations that don't specify a pool use this one.
+    pub is_default: bool,
+}
+
+/// Update a subnet pool's silo link
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolSiloUpdate {
+    /// Whether this is the default subnet pool for the silo
+    pub is_default: bool,
+}
+
 // Floating IPs
 
 /// Specify how to allocate a floating IP address.

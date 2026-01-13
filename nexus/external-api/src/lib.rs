@@ -74,6 +74,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026011601, EXTERNAL_SUBNET_ATTACHMENT),
     (2026011600, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
     (2026011501, AUDIT_LOG_CREDENTIAL_ID),
     (2026011500, AUDIT_LOG_AUTH_METHOD_ENUM),
@@ -293,6 +294,15 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "IP pools are collections of external IPs that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate IPs from the pool for their instances.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/system-ip-pools"
+                }
+            },
+            "system/subnet-pools" = {
+                description = "Subnet pools are collections of IP subnets \
+                    that can be assigned to silos. When a pool is linked to \
+                    a silo, users in that silo can allocate external subnets \
+                    from the pool.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-subnet-pools"
                 }
             },
             "system/networking" = {
@@ -1276,6 +1286,171 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         range_params: TypedBody<shared::IpRange>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // Subnet Pools
+
+    /// List subnet pools
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPool>>, HttpError>;
+
+    /// Create a subnet pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_create(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<params::SubnetPoolCreate>,
+    ) -> Result<HttpResponseCreated<views::SubnetPool>, HttpError>;
+
+    /// Fetch a subnet pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+    ) -> Result<HttpResponseOk<views::SubnetPool>, HttpError>;
+
+    /// Update a subnet pool
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+        updates: TypedBody<params::SubnetPoolUpdate>,
+    ) -> Result<HttpResponseOk<views::SubnetPool>, HttpError>;
+
+    /// Delete a subnet pool
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List members in a subnet pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/members",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_member_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolMember>>, HttpError>;
+
+    /// Add a member to a subnet pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/members/add",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_member_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+        subnet_params: TypedBody<params::SubnetPoolMemberAdd>,
+    ) -> Result<HttpResponseCreated<views::SubnetPoolMember>, HttpError>;
+
+    /// Remove a member from a subnet pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/members/remove",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_member_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+        subnet_params: TypedBody<params::SubnetPoolMemberRemove>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// List silos linked to a subnet pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/silos",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_silo_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>;
+
+    /// Link a subnet pool to a silo
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/silos",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_silo_link(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+        silo_link: TypedBody<params::SubnetPoolLinkSilo>,
+    ) -> Result<HttpResponseCreated<views::SubnetPoolSiloLink>, HttpError>;
+
+    /// Update a subnet pool's link to a silo
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_silo_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolSiloPath>,
+        update: TypedBody<params::SubnetPoolSiloUpdate>,
+    ) -> Result<HttpResponseOk<views::SubnetPoolSiloLink>, HttpError>;
+
+    /// Unlink a subnet pool from a silo
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_silo_unlink(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolSiloPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Fetch subnet pool utilization
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/utilization",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn subnet_pool_utilization_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+    ) -> Result<HttpResponseOk<views::SubnetPoolUtilization>, HttpError>;
 
     // Floating IP Addresses
 

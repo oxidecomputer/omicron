@@ -1605,6 +1605,321 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    // Subnet Pools
+
+    async fn subnet_pool_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPool>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let pools = nexus.subnet_pool_list(&opctx, &paginated_by).await?;
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                pools,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_create(
+        rqctx: RequestContext<ApiContext>,
+        pool_params: TypedBody<params::SubnetPoolCreate>,
+    ) -> Result<HttpResponseCreated<views::SubnetPool>, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let pool_params = pool_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let pool = nexus.subnet_pool_create(&opctx, &pool_params).await?;
+            Ok(HttpResponseCreated(pool))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SubnetPoolPath>,
+    ) -> Result<HttpResponseOk<views::SubnetPool>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let pool_selector = path_params.into_inner().pool;
+            let pool = nexus.subnet_pool_view(&opctx, &pool_selector).await?;
+            Ok(HttpResponseOk(pool))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SubnetPoolPath>,
+        updates: TypedBody<params::SubnetPoolUpdate>,
+    ) -> Result<HttpResponseOk<views::SubnetPool>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let updates = updates.into_inner();
+            let pool =
+                nexus.subnet_pool_update(&opctx, &path.pool, &updates).await?;
+            Ok(HttpResponseOk(pool))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SubnetPoolPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            nexus.subnet_pool_delete(&opctx, &path.pool).await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_member_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SubnetPoolPath>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolMember>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let path = path_params.into_inner();
+            let members = nexus
+                .subnet_pool_member_list(&opctx, &path.pool, &paginated_by)
+                .await?;
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                members,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_member_add(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SubnetPoolPath>,
+        subnet_params: TypedBody<params::SubnetPoolMemberAdd>,
+    ) -> Result<HttpResponseCreated<views::SubnetPoolMember>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let subnet_params = subnet_params.into_inner();
+            let member = nexus
+                .subnet_pool_member_add(&opctx, &path.pool, &subnet_params)
+                .await?;
+            Ok(HttpResponseCreated(member))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_member_remove(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SubnetPoolPath>,
+        subnet_params: TypedBody<params::SubnetPoolMemberRemove>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let subnet_params = subnet_params.into_inner();
+            nexus
+                .subnet_pool_member_remove(&opctx, &path.pool, &subnet_params)
+                .await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_silo_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SubnetPoolPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let path = path_params.into_inner();
+            let links = nexus
+                .subnet_pool_silo_list(&opctx, &path.pool, &pag_params)
+                .await?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                links,
+                &|_, x: &views::SubnetPoolSiloLink| x.silo_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_silo_link(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SubnetPoolPath>,
+        silo_link: TypedBody<params::SubnetPoolLinkSilo>,
+    ) -> Result<HttpResponseCreated<views::SubnetPoolSiloLink>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let silo_link = silo_link.into_inner();
+            let link = nexus
+                .subnet_pool_silo_link(&opctx, &path.pool, &silo_link)
+                .await?;
+            Ok(HttpResponseCreated(link))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_silo_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SubnetPoolSiloPath>,
+        update: TypedBody<params::SubnetPoolSiloUpdate>,
+    ) -> Result<HttpResponseOk<views::SubnetPoolSiloLink>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let update = update.into_inner();
+            let link = nexus
+                .subnet_pool_silo_update(
+                    &opctx, &path.pool, &path.silo, &update,
+                )
+                .await?;
+            Ok(HttpResponseOk(link))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_silo_unlink(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SubnetPoolSiloPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            nexus
+                .subnet_pool_silo_unlink(&opctx, &path.pool, &path.silo)
+                .await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn subnet_pool_utilization_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SubnetPoolPath>,
+    ) -> Result<HttpResponseOk<views::SubnetPoolUtilization>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let utilization =
+                nexus.subnet_pool_utilization_view(&opctx, &path.pool).await?;
+            Ok(HttpResponseOk(utilization))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Floating IP Addresses
 
     async fn floating_ip_list(
