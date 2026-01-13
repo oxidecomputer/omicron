@@ -1538,16 +1538,26 @@ impl RackInitRequestBuilder {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct SledAgentOptions {
+    pub sim_mode: sim::SimMode,
+    pub extra_sled_agents: u16,
+    pub sled_agent_health_monitor: sim::ConfigHealthMonitor,
+}
+
 pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     mut starter: ControlPlaneStarter<'_, N>,
     populate: PopulateCrdb,
-    sim_mode: sim::SimMode,
+    sled_agent_opts: SledAgentOptions,
     initial_cert: Option<Certificate>,
-    extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
     second_nexus: bool,
-    sled_agent_health_monitor: sim::ConfigHealthMonitor,
 ) -> ControlPlaneTestContext<N> {
+    let SledAgentOptions {
+        sim_mode,
+        extra_sled_agents,
+        sled_agent_health_monitor,
+    } = sled_agent_opts;
     const STEP_TIMEOUT: Duration = Duration::from_secs(600);
 
     // All setups will start with CRDB and clickhouse
@@ -1851,6 +1861,7 @@ pub(crate) enum PopulateCrdb {
 ///
 /// Note: you should probably use the `extra_sled_agents` macro parameter on
 /// `nexus_test` instead!
+#[allow(clippy::too_many_arguments)]
 pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,

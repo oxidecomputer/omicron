@@ -123,6 +123,7 @@ impl Config {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn for_testing_with_baseboard(
         id: SledUuid,
         sim_mode: SimMode,
