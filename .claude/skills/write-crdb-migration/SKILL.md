@@ -25,7 +25,7 @@ Ask the user where the schema changes are:
   - git: `git diff HEAD^ -- schema/crdb/dbinit.sql`
   - jj: `jj diff --from @-- -- schema/crdb/dbinit.sql`
 
-- **This branch** (feature branch or amend workflow): Changes span the entire branch.
+- **This branch** (feature branch workflow): Changes span the entire branch.
   - git: `git diff $(git merge-base HEAD main) -- schema/crdb/dbinit.sql`
   - jj: `jj diff --from 'fork_point(trunk() | @)' -- schema/crdb/dbinit.sql`
 
