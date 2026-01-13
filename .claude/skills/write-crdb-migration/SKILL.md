@@ -23,7 +23,7 @@ Ask the user where the schema changes are:
 
 - **This commit only** (stacked diff workflow): Changes are in the current commit only.
   - git: `git diff HEAD^ -- schema/crdb/dbinit.sql`
-  - jj: `jj diff --from @- -- schema/crdb/dbinit.sql`
+  - jj: `jj diff --from @-- -- schema/crdb/dbinit.sql`
 
 - **This branch** (feature branch or amend workflow): Changes span the entire branch.
   - git: `git diff $(git merge-base HEAD main) -- schema/crdb/dbinit.sql`
