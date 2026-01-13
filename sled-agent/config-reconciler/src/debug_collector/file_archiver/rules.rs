@@ -116,7 +116,7 @@ static VAR_ADM: &str = "var/adm";
 pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
     let rules = [
         Rule {
-            label: "process core files and kernel crash dumps",
+            label: "process core files",
             rule_scope: RuleScope::CoresDirectory,
             directory: ".".parse().unwrap(),
             regex: "^.*$".parse().unwrap(),

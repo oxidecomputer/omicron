@@ -474,8 +474,7 @@ mod test {
                     // by the rule that it matched.  We check it here against
                     // what we expect for each kind of file.
                     match &test_file.kind {
-                        TestFileKind::KernelCrashDump { .. }
-                        | TestFileKind::ProcessCoreDump { .. }
+                        TestFileKind::ProcessCoreDump { .. }
                         | TestFileKind::LogSmfRotated { .. }
                         | TestFileKind::LogSyslogRotated { .. }
                         | TestFileKind::GlobalLogSmfRotated
@@ -570,8 +569,7 @@ mod test {
             .iter()
             .filter_map(|test_file| {
                 let expected = match test_file.kind {
-                    TestFileKind::KernelCrashDump { .. }
-                    | TestFileKind::ProcessCoreDump { .. }
+                    TestFileKind::ProcessCoreDump { .. }
                     | TestFileKind::LogSmfRotated { .. }
                     | TestFileKind::LogSyslogRotated { .. }
                     | TestFileKind::GlobalLogSmfRotated

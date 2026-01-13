@@ -147,9 +147,6 @@ impl IdOrdItem for TestFile {
 #[derive(Clone, Debug, Display, EnumIter, EnumDiscriminants)]
 #[strum_discriminants(derive(EnumIter, Ord, PartialOrd))]
 pub(crate) enum TestFileKind {
-    KernelCrashDump {
-        cores_directory: String,
-    },
     ProcessCoreDump {
         cores_directory: String,
     },
@@ -182,8 +179,7 @@ impl TestFileKind {
     /// Returns information about the cores directory this file is in, if any
     pub fn cores_directory(&self) -> Option<&Utf8Path> {
         match self {
-            TestFileKind::KernelCrashDump { cores_directory }
-            | TestFileKind::ProcessCoreDump { cores_directory } => {
+            TestFileKind::ProcessCoreDump { cores_directory } => {
                 Some(Utf8Path::new(cores_directory))
             }
             TestFileKind::LogSmfRotated { .. }
@@ -201,9 +197,9 @@ impl TestFileKind {
     /// Returns information about the zone this file is in, if any
     pub fn zone_info(&self) -> Option<(&str, &Utf8Path)> {
         match self {
-            TestFileKind::KernelCrashDump { .. }
-            | TestFileKind::ProcessCoreDump { .. }
-            | TestFileKind::Ignored => None,
+            TestFileKind::ProcessCoreDump { .. } | TestFileKind::Ignored => {
+                None
+            }
             TestFileKind::LogSmfRotated { zone_name, zone_root }
             | TestFileKind::LogSmfLive { zone_name, zone_root }
             | TestFileKind::LogSyslogRotated { zone_name, zone_root }
@@ -238,8 +234,6 @@ impl TryFrom<&Utf8Path> for TestFileKind {
             let cores_directory = cores_directory.to_owned();
             if s.ends_with("bounds") {
                 Ok(TestFileKind::Ignored)
-            } else if s.contains("/vmdump.") {
-                Ok(TestFileKind::KernelCrashDump { cores_directory })
             } else if s.contains("/core.") {
                 Ok(TestFileKind::ProcessCoreDump { cores_directory })
             } else {

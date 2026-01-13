@@ -33,11 +33,6 @@
 # The output here has been constructed from similar invocations on several
 # systems in order to assemble a representative set.
 
-# Kernel crash dumps and related files in the "crash" dataset
-/pool/int/35dcb885-18cf-4842-a17f-fb63e76a5f2c/crash/vmdump.0
-/pool/int/35dcb885-18cf-4842-a17f-fb63e76a5f2c/crash/bounds
-/pool/int/35dcb885-18cf-4842-a17f-fb63e76a5f2c/crash/vmdump.1
-
 # User process core files in the "crash" dataset
 /pool/int/5a058adc-8208-4bff-b4f3-44e2651435b0/crash/core.oxz_switch.cat.27751.1765577436
 /pool/int/7c377f39-95bf-4074-8dda-7a7a102b9d2c/crash/core.oxz_propolis-server_081c9d2b-2d89-4830-b3c5-ff4439013794.propolis-server.5047.1765579111
