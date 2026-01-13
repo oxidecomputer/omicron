@@ -858,6 +858,14 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// (Moving them to "ready for cleanup" is a _prerequisite_ for pruning.)
     PlannerCheckReadyForCleanup,
 
+    /// When constructing a [`PlanningInput`], its builder has a guard that any
+    /// "expunged and unreferenced" zone ID actually is expunged.
+    ///
+    /// This guard is implemented by asking the parent blueprint for its list of
+    /// expunged zones. The planner does not need to account for this when
+    /// pruning zones.
+    PlanningInputExpungedZoneGuard,
+
     // --------------------------------------------------------------------
     // Catch-all variants for non-production callers. The planner does not need
     // to account for these when pruning.
