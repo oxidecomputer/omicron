@@ -369,8 +369,6 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     gateway_config_file: Utf8PathBuf,
     sled_agent_health_monitor: sim::ConfigHealthMonitor,
 ) -> Result<ControlPlaneTestContext<N>> {
-    use crate::starter::SledAgentOptions;
-
     let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
 
     let log = &starter.logctx.log;
