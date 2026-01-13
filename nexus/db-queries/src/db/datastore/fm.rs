@@ -1694,6 +1694,28 @@ mod tests {
             .await
             .expect("failed to insert sitrep");
 
+        // Note that we must also insert a second sitrep which is a child of the
+        // sitrep we intend to delete, as the sitrep insert operation makes a
+        // sitrep the current sitrep, and a sitrep cannot be deleted if it is
+        // current.
+        datastore
+            .fm_sitrep_insert(
+                opctx,
+                fm::Sitrep {
+                    metadata: fm::SitrepMetadata {
+                        parent_sitrep_id: Some(sitrep_id),
+                        id: SitrepUuid::new_v4(),
+                        time_created: Utc::now(),
+                        creator_id: OmicronZoneUuid::new_v4(),
+                        comment: "my cool sitrep".to_string(),
+                        inv_collection_id: CollectionUuid::new_v4(),
+                    },
+                    cases: Default::default(),
+                },
+            )
+            .await
+            .expect("failed to insert second sitrep");
+
         // Verify the sitrep, cases, and ereport assignments exist
         let conn = db
             .datastore()
