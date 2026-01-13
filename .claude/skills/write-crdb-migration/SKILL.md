@@ -26,16 +26,20 @@ Create a new folder under `schema/crdb/` using the provided name or a short desc
 
 Use existing folder names in `schema/crdb/` as examples for naming conventions.
 
+NOTE: The numbered folders, e.g. 1.0.0, are for legacy support only. No additional numbered directories should be added.
+
 ### Step 3: Write migration files
 
 Based on the diff from step 1, write migration files in order:
 
-- Use `up01.sql`, `up02.sql` etc. (zero-padded) if you have more than 10 files
-- Use `up1.sql`, `up2.sql` etc. if you have 10 or fewer files
-- **One statement per file!**
-- For `ALTER TABLE` with multiple columns, you can add them all in one statement
-- When adding `NOT NULL` columns to existing tables, add temporary defaults, then remove them in later migration files
-- Use `IF NOT EXISTS` for idempotency where supported
+- Use `up01.sql`, `up02.sql` etc. (zero-padded) if you have more than 10 files.
+- Use `up1.sql`, `up2.sql` etc. if you have 10 or fewer files.
+- For Data Definition Language (DDL) statements, **one statement per file!**
+- For Data Modifying Language (DML) statements, multiple statements are allowed per file.
+- For `ALTER TABLE` with multiple columns, you can add them all in one statement.
+- When adding `NOT NULL` columns to existing tables, add temporary defaults, then remove them in later migration files.
+- Use `IF NOT EXISTS` for idempotency where supported.
+- Individual `up.sql` files are executed within a transaction (this always happens), and should be idempotent (this is an expectation that the migration author must uphold, with, e.g. `IF NOT EXISTS`).
 
 ### Step 4: Update dbinit.sql version
 

@@ -22,13 +22,13 @@ use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::LastAllocatedSubnetIpOffset;
@@ -48,6 +48,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use scalar::ScalarEditor;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::ZoneKind;
+use std::iter;
 use std::mem;
 use std::net::Ipv6Addr;
 use underlay_ip_allocator::SledUnderlayIpAllocator;
@@ -291,24 +292,63 @@ impl SledEditor {
         }
     }
 
-    pub fn zones<F>(
+    pub fn in_service_zones(
         &self,
-        mut filter: F,
-    ) -> impl Iterator<Item = &BlueprintZoneConfig>
-    where
-        F: FnMut(BlueprintZoneDisposition) -> bool,
-    {
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
         match &self.0 {
             InnerSledEditor::Active(editor) => {
-                Either::Left(editor.zones(filter))
+                Either::Left(editor.in_service_zones())
+            }
+            InnerSledEditor::Decommissioned(_) => {
+                // A decommissioned sled cannot have any in-service zones!
+                Either::Right(iter::empty())
+            }
+        }
+    }
+
+    pub fn could_be_running_zones(
+        &self,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                Either::Left(editor.could_be_running_zones())
+            }
+            InnerSledEditor::Decommissioned(_) => {
+                // A decommissioned sled cannot have any running zones!
+                Either::Right(iter::empty())
+            }
+        }
+    }
+
+    pub fn expunged_zones(
+        &self,
+        reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                Either::Left(editor.expunged_zones(reason))
             }
             InnerSledEditor::Decommissioned(edited) => Either::Right(
                 edited
                     .config
                     .zones
                     .iter()
-                    .filter(move |zone| filter(zone.disposition)),
+                    .filter(move |zone| zone.disposition.is_expunged()),
             ),
+        }
+    }
+
+    pub fn all_in_service_and_expunged_zones(
+        &self,
+        reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                Either::Left(editor.all_in_service_and_expunged_zones(reason))
+            }
+            InnerSledEditor::Decommissioned(edited) => {
+                Either::Right(edited.config.zones.iter())
+            }
         }
     }
 
@@ -592,9 +632,7 @@ impl ActiveSledEditor {
     fn validate_decommisionable(&self) -> Result<(), SledEditError> {
         // A sled is only decommissionable if all its zones have been expunged
         // (i.e., there are no zones left with an in-service disposition).
-        if let Some(zone) =
-            self.zones(BlueprintZoneDisposition::is_in_service).next()
-        {
+        if let Some(zone) = self.in_service_zones().next() {
             return Err(SledEditError::NonDecommissionableZoneNotExpunged {
                 zone_id: zone.id,
                 kind: zone.zone_type.kind(),
@@ -636,14 +674,30 @@ impl ActiveSledEditor {
         self.datasets.datasets(filter)
     }
 
-    pub fn zones<F>(
+    pub fn in_service_zones(
         &self,
-        filter: F,
-    ) -> impl Iterator<Item = &BlueprintZoneConfig>
-    where
-        F: FnMut(BlueprintZoneDisposition) -> bool,
-    {
-        self.zones.zones(filter)
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        self.zones.in_service_zones()
+    }
+
+    pub fn could_be_running_zones(
+        &self,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        self.zones.could_be_running_zones()
+    }
+
+    pub fn expunged_zones(
+        &self,
+        reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        self.zones.expunged_zones(reason)
+    }
+
+    pub fn all_in_service_and_expunged_zones(
+        &self,
+        reason: BlueprintExpungedZoneAccessReason,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        self.zones.all_in_service_and_expunged_zones(reason)
     }
 
     pub fn host_phase_2(&self) -> BlueprintHostPhase2DesiredSlots {
@@ -808,7 +862,7 @@ impl ActiveSledEditor {
         &mut self,
         rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
-        for zone in self.zones.zones(BlueprintZoneDisposition::is_in_service) {
+        for zone in self.zones.in_service_zones() {
             ZoneDatasetConfigs::new(&self.disks, zone)?
                 .ensure_in_service(&mut self.datasets, rng);
         }
@@ -884,7 +938,7 @@ impl ActiveSledEditor {
                 // Set all zone image sources to InstallDataset. This is an
                 // acknowledgement of the current state of the world.
                 let zone_ids: Vec<_> = self
-                    .zones(BlueprintZoneDisposition::is_in_service)
+                    .in_service_zones()
                     .map(|zone| (zone.id, zone.kind()))
                     .collect();
 
