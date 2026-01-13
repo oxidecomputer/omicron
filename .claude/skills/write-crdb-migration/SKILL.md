@@ -13,12 +13,23 @@ Follow these steps in order. Do not skip ahead.
 
 ### Step 1: Get the diff
 
-Check if `.jj` exists in the repository.
+Check if `.jj` exists in the repository to determine whether to use jj or git commands.
 
-- If it does, run `jj diff --from @-- --git schema/crdb/dbinit.sql`.
-- Otherwise, run `git diff HEAD^ -- schema/crdb/dbinit.sql`.
+Ask the user where the schema changes are:
 
-If that doesn't show anything, stop and ask the user which commit to diff from for the changes they may want to migrate.
+- **Uncommitted changes**: Changes not yet committed.
+  - git: `git diff -- schema/crdb/dbinit.sql` (unstaged) or `git diff --cached -- schema/crdb/dbinit.sql` (staged)
+  - jj: `jj diff -- schema/crdb/dbinit.sql`
+
+- **This commit only** (stacked diff workflow): Changes are in the current commit only.
+  - git: `git diff HEAD^ -- schema/crdb/dbinit.sql`
+  - jj: `jj diff --from @- -- schema/crdb/dbinit.sql`
+
+- **This branch** (feature branch or amend workflow): Changes span the entire branch.
+  - git: `git diff $(git merge-base HEAD main) -- schema/crdb/dbinit.sql`
+  - jj: `jj diff --from 'fork_point(trunk() | @)' -- schema/crdb/dbinit.sql`
+
+If the diff doesn't show anything, ask the user which ref to diff from.
 
 ### Step 2: Create migration folder
 
