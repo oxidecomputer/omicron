@@ -717,7 +717,7 @@ impl<'a> BlueprintBuilder<'a> {
         let any_sled_subnet = self
             .sled_editors
             .values()
-            .filter_map(|editor| editor.subnet())
+            .map(|editor| editor.subnet())
             .next()
             .ok_or(Error::RackSubnetUnknownNoSleds)?;
         let rack_subnet = ReservedRackSubnet::from_subnet(any_sled_subnet);
@@ -753,12 +753,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn current_commissioned_sleds(
         &self,
     ) -> impl Iterator<Item = SledUuid> + '_ {
-        self.sled_editors.iter().filter_map(|(sled_id, editor)| {
-            match editor.state() {
-                SledState::Active => Some(*sled_id),
-                SledState::Decommissioned => None,
-            }
-        })
+        self.sled_editors.keys().copied()
     }
 
     /// Iterate over the in-service [`BlueprintZoneConfig`] instances on a
@@ -965,12 +960,15 @@ impl<'a> BlueprintBuilder<'a> {
         &self,
         sled_id: SledUuid,
     ) -> Result<SledState, Error> {
-        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
-            Error::Planner(anyhow!(
+        if self.sled_editors.contains_key(&sled_id) {
+            Ok(SledState::Active)
+        } else if self.decommissioned_sleds.contains_key(&sled_id) {
+            Ok(SledState::Decommissioned)
+        } else {
+            Err(Error::Planner(anyhow!(
                 "tried to get sled state for unknown sled {sled_id}"
-            ))
-        })?;
-        Ok(editor.state())
+            )))
+        }
     }
 
     /// Set the desired state of the given sled.
@@ -2115,9 +2113,8 @@ impl<'a> BlueprintBuilder<'a> {
                 "tried to change image of zone on unknown sled {sled_id}"
             ))
         })?;
-        editor
-            .set_host_phase_2(host_phase_2)
-            .map_err(|err| Error::SledEditError { sled_id, err })
+        editor.set_host_phase_2(host_phase_2);
+        Ok(())
     }
 
     pub fn sled_set_host_phase_2_slot(
@@ -2131,9 +2128,8 @@ impl<'a> BlueprintBuilder<'a> {
                 "tried to change image of zone on unknown sled {sled_id}"
             ))
         })?;
-        editor
-            .set_host_phase_2_slot(slot, host_phase_2)
-            .map_err(|err| Error::SledEditError { sled_id, err })
+        editor.set_host_phase_2_slot(slot, host_phase_2);
+        Ok(())
     }
 
     /// Set the `remove_mupdate_override` field of the given sled.
@@ -2147,9 +2143,8 @@ impl<'a> BlueprintBuilder<'a> {
                 "tried to set sled state for unknown sled {sled_id}"
             ))
         })?;
-        editor
-            .set_remove_mupdate_override(remove_mupdate_override)
-            .map_err(|err| Error::SledEditError { sled_id, err })
+        editor.set_remove_mupdate_override(remove_mupdate_override);
+        Ok(())
     }
 
     fn sled_add_zone(
@@ -2177,6 +2172,7 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
         editor
             .alloc_underlay_ip()
+            .ok_or(SledEditError::OutOfUnderlayIps)
             .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
@@ -2320,9 +2316,8 @@ impl<'a> BlueprintBuilder<'a> {
                 "tried to force generation bump for unknown sled {sled_id}"
             ))
         })?;
-        editor
-            .debug_force_generation_bump()
-            .map_err(|err| Error::SledEditError { sled_id, err })
+        editor.debug_force_generation_bump();
+        Ok(())
     }
 }
 
