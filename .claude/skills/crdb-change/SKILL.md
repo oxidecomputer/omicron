@@ -1,21 +1,34 @@
 ---
-name: write-crdb-migration
-description: Generate CockroachDB migrations for schema changes. Use when creating migrations, updating the database schema, or when the user mentions migrations, schema changes, or dbinit.sql.
+name: crdb-change
+description: Generate CockroachDB SQL and migrations for schema changes. Use when creating migrations, updating the database schema, or when the user mentions migrations, schema changes, or dbinit.sql.
 ---
 
-# Database migration
+# CockroachDB database changes
 
-Generate a database migration for this repository.
+Generate database changes for this repository. This includes changes to:
+
+- `schema/crdb/dbinit.sql`
+- Migrations for changes
 
 ## Instructions
 
 Follow these steps in order. Do not skip ahead.
 
-### Step 1: Get the diff
+### Step 1: Ascertain the scope of the request
+
+If not already provided, prompt the user whether they'd like to:
+
+- **Perform both a dbinit.sql change and a migration**: If this is the case, then:
+  1. Ask the user to describe the changes they'd like to perform to `dbinit.sql`.
+  2. Make those changes, asking the user followup questions as necessary.
+  3. Go directly to step 3, with the scope of the migration being to cover those changes.
+- **Write migrations for pre-existing changes**: In this case, changes need to be fetched from version control. Go to step 2.
+
+### Step 2: Get the diff
 
 Check if `.jj` exists in the repository to determine whether to use jj or git commands.
 
-Ask the user where the schema changes are:
+Prompt the user to ask where the schema changes are:
 
 - **Uncommitted changes**: Changes not yet committed.
   - git: `git diff -- schema/crdb/dbinit.sql` (unstaged) or `git diff --cached -- schema/crdb/dbinit.sql` (staged)
@@ -31,7 +44,7 @@ Ask the user where the schema changes are:
 
 If the diff doesn't show anything, ask the user which ref to diff from.
 
-### Step 2: Create migration folder
+### Step 3: Create migration folder
 
 Create a new folder under `schema/crdb/` using the provided name or a short descriptive name derived from the schema changes.
 
@@ -39,7 +52,7 @@ Use existing folder names in `schema/crdb/` as examples for naming conventions.
 
 NOTE: The numbered folders, e.g. 1.0.0, are for legacy support only. No additional numbered directories should be added.
 
-### Step 3: Write migration files
+### Step 4: Write migration files
 
 Based on the diff from step 1, write migration files in order:
 
@@ -52,19 +65,19 @@ Based on the diff from step 1, write migration files in order:
 - Use `IF NOT EXISTS` for idempotency where supported.
 - Individual `up.sql` files are executed within a transaction (this always happens), and should be idempotent (this is an expectation that the migration author must uphold, with, e.g. `IF NOT EXISTS`).
 
-### Step 4: Update dbinit.sql version
+### Step 5: Update dbinit.sql version
 
 Bump the version number at the end of `schema/crdb/dbinit.sql`.
 
-### Step 5: Update SCHEMA_VERSION
+### Step 6: Update SCHEMA_VERSION
 
 In `nexus/db-model/src/schema_versions.rs`, bump `SCHEMA_VERSION`.
 
-### Step 6: Add to KNOWN_VERSIONS
+### Step 7: Add to KNOWN_VERSIONS
 
 In `nexus/db-model/src/schema_versions.rs`, add the new version to the `KNOWN_VERSIONS` list.
 
-### Step 7: Test the migration
+### Step 8: Test the migration
 
 Run `cargo nextest run -p omicron-nexus schema` to verify that the migration is correct.
 
