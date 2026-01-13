@@ -26,10 +26,13 @@
 //! | MULTICAST_IP | Allocated multicast IP               |
 //! | RANGE        | ASM or SSM based on IP range         |
 //! | UNDERLAY_IP  | Underlay group IP (blank if none)    |
-//! | SOURCES      | Union of member source IPs, or "-"   |
+//! | SOURCES      | Source allowlist, or "-" (any)       |
 //! | MEMBERS      | Comma-separated "instance@sled" list |
 //! | VNI          | Virtual network ID                   |
 //! | CREATED      | Creation timestamp                   |
+//!
+//! Note: SOURCES "-" also appears when a group has no members; use MEMBERS
+//! column or `info` command to distinguish from any-source members.
 //!
 //! Filters: `--state`, `--pool`
 //!
@@ -42,7 +45,7 @@
 //! | PARENT_ID    | Instance UUID                            |
 //! | STATE        | Member state ("Joining"/"Joined"/"Left") |
 //! | MULTICAST_IP | Group multicast IP                       |
-//! | SOURCES      | SSM source IPs, or "-" for ASM           |
+//! | SOURCES      | Source allowlist, or "-" (any)           |
 //! | SLED_ID      | Assigned sled UUID (blank if none)       |
 //! | CREATED      | Creation timestamp                       |
 //!
@@ -54,7 +57,7 @@
 //! Detailed view of a single group with sections:
 //!
 //! **MULTICAST GROUP**
-//! - id, name, state, multicast_ip, vni, source_ips
+//! - id, name, state, multicast_ip, vni, source_ips (allowlist or "-")
 //! - ip_pool (name + ID), underlay_group, tag, created
 //!
 //! **UNDERLAY GROUP** (if present)
@@ -68,7 +71,7 @@
 //! | INSTANCE     | Instance name                  |
 //! | STATE        | Member state                   |
 //! | MULTICAST_IP | Group multicast IP             |
-//! | SOURCES      | SSM source IPs, or "-" for ASM |
+//! | SOURCES      | Allowlist, or "-" (any)        |
 //! | SLED         | Sled serial number, or "-"     |
 //! | CREATED      | Creation timestamp             |
 //!
@@ -79,8 +82,7 @@ use std::collections::{BTreeSet, HashMap};
 use anyhow::Context;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::{DateTime, Utc};
-use clap::builder::{PossibleValue, PossibleValuesParser, TypedValueParser};
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use diesel::prelude::*;
 use tabled::Tabled;
 use uuid::Uuid;
@@ -90,11 +92,48 @@ use nexus_db_model::{
     MulticastGroupMember, MulticastGroupMemberState, MulticastGroupState,
     UnderlayMulticastGroup,
 };
-use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use omicron_common::address::is_ssm_address;
-use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid, SledUuid};
+use omicron_uuid_kinds::{GenericUuid, SledUuid};
+
+/// CLI wrapper for MulticastGroupState to support clap ValueEnum
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum CliGroupState {
+    Creating,
+    Active,
+    Deleting,
+    Deleted,
+}
+
+impl From<CliGroupState> for MulticastGroupState {
+    fn from(cli: CliGroupState) -> Self {
+        match cli {
+            CliGroupState::Creating => MulticastGroupState::Creating,
+            CliGroupState::Active => MulticastGroupState::Active,
+            CliGroupState::Deleting => MulticastGroupState::Deleting,
+            CliGroupState::Deleted => MulticastGroupState::Deleted,
+        }
+    }
+}
+
+/// CLI wrapper for MulticastGroupMemberState to support clap ValueEnum
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum CliMemberState {
+    Joining,
+    Joined,
+    Left,
+}
+
+impl From<CliMemberState> for MulticastGroupMemberState {
+    fn from(cli: CliMemberState) -> Self {
+        match cli {
+            CliMemberState::Joining => MulticastGroupMemberState::Joining,
+            CliMemberState::Joined => MulticastGroupMemberState::Joined,
+            CliMemberState::Left => MulticastGroupMemberState::Left,
+        }
+    }
+}
 
 use crate::db::{DbFetchOptions, check_limit};
 use crate::helpers::{datetime_rfc3339_concise, display_option_blank};
@@ -140,16 +179,8 @@ pub(super) enum MulticastCommands {
 #[derive(Debug, Args, Clone)]
 pub(super) struct MulticastGroupsArgs {
     /// Filter by state
-    #[arg(
-        long,
-        ignore_case = true,
-        value_parser = PossibleValuesParser::new(
-            MulticastGroupState::ALL_STATES
-                .iter()
-                .map(|v| PossibleValue::new(v.label()))
-        ).try_map(|s| s.parse::<MulticastGroupState>()),
-    )]
-    state: Option<MulticastGroupState>,
+    #[arg(long, ignore_case = true, value_enum)]
+    state: Option<CliGroupState>,
     /// Filter by pool name
     #[arg(long)]
     pool: Option<String>,
@@ -167,16 +198,8 @@ pub(super) struct MulticastMembersArgs {
     #[arg(long)]
     group_name: Option<String>,
     /// Filter by state
-    #[arg(
-        long,
-        ignore_case = true,
-        value_parser = PossibleValuesParser::new(
-            MulticastGroupMemberState::ALL_STATES
-                .iter()
-                .map(|v| PossibleValue::new(v.label()))
-        ).try_map(|s| s.parse::<MulticastGroupMemberState>()),
-    )]
-    state: Option<MulticastGroupMemberState>,
+    #[arg(long, ignore_case = true, value_enum)]
+    state: Option<CliMemberState>,
     /// Filter by sled ID
     #[arg(long)]
     sled_id: Option<SledUuid>,
@@ -262,7 +285,6 @@ struct MulticastPoolRow {
 }
 
 pub(super) async fn cmd_db_multicast_groups(
-    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &MulticastGroupsArgs,
@@ -280,7 +302,7 @@ pub(super) async fn cmd_db_multicast_groups(
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
     }
-    if let Some(state) = args.state {
+    if let Some(state) = args.state.map(MulticastGroupState::from) {
         query = query.filter(dsl::state.eq(state));
     }
     if let Some(ref pool_name) = args.pool {
@@ -319,28 +341,12 @@ pub(super) async fn cmd_db_multicast_groups(
                 .select((underlay_dsl::id, underlay_dsl::multicast_ip))
                 .get_results_async::<(Uuid, ipnetwork::IpNetwork)>(&*conn)
                 .await
-                .unwrap_or_default()
+                .context("fetching underlay groups")?
                 .into_iter()
                 .collect()
         };
 
-    // Derive source IPs union from members for each group
-    // Source IPs are stored per-member; groups show the union of all member sources
-    let group_uuids: Vec<MulticastGroupUuid> = groups
-        .iter()
-        .map(|group| MulticastGroupUuid::from_untyped_uuid(group.identity.id))
-        .collect();
-    let source_ips_raw = datastore
-        .multicast_groups_source_ips_union(opctx, &group_uuids)
-        .await
-        .context("failed to fetch source IPs union")?;
-    let source_ips_map: HashMap<Uuid, BTreeSet<std::net::IpAddr>> =
-        source_ips_raw
-            .into_iter()
-            .map(|(k, v)| (k, v.into_iter().collect()))
-            .collect();
-
-    // Fetch members for all groups
+    // Fetch members for all groups with deterministic ordering
     let group_ids: Vec<Uuid> = groups.iter().map(|g| g.identity.id).collect();
     let members: Vec<MulticastGroupMember> = if group_ids.is_empty() {
         Vec::new()
@@ -351,10 +357,48 @@ pub(super) async fn cmd_db_multicast_groups(
         if !fetch_opts.include_deleted {
             mq = mq.filter(member_dsl::time_deleted.is_null());
         }
-        mq.select(MulticastGroupMember::as_select())
+        mq.order_by(member_dsl::external_group_id.asc())
+            .then_order_by(member_dsl::parent_id.asc())
+            .then_order_by(member_dsl::id.asc())
+            .select(MulticastGroupMember::as_select())
             .get_results_async(&*conn)
             .await
-            .unwrap_or_default()
+            .context("fetching multicast group members")?
+    };
+
+    // Derive effective source filtering state from members for each group.
+    // If any member has empty source_ips, the group effectively allows any source
+    // (filter disabled). Otherwise, show the union of all member source IPs
+    // (filter enabled with allowlist). None = any-source, Some(set) = filtered.
+    let source_filter_map: HashMap<Uuid, Option<BTreeSet<std::net::IpAddr>>> = {
+        let mut map: HashMap<Uuid, Option<BTreeSet<std::net::IpAddr>>> =
+            HashMap::new();
+        for member in &members {
+            if member.source_ips.is_empty() {
+                // Any member with empty sources means any-source allowed
+                map.insert(member.external_group_id, None);
+            } else {
+                map.entry(member.external_group_id)
+                    .and_modify(|v| {
+                        if let Some(set) = v {
+                            for ip in &member.source_ips {
+                                set.insert(ip.ip());
+                            }
+                        }
+                        // If already None (any-source), leave it as None
+                    })
+                    .or_insert_with(|| {
+                        Some(
+                            member
+                                .source_ips
+                                .iter()
+                                .map(|ip| ip.ip())
+                                .collect(),
+                        )
+                    });
+            }
+        }
+        map
     };
 
     // Batch lookup instance names
@@ -367,7 +411,7 @@ pub(super) async fn cmd_db_multicast_groups(
             .select((instance_dsl::id, instance_dsl::name))
             .get_results_async::<(Uuid, String)>(&*conn)
             .await
-            .unwrap_or_default()
+            .context("fetching instance names")?
             .into_iter()
             .collect()
     };
@@ -385,7 +429,7 @@ pub(super) async fn cmd_db_multicast_groups(
             .select((sled_dsl::id, sled_dsl::serial_number))
             .get_results_async::<(Uuid, String)>(&*conn)
             .await
-            .unwrap_or_default()
+            .context("fetching sled serials")?
             .into_iter()
             .collect()
     };
@@ -408,19 +452,24 @@ pub(super) async fn cmd_db_multicast_groups(
             .push(formatted);
     }
 
+    // Sort each group's members for deterministic output
+    for v in members_map.values_mut() {
+        v.sort_unstable();
+    }
+
     let rows: Vec<MulticastGroupRow> = groups
         .into_iter()
         .map(|group| {
             let mcast_ip = group.multicast_ip.ip();
             let range =
                 if is_ssm_address(mcast_ip) { RANGE_SSM } else { RANGE_ASM };
-            // Format source IPs union (derived from members)
-            let sources = source_ips_map
+            // Format effective source filter state (derived from members)
+            let sources = source_filter_map
                 .get(&group.identity.id)
-                .filter(|source_ips| !source_ips.is_empty())
-                .map(|source_ips| {
-                    source_ips
-                        .iter()
+                .and_then(|opt| opt.as_ref())
+                .filter(|set| !set.is_empty())
+                .map(|set| {
+                    set.iter()
                         .map(|ip| ip.to_string())
                         .collect::<Vec<_>>()
                         .join(",")
@@ -505,7 +554,7 @@ pub(super) async fn cmd_db_multicast_members(
     if let Some(group_id) = resolved_group_id {
         query = query.filter(dsl::external_group_id.eq(group_id));
     }
-    if let Some(state) = args.state {
+    if let Some(state) = args.state.map(MulticastGroupMemberState::from) {
         query = query.filter(dsl::state.eq(state));
     }
     if let Some(sled_id) = args.sled_id {
@@ -538,7 +587,7 @@ pub(super) async fn cmd_db_multicast_members(
             .select((group_dsl::id, group_dsl::name))
             .get_results_async::<(Uuid, String)>(&*conn)
             .await
-            .unwrap_or_default()
+            .context("fetching group names")?
             .into_iter()
             .collect()
     };
@@ -662,7 +711,6 @@ pub(super) async fn cmd_db_multicast_pools(
 }
 
 pub(super) async fn cmd_db_multicast_info(
-    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &MulticastInfoArgs,
@@ -735,26 +783,56 @@ pub(super) async fn cmd_db_multicast_info(
     };
 
     // Look up the pool name
-    let pool_name: String = pool_dsl::ip_pool
+    let pool_name: String = match pool_dsl::ip_pool
         .filter(pool_dsl::id.eq(group.ip_pool_id))
         .select(pool_dsl::name)
         .first_async(&*conn)
         .await
-        .unwrap_or_else(|_| "<unknown>".into());
+        .optional()
+        .context("fetching pool name")?
+    {
+        Some(name) => name,
+        None => {
+            eprintln!("warning: no pool found for id {}", group.ip_pool_id);
+            "<unknown>".into()
+        }
+    };
 
-    // Derive source_ips union from members (source_ips is per-member, not per-group)
-    let group_uuid = MulticastGroupUuid::from_untyped_uuid(group.identity.id);
-    let source_ips_map = datastore
-        .multicast_groups_source_ips_union(opctx, &[group_uuid])
-        .await
-        .context("failed to fetch source IPs union")?;
-    let source_ips_display = source_ips_map
-        .get(&group.identity.id)
-        .filter(|ips| !ips.is_empty())
-        .map(|ips| {
-            ips.iter().map(|ip| ip.to_string()).collect::<Vec<_>>().join(",")
-        })
-        .unwrap_or_else(|| "-".to_string());
+    // Find members for this group (fetch early to derive source_ips)
+    let mut member_query = member_dsl::multicast_group_member.into_boxed();
+    member_query = member_query
+        .filter(member_dsl::external_group_id.eq(group.identity.id));
+    if !fetch_opts.include_deleted {
+        member_query = member_query.filter(member_dsl::time_deleted.is_null());
+    }
+
+    let members: Vec<MulticastGroupMember> = member_query
+        .order_by(member_dsl::time_created.desc())
+        .select(MulticastGroupMember::as_select())
+        .get_results_async(&*conn)
+        .await?;
+
+    // Derive effective source filter state from members.
+    // If any member has empty source_ips, the group allows any source ("-").
+    // Otherwise, show the union of all member source IPs.
+    let has_any_source_member = members.iter().any(|m| m.source_ips.is_empty());
+    let source_ips_display = if has_any_source_member {
+        "-".to_string()
+    } else {
+        let source_ips: BTreeSet<std::net::IpAddr> = members
+            .iter()
+            .flat_map(|m| m.source_ips.iter().map(|ip| ip.ip()))
+            .collect();
+        if source_ips.is_empty() {
+            "-".to_string()
+        } else {
+            source_ips
+                .iter()
+                .map(|ip| ip.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        }
+    };
 
     // Print group details
     println!("MULTICAST GROUP");
@@ -784,20 +862,6 @@ pub(super) async fn cmd_db_multicast_info(
         }
     }
 
-    // Find members for this group
-    let mut member_query = member_dsl::multicast_group_member.into_boxed();
-    member_query = member_query
-        .filter(member_dsl::external_group_id.eq(group.identity.id));
-    if !fetch_opts.include_deleted {
-        member_query = member_query.filter(member_dsl::time_deleted.is_null());
-    }
-
-    let members: Vec<MulticastGroupMember> = member_query
-        .order_by(member_dsl::time_created.desc())
-        .select(MulticastGroupMember::as_select())
-        .get_results_async(&*conn)
-        .await?;
-
     if members.is_empty() {
         println!("\nMEMBERS: (none)");
     } else {
@@ -811,7 +875,7 @@ pub(super) async fn cmd_db_multicast_info(
             .select((instance_dsl::id, instance_dsl::name))
             .get_results_async(&*conn)
             .await
-            .unwrap_or_default();
+            .context("fetching instance names")?;
         let instance_map: HashMap<Uuid, String> =
             instances.into_iter().collect();
 
@@ -828,7 +892,7 @@ pub(super) async fn cmd_db_multicast_info(
                 .select((sled_dsl::id, sled_dsl::serial_number))
                 .get_results_async(&*conn)
                 .await
-                .unwrap_or_default()
+                .context("fetching sled serials")?
         };
         let sled_map: HashMap<Uuid, String> = sleds.into_iter().collect();
 

@@ -8,7 +8,6 @@
 //!
 //! - External IPs: Instances with ephemeral/floating IPs can join multicast groups
 //! - Floating IP attach/detach: Multicast membership unaffected by IP changes
-//! - Complex network configs: Multiple NICs, VPCs, subnets with multicast
 
 use http::{Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};

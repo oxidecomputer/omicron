@@ -9,52 +9,46 @@
 //! and checking the output.
 
 use std::net::IpAddr;
-use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
+use dropshot::test_util::ClientTestContext;
 use futures::future::join3;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_project,
+    create_default_ip_pools, create_instance_with, create_multicast_ip_pool,
+    create_project, link_ip_pool, object_put_upsert, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params::{
+    InstanceMulticastGroupJoin, InstanceNetworkInterfaceAttachment,
+};
+use nexus_types::external_api::shared::{IpRange, Ipv4Range};
+use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
+use nexus_types::identity::Resource;
+use omicron_common::api::external::Instance;
+use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
 
-use super::*;
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 const PROJECT_NAME: &str = "omdb-test-project";
-const TARGET_DIR: &str = "target";
-const OMDB_BIN: &str = "omdb";
-const BUILD_PROFILES: &[&str] = &["debug", "release"];
 
-/// Find the omdb binary path.
-///
-/// Since omdb is not built as part of omicron-nexus tests, we look for it
-/// in the target directory relative to CARGO_MANIFEST_DIR.
-fn find_omdb() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir.parent().unwrap();
+/// Path to the omdb binary - set by cargo when running tests
+const CMD_OMDB: &str = env!("CARGO_BIN_EXE_omdb");
 
-    for profile in BUILD_PROFILES {
-        let omdb_path =
-            workspace_root.join(TARGET_DIR).join(profile).join(OMDB_BIN);
-        if omdb_path.exists() {
-            return omdb_path;
-        }
-    }
-
-    PathBuf::from(OMDB_BIN)
-}
+// Timeout constants for test operations
+const POLL_INTERVAL: Duration = Duration::from_millis(80);
+const MULTICAST_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Run an omdb command and return its stdout.
 fn run_omdb(db_url: &str, args: &[&str]) -> String {
-    let cmd_path = find_omdb();
-    let output = Command::new(&cmd_path)
+    let output = Command::new(CMD_OMDB)
         .env("OMDB_DB_URL", db_url)
         .args(args)
         .output()
-        .expect(
-            "failed to execute `omdb` - ensure `cargo build -p omicron-omdb` has been run",
-        );
+        .expect("failed to execute omdb");
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -62,6 +56,128 @@ fn run_omdb(db_url: &str, args: &[&str]) -> String {
     }
 
     String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+/// Build URL for a specific multicast group by name.
+fn mcast_group_url(group_name: &str) -> String {
+    format!("/v1/multicast-groups/{group_name}")
+}
+
+/// Create a multicast IP pool and link it to the default silo.
+async fn create_multicast_pool_linked(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_range: Option<IpRange>,
+) {
+    create_multicast_ip_pool(client, pool_name, ip_range).await;
+    link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
+}
+
+/// Convenience function to wait for a group to become "Active".
+async fn wait_for_group_active(
+    client: &ClientTestContext,
+    group_name: &str,
+) -> MulticastGroup {
+    match wait_for_condition(
+        || async {
+            let group: MulticastGroup =
+                NexusRequest::object_get(client, &mcast_group_url(group_name))
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute_and_parse_unwrap()
+                    .await;
+            if group.state == "Active" {
+                Ok(group)
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    {
+        Ok(group) => group,
+        Err(poll::Error::TimedOut(elapsed)) => {
+            panic!(
+                "group {group_name} did not reach state 'Active' within {elapsed:?}"
+            );
+        }
+        Err(poll::Error::PermanentError(err)) => {
+            panic!(
+                "failed waiting for group {group_name} to reach 'Active': {err:?}"
+            );
+        }
+    }
+}
+
+/// Wait for a specific member to reach the expected state.
+async fn wait_for_member_state(
+    cptestctx: &ControlPlaneTestContext,
+    group_name: &str,
+    instance_id: uuid::Uuid,
+    expected_state: nexus_db_model::MulticastGroupMemberState,
+) -> MulticastGroupMember {
+    let client = &cptestctx.external_client;
+    let expected_state_str = expected_state.to_string();
+
+    match wait_for_condition(
+        || async {
+            let url = format!("/v1/multicast-groups/{group_name}/members");
+            let members =
+                objects_list_page_authz::<MulticastGroupMember>(client, &url)
+                    .await
+                    .items;
+            if let Some(member) =
+                members.iter().find(|m| m.instance_id == instance_id)
+            {
+                if member.state == expected_state_str {
+                    Ok(member.clone())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    {
+        Ok(member) => member,
+        Err(poll::Error::TimedOut(elapsed)) => {
+            panic!(
+                "member {instance_id} in group {group_name} did not reach state '{expected_state_str}' within {elapsed:?}"
+            );
+        }
+        Err(poll::Error::PermanentError(err)) => {
+            panic!(
+                "failed waiting for member {instance_id} in group {group_name}: {err:?}"
+            );
+        }
+    }
+}
+
+/// Create an instance for multicast testing.
+async fn create_test_instance(
+    client: &ClientTestContext,
+    project_name: &str,
+    instance_name: &str,
+    start: bool,
+) -> Instance {
+    create_instance_with(
+        client,
+        project_name,
+        instance_name,
+        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        vec![],
+        vec![],
+        start,
+        None,
+        None,
+        vec![],
+    )
+    .await
 }
 
 /// Test omdb multicast pools command.
@@ -77,8 +193,8 @@ async fn test_omdb_multicast_pools(cptestctx: &ControlPlaneTestContext) {
         "Expected empty pool message, got: {output}"
     );
 
-    // Create a multicast pool
-    create_multicast_ip_pool(client, "test-mcast-pool").await;
+    // Create a multicast pool (no silo linking needed for pools-only test)
+    create_multicast_ip_pool(client, "test-mcast-pool", None).await;
 
     // Now should show the pool with all columns
     let output = run_omdb(&db_url, &["db", "multicast", "pools"]);
@@ -87,14 +203,14 @@ async fn test_omdb_multicast_pools(cptestctx: &ControlPlaneTestContext) {
         output.contains("test-mcast-pool"),
         "Expected pool name in output, got: {output}"
     );
-    // first address
+    // first address (default range from test-utils: 224.1.0.0 - 224.1.255.255)
     assert!(
-        output.contains("224.2.0.0"),
+        output.contains("224.1.0.0"),
         "Expected first address in output, got: {output}"
     );
     // last address
     assert!(
-        output.contains("224.2.255.255"),
+        output.contains("224.1.255.255"),
         "Expected last address in output, got: {output}"
     );
 }
@@ -108,35 +224,35 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Setup: create pools and project
-    let (_, _, _) = join3(
-        create_default_ip_pool(client),
+    join3(
+        create_default_ip_pools(client),
         create_project(client, PROJECT_NAME),
-        create_multicast_ip_pool(client, "test-mcast-pool"),
+        create_multicast_pool_linked(client, "test-mcast-pool", None),
     )
     .await;
 
     // Create an instance without multicast groups first
-    let instance = instance_for_multicast_groups(
-        cptestctx,
+    let instance = create_test_instance(
+        client,
         PROJECT_NAME,
         "test-instance",
         false, // don't start
-        &[],   // no multicast groups yet
     )
     .await;
 
     // Add a multicast member via API (this implicitly creates the group)
-    // Use instance-centric join endpoint: POST /v1/instances/{instance}/multicast-groups/{group}
+    // Use instance-centric join endpoint: PUT /v1/instances/{instance}/multicast-groups/{group}
     let join_url = format!(
         "/v1/instances/{}/multicast-groups/test-mcast-group?project={PROJECT_NAME}",
         instance.identity.id
     );
 
-    put_upsert::<_, MulticastGroupMember>(
+    object_put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url,
         &InstanceMulticastGroupJoin {
             source_ips: None, // ASM (Any-Source Multicast)
+            ip_version: None,
         },
     )
     .await;
@@ -228,10 +344,13 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
         output.contains(&group_ip),
         "Expected multicast ip in members output, got: {output}"
     );
-    // sources ("-" for ASM)
+    // sources ("-" = any-source member)
+    let has_any_source = output.lines().any(|line| {
+        line.contains(&instance.identity.id.to_string()) && line.contains(" - ")
+    });
     assert!(
-        output.contains("-"),
-        "Expected sources '-' for ASM in members output, got: {output}"
+        has_any_source,
+        "Expected '-' for any-source member, got: {output}"
     );
 
     // Test: omdb db multicast members --group-name
@@ -284,12 +403,11 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
 
     // Test: omdb db multicast members --sled-id
     // Create a started instance so the member gets a sled_id
-    let started_instance = instance_for_multicast_groups(
-        cptestctx,
+    let started_instance = create_test_instance(
+        client,
         PROJECT_NAME,
         "started-instance",
         true, // start the instance
-        &[],
     )
     .await;
 
@@ -298,10 +416,10 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
         "/v1/instances/{}/multicast-groups/sled-test-group?project={PROJECT_NAME}",
         started_instance.identity.id
     );
-    put_upsert::<_, MulticastGroupMember>(
+    object_put_upsert::<_, MulticastGroupMember>(
         client,
         &sled_join_url,
-        &InstanceMulticastGroupJoin { source_ips: None },
+        &InstanceMulticastGroupJoin { source_ips: None, ip_version: None },
     )
     .await;
 
@@ -378,7 +496,7 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
 
     // Verify underlay_ip column shows an IP for active groups
     // Active groups with joined members should have an underlay group assigned
-    // The underlay IP is in the ff04::/64 range (admin-scoped IPv6 multicast)
+    // The underlay IP is in the ff04::/16 range (admin-local IPv6 multicast)
     assert!(
         output_groups.contains("ff04:"),
         "Expected underlay_ip (ff04:*) for active group in groups output, got: {output_groups}"
@@ -481,11 +599,14 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
         output.contains("test-instance"),
         "Expected instance name in info members, got: {output}"
     );
-    // member sled ("-" when not started)
-    // Note: info shows sled serial, not sled_id UUID
+    // member sled ("-" when not started) - check specific line pattern
+    // More specific than just contains("-") which could match table separators
+    let has_sled_dash = output
+        .lines()
+        .any(|line| line.contains("test-instance") && line.contains(" - "));
     assert!(
-        output.contains("-"),
-        "Expected sled '-' for non-started instance in info members, got: {output}"
+        has_sled_dash,
+        "Expected sled '-' for non-started instance on same line as instance name, got: {output}"
     );
 
     // Test: omdb db multicast info --ip
@@ -508,28 +629,24 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
 
     // Test SSM (Source-Specific Multicast) - group in 232/8 range
     // SSM range is 232.0.0.0/8 for IPv4, ff3x::/32 for IPv6
-    create_multicast_ip_pool_with_range(
-        client,
-        "test-ssm-pool",
-        (232, 1, 0, 0),   // SSM range start
-        (232, 1, 0, 255), // SSM range end
-    )
-    .await;
+    let ssm_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(232, 1, 0, 0),
+            std::net::Ipv4Addr::new(232, 1, 0, 255),
+        )
+        .unwrap(),
+    );
+    create_multicast_pool_linked(client, "test-ssm-pool", Some(ssm_range))
+        .await;
 
-    let ssm_instance = instance_for_multicast_groups(
-        cptestctx,
-        PROJECT_NAME,
-        "ssm-instance",
-        false,
-        &[],
-    )
-    .await;
+    let ssm_instance =
+        create_test_instance(client, PROJECT_NAME, "ssm-instance", false).await;
 
     let ssm_join_url = format!(
         "/v1/instances/{}/multicast-groups/ssm-group?project={PROJECT_NAME}",
         ssm_instance.identity.id
     );
-    put_upsert::<_, MulticastGroupMember>(
+    object_put_upsert::<_, MulticastGroupMember>(
         client,
         &ssm_join_url,
         &InstanceMulticastGroupJoin {
@@ -537,6 +654,7 @@ async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
                 "10.0.0.1".parse::<IpAddr>().unwrap(),
                 "10.0.0.2".parse::<IpAddr>().unwrap(),
             ]),
+            ip_version: None,
         },
     )
     .await;

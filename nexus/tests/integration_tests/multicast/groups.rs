@@ -37,7 +37,7 @@ use nexus_test_utils::http_testing::{
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_instance, create_project, link_ip_pool,
     object_create, object_create_error, object_delete, object_delete_error,
-    object_get, object_get_error, object_put_error,
+    object_get, object_get_error, object_put_error, object_put_upsert,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -192,7 +192,7 @@ async fn test_multicast_group_member_operations(
     let join_params =
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     let added_member: MulticastGroupMember =
-        put_upsert(client, &join_url, &join_params).await;
+        object_put_upsert(client, &join_url, &join_params).await;
 
     assert_eq!(
         added_member.instance_id.to_string(),
@@ -385,7 +385,8 @@ async fn test_instance_multicast_endpoints(
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     // Use PUT method and expect 201 Created (implicitly creating group1)
     let member1: MulticastGroupMember =
-        put_upsert(client, &instance_join_group1_url, &join_params).await;
+        object_put_upsert(client, &instance_join_group1_url, &join_params)
+            .await;
     assert_eq!(member1.instance_id, instance.identity.id);
 
     // Wait for group1 to become active after implicitly create
@@ -429,7 +430,7 @@ async fn test_instance_multicast_endpoints(
     let join_params2 =
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     let member2: MulticastGroupMember =
-        put_upsert(client, &join_group2_url, &join_params2).await;
+        object_put_upsert(client, &join_group2_url, &join_params2).await;
     assert_eq!(member2.instance_id, instance.identity.id);
 
     // Wait for group2 to become active after implicitly create
@@ -758,7 +759,7 @@ async fn test_member_response_includes_multicast_ip(
 
     // Add member and verify multicast_ip field is present in response
     let added_member: MulticastGroupMember =
-        put_upsert(client, &join_url, &join_params).await;
+        object_put_upsert(client, &join_url, &join_params).await;
 
     // Wait for group to become active
     wait_for_group_active(client, group_name).await;
@@ -811,7 +812,7 @@ async fn test_member_response_includes_multicast_ip(
 
     // Re-create group by adding member again
     let readded_member: MulticastGroupMember =
-        put_upsert(client, &join_url, &join_params).await;
+        object_put_upsert(client, &join_url, &join_params).await;
 
     wait_for_group_active(client, group_name).await;
 
@@ -1005,8 +1006,12 @@ async fn test_source_ip_validation_on_join(
         source_ips: Some(vec![source1]),
         ip_version: None,
     };
-    put_upsert::<_, MulticastGroupMember>(client, &join_url1, &join_body1)
-        .await;
+    object_put_upsert::<_, MulticastGroupMember>(
+        client,
+        &join_url1,
+        &join_body1,
+    )
+    .await;
 
     // Verify group source_ips shows source1
     let group: MulticastGroup =
@@ -1021,8 +1026,12 @@ async fn test_source_ip_validation_on_join(
         source_ips: Some(vec![source1, source2]),
         ip_version: None,
     };
-    put_upsert::<_, MulticastGroupMember>(client, &join_url2, &join_body2)
-        .await;
+    object_put_upsert::<_, MulticastGroupMember>(
+        client,
+        &join_url2,
+        &join_body2,
+    )
+    .await;
 
     // Verify group source_ips is union of member sources (sorted for comparison)
     let group: MulticastGroup =
@@ -1044,8 +1053,12 @@ async fn test_source_ip_validation_on_join(
         source_ips: Some(vec![source3]),
         ip_version: None,
     };
-    put_upsert::<_, MulticastGroupMember>(client, &join_url3, &join_body3)
-        .await;
+    object_put_upsert::<_, MulticastGroupMember>(
+        client,
+        &join_url3,
+        &join_body3,
+    )
+    .await;
 
     // Verify group source_ips is union of all three members' sources
     let group: MulticastGroup =
@@ -1418,8 +1431,12 @@ async fn test_multiple_ssm_groups_same_pool(
             source_ips: Some(vec![source_ip.parse().unwrap()]),
             ip_version: None,
         };
-        put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_params)
-            .await;
+        object_put_upsert::<_, MulticastGroupMember>(
+            client,
+            &join_url,
+            &join_params,
+        )
+        .await;
 
         // Wait for group to become active
         wait_for_group_active(client, group_name).await;
@@ -1506,7 +1523,7 @@ async fn test_multiple_ssm_groups_same_pool(
         source_ips: Some(vec![different_source]),
         ip_version: None,
     };
-    put_upsert::<_, MulticastGroupMember>(
+    object_put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url_diff_source,
         &join_params_diff_source,
@@ -1574,7 +1591,7 @@ async fn test_multicast_group_ip_version_conflict(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/conflict-test-group?project={project_name}"
     );
-    put_upsert::<_, MulticastGroupMember>(
+    object_put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url,
         &InstanceMulticastGroupJoin { source_ips: None, ip_version: None },
@@ -1586,7 +1603,7 @@ async fn test_multicast_group_ip_version_conflict(
     let explicit_ip_join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{explicit_ip}?project={project_name}"
     );
-    put_upsert::<_, MulticastGroupMember>(
+    object_put_upsert::<_, MulticastGroupMember>(
         client,
         &explicit_ip_join_url,
         &InstanceMulticastGroupJoin { source_ips: None, ip_version: None },
