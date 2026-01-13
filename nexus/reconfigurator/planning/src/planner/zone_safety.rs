@@ -8,6 +8,7 @@
 use crate::blueprint_builder::BlueprintBuilder;
 use itertools::Itertools;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::CockroachdbUnsafeToShutdown;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::ZoneUnsafeToShutdown;
@@ -125,7 +126,9 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
 
         // Precalculate sets of particular zone kinds that we care about in
         // other checks below.
-        for (_sled_id, zone) in blueprint.current_in_service_zones() {
+        for (_sled_id, zone) in
+            blueprint.current_zones(BlueprintZoneDisposition::is_in_service)
+        {
             match zone.zone_type.kind() {
                 ZoneKind::BoundaryNtp => {
                     boundary_ntp_zones.insert(zone.id);
@@ -148,7 +151,10 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
     }
 
     fn build(mut self) -> ZoneSafetyChecks {
-        for (sled_id, zone) in self.blueprint.current_in_service_zones() {
+        for (sled_id, zone) in self
+            .blueprint
+            .current_zones(BlueprintZoneDisposition::is_in_service)
+        {
             if let Some(reason) = self.reason_zone_unsafe_to_shut_down(zone) {
                 self.checks.insert(sled_id, zone.id, reason);
             }

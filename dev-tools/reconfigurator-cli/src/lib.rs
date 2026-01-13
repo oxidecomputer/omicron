@@ -34,16 +34,16 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
-use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
-use nexus_types::deployment::{BlueprintExpungedZoneAccessReason, execution};
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredContents, PlannerConfig,
 };
 use nexus_types::deployment::{BlueprintSource, SledFilter};
+use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
@@ -2766,12 +2766,9 @@ fn sled_with_zone(
 ) -> anyhow::Result<SledUuid> {
     let mut parent_sled_id = None;
 
-    for sled_id in builder.current_commissioned_sleds() {
+    for sled_id in builder.sled_ids_with_zones() {
         if builder
-            .current_in_service_and_expunged_sled_zones(
-                sled_id,
-                BlueprintExpungedZoneAccessReason::ReconfiguratorCli,
-            )
+            .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
             .any(|z| z.id == *zone_id)
         {
             parent_sled_id = Some(sled_id);

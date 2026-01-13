@@ -1503,7 +1503,7 @@ mod tests {
         .expect("created builder");
 
         let to_expunge = builder
-            .current_in_service_zones()
+            .current_zones(BlueprintZoneDisposition::is_in_service)
             .filter_map(|(sled_id, zone)| {
                 if zone.zone_type.is_external_dns() {
                     Some((sled_id, zone.id))

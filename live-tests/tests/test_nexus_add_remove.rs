@@ -93,8 +93,12 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
             let (image_source, nexus_generation) = commissioned_sled_ids
                 .iter()
                 .find_map(|&sled_id| {
-                    builder.current_in_service_sled_zones(sled_id).find_map(
-                        |zone| {
+                    builder
+                        .current_sled_zones(
+                            sled_id,
+                            BlueprintZoneDisposition::is_in_service,
+                        )
+                        .find_map(|zone| {
                             if let BlueprintZoneType::Nexus(
                                 blueprint_zone_type::Nexus {
                                     nexus_generation,
@@ -109,8 +113,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                             } else {
                                 None
                             }
-                        },
-                    )
+                        })
                 })
                 .context(
                     "could not find in-service Nexus in parent blueprint",

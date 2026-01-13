@@ -8,7 +8,9 @@
 use clickhouse_admin_types::keeper::{
     ClickhouseKeeperClusterMembership, KeeperId,
 };
-use nexus_types::deployment::{BlueprintZoneType, ClickhouseClusterConfig};
+use nexus_types::deployment::{
+    BlueprintZoneDisposition, BlueprintZoneType, ClickhouseClusterConfig,
+};
 use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::{Logger, error};
 use std::collections::BTreeSet;
@@ -27,7 +29,9 @@ impl ClickhouseZonesThatShouldBeRunning {
     pub fn new(blueprint: &BlueprintBuilder<'_>) -> Self {
         let mut keepers = BTreeSet::new();
         let mut servers = BTreeSet::new();
-        for (_, zone) in blueprint.current_in_service_zones() {
+        for (_, zone) in
+            blueprint.current_zones(BlueprintZoneDisposition::is_in_service)
+        {
             match zone.zone_type {
                 BlueprintZoneType::ClickhouseKeeper(_) => {
                     keepers.insert(zone.id);

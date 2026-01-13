@@ -28,7 +28,6 @@ use iddqd::IdOrdMap;
 use itertools::Either;
 use itertools::Itertools;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -418,9 +417,13 @@ impl<'a> Planner<'a> {
             // we ourselves have made this change, which is fine.
             let all_zones_expunged = self
                 .blueprint
-                .current_in_service_sled_zones(sled_id)
-                .next()
-                .is_none();
+                .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
+                .all(|zone| {
+                    matches!(
+                        zone.disposition,
+                        BlueprintZoneDisposition::Expunged { .. }
+                    )
+                });
 
             // Check 3: Are there any instances assigned to this sled? See
             // comment above; while we wait for omicron#4872, we just assume
@@ -500,15 +503,31 @@ impl<'a> Planner<'a> {
             )?;
         }
 
-        // Check for any decommissioned sled mismatches: If our blueprint says a
-        // sled is commissioned, our input must still too. A sled can only be
-        // dropped from the input if we've decommissioned it via a prior
-        // blueprint.
-        for sled_id in self.blueprint.current_commissioned_sleds() {
+        // Check for any decommissioned sleds (i.e., sleds for which our
+        // blueprint has zones, but are not in the input sled list). Any zones
+        // for decommissioned sleds must have already be expunged for
+        // decommissioning to have happened; fail if we find non-expunged zones
+        // associated with a decommissioned sled.
+        for sled_id in self.blueprint.sled_ids_with_zones() {
             if !commissioned_sled_ids.contains(&sled_id) {
-                return Err(Error::CommissionedSledMissingFromInput {
-                    sled_id,
-                });
+                let num_zones = self
+                    .blueprint
+                    .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
+                    .filter(|zone| {
+                        !matches!(
+                            zone.disposition,
+                            BlueprintZoneDisposition::Expunged { .. }
+                        )
+                    })
+                    .count();
+                if num_zones > 0 {
+                    return Err(
+                        Error::DecommissionedSledWithNonExpungedZones {
+                            sled_id,
+                            num_zones,
+                        },
+                    );
+                }
             }
         }
 
@@ -623,10 +642,10 @@ impl<'a> Planner<'a> {
         };
 
         let mut zones_ready_for_cleanup = Vec::new();
-        for zone in self.blueprint.current_expunged_sled_zones(
-            sled_id,
-            BlueprintExpungedZoneAccessReason::PlannerCheckReadyForCleanup,
-        ) {
+        for zone in self
+            .blueprint
+            .current_sled_zones(sled_id, BlueprintZoneDisposition::is_expunged)
+        {
             // If this is a zone still waiting for cleanup, grab the generation
             // in which it was expunged. Otherwise, move on.
             let as_of_generation = match zone.disposition {
@@ -890,12 +909,17 @@ impl<'a> Planner<'a> {
                 // If the sled is still running some other control plane
                 // services (which is evidence it previously had an NTP zone!),
                 // we can go ahead and consider it eligible for new ones.
-                if self.blueprint.current_in_service_sled_zones(sled_id).any(
-                    |z| {
+                if self
+                    .blueprint
+                    .current_sled_zones(
+                        sled_id,
+                        BlueprintZoneDisposition::is_in_service,
+                    )
+                    .any(|z| {
                         OmicronZoneType::from(z.zone_type.clone())
                             .requires_timesync()
-                    },
-                ) {
+                    })
+                {
                     report
                         .sleds_getting_ntp_and_discretionary_zones
                         .insert(sled_id);
@@ -1138,7 +1162,10 @@ impl<'a> Planner<'a> {
                                     .count(),
                                 discretionary_zones: self
                                     .blueprint
-                                    .current_in_service_sled_zones(sled_id)
+                                    .current_sled_zones(
+                                        sled_id,
+                                        BlueprintZoneDisposition::is_in_service,
+                                    )
                                     .filter_map(|zone| {
                                         DiscretionaryOmicronZone::from_zone_type(
                                             &zone.zone_type,
@@ -1202,16 +1229,14 @@ impl<'a> Planner<'a> {
             // reuse its subnet until it's ready for cleanup. For all other
             // services, we want to go ahead and replace them if they're below
             // the desired count based on purely "in service vs expunged".
-            let zones_iter = if zone_kind == ZoneKind::InternalDns {
-                Either::Left(
-                    self.blueprint.current_could_be_running_sled_zones(sled_id),
-                )
+            let disposition_filter = if zone_kind == ZoneKind::InternalDns {
+                BlueprintZoneDisposition::could_be_running
             } else {
-                Either::Right(
-                    self.blueprint.current_in_service_sled_zones(sled_id),
-                )
+                BlueprintZoneDisposition::is_in_service
             };
-            num_existing_kind_zones += zones_iter
+            num_existing_kind_zones += self
+                .blueprint
+                .current_sled_zones(sled_id, disposition_filter)
                 .filter(|z| {
                     let matches_kind = z.zone_type.kind() == zone_kind;
                     match discretionary_zone_kind {
@@ -1399,8 +1424,7 @@ impl<'a> Planner<'a> {
     // Nexus zones.
     //
     // The logic is:
-    // - If any existing Nexus zone has the same image source, reuse its
-    //   generation
+    // - If any existing Nexus zone has the same image source, reuse its generation
     // - Otherwise, use the highest existing generation + 1
     // - If no existing zones exist, return an error
     //
@@ -1415,11 +1439,10 @@ impl<'a> Planner<'a> {
         let mut highest_seen_generation = None;
         let mut same_image_nexus_generation = None;
 
-        // Iterate over both existing zones and ones that are actively being
-        // placed.
+        // Iterate over both existing zones and ones that are actively being placed.
         for (zone, nexus) in self
             .blueprint
-            .current_in_service_zones()
+            .current_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_sled_id, z)| match &z.zone_type {
                 BlueprintZoneType::Nexus(nexus) => Some((z, nexus)),
                 _ => None,
@@ -1576,7 +1599,10 @@ impl<'a> Planner<'a> {
             // https://github.com/oxidecomputer/omicron/issues/8589.
             let mut zones_currently_updating = self
                 .blueprint
-                .current_in_service_sled_zones(sled_id)
+                .current_sled_zones(
+                    sled_id,
+                    BlueprintZoneDisposition::is_in_service,
+                )
                 .filter_map(|zone| {
                     let bp_image_source =
                         OmicronZoneImageSource::from(zone.image_source.clone());
@@ -1754,7 +1780,10 @@ impl<'a> Planner<'a> {
             .flat_map(|sled_id| {
                 let log = &self.log;
                 self.blueprint
-                    .current_in_service_sled_zones(sled_id)
+                    .current_sled_zones(
+                        sled_id,
+                        BlueprintZoneDisposition::is_in_service,
+                    )
                     .filter_map(move |zone| {
                         let desired_image_source = match target_release
                             .zone_image_source(zone.zone_type.kind())
@@ -2071,7 +2100,10 @@ impl<'a> Planner<'a> {
             for sled_id in self.input.all_sled_ids(SledFilter::InService) {
                 let mut zones_with_non_artifact = IdOrdMap::new();
                 // Are all zone image sources set to Artifact?
-                for z in self.blueprint.current_in_service_sled_zones(sled_id) {
+                for z in self.blueprint.current_sled_zones(
+                    sled_id,
+                    BlueprintZoneDisposition::is_in_service,
+                ) {
                     match &z.image_source {
                         BlueprintZoneImageSource::InstallDataset => {
                             zones_with_non_artifact.insert_overwrite(z);
@@ -2170,20 +2202,26 @@ impl<'a> Planner<'a> {
         let mut old_nexuses_at_current_gen = 0;
         let mut nexuses_at_proposed_gen = 0;
         let mut nexuses_at_proposed_gen_missing_metadata_record = 0;
-        for (_sled_id, z) in self.blueprint.current_in_service_zones() {
-            if let BlueprintZoneType::Nexus(nexus_zone) = &z.zone_type {
-                if nexus_zone.nexus_generation == proposed_generation {
-                    nexuses_at_proposed_gen += 1;
-                    if !self.input.not_yet_nexus_zones().contains(&z.id) {
-                        nexuses_at_proposed_gen_missing_metadata_record += 1;
+        for sled_id in self.blueprint.sled_ids_with_zones() {
+            for z in self.blueprint.current_sled_zones(
+                sled_id,
+                BlueprintZoneDisposition::is_in_service,
+            ) {
+                if let BlueprintZoneType::Nexus(nexus_zone) = &z.zone_type {
+                    if nexus_zone.nexus_generation == proposed_generation {
+                        nexuses_at_proposed_gen += 1;
+                        if !self.input.not_yet_nexus_zones().contains(&z.id) {
+                            nexuses_at_proposed_gen_missing_metadata_record +=
+                                1;
+                        }
                     }
-                }
 
-                if nexus_zone.nexus_generation == current_generation
-                    && z.image_source
-                        != new_repo.zone_image_source(z.zone_type.kind())?
-                {
-                    old_nexuses_at_current_gen += 1;
+                    if nexus_zone.nexus_generation == current_generation
+                        && z.image_source
+                            != new_repo.zone_image_source(z.zone_type.kind())?
+                    {
+                        old_nexuses_at_current_gen += 1;
+                    }
                 }
             }
         }
@@ -2439,12 +2477,17 @@ impl<'a> Planner<'a> {
 
     fn all_non_nexus_zones_using_new_image(&self) -> Result<bool, Error> {
         let new_repo = self.input.tuf_repo().description();
-        for (_sled_id, z) in self.blueprint.current_in_service_zones() {
-            let kind = z.zone_type.kind();
-            if kind != ZoneKind::Nexus
-                && z.image_source != new_repo.zone_image_source(kind)?
-            {
-                return Ok(false);
+        for sled_id in self.blueprint.sled_ids_with_zones() {
+            for z in self.blueprint.current_sled_zones(
+                sled_id,
+                BlueprintZoneDisposition::is_in_service,
+            ) {
+                let kind = z.zone_type.kind();
+                if kind != ZoneKind::Nexus
+                    && z.image_source != new_repo.zone_image_source(kind)?
+                {
+                    return Ok(false);
+                }
             }
         }
         return Ok(true);
@@ -2460,7 +2503,10 @@ impl<'a> Planner<'a> {
         // conversions can change the image source.
         let mut image_source = None;
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            for zone in self.blueprint.current_in_service_sled_zones(sled_id) {
+            for zone in self.blueprint.current_sled_zones(
+                sled_id,
+                BlueprintZoneDisposition::is_in_service,
+            ) {
                 if self.input.active_nexus_zones().contains(&zone.id) {
                     image_source = Some(zone.image_source.clone());
                     break;

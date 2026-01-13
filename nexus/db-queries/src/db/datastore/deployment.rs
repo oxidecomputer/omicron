@@ -3111,6 +3111,7 @@ mod tests {
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::PendingMgsUpdate;
@@ -3531,7 +3532,10 @@ mod tests {
         // Take the first two zones and set their image sources.
         {
             let zone_ids: Vec<OmicronZoneUuid> = builder
-                .current_in_service_sled_zones(new_sled_id)
+                .current_sled_zones(
+                    new_sled_id,
+                    BlueprintZoneDisposition::is_in_service,
+                )
                 .map(|zone| zone.id)
                 .take(2)
                 .collect();
@@ -3573,8 +3577,7 @@ mod tests {
         // 3. both slots set to a known version
         // 4. slot_a set to a known version; slot b set to an unknown version
         {
-            let sled_ids =
-                builder.current_commissioned_sleds().collect::<Vec<_>>();
+            let sled_ids = builder.sled_ids_with_zones().collect::<Vec<_>>();
             assert!(sled_ids.len() >= 4, "at least 4 sleds");
 
             let host_phase_2_samples = [
