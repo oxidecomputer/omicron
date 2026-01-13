@@ -70,6 +70,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026011300, DOC_LINT_SUMMARY_TRAILING_PERIOD),
     (2026011100, MULTICAST_JOIN_LEAVE_DOCS),
     (2026010800, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
     (2026010500, POOL_SELECTION_ENUMS),
@@ -1199,7 +1200,7 @@ pub trait NexusExternalApi {
         query_params: Query<IpPoolRangePaginationParams>,
     ) -> Result<HttpResponseOk<ResultsPage<views::IpPoolRange>>, HttpError>;
 
-    /// Add range to IP pool.
+    /// Add range to an IP pool
     ///
     /// IPv6 ranges are not allowed yet for unicast pools.
     ///
@@ -1405,7 +1406,7 @@ pub trait NexusExternalApi {
     // TODO: Consider adding `.map()` to dropshot's `Path<T>` (like `TypedBody`)
     // to enable inline delegation when path types differ between API versions.
 
-    /// List multicast groups.
+    /// List multicast groups
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups",
@@ -1429,7 +1430,7 @@ pub trait NexusExternalApi {
         }
     }
 
-    /// List multicast groups.
+    /// List multicast groups
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups",
@@ -1441,7 +1442,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>;
 
-    /// Create a multicast group.
+    /// Create a multicast group
     ///
     /// Deprecated: Groups are created implicitly when adding members in newer
     /// API versions.
@@ -1466,7 +1467,7 @@ pub trait NexusExternalApi {
         ))
     }
 
-    /// Fetch a multicast group.
+    /// Fetch a multicast group
     ///
     /// The group can be specified by name or UUID.
     #[endpoint {
@@ -1483,7 +1484,7 @@ pub trait NexusExternalApi {
         path_params: Path<v2025121200::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError>;
 
-    /// Fetch a multicast group.
+    /// Fetch a multicast group
     ///
     /// The group can be specified by name, UUID, or multicast IP address.
     /// (e.g., "224.1.2.3" or "ff38::1").
@@ -1498,7 +1499,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
 
-    /// Update a multicast group.
+    /// Update a multicast group
     ///
     /// Deprecated: groups are managed implicitly through member operations.
     #[endpoint {
@@ -1521,7 +1522,7 @@ pub trait NexusExternalApi {
         ))
     }
 
-    /// Delete a multicast group.
+    /// Delete a multicast group
     ///
     /// Deprecated: groups are deleted automatically when the last member leaves.
     #[endpoint {
@@ -1543,7 +1544,7 @@ pub trait NexusExternalApi {
         ))
     }
 
-    /// List members of a multicast group.
+    /// List members of a multicast group
     ///
     /// The group can be specified by name or UUID.
     #[endpoint {
@@ -1564,7 +1565,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// List members of a multicast group.
+    /// List members of a multicast group
     ///
     /// The group can be specified by name, UUID, or multicast IP address.
     #[endpoint {
@@ -1579,7 +1580,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<MulticastGroupMember>>, HttpError>;
 
-    /// Add instance to a multicast group.
+    /// Add instance to a multicast group
     ///
     /// Deprecated: use the instance join endpoint which supports implicit group
     /// creation and accepts group by name, UUID, or IP address.
@@ -1606,7 +1607,7 @@ pub trait NexusExternalApi {
         ))
     }
 
-    /// Remove instance from a multicast group.
+    /// Remove instance from a multicast group
     ///
     /// Deprecated: use the instance leave endpoint which accepts group by name,
     /// UUID, or IP address.
@@ -1631,7 +1632,7 @@ pub trait NexusExternalApi {
         ))
     }
 
-    /// Look up multicast group by IP address.
+    /// Look up multicast group by IP address
     ///
     /// Deprecated: use the main view endpoint which accepts IP addresses directly.
     #[endpoint {
@@ -3353,7 +3354,7 @@ pub trait NexusExternalApi {
 
     // Instance Multicast Groups
 
-    /// List multicast groups for an instance.
+    /// List multicast groups for an instance
     #[endpoint {
         method = GET,
         path = "/v1/instances/{instance}/multicast-groups",
@@ -3387,7 +3388,7 @@ pub trait NexusExternalApi {
         }
     }
 
-    /// List multicast groups for an instance.
+    /// List multicast groups for an instance
     #[endpoint {
         method = GET,
         path = "/v1/instances/{instance}/multicast-groups",
@@ -3403,7 +3404,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Join a multicast group.
+    /// Join a multicast group
     ///
     /// Deprecated: newer version supports implicit group creation, accepts group
     /// by name/UUID/IP and allows specifying source IPs (optional for ASM,
@@ -3421,7 +3422,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseCreated<v2025121200::MulticastGroupMember>, HttpError>;
 
-    /// Join a multicast group by name, IP address, or UUID.
+    /// Join a multicast group by name, IP address, or UUID
     ///
     /// Groups can be referenced by name, IP address, or UUID. If the group
     /// doesn't exist, it's implicitly created with an auto-allocated IP from a
@@ -3444,7 +3445,7 @@ pub trait NexusExternalApi {
         body_params: TypedBody<params::InstanceMulticastGroupJoin>,
     ) -> Result<HttpResponseCreated<views::MulticastGroupMember>, HttpError>;
 
-    /// Leave a multicast group.
+    /// Leave a multicast group
     ///
     /// Deprecated: newer version accepts group by name, UUID, or IP address.
     #[endpoint {
@@ -3462,7 +3463,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Leave a multicast group by name, IP address, or UUID.
+    /// Leave a multicast group by name, IP address, or UUID
     #[endpoint {
         method = DELETE,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
