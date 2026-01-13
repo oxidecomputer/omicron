@@ -69,6 +69,13 @@ rustflags = [
     "--cfg", "tokio_unstable"
 ]
 
+[target.aarch64-apple-darwin]
+rustflags = [
+  "-C", "link-arg=-fuse-ld=lld",
+  # enable the `tokio-unstable` config for `tokio-dtrace` probes
+  "--cfg", "tokio_unstable"
+]
+
 # Set up `cargo xtask`.
 [alias]
 xtask = "run --package xtask -- "

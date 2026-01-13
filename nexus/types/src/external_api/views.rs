@@ -21,7 +21,7 @@ use omicron_common::api::external::{
 };
 use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
-use oxnet::{Ipv4Net, Ipv6Net};
+use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -458,6 +458,49 @@ pub struct IpPoolRange {
     pub ip_pool_id: Uuid,
     pub time_created: DateTime<Utc>,
     pub range: IpRange,
+}
+
+// SUBNET POOLS
+
+/// A pool of subnets for external subnet allocation
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The IP version for this pool
+    pub ip_version: IpVersion,
+}
+
+/// A subnet range within a subnet pool
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolMember {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// ID of the parent subnet pool
+    pub subnet_pool_id: Uuid,
+    /// The subnet CIDR
+    pub subnet: IpNet,
+    /// Minimum prefix length for allocations
+    pub min_alloc: Option<u8>,
+    /// Maximum prefix length for allocations
+    pub max_alloc: Option<u8>,
+}
+
+/// A link between a subnet pool and a silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SubnetPoolSiloLink {
+    pub subnet_pool_id: Uuid,
+    pub silo_id: Uuid,
+    pub is_default: bool,
+}
+
+/// Utilization information for a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolUtilization {
+    /// Number of addresses allocated from this pool
+    pub allocated: f64,
+    /// Total capacity of this pool in addresses
+    pub capacity: f64,
 }
 
 // INSTANCE EXTERNAL IP ADDRESSES
