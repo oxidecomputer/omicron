@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 api_identity.workspace = true
 chrono.workspace = true
 dropshot-api-manager-types.workspace = true

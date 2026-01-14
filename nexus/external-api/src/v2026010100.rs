@@ -2,12 +2,30 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2026010100 to 2026010300
+//! Nexus external types that changed from 2026010100 to 2026010300.
+//!
+//! ## Network Interface Changes
+//!
+//! This version adds dual-stack NIC support with [`InstanceNetworkInterfaceAttachment`]
+//! and [`InstanceNetworkInterfaceCreate`] changes.
+//!
+//! ## Multicast Changes
+//!
+//! `InstanceCreate.multicast_groups` uses `Vec<NameOrId>` instead of
+//! `Vec<MulticastGroupJoinSpec>`. The conversion adds default values for
+//! `source_ips` and `ip_version` fields.
+//!
+//! Affected endpoints:
+//! - `POST /v1/instances` (instance_create)
+//!
+//! [`InstanceNetworkInterfaceAttachment`]: self::InstanceNetworkInterfaceAttachment
+//! [`InstanceNetworkInterfaceCreate`]: self::InstanceNetworkInterfaceCreate
 
 use api_identity::ObjectIdentity;
 use itertools::Either;
 use itertools::Itertools as _;
 use nexus_types::external_api::params;
+
 use nexus_types::external_api::params::IpAssignment;
 use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::external_api::params::PrivateIpv4StackCreate;
@@ -83,7 +101,7 @@ impl TryFrom<InstanceNetworkInterfaceAttachment>
                 .collect::<Result<_, _>>()
                 .map(Self::Create),
             InstanceNetworkInterfaceAttachment::Default => {
-                Ok(Self::DefaultIpv4)
+                Ok(Self::DefaultDualStack)
             }
             InstanceNetworkInterfaceAttachment::None => Ok(Self::None),
         }
@@ -257,7 +275,7 @@ impl TryFrom<InstanceNetworkInterfaceCreate>
                         transit_ips: ipv6_transit_ips,
                     })
                 } else {
-                    PrivateIpStackCreate::auto_ipv4()
+                    PrivateIpStackCreate::auto_dual_stack()
                 }
             }
             Some(IpAddr::V4(ipv4)) => {
@@ -327,7 +345,6 @@ pub struct InstanceCreate {
     /// By default, all instances have outbound connectivity, but no inbound
     /// connectivity. These external addresses can be used to provide a fixed,
     /// known IP address for making inbound connections to the instance.
-    // Delegates through v2026010300 → params::ExternalIpCreate
     #[serde(default)]
     pub external_ips: Vec<v2026010300::ExternalIpCreate>,
 
@@ -426,7 +443,15 @@ impl TryFrom<InstanceCreate> for params::InstanceCreate {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
-            multicast_groups: value.multicast_groups,
+            multicast_groups: value
+                .multicast_groups
+                .into_iter()
+                .map(|g| params::MulticastGroupJoinSpec {
+                    group: g.into(),
+                    source_ips: None,
+                    ip_version: None,
+                })
+                .collect(),
             disks: value.disks,
             boot_disk: value.boot_disk,
             ssh_public_keys: value.ssh_public_keys,

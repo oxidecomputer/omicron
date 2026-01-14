@@ -28,7 +28,8 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(220, "health-monitor-svcs-in-maintenance"),
+        KnownVersion::new(221, "health-monitor-svcs-in-maintenance"),
+        KnownVersion::new(220, "multicast-implicit-lifecycle"),
         KnownVersion::new(219, "blueprint-sled-last-used-ip"),
         KnownVersion::new(218, "measurements"),
         KnownVersion::new(217, "multiple-default-ip-pools-per-silo"),
