@@ -87,6 +87,10 @@ async fn archive_one(
     tokio::io::copy(&mut src_f, &mut dest_f).await?;
 
     dest_f.sync_all().await?;
+    if let Some(parent) = dest.parent() {
+        let file = tokio::fs::File::open(&parent).await?;
+        file.sync_all().await?;
+    }
 
     drop(src_f);
     drop(dest_f);

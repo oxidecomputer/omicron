@@ -15,14 +15,14 @@ use thiserror::Error;
 pub(crate) struct Filename(String);
 
 #[derive(Debug, Error)]
-#[error("string is not a valid filename (has slashes or is '.' or '..')")]
-pub(crate) struct BadFilename;
+#[error("string is not a valid filename (has slashes or is '.' or '..'): {0}")]
+pub(crate) struct BadFilename(String);
 
 impl TryFrom<String> for Filename {
     type Error = BadFilename;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value == "." || value == ".." || value.contains('/') {
-            Err(BadFilename)
+            Err(BadFilename(value))
         } else {
             Ok(Filename(value))
         }
