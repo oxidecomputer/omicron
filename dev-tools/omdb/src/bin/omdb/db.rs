@@ -1166,10 +1166,13 @@ impl DbArgs {
         if let DbCommands::Sql = &self.command {
             let _token = omdb.check_allow_destructive()?;
             let url = self.db_url_opts.resolve_pg_url(omdb, log).await?;
-            let url = url.url().split(',').next().unwrap_or(url.url());
+            let url = format!(
+                "postgresql://root@{}/omicron?sslmode=disable",
+                url.address()
+            );
             let mut command =
                 Command::new("/opt/oxide/cockroachdb/bin/cockroach-sql");
-            let error = command.args(["--read-only", "--url", url]).exec();
+            let error = command.args(["--read-only", "--url", &url]).exec();
             return Err(error)
                 .with_context(|| format!("failed to exec {command:?}"));
         }
