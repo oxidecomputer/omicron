@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use headers::HeaderMapExt;
 use headers::authorization::{Authorization, Bearer};
+use uuid::Uuid;
 
 // This scheme is intended for clients such as the API, CLI, etc.
 //
@@ -66,10 +67,11 @@ where
             Ok(None) => SchemeResult::NotRequested,
             Ok(Some(token)) => match ctx.authenticate_token(token).await {
                 Err(error) => SchemeResult::Failed(error),
-                Ok((actor, device_token_expiration)) => {
+                Ok((actor, device_token_expiration, token_id)) => {
                     SchemeResult::Authenticated(Details {
                         actor,
                         device_token_expiration,
+                        credential_id: Some(token_id),
                     })
                 }
             },
@@ -97,12 +99,12 @@ fn parse_token(
 /// A context that can look up a Silo user and client ID from a token.
 #[async_trait]
 pub trait TokenContext {
-    /// Returns the actor authenticated by the token and the token's expiration
-    /// time (if any).
+    /// Returns the actor authenticated by the token, the token's expiration
+    /// time (if any), and the token's ID.
     async fn authenticate_token(
         &self,
         token: String,
-    ) -> Result<(authn::Actor, Option<DateTime<Utc>>), Reason>;
+    ) -> Result<(authn::Actor, Option<DateTime<Utc>>, Uuid), Reason>;
 }
 
 #[cfg(test)]
