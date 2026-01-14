@@ -196,10 +196,11 @@ impl ExampleRackSetupData {
             management_addrs: Some(vec!["172.32.0.4".parse().unwrap()]),
         });
 
+        let rack_subnet_address =
+            Some(Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0));
+
         let rack_network_config = UserSpecifiedRackNetworkConfig {
-            rack_subnet_address: Ipv6Addr::new(
-                0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0,
-            ),
+            rack_subnet_address,
             infra_ip_first: "172.30.0.1".parse().unwrap(),
             infra_ip_last: "172.30.0.10".parse().unwrap(),
             #[rustfmt::skip]

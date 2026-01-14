@@ -713,7 +713,11 @@ fn rss_config_text<'a>(
         (
             "Rack subnet address (IPv6 /56): ",
             rack_network_config.as_ref().map_or("".into(), |c| {
-                c.rack_subnet_address.to_string().into()
+                match c.rack_subnet_address {
+                    Some(v) => v.to_string(),
+                    None => "".to_string(),
+                }
+                .into()
             }),
         ),
         (

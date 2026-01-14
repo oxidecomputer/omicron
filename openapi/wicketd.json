@@ -7785,6 +7785,7 @@
             "format": "ipv4"
           },
           "rack_subnet_address": {
+            "nullable": true,
             "type": "string",
             "format": "ipv6"
           },
@@ -7805,7 +7806,6 @@
           "bgp",
           "infra_ip_first",
           "infra_ip_last",
-          "rack_subnet_address",
           "switch0",
           "switch1"
         ],

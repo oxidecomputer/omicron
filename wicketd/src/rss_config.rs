@@ -22,6 +22,7 @@ use omicron_common::address;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::SwitchLocation;
+use oxnet::Ipv6Net;
 use sled_hardware_types::Baseboard;
 use slog::debug;
 use slog::warn;
@@ -30,6 +31,7 @@ use std::collections::BTreeSet;
 use std::collections::btree_map;
 use std::mem;
 use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use thiserror::Error;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::SpType;
@@ -647,7 +649,7 @@ fn validate_rack_network_config(
         }
     }
 
-    let rack_subnet = match config.rack_subnet() {
+    let rack_subnet = match validate_rack_subnet(config.rack_subnet_address) {
         Ok(v) => v,
         Err(e) => bail!(e),
     };
@@ -677,6 +679,42 @@ fn validate_rack_network_config(
         //TODO bfd config in wicket
         bfd: vec![],
     })
+}
+
+pub fn validate_rack_subnet(
+    subnet_address: Option<Ipv6Addr>,
+) -> Result<Ipv6Net, String> {
+    use rand::prelude::*;
+
+    let rack_subnet_address = match subnet_address {
+        Some(addr) => addr,
+        None => {
+            let mut rng = rand::rng();
+            let a: u16 = 0xfd00 + Into::<u16>::into(rng.random::<u8>());
+            Ipv6Addr::new(
+                a,
+                rng.random::<u16>(),
+                rng.random::<u16>(),
+                0x0100,
+                0,
+                0,
+                0,
+                0,
+            )
+        }
+    };
+
+    // first octet must be fd
+    if rack_subnet_address.octets()[0] != 0xfd {
+        return Err("rack subnet address must begin with 0xfd".into());
+    };
+
+    // Do not allow rack0
+    if rack_subnet_address.octets()[6] == 0x00 {
+        return Err("rack number (seventh octet) cannot be 0".into());
+    };
+
+    Ipv6Net::new(rack_subnet_address, 56).map_err(|e| e.to_string())
 }
 
 /// Builds a `BaPortConfigV2` from a `UserSpecifiedPortConfig`.
