@@ -470,7 +470,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::Silo>>, HttpError>;
 
-    /// Create a silo
+    /// Create silo
     #[endpoint {
         method = POST,
         path = "/v1/system/silos",
@@ -537,7 +537,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError>;
 
-    /// Delete a silo
+    /// Delete silo
     ///
     /// Delete a silo by name or ID.
     #[endpoint {
@@ -939,7 +939,7 @@ pub trait NexusExternalApi {
     // problem? (HTTP may require that this be idempotent.)  If so, can we get
     // around that having this be a slightly different content-type (e.g.,
     // "application/json-patch")?  We should see what other APIs do.
-    /// Update a project
+    /// Update project
     #[endpoint {
         method = PUT,
         path = "/v1/projects/{project}",
@@ -1484,7 +1484,7 @@ pub trait NexusExternalApi {
         path_params: Path<v2025121200::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError>;
 
-    /// Fetch a multicast group
+    /// Fetch multicast group
     ///
     /// The group can be specified by name, UUID, or multicast IP address.
     /// (e.g., "224.1.2.3" or "ff38::1").
@@ -1522,7 +1522,7 @@ pub trait NexusExternalApi {
         ))
     }
 
-    /// Delete a multicast group
+    /// Delete multicast group
     ///
     /// Deprecated: groups are deleted automatically when the last member leaves.
     #[endpoint {
@@ -1544,7 +1544,7 @@ pub trait NexusExternalApi {
         ))
     }
 
-    /// List members of a multicast group
+    /// List members of multicast group
     ///
     /// The group can be specified by name or UUID.
     #[endpoint {
@@ -1565,7 +1565,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// List members of a multicast group
+    /// List members of multicast group
     ///
     /// The group can be specified by name, UUID, or multicast IP address.
     #[endpoint {
@@ -1580,7 +1580,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<MulticastGroupMember>>, HttpError>;
 
-    /// Add instance to a multicast group
+    /// Add instance to multicast group
     ///
     /// Deprecated: use the instance join endpoint which supports implicit group
     /// creation and accepts group by name, UUID, or IP address.
@@ -1607,7 +1607,7 @@ pub trait NexusExternalApi {
         ))
     }
 
-    /// Remove instance from a multicast group
+    /// Remove instance from multicast group
     ///
     /// Deprecated: use the instance leave endpoint which accepts group by name,
     /// UUID, or IP address.
@@ -1716,7 +1716,7 @@ pub trait NexusExternalApi {
     }
 
     // TODO-correctness See note about instance create.  This should be async.
-    /// Create a disk
+    /// Create disk
     #[endpoint {
         method = POST,
         path = "/v1/disks",
@@ -2008,7 +2008,7 @@ pub trait NexusExternalApi {
         instance_config: TypedBody<params::InstanceUpdate>,
     ) -> Result<HttpResponseOk<Instance>, HttpError>;
 
-    /// Reboot an instance
+    /// Reboot instance
     #[endpoint {
         method = POST,
         path = "/v1/instances/{instance}/reboot",
@@ -2930,7 +2930,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::BgpAnnounceSetSelector>,
     ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError>;
 
-    /// Enable a BFD session
+    /// Enable BFD session
     #[endpoint {
         method = POST,
         path = "/v1/system/networking/bfd-enable",
@@ -2941,7 +2941,7 @@ pub trait NexusExternalApi {
         session: TypedBody<params::BfdSessionEnable>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Disable a BFD session
+    /// Disable BFD session
     #[endpoint {
         method = POST,
         path = "/v1/system/networking/bfd-disable",
@@ -3404,7 +3404,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Join a multicast group
+    /// Join multicast group
     ///
     /// Deprecated: newer version supports implicit group creation, accepts group
     /// by name/UUID/IP and allows specifying source IPs (optional for ASM,
@@ -3422,7 +3422,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseCreated<v2025121200::MulticastGroupMember>, HttpError>;
 
-    /// Join a multicast group by name, IP address, or UUID
+    /// Join multicast group by name, IP address, or UUID
     ///
     /// Groups can be referenced by name, IP address, or UUID. If the group
     /// doesn't exist, it's implicitly created with an auto-allocated IP from a
@@ -3445,7 +3445,7 @@ pub trait NexusExternalApi {
         body_params: TypedBody<params::InstanceMulticastGroupJoin>,
     ) -> Result<HttpResponseCreated<views::MulticastGroupMember>, HttpError>;
 
-    /// Leave a multicast group
+    /// Leave multicast group
     ///
     /// Deprecated: newer version accepts group by name, UUID, or IP address.
     #[endpoint {
@@ -3463,7 +3463,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Leave a multicast group by name, IP address, or UUID
+    /// Leave multicast group by name, IP address, or UUID
     #[endpoint {
         method = DELETE,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
@@ -3564,7 +3564,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseOk<views::Vpc>, HttpError>;
 
-    /// Update a VPC
+    /// Update VPC
     #[endpoint {
         method = PUT,
         path = "/v1/vpcs/{vpc}",
@@ -4105,7 +4105,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::PhysicalDisk>>, HttpError>;
 
-    /// Get a physical disk
+    /// Get physical disk
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/disks/{disk_id}",
@@ -4594,7 +4594,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByTimeAndId>,
     ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
 
-    /// View a support bundle
+    /// View support bundle
     #[endpoint {
         method = GET,
         path = "/experimental/v1/system/support-bundles/{bundle_id}",

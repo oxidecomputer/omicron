@@ -1042,9 +1042,6 @@ opt-level = 3
 # [patch."https://github.com/oxidecomputer/typify"]
 # typify = { path = "../typify/typify" }
 
-[patch."https://github.com/oxidecomputer/openapi-lint"]
-openapi-lint = { path = "../openapi-lint" }
-
 #
 # We maintain a fork of pq-sys to address upstream issues.  See the
 # README.oxide.md in the "oxide" branch of our fork for details.
