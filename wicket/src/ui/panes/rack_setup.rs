@@ -711,6 +711,12 @@ fn rss_config_text<'a>(
             Cow::from(external_dns_zone_name.as_str()),
         ),
         (
+            "Rack subnet address (IPv6 /56): ",
+            rack_network_config.as_ref().map_or("".into(), |c| {
+                c.rack_subnet_address.to_string().into()
+            }),
+        ),
+        (
             "Infrastructure first IP: ",
             rack_network_config
                 .as_ref()
@@ -755,7 +761,9 @@ fn rss_config_text<'a>(
         // This style ensures that if a new field is added to the struct, it
         // fails to compile.
         let UserSpecifiedRackNetworkConfig {
-            // infra_ip_first and infra_ip_last have already been handled above.
+            // rack_subnet_address, infra_ip_first, and infra_ip_last
+            // have already been handled above.
+            rack_subnet_address: _,
             infra_ip_first: _,
             infra_ip_last: _,
             // switch0 and switch1 re handled via the iter_uplinks iterator.

@@ -20,7 +20,6 @@ use omicron_common::api::internal::shared::UplinkAddressConfig;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use oxnet::IpNet;
-use oxnet::IpNetPrefixError;
 use oxnet::Ipv6Net;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -173,10 +172,18 @@ impl UserSpecifiedRackNetworkConfig {
         iter0.chain(iter1)
     }
 
-    pub fn rack_subnet(&self) -> Result<Ipv6Net, IpNetPrefixError> {
+    pub fn rack_subnet(&self) -> Result<Ipv6Net, String> {
+        // first octet must be fd
+        if self.rack_subnet_address.octets()[0] != 0xfd {
+            return Err("rack subnet address must begin with 0xfd".into());
+        };
+
         // Do not allow rack0
-        // must be fd
-        Ipv6Net::new(self.rack_subnet_address, 56)
+        if self.rack_subnet_address.octets()[6] == 0x00 {
+            return Err("rack number (seventh octet) cannot be 0".into());
+        };
+
+        Ipv6Net::new(self.rack_subnet_address, 56).map_err(|e| e.to_string())
     }
 }
 

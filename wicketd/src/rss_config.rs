@@ -20,8 +20,6 @@ use display_error_chain::DisplayErrorChain;
 use omicron_certificates::CertificateError;
 use omicron_common::address;
 use omicron_common::address::Ipv4Range;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::SwitchLocation;
 use sled_hardware_types::Baseboard;
@@ -32,8 +30,6 @@ use std::collections::BTreeSet;
 use std::collections::btree_map;
 use std::mem;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
-use std::sync::LazyLock;
 use thiserror::Error;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::SpType;
@@ -51,14 +47,6 @@ use wicketd_api::CertificateUploadResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
 use wicketd_api::SetBgpAuthKeyStatus;
-
-// TODO-correctness For now, we always use the same rack subnet when running
-// RSS. When we get to multirack, this will be wrong, but there are many other
-// RSS-related things that need to change then too.
-static DEFAULT_RACK_SUBNET: LazyLock<Ipv6Subnet<RACK_PREFIX>> = LazyLock::new(|| {
-    let ip = Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0);
-    Ipv6Subnet::new(ip)
-});
 
 const RECOVERY_SILO_NAME: &str = "recovery";
 const RECOVERY_SILO_USERNAME: &str = "recovery";
@@ -659,8 +647,10 @@ fn validate_rack_network_config(
         }
     }
 
-    // TODO more validation?
-    let rack_subnet = config.rack_subnet()?;
+    let rack_subnet = match config.rack_subnet() {
+        Ok(v) => v,
+        Err(e) => bail!(e),
+    };
 
     // TODO Add more client side checks on `rack_network_config` contents?
 

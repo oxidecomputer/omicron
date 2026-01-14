@@ -245,9 +245,11 @@ fn populate_network_table(
     };
 
     for (property, value) in [
+        ("rack_subnet_address", config.rack_subnet_address.to_string()),
         ("infra_ip_first", config.infra_ip_first.to_string()),
         ("infra_ip_last", config.infra_ip_last.to_string()),
     ] {
+        println!("property: {property}, value: {value}");
         *table.get_mut(property).unwrap().as_value_mut().unwrap() =
             Value::String(Formatted::new(value));
     }

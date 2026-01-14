@@ -7784,6 +7784,10 @@
             "type": "string",
             "format": "ipv4"
           },
+          "rack_subnet_address": {
+            "type": "string",
+            "format": "ipv6"
+          },
           "switch0": {
             "type": "object",
             "additionalProperties": {
@@ -7801,6 +7805,7 @@
           "bgp",
           "infra_ip_first",
           "infra_ip_last",
+          "rack_subnet_address",
           "switch0",
           "switch1"
         ],
