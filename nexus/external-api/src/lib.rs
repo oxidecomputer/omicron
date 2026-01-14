@@ -23,6 +23,7 @@ use nexus_types::{
         headers, params, shared,
         views::{self, MulticastGroupMember},
     },
+    trust_quorum::TrustQuorumConfig,
 };
 use omicron_common::api::external::{
     http_pagination::{
@@ -74,6 +75,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026012100, TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG),
     (2026011601, EXTERNAL_SUBNET_ATTACHMENT),
     (2026011600, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
     (2026011501, AUDIT_LOG_CREDENTIAL_ID),
@@ -4310,6 +4312,37 @@ pub trait NexusExternalApi {
         path_params: Path<params::IpAddressPath>,
         query_params: Query<params::DeleteInternetGatewayElementSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    //
+    // Trust Quorum
+    //
+
+    /// Add new sleds to the trust quorum membership
+    ///
+    /// This will write a new configuration to the database and then issue a
+    /// reconfiguration request to a trust quorum coordinator.
+    #[endpoint {
+        method = POST,
+        path = "/v1/trust-quorum/new-members",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+    }]
+    async fn trust_quorum_add_sleds(
+        rqctx: RequestContext<Self::Context>,
+        req: TypedBody<params::TrustQuorumAddSledsRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Retrieve the latest trust quorum configuration, including member status
+    #[endpoint {
+        method = GET,
+        path = "/v1/trust-quorum/config/latest/{rack_id}",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+    }]
+    async fn trust_quorum_get_latest_config(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumConfig>>, HttpError>;
 
     // Racks
 

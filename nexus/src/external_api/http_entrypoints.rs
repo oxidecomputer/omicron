@@ -55,6 +55,7 @@ use nexus_types::{
         params::SystemMetricsPathParam,
         shared::{BfdStatus, ProbeInfo},
     },
+    trust_quorum::TrustQuorumConfig,
 };
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
@@ -6191,6 +6192,52 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseDeleted())
         })
         .await
+    }
+
+    //
+    // Trust Quorum
+    //
+
+    async fn trust_quorum_add_sleds(
+        rqctx: RequestContext<Self::Context>,
+        req: TypedBody<params::TrustQuorumAddSledsRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let req = req.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus.tq_add_sleds(&opctx, req.rack_id, req.sled_ids).await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn trust_quorum_get_latest_config(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumConfig>>, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let rack_id =
+            RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let config =
+                nexus.datastore().tq_get_latest_config(&opctx, rack_id).await?;
+            Ok(HttpResponseOk(config))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     // Racks

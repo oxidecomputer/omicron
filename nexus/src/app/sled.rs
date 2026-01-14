@@ -111,6 +111,8 @@ impl super::Nexus {
     /// sufficient warning to the operator.
     ///
     /// This is idempotent, and it returns the old policy of the sled.
+    ///
+    // TODO: This needs to remove the sled from the trust-quorum.
     pub(crate) async fn sled_expunge(
         &self,
         opctx: &OpContext,

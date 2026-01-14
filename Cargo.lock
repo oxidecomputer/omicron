@@ -7165,6 +7165,7 @@ dependencies = [
  "pq-sys",
  "reqwest",
  "sled-agent-client",
+ "sled-hardware-types",
  "slog",
  "uuid",
 ]
@@ -8488,6 +8489,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-util",
  "tough",
+ "trust-quorum-types",
  "tufaceous",
  "tufaceous-artifact",
  "tufaceous-lib",
@@ -13024,7 +13026,9 @@ dependencies = [
  "serde_json",
  "sled-agent-types",
  "sled-agent-types-versions",
+ "sled-hardware-types",
  "slog",
+ "trust-quorum-types",
  "uuid",
 ]
 
