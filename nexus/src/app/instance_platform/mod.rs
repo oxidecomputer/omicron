@@ -73,7 +73,6 @@ mod cpu_platform;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::num::NonZeroU32;
 
 use crate::app::instance::InstanceRegisterReason;
 use crate::cidata::InstanceCiData;
@@ -281,7 +280,7 @@ impl DisksByIdBuilder {
             path,
             readonly: false,
             block_size: disk.block_size().to_bytes(),
-            workers: Some(NonZeroU32::new(LOCAL_STORAGE_WORKERS).unwrap()),
+            workers: Some(LOCAL_STORAGE_WORKERS),
         });
 
         self.add_generic_disk(disk, backend)
