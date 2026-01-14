@@ -306,6 +306,9 @@ pub enum SecretRetrieverError {
 
     #[error("Bootstore error: {0}")]
     Bootstore(String),
+
+    #[error("Trust quorum error: {0}")]
+    TrustQuorum(String),
 }
 
 /// A mechanism for retrieving a secrets to use as input key material to HKDF-
