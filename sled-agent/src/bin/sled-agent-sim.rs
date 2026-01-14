@@ -15,6 +15,7 @@ use dropshot::ConfigLoggingLevel;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
+use omicron_sled_agent::sim::ConfigHealthMonitor;
 use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
     Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode, ZpoolConfig,
@@ -55,6 +56,9 @@ struct Args {
 
     #[clap(action)]
     nexus_lockstep_port: u16,
+
+    #[clap(long, default_value_t = false, action)]
+    enable_health_monitor: bool,
 
     #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
@@ -127,6 +131,7 @@ async fn do_run() -> Result<(), CmdError> {
             Some(tmp.path()),
             ZpoolConfig::TenVirtualU2s,
             SledCpuFamily::AmdMilan,
+            ConfigHealthMonitor { enabled: args.enable_health_monitor },
         )
     };
 
