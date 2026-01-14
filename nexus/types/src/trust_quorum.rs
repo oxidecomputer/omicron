@@ -6,15 +6,22 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use anyhow::bail;
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::RackUuid;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_with::{DisplayFromStr, serde_as};
 use sled_hardware_types::BaseboardId;
 use trust_quorum_types::{
     crypto::EncryptedRackSecrets, crypto::Sha3_256Digest, types::Epoch,
     types::Threshold,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum TrustQuorumConfigState {
     Preparing,
     PreparingLrtqUpgrade,
@@ -40,16 +47,25 @@ impl TrustQuorumConfigState {
     pub fn is_committing(&self) -> bool {
         *self == Self::Committing
     }
+
+    pub fn is_active(&self) -> bool {
+        self.is_preparing() || self.is_committing()
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum TrustQuorumMemberState {
     Unacked,
     Prepared,
     Committed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
 pub struct TrustQuorumMemberData {
     pub state: TrustQuorumMemberState,
 
@@ -72,7 +88,8 @@ impl TrustQuorumMemberData {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TrustQuorumConfig {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
@@ -82,12 +99,40 @@ pub struct TrustQuorumConfig {
     pub commit_crash_tolerance: u8,
     pub coordinator: BaseboardId,
     pub encrypted_rack_secrets: Option<EncryptedRackSecrets>,
+    #[serde_as(as = "BTreeMap<DisplayFromStr, _>")]
     pub members: BTreeMap<BaseboardId, TrustQuorumMemberData>,
     pub time_created: DateTime<Utc>,
     pub time_committing: Option<DateTime<Utc>>,
     pub time_committed: Option<DateTime<Utc>>,
     pub time_aborted: Option<DateTime<Utc>>,
     pub abort_reason: Option<String>,
+}
+
+impl TryFrom<&TrustQuorumConfig>
+    for trust_quorum_types::configuration::Configuration
+{
+    type Error = anyhow::Error;
+    fn try_from(nexus_config: &TrustQuorumConfig) -> Result<Self, Self::Error> {
+        let mut members: BTreeMap<_, _> = BTreeMap::new();
+        for (id, data) in &nexus_config.members {
+            let Some(digest) = data.share_digest else {
+                bail!(format!(
+                    "Missing sled digests. \
+                    Trust Quorum Configuration state = {:?}",
+                    nexus_config.state
+                ));
+            };
+            members.insert(id.clone(), digest);
+        }
+        Ok(trust_quorum_types::configuration::Configuration {
+            rack_id: nexus_config.rack_id,
+            coordinator: nexus_config.coordinator.clone(),
+            members,
+            epoch: nexus_config.epoch,
+            threshold: nexus_config.threshold,
+            encrypted_rack_secrets: nexus_config.encrypted_rack_secrets.clone(),
+        })
+    }
 }
 
 impl TrustQuorumConfig {

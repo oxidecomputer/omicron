@@ -24,5 +24,7 @@ schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sled-agent-types.workspace = true
+sled-hardware-types.workspace = true
+trust-quorum-types.workspace = true
 slog.workspace = true
 uuid.workspace = true

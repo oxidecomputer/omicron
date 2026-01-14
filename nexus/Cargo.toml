@@ -119,6 +119,7 @@ tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util = { workspace = true, features = ["codec", "rt"] }
 tough.workspace = true
+trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 usdt.workspace = true
 uuid.workspace = true
