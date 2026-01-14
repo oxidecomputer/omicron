@@ -10,7 +10,8 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     DiskTest, create_console_session, create_default_ip_pools, create_disk,
     create_instance_with, create_local_user, create_project, create_silo,
-    object_create_error, object_delete, objects_list_page_authz, test_params,
+    get_device_token, grant_iam, object_create_error, object_create_no_body,
+    object_delete, objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, shared, views};
@@ -62,7 +63,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
 
     // this this creates its own entry
     let session_token = create_console_session(ctx).await;
-    let session_cookie = format!("session={}", session_token);
+    let session_cookie = format!("session={}", &session_token);
 
     let t3 = Utc::now(); // after second entry
 
@@ -407,4 +408,120 @@ fn verify_entry(
     assert_eq!(entry.source_ip.to_string(), "127.0.0.1");
     assert_eq!(entry.auth_method, Some(views::AuthMethod::Spoof));
     assert!(entry.time_completed > entry.time_started);
+}
+
+/// Test that AccessToken auth method is correctly recorded in the audit log
+#[nexus_test]
+async fn test_audit_log_access_token_auth(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+
+    let token_grant = get_device_token(client, AuthnMode::PrivilegedUser).await;
+
+    let t1 = Utc::now();
+
+    // Make an audited request using the access token
+    let body = &params::ProjectCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "token-project".parse().unwrap(),
+            description: "created with access token".to_string(),
+        },
+    };
+    RequestBuilder::new(client, Method::POST, "/v1/projects")
+        .body(Some(&body))
+        .header(
+            header::AUTHORIZATION,
+            format!("Bearer {}", token_grant.access_token),
+        )
+        .expect_status(Some(StatusCode::CREATED))
+        .execute()
+        .await
+        .expect("failed to create project with access token");
+
+    let t2 = Utc::now();
+
+    // Fetch the audit log and find the entry
+    let audit_log = fetch_log(client, t1, Some(t2)).await;
+    assert_eq!(audit_log.items.len(), 1);
+
+    let entry = &audit_log.items[0];
+    assert_eq!(entry.operation_id, "project_create");
+    assert_eq!(entry.request_uri, "/v1/projects");
+    assert_eq!(entry.auth_method, Some(views::AuthMethod::AccessToken));
+    assert_eq!(entry.credential_id, Some(token_grant.token_id));
+    assert_eq!(
+        entry.actor,
+        views::AuditLogEntryActor::SiloUser {
+            silo_user_id: USER_TEST_PRIVILEGED.id(),
+            silo_id: DEFAULT_SILO_ID,
+        }
+    );
+    assert_eq!(
+        entry.result,
+        views::AuditLogEntryResult::Success { http_status_code: 201 }
+    );
+}
+
+/// Test that ScimToken auth method is correctly recorded in the audit log
+#[nexus_test]
+async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+
+    // Create a SAML+SCIM silo (required for SCIM tokens)
+    const SILO_NAME: &str = "scim-audit-test-silo";
+    let silo = create_silo(
+        client,
+        SILO_NAME,
+        true,
+        shared::SiloIdentityMode::SamlScim,
+    )
+    .await;
+
+    // Grant the privileged user admin role on this silo so they can create tokens
+    grant_iam(
+        client,
+        &format!("/v1/system/silos/{SILO_NAME}"),
+        shared::SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Create a SCIM token
+    let url = format!("/v1/system/scim/tokens?silo={SILO_NAME}");
+    let created_token: views::ScimClientBearerTokenValue =
+        object_create_no_body(client, &url).await;
+
+    let t1 = Utc::now();
+
+    // Make an audited SCIM request using the token
+    RequestBuilder::new(client, Method::GET, "/scim/v2/Users")
+        .header(
+            header::AUTHORIZATION,
+            format!("Bearer {}", created_token.bearer_token),
+        )
+        .allow_non_dropshot_errors()
+        .expect_status(Some(StatusCode::OK))
+        .execute()
+        .await
+        .expect("failed to list SCIM users");
+
+    let t2 = Utc::now();
+
+    // Fetch the audit log and find the entry
+    let audit_log = fetch_log(client, t1, Some(t2)).await;
+    assert_eq!(audit_log.items.len(), 1);
+
+    let entry = &audit_log.items[0];
+    assert_eq!(entry.operation_id, "scim_v2_list_users");
+    assert_eq!(entry.request_uri, "/scim/v2/Users");
+    assert_eq!(entry.auth_method, Some(views::AuthMethod::ScimToken));
+    assert_eq!(entry.credential_id, Some(created_token.id));
+    assert_eq!(
+        entry.actor,
+        views::AuditLogEntryActor::Scim { silo_id: silo.identity.id }
+    );
+    assert_eq!(
+        entry.result,
+        views::AuditLogEntryResult::Success { http_status_code: 200 }
+    );
 }
