@@ -8,7 +8,6 @@ use anyhow::anyhow;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use std::collections::BTreeSet;
 
@@ -31,7 +30,7 @@ pub(crate) async fn deploy_db_metadata_nexus_records(
     // The actual generation number that's currently active is necessarily the
     // generation number of the Nexus instance that's doing the execution.
     let active_generation = blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_nexus_zones()
         .find_map(|(_sled_id, zone_cfg, nexus_config)| {
             (zone_cfg.id == nexus_id).then_some(nexus_config.nexus_generation)
         })
@@ -45,7 +44,7 @@ pub(crate) async fn deploy_db_metadata_nexus_records(
     let mut active = BTreeSet::new();
     let mut not_yet = BTreeSet::new();
     for (_sled_id, zone_config, nexus_config) in
-        blueprint.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        blueprint.in_service_nexus_zones()
     {
         if nexus_config.nexus_generation == active_generation {
             active.insert(zone_config.id);
@@ -79,6 +78,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::PendingMgsUpdates;
@@ -165,6 +165,8 @@ mod test {
             BlueprintSledConfig {
                 state: SledState::Active,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                last_allocated_ip_subnet_offset:
+                    LastAllocatedSubnetIpOffset::initial(),
                 sled_agent_generation: Generation::new(),
                 zones,
                 disks: IdOrdMap::new(),

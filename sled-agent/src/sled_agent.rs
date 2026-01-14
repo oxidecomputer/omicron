@@ -1144,7 +1144,7 @@ impl SledAgent {
         let reservoir_size = self.inner.instances.reservoir_size();
         let sled_role =
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
-        let zone_image_resolver =
+        let file_source_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
         let health_monitor = self.inner.health_monitor.to_inventory();
@@ -1173,7 +1173,7 @@ impl SledAgent {
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
-            zone_image_resolver,
+            file_source_resolver,
             health_monitor,
         })
     }
@@ -1497,7 +1497,7 @@ impl SledAgentFacilities for ReconcilerFacilities {
         Ok(zone)
     }
 
-    fn zone_image_resolver_status(&self) -> ResolverStatus {
+    fn file_source_resolver_status(&self) -> ResolverStatus {
         self.service_manager.zone_image_resolver().status()
     }
 

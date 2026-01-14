@@ -9,11 +9,11 @@ use crate::blippy::Severity;
 use crate::blippy::SledKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
@@ -61,10 +61,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
     > = BTreeMap::new();
     let mut rack_dns_subnets: BTreeSet<DnsSubnet> = BTreeSet::new();
 
-    for (sled_id, zone) in blippy
-        .blueprint()
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-    {
+    for (sled_id, zone) in blippy.blueprint().in_service_zones() {
         let ip = zone.underlay_ip();
 
         // There should be no duplicate underlay IPs.
@@ -99,7 +96,8 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                 );
             }
         } else {
-            let subnet = blippy.blueprint().sleds.get(&sled_id).unwrap().subnet;
+            let sled_config = blippy.blueprint().sleds.get(&sled_id).unwrap();
+            let subnet = sled_config.subnet;
 
             // Any given subnet should be used by at most one sled.
             match sled_subnets_by_subnet.entry(subnet) {
@@ -133,6 +131,21 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                     },
                 );
             }
+
+            // Any underlay IP (other than internal DNS, which we check above)
+            // from this sled should be no higher than this sled's last
+            // allocated IP.
+            let last_allocated_ip = sled_config.last_allocated_ip();
+            if last_allocated_ip < ip {
+                blippy.push_sled_note(
+                    sled_id,
+                    Severity::Fatal,
+                    SledKind::UnderlayIpAboveLastAllocatedIp {
+                        zone: zone.clone(),
+                        last_allocated_ip,
+                    },
+                );
+            }
         }
     }
 }
@@ -145,10 +158,8 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
     let mut used_nic_ips = BTreeMap::new();
     let mut used_nic_macs = BTreeMap::new();
 
-    for (sled_id, zone, external_ip, nic) in blippy
-        .blueprint()
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        .filter_map(|(sled_id, zone)| {
+    for (sled_id, zone, external_ip, nic) in
+        blippy.blueprint().in_service_zones().filter_map(|(sled_id, zone)| {
             zone.zone_type
                 .external_networking()
                 .map(|(external_ip, nic)| (sled_id, zone, external_ip, nic))
@@ -250,10 +261,7 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
 
     // On any given zpool, we should have at most one zone of any given
     // kind.
-    for (sled_id, zone) in blippy
-        .blueprint()
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-    {
+    for (sled_id, zone) in blippy.blueprint().in_service_zones() {
         // Check "one kind per zpool" for transient datasets...
         let filesystem_dataset = zone.filesystem_dataset();
         let kind = zone.zone_type.kind();
@@ -676,10 +684,7 @@ fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
     > = HashMap::new();
 
     // Collect all Nexus zones and their generations
-    for (sled_id, zone) in blippy
-        .blueprint()
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-    {
+    for (sled_id, zone) in blippy.blueprint().in_service_zones() {
         if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
             generation_info.entry(nexus.nexus_generation).or_default().push((
                 sled_id,
@@ -744,6 +749,7 @@ mod tests {
     use crate::BlippyReportSortKey;
     use crate::blippy::Kind;
     use crate::blippy::Note;
+    use ipnet::IpAdd;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::BlueprintArtifactVersion;
@@ -837,6 +843,62 @@ mod tests {
                 },
             },
         ];
+
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_underlay_ip_above_last_allocated() {
+        static TEST_NAME: &str = "test_underlay_ip_above_last_allocated";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Assign an "above last" IP to a Nexus zone.
+        let (sled_id, sled_config) = blueprint
+            .sleds
+            .iter_mut()
+            .find(|(_sled_id, config)| {
+                config.zones.iter().any(|z| z.zone_type.is_nexus())
+            })
+            .expect("at least one Nexus zone");
+
+        // Get the current `last_allocated_ip`, then change Nexus's IP to be one
+        // above that.
+        let last_allocated_ip = sled_config.last_allocated_ip();
+        let bad_ip = last_allocated_ip.saturating_add(1);
+        let mut nexus_config = None;
+
+        for mut z in &mut sled_config.zones {
+            if let BlueprintZoneType::Nexus(nexus) = &mut z.zone_type {
+                nexus.internal_address.set_ip(bad_ip);
+                nexus_config = Some(z.into_ref().clone());
+                break;
+            }
+        }
+
+        // We know this sled has a Nexus, so the loop must have populated this.
+        let nexus_config = nexus_config.unwrap();
+
+        let expected_notes = [Note {
+            severity: Severity::Fatal,
+            kind: Kind::Sled {
+                sled_id: *sled_id,
+                kind: Box::new(SledKind::UnderlayIpAboveLastAllocatedIp {
+                    zone: nexus_config,
+                    last_allocated_ip,
+                }),
+            },
+        }];
 
         let report = Blippy::new_blueprint_only(&blueprint)
             .into_report(BlippyReportSortKey::Kind);
@@ -1759,7 +1821,7 @@ mod tests {
         let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
 
         let crucible_addr_by_zpool = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter_map(|(_, z)| match z.zone_type {
                 BlueprintZoneType::Crucible(
                     blueprint_zone_type::Crucible { address, .. },
@@ -2004,7 +2066,7 @@ mod tests {
         // Find the Nexus zones
         let ((sled1, zone1_id), (sled2, zone2_id)) = {
             let nexus_zones: Vec<_> = blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter_map(|(sled_id, zone)| {
                     if matches!(zone.zone_type, BlueprintZoneType::Nexus(_)) {
                         Some((sled_id, zone))
@@ -2150,9 +2212,9 @@ fn check_planning_input_network_records_appear_in_blueprint(
     // constructed above in `BuilderExternalNetworking::new()`, we do not
     // check for duplicates here: we could very well see reuse of IPs
     // between expunged zones or between expunged -> running zones.
-    for (_, z) in
-        blippy.blueprint().all_omicron_zones(BlueprintZoneDisposition::any)
-    {
+    for (_, z) in blippy.blueprint().all_in_service_and_expunged_zones(
+        BlueprintExpungedZoneAccessReason::Blippy,
+    ) {
         let zone_type = &z.zone_type;
         match zone_type {
             BlueprintZoneType::BoundaryNtp(ntp) => {

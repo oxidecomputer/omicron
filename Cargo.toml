@@ -392,6 +392,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
+async-recursion = "1.1.1"
 async-trait = "0.1.89"
 attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
 atomicwrites = "0.4.4"
@@ -677,10 +678,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"

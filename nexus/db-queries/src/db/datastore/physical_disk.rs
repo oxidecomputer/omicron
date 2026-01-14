@@ -347,8 +347,8 @@ mod test {
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
-        Inventory, InventoryDisk, SledCpuFamily, SledRole,
-        ZoneImageResolverInventory,
+        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
+        SledCpuFamily, SledRole,
     };
     use std::num::NonZeroU32;
 
@@ -705,7 +705,8 @@ mod test {
                     reconciler_status:
                         ConfigReconcilerInventoryStatus::NotYetRun,
                     last_reconciliation: None,
-                    zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                    file_source_resolver:
+                        OmicronFileSourceResolverInventory::new_fake(),
                     health_monitor: HealthMonitorInventory::new(),
                 },
             )
