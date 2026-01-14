@@ -13139,6 +13139,7 @@ name = "sled-agent-types-versions"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "bootstore",
  "camino",
  "chrono",
