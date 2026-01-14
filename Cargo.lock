@@ -7006,9 +7006,9 @@ dependencies = [
  "reqwest",
  "serde_json",
  "sled-agent-client",
+ "sled-agent-resolvable-files-examples",
  "sled-agent-types",
  "sled-agent-types-versions",
- "sled-agent-zone-images-examples",
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
@@ -8901,9 +8901,9 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-health-monitor",
+ "sled-agent-resolvable-files",
  "sled-agent-types",
  "sled-agent-types-versions",
- "sled-agent-zone-images",
  "sled-diagnostics",
  "sled-hardware",
  "sled-hardware-types",
@@ -13061,9 +13061,9 @@ dependencies = [
  "serde_json",
  "sha2",
  "sled-agent-api",
+ "sled-agent-resolvable-files-examples",
  "sled-agent-types",
  "sled-agent-types-versions",
- "sled-agent-zone-images-examples",
  "sled-hardware",
  "sled-storage",
  "slog",
@@ -13096,6 +13096,51 @@ dependencies = [
  "slog-error-chain",
  "thiserror 2.0.17",
  "tokio",
+]
+
+[[package]]
+name = "sled-agent-resolvable-files"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile-ext",
+ "dropshot",
+ "expectorate",
+ "iddqd",
+ "illumos-utils",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pretty_assertions",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sled-agent-config-reconciler",
+ "sled-agent-resolvable-files-examples",
+ "sled-agent-types",
+ "sled-storage",
+ "slog",
+ "slog-error-chain",
+ "thiserror 2.0.17",
+ "tufaceous-artifact",
+]
+
+[[package]]
+name = "sled-agent-resolvable-files-examples"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile-ext",
+ "iddqd",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "serde_json",
+ "sha2",
+ "sled-agent-types",
+ "sled-storage",
+ "tufaceous-artifact",
 ]
 
 [[package]]
@@ -13167,51 +13212,6 @@ dependencies = [
  "trust-quorum-types-versions",
  "tufaceous-artifact",
  "uuid",
-]
-
-[[package]]
-name = "sled-agent-zone-images"
-version = "0.1.0"
-dependencies = [
- "camino",
- "camino-tempfile-ext",
- "dropshot",
- "expectorate",
- "iddqd",
- "illumos-utils",
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "pretty_assertions",
- "rayon",
- "serde",
- "serde_json",
- "sha2",
- "sled-agent-config-reconciler",
- "sled-agent-types",
- "sled-agent-zone-images-examples",
- "sled-storage",
- "slog",
- "slog-error-chain",
- "thiserror 2.0.17",
- "tufaceous-artifact",
-]
-
-[[package]]
-name = "sled-agent-zone-images-examples"
-version = "0.1.0"
-dependencies = [
- "camino",
- "camino-tempfile-ext",
- "iddqd",
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "serde_json",
- "sha2",
- "sled-agent-types",
- "sled-storage",
- "tufaceous-artifact",
 ]
 
 [[package]]
@@ -16374,9 +16374,9 @@ dependencies = [
  "serde_json",
  "sha2",
  "sled-agent-config-reconciler",
+ "sled-agent-resolvable-files",
+ "sled-agent-resolvable-files-examples",
  "sled-agent-types",
- "sled-agent-zone-images",
- "sled-agent-zone-images-examples",
  "sled-hardware-types",
  "sled-storage",
  "slog",
