@@ -1351,7 +1351,8 @@ mod test {
             .await
             .expect("Failed to set version");
 
-        let datastore = DataStore::new_unchecked(logctx.log.clone(), pool);
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), pool.clone());
         let checked_action = datastore
             .check_schema_and_access(
                 IdentityCheckPolicy::DontCare,
