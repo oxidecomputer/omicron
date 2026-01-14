@@ -213,6 +213,7 @@ impl DataStore {
             }
         }
 
+        // TODO-K: Update here
         // Pull services in maintenance out of all sled agents
         let svcs_in_maintenance: Vec<_> = collection
             .sled_agents
@@ -2946,6 +2947,7 @@ impl DataStore {
             datasets
         };
 
+        // TODO-K: Update here
         // Mapping of "Sled ID" -> "All SMF services in maintenance reported by
         // that sled"
         let mut svcs_in_maintenance_by_sled = {

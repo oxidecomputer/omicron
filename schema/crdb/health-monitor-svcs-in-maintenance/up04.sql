@@ -1,5 +1,5 @@
--- TODO-K: rename table
-CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance2 (
+-- TODO-K: Delete this file
+CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
@@ -10,7 +10,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance2
     sled_id UUID NOT NULL,
 
     -- unique id for each row
-    svcs_in_maintenance_id UUID NOT NULL,
+    id UUID NOT NULL,
+
+    -- FMRI of the SMF service in maintenance
+    fmri TEXT,
+
+    -- zone the SMF service in maintenance is located in
+    zone TEXT,
+
+    -- any error messages found when retrieving the SMF services in maintenance
+    error_messages TEXT ARRAY NOT NULL,
 
     -- error when calling the svcs command
     svcs_cmd_error TEXT,
@@ -18,5 +27,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance2
     -- time when the status was checked if applicable
     time_of_status TIMESTAMPTZ,
 
-    PRIMARY KEY (inv_collection_id, sled_id, svcs_in_maintenance_id)
+    PRIMARY KEY (inv_collection_id, sled_id, id)
 );

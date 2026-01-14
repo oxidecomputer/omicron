@@ -1022,6 +1022,7 @@ impl_enum_type!(
     Idle => b"idle"
 );
 
+// TODO-K: Update here
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_health_monitor_svc_in_maintenance)]
 pub struct InvSvcInMaintenance {
