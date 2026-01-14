@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use dropshot::{ResultsPage, test_util::ClientTestContext};
 use http::{Method, StatusCode, header};
 use nexus_db_queries::authn::USER_TEST_PRIVILEGED;
-use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     DiskTest, create_console_session, create_default_ip_pools, create_disk,
     create_instance_with, create_local_user, create_project, create_silo,
@@ -61,8 +61,8 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(audit_log.items.len(), 1);
 
     // this this creates its own entry
-    let session_cookie =
-        format!("session={}", create_console_session(ctx).await);
+    let session_token = create_console_session(ctx).await;
+    let session_cookie = format!("session={}", session_token);
 
     let t3 = Utc::now(); // after second entry
 
@@ -102,6 +102,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e1.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e1.user_agent, None); // no user agent passed by default
     assert_eq!(e1.auth_method, Some(views::AuthMethod::Spoof));
+    assert_eq!(e1.credential_id, None); // spoof auth has no credential
     assert!(e1.time_started >= t1 && e1.time_started <= t2);
     assert!(e1.time_completed > e1.time_started);
     assert_eq!(
@@ -118,24 +119,31 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e2.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e2.user_agent, None); // no user agent passed by default
     assert_eq!(e2.auth_method, None);
+    assert_eq!(e2.credential_id, None); // unauthenticated
     assert!(e2.time_started >= t2 && e2.time_started <= t3);
     assert!(e2.time_completed > e2.time_started);
 
     // login attempts are unauthenticated (until the user is authenticated)
-    // assert_eq!(e2.actor, views::AuditLogEntryActor::Unauthenticated);
     assert_eq!(e2.actor, views::AuditLogEntryActor::Unauthenticated);
 
     // session create was the test suite user in the test suite silo, which
     // is different from the privileged user, so we need to fetch the user
     // and silo ID using the session to check them against the audit log
-    let me = RequestBuilder::new(client, Method::GET, "/v1/me")
-        .header(header::COOKIE, session_cookie)
-        .expect_status(Some(StatusCode::OK))
-        .execute()
-        .await
-        .expect("failed to 201 on project create with session")
-        .parsed_body::<views::CurrentUser>()
-        .unwrap();
+    let session_authn = AuthnMode::Session(session_token);
+    let me: views::CurrentUser = NexusRequest::object_get(client, "/v1/me")
+        .authn_as(session_authn.clone())
+        .execute_and_parse_unwrap()
+        .await;
+
+    // get the session ID to verify credential_id
+    let sessions_url = format!("/v1/users/{}/sessions", me.user.id);
+    let sessions: ResultsPage<views::ConsoleSession> =
+        NexusRequest::object_get(client, &sessions_url)
+            .authn_as(session_authn)
+            .execute_and_parse_unwrap()
+            .await;
+    assert_eq!(sessions.items.len(), 1);
+    let session_id = sessions.items[0].id;
 
     // third one was done with the session cookie, reflected in auth_method
     assert_eq!(e3.request_uri.len(), 512);
@@ -146,6 +154,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e3.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e3.user_agent.clone().unwrap(), "A".repeat(256));
     assert_eq!(e3.auth_method, Some(views::AuthMethod::SessionCookie));
+    assert_eq!(e3.credential_id, Some(session_id));
     assert!(e3.time_started >= t3 && e3.time_started <= t4);
     assert!(e3.time_completed > e3.time_started);
     assert_eq!(

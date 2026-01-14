@@ -70,6 +70,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026011501, AUDIT_LOG_CREDENTIAL_ID),
     (2026011500, AUDIT_LOG_AUTH_METHOD_ENUM),
     (2026011300, DOC_LINT_SUMMARY_TRAILING_PERIOD),
     (2026011100, MULTICAST_JOIN_LEAVE_DOCS),
