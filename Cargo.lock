@@ -12650,10 +12650,11 @@ dependencies = [
 [[package]]
 name = "serde_human_bytes"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/serde_human_bytes?branch=main#0a09794501b6208120528c3b457d5f3a8cb17424"
+source = "git+https://github.com/oxidecomputer/serde_human_bytes?branch=main#70d3253a1acbe12a06152612ea85110acfe07317"
 dependencies = [
+ "base64 0.22.1",
  "hex",
- "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -13139,7 +13140,6 @@ name = "sled-agent-types-versions"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
  "bootstore",
  "camino",
  "chrono",
@@ -13157,6 +13157,7 @@ dependencies = [
  "proptest",
  "schemars 0.8.22",
  "serde",
+ "serde_human_bytes",
  "serde_json",
  "serde_with",
  "sha3",

@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TrustQuorumNetworkConfig {
     pub generation: u64,
-    /// A serialized blob of configuration data, base64 encoded.
+    /// A serialized blob of configuration data (base64 encoded).
     #[schemars(with = "String")]
-    #[serde(with = "serde_bytes_base64")]
+    #[serde(with = "serde_human_bytes::base64_vec")]
     pub blob: Vec<u8>,
 }
 
@@ -35,29 +35,5 @@ impl From<TrustQuorumNetworkConfig> for bootstore::schemes::v0::NetworkConfig {
             generation: config.generation,
             blob: config.blob,
         }
-    }
-}
-
-mod serde_bytes_base64 {
-    use base64::Engine;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        base64::engine::general_purpose::STANDARD
-            .encode(bytes)
-            .serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        base64::engine::general_purpose::STANDARD
-            .decode(&s)
-            .map_err(serde::de::Error::custom)
     }
 }

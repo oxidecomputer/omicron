@@ -9554,7 +9554,7 @@
         "type": "object",
         "properties": {
           "blob": {
-            "description": "A serialized blob of configuration data, base64 encoded.",
+            "description": "A serialized blob of configuration data (base64 encoded).",
             "type": "string"
           },
           "generation": {
