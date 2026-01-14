@@ -48,7 +48,7 @@ pub(crate) async fn poll_smf_services_in_maintenance(
 
 pub(crate) async fn poll_unhealthy_zpools(
     log: Logger,
-    unhealhty_zpools_tx: watch::Sender<Result<UnhealthyZpoolsResult, String>>,
+    unhealthy_zpools_tx: watch::Sender<Result<UnhealthyZpoolsResult, String>>,
 ) {
     // We poll every minute to verify the health of all zpools. This interval
     // is arbitrary.
@@ -65,10 +65,10 @@ pub(crate) async fn poll_unhealthy_zpools(
             // As above, there isn't anything waiting for changes because we
             // only look at the health check status when an inventory request
             // comes in.
-            Err(e) => unhealhty_zpools_tx.send_modify(|status| {
+            Err(e) => unhealthy_zpools_tx.send_modify(|status| {
                 *status = Err(e.to_string());
             }),
-            Ok(zpools) => unhealhty_zpools_tx.send_modify(|status| {
+            Ok(zpools) => unhealthy_zpools_tx.send_modify(|status| {
                 *status = Ok(zpools);
             }),
         };

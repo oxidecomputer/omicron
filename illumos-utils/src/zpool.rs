@@ -255,6 +255,7 @@ impl UnhealthyZpoolsResult {
                 // state.
                 match ZpoolHealth::from_str(state_str) {
                     Ok(ZpoolHealth::Faulted)
+                    | Ok(ZpoolHealth::Degraded)
                     | Ok(ZpoolHealth::Offline)
                     | Ok(ZpoolHealth::Removed)
                     | Ok(ZpoolHealth::Unavailable) => {
@@ -272,8 +273,8 @@ impl UnhealthyZpoolsResult {
                             continue;
                         }
                     }
-                    // Pool is in a healthy or degraded state, skip it.
-                    Ok(_) => {}
+                    // Pool is in a healthy state, skip it.
+                    Ok(ZpoolHealth::Online) => {}
                     Err(e) => {
                         errors.push(format!("{e}"));
                         info!(
