@@ -6,6 +6,7 @@
 
 use crate::app::background::BackgroundTask;
 use anyhow::{Context, Error, anyhow, bail};
+use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
