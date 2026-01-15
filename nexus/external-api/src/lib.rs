@@ -4313,37 +4313,6 @@ pub trait NexusExternalApi {
         query_params: Query<params::DeleteInternetGatewayElementSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    //
-    // Trust Quorum
-    //
-
-    /// Add new sleds to the trust quorum membership
-    ///
-    /// This will write a new configuration to the database and then issue a
-    /// reconfiguration request to a trust quorum coordinator.
-    #[endpoint {
-        method = POST,
-        path = "/v1/trust-quorum/new-members",
-        tags = ["experimental"],
-        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
-    }]
-    async fn trust_quorum_add_sleds(
-        rqctx: RequestContext<Self::Context>,
-        req: TypedBody<params::TrustQuorumAddSledsRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Retrieve the latest trust quorum configuration, including member status
-    #[endpoint {
-        method = GET,
-        path = "/v1/trust-quorum/config/latest/{rack_id}",
-        tags = ["experimental"],
-        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
-    }]
-    async fn trust_quorum_get_latest_config(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::RackPath>,
-    ) -> Result<HttpResponseOk<Option<TrustQuorumConfig>>, HttpError>;
-
     // Racks
 
     /// List racks
@@ -4394,6 +4363,33 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         sled: TypedBody<params::UninitializedSledId>,
     ) -> Result<HttpResponseCreated<views::SledId>, HttpError>;
+
+    /// Add new sleds to rack cluster
+    ///
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/sleds",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+    }]
+    async fn trust_quorum_add_sleds(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
+        req: TypedBody<params::AddSledsRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Retrieve the latest ongoing rack cluster membership change
+    // TODO: Change what this returns to not be so detailed.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks/{rack_id}/sleds",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+    }]
+    async fn trust_quorum_get_latest_config(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumConfig>>, HttpError>;
 
     // Sleds
 
