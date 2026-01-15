@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026011100.0.0"
+    "version": "2026011300.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -6073,7 +6073,6 @@
           "experimental"
         ],
         "summary": "List multicast groups",
-        "description": "This version includes mvlan in the response for backwards compatibility.",
         "operationId": "multicast_group_list",
         "parameters": [
           {
@@ -6133,7 +6132,7 @@
           "experimental"
         ],
         "summary": "Fetch multicast group",
-        "description": "The group can be specified by name, UUID, or multicast IP address. (e.g., \"224.1.2.3\" or \"ff38::1\").\n\nThis version includes mvlan in the response for backwards compatibility.",
+        "description": "The group can be specified by name, UUID, or multicast IP address. (e.g., \"224.1.2.3\" or \"ff38::1\").",
         "operationId": "multicast_group_view",
         "parameters": [
           {
@@ -23010,7 +23009,7 @@
         ]
       },
       "MulticastGroup": {
-        "description": "View of a Multicast Group.\n\nThis version includes `mvlan` for backwards compatibility with clients using API version 2026010800..2026011000.",
+        "description": "View of a Multicast Group",
         "type": "object",
         "properties": {
           "description": {
@@ -23034,7 +23033,7 @@
           },
           "mvlan": {
             "nullable": true,
-            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.",
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. None means no VLAN tagging on egress.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -23048,7 +23047,7 @@
             ]
           },
           "source_ips": {
-            "description": "Source IP addresses for multicast source filtering (SSM requires these; ASM can optionally use them via IGMPv3/MLDv2). Empty array means any source.",
+            "description": "Union of all member source IP addresses (computed, read-only).\n\nThis field shows the combined source IPs across all group members. Individual members may subscribe to different sources; this union reflects all sources that any member is subscribed to. Empty array means no members have source filtering enabled.",
             "type": "array",
             "items": {
               "type": "string",
