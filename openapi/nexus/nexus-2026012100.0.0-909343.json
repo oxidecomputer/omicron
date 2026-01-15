@@ -7833,7 +7833,7 @@
           "experimental"
         ],
         "summary": "Retrieve the latest ongoing rack cluster membership change",
-        "operationId": "trust_quorum_get_latest_config",
+        "operationId": "rack_membership_config_latest",
         "parameters": [
           {
             "in": "path",
@@ -7852,7 +7852,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrustQuorumConfig"
+                  "$ref": "#/components/schemas/RackMembershipChange"
                 }
               }
             }
@@ -7870,7 +7870,7 @@
           "experimental"
         ],
         "summary": "Add new sleds to rack cluster",
-        "operationId": "trust_quorum_add_sleds",
+        "operationId": "rack_membership_add_sleds",
         "parameters": [
           {
             "in": "path",
@@ -7894,8 +7894,66 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "uint64",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/racks/{rack_id}/sleds/{epoch}": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Retrieve the rack cluster membership change for the given epoch",
+        "operationId": "rack_membership_config",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "epoch",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackMembershipChange"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -19907,26 +19965,6 @@
           "sum_of_samples"
         ]
       },
-      "EncryptedRackSecrets": {
-        "description": "All possibly relevant __encrypted__ rack secrets for _prior_ committed configurations.",
-        "type": "object",
-        "properties": {
-          "data": {
-            "description": "Encrypted data.",
-            "type": "string",
-            "format": "hex string"
-          },
-          "salt": {
-            "description": "A random value used to derive the key to encrypt the rack secrets for prior committed epochs.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          }
-        },
-        "required": [
-          "data",
-          "salt"
-        ]
-      },
       "EphemeralIpCreate": {
         "description": "Parameters for creating an ephemeral IP address for an instance.",
         "type": "object",
@@ -25838,6 +25876,71 @@
           "time_modified"
         ]
       },
+      "RackMembershipChange": {
+        "description": "Status of last membership change from adding or removinig sleds",
+        "type": "object",
+        "properties": {
+          "epoch": {
+            "description": "The generation / version of the configuration",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "members": {
+            "description": "All members of the rack cluster for this epoch",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          },
+          "rack_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RackMembershipChangeState"
+          },
+          "time_aborted": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_committed": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "unacknowledged_members": {
+            "description": "All members which have not committed to the membership change",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "epoch",
+          "members",
+          "rack_id",
+          "state",
+          "time_created",
+          "unacknowledged_members"
+        ]
+      },
+      "RackMembershipChangeState": {
+        "type": "string",
+        "enum": [
+          "in_progress",
+          "committed",
+          "aborted"
+        ]
+      },
       "RackResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -25858,15 +25961,6 @@
         "required": [
           "items"
         ]
-      },
-      "RackUuid": {
-        "x-rust-type": {
-          "crate": "omicron-uuid-kinds",
-          "path": "omicron_uuid_kinds::RackUuid",
-          "version": "*"
-        },
-        "type": "string",
-        "format": "uuid"
       },
       "Route": {
         "description": "A route to a destination network through a gateway address.",
@@ -29098,133 +29192,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "TrustQuorumConfig": {
-        "type": "object",
-        "properties": {
-          "abort_reason": {
-            "nullable": true,
-            "type": "string"
-          },
-          "commit_crash_tolerance": {
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          },
-          "coordinator": {
-            "$ref": "#/components/schemas/BaseboardId"
-          },
-          "encrypted_rack_secrets": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/EncryptedRackSecrets"
-              }
-            ]
-          },
-          "epoch": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "last_committed_epoch": {
-            "nullable": true,
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "members": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/TrustQuorumMemberData"
-            }
-          },
-          "rack_id": {
-            "$ref": "#/components/schemas/RackUuid"
-          },
-          "state": {
-            "$ref": "#/components/schemas/TrustQuorumConfigState"
-          },
-          "threshold": {
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          },
-          "time_aborted": {
-            "nullable": true,
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_committed": {
-            "nullable": true,
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_committing": {
-            "nullable": true,
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_created": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "commit_crash_tolerance",
-          "coordinator",
-          "epoch",
-          "members",
-          "rack_id",
-          "state",
-          "threshold",
-          "time_created"
-        ]
-      },
-      "TrustQuorumConfigState": {
-        "type": "string",
-        "enum": [
-          "preparing",
-          "preparing_lrtq_upgrade",
-          "committing",
-          "committed",
-          "committed_partially",
-          "aborted"
-        ]
-      },
-      "TrustQuorumMemberData": {
-        "type": "object",
-        "properties": {
-          "share_digest": {
-            "nullable": true,
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          },
-          "state": {
-            "$ref": "#/components/schemas/TrustQuorumMemberState"
-          },
-          "time_committed": {
-            "nullable": true,
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_prepared": {
-            "nullable": true,
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "state"
-        ]
-      },
-      "TrustQuorumMemberState": {
-        "type": "string",
-        "enum": [
-          "unacked",
-          "prepared",
-          "committed"
         ]
       },
       "TufRepo": {

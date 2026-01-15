@@ -29,7 +29,7 @@ impl super::Nexus {
         opctx: &OpContext,
         rack_id: RackUuid,
         new_sleds: BTreeSet<UninitializedSledId>,
-    ) -> Result<(), Error> {
+    ) -> Result<Epoch, Error> {
         let (latest_committed_config, latest_epoch) =
             self.load_latest_possible_committed_config(opctx, rack_id).await?;
         let new_epoch = latest_epoch.next();
@@ -59,7 +59,7 @@ impl super::Nexus {
             .sled_get_commissioned_by_baseboard_and_rack_id(
                 opctx,
                 rack_id,
-                &new_config.coordinator,
+                new_config.coordinator.clone(),
             )
             .await?
         else {
@@ -114,7 +114,7 @@ impl super::Nexus {
         };
         client.trust_quorum_reconfigure(&req).await?;
 
-        Ok(())
+        Ok(new_config.epoch)
     }
 
     // Create a new `ProposedTrustQuorumConfig` including `new_sleds` in

@@ -32,6 +32,7 @@ use omicron_common::api::external::{
     *,
 };
 use openapiv3::OpenAPI;
+use trust_quorum_types::types::Epoch;
 
 /// Copies of data types that changed between versions
 mod v2025112000;
@@ -4371,11 +4372,23 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
     }]
-    async fn trust_quorum_add_sleds(
+    async fn rack_membership_add_sleds(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackPath>,
         req: TypedBody<params::AddSledsRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    ) -> Result<HttpResponseOk<Epoch>, HttpError>;
+
+    /// Retrieve the rack cluster membership change for the given epoch
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks/{rack_id}/sleds/{epoch}",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+    }]
+    async fn rack_membership_config(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackMembershipConfigPathParams>,
+    ) -> Result<HttpResponseOk<Option<RackMembershipChange>>, HttpError>;
 
     /// Retrieve the latest ongoing rack cluster membership change
     #[endpoint {
@@ -4384,7 +4397,7 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
     }]
-    async fn trust_quorum_get_latest_config(
+    async fn rack_membership_config_latest(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackPath>,
     ) -> Result<HttpResponseOk<Option<RackMembershipChange>>, HttpError>;

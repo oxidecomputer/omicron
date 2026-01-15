@@ -94,7 +94,7 @@ pub async fn sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext(
         .sled_get_commissioned_by_baseboard_and_rack_id(
             opctx,
             rack_id,
-            baseboard_id,
+            baseboard_id.clone(),
         )
         .await?
     else {

@@ -39,6 +39,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
+use trust_quorum_types::types::Epoch;
 use url::Url;
 use uuid::Uuid;
 
@@ -3191,6 +3192,12 @@ pub struct LoginUrlQuery {
 #[derive(Deserialize, JsonSchema)]
 pub struct LoginPath {
     pub silo_name: Name,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RackMembershipConfigPathParams {
+    pub rack_id: Uuid,
+    pub epoch: Epoch,
 }
 
 /// This is meant as a security feature. We want to ensure we never redirect to

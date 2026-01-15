@@ -6953,6 +6953,7 @@ dependencies = [
  "scim2-rs",
  "serde",
  "test-strategy",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "uuid",
 ]
