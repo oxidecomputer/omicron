@@ -632,6 +632,8 @@ impl BackgroundTasksInitializer {
                     resolver.clone(),
                     config.support_bundle_collector.disable,
                     nexus_id,
+                    config.support_bundle_collector.target_free_datasets,
+                    config.support_bundle_collector.min_bundles_to_keep,
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),

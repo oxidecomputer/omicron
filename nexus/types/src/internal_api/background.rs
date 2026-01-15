@@ -268,6 +268,21 @@ pub struct SupportBundleCleanupReport {
     pub db_failing_bundles_updated: usize,
 }
 
+/// Describes what happened during automatic support bundle deletion.
+#[derive(Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+pub struct SupportBundleAutoDeletionReport {
+    /// Number of bundles marked for deletion to free up dataset capacity.
+    pub bundles_marked_for_deletion: usize,
+    /// Current count of free debug datasets (before deletions).
+    pub free_datasets: usize,
+    /// Total debug datasets available.
+    pub total_datasets: usize,
+    /// Active bundles count (before deletions).
+    pub active_bundles: usize,
+    /// Errors encountered during auto-deletion.
+    pub errors: Vec<String>,
+}
+
 /// Identifies what we could or could not store within a support bundle.
 ///
 /// This struct will get emitted as part of the background task infrastructure.

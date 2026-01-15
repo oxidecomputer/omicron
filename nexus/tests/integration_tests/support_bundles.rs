@@ -20,6 +20,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::SupportBundleInfo;
 use nexus_types::external_api::shared::SupportBundleState;
+use nexus_types::internal_api::background::SupportBundleAutoDeletionReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
@@ -28,6 +29,7 @@ use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
+use std::num::NonZeroU32;
 use zip::read::ZipArchive;
 
 type ControlPlaneTestContext =
@@ -331,6 +333,8 @@ async fn bundle_update_comment(
 
 #[derive(Deserialize)]
 struct TaskOutput {
+    auto_deletion_err: Option<String>,
+    auto_deletion_report: Option<SupportBundleAutoDeletionReport>,
     cleanup_err: Option<String>,
     collection_err: Option<String>,
     cleanup_report: Option<SupportBundleCleanupReport>,
@@ -929,4 +933,120 @@ async fn test_support_bundle_delete_failed_bundle(
         !bundles.iter().any(|b| b.id == bundle.id),
         "Deleted bundle should not appear in bundle list"
     );
+}
+
+// Test automatic deletion of support bundles to maintain free dataset capacity.
+//
+// This test verifies that:
+// 1. Auto-deletion kicks in when free_datasets < target_free_datasets
+// 2. The oldest bundles are marked for deletion first
+// 3. min_bundles_to_keep is respected
+//
+// Configuration: target_free_datasets=1, min_bundles_to_keep=1, 5 datasets
+// Create 5 bundles (filling all datasets), and verify auto-deletion happens
+// when we run out of free datasets.
+#[tokio::test]
+async fn test_support_bundle_auto_deletion() {
+    // Create a test context with auto-deletion enabled:
+    // - target_free_datasets=1: try to maintain 1 free dataset
+    // - min_bundles_to_keep=1: always keep at least 1 bundle
+    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+        "test_support_bundle_auto_deletion",
+    )
+    .customize_nexus_config(&|config| {
+        config
+            .pkg
+            .background_tasks
+            .support_bundle_collector
+            .target_free_datasets = Some(NonZeroU32::new(1).unwrap());
+        config
+            .pkg
+            .background_tasks
+            .support_bundle_collector
+            .min_bundles_to_keep = Some(NonZeroU32::new(1).unwrap());
+    })
+    .start::<omicron_nexus::Server>()
+    .await;
+
+    let client = &cptestctx.external_client;
+
+    // Create 5 zpools, giving us 5 debug datasets
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(5).build().await;
+
+    // Create and activate bundles one by one.
+    // With 5 datasets and target_free=1:
+    // - After bundles 1-4: free >= 1, so no auto-delete needed
+    // - When creating bundle 5:
+    //   - Before collection: 4 Active + 1 Collecting = 5 bundles, free = 0
+    //   - Auto-delete triggers: want 1 free, have 0, delete 1 oldest
+    //   - min_keep=1, active=4, max_deletable=3, so we CAN delete
+    //   - Result: oldest bundle deleted, then bundle 5 gets collected
+    let mut bundle_ids = Vec::new();
+    for i in 0..5 {
+        let bundle = bundle_create(&client).await.unwrap();
+        bundle_ids.push(bundle.id);
+        let output =
+            activate_bundle_collection_background_task(&cptestctx).await;
+        assert_eq!(
+            output.collection_err, None,
+            "Bundle {} collection failed",
+            i
+        );
+
+        // Check auto-deletion report
+        assert_eq!(output.auto_deletion_err, None);
+        let report = output
+            .auto_deletion_report
+            .expect("Should have auto_deletion_report");
+        assert_eq!(report.total_datasets, 5);
+
+        // Small delay to ensure different creation times
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
+
+    // After creating 5 bundles:
+    // - Bundle 5 creation triggered auto-delete of bundle 1 (oldest)
+    // - Then cleanup removed bundle 1, and collection activated bundle 5
+    // So we should have 4 Active bundles remaining
+    let bundles = bundles_list(&client).await.unwrap();
+    assert_eq!(bundles.len(), 4, "Should have 4 bundles after auto-deletion");
+
+    // All remaining bundles should be Active
+    for bundle in &bundles {
+        assert_eq!(bundle.state, SupportBundleState::Active);
+    }
+
+    // The oldest bundle (first created) should have been deleted
+    assert!(
+        !bundles.iter().any(|b| b.id == bundle_ids[0]),
+        "Oldest bundle (bundle 1) should have been auto-deleted"
+    );
+
+    // Bundles 2-5 should remain
+    for i in 1..5 {
+        assert!(
+            bundles.iter().any(|b| b.id == bundle_ids[i]),
+            "Bundle {} should remain",
+            i + 1
+        );
+    }
+
+    // Now verify the auto-deletion report from the last run
+    // Re-run bg task to get a fresh report (no deletion should happen now)
+    let output = activate_bundle_collection_background_task(&cptestctx).await;
+    assert_eq!(output.auto_deletion_err, None);
+    let report = output.auto_deletion_report.expect("Should have report");
+
+    // Now we have: 4 bundles, 5 datasets, 1 free
+    // free (1) >= target (1), so no deletion needed
+    assert_eq!(report.total_datasets, 5);
+    assert_eq!(report.active_bundles, 4);
+    assert_eq!(report.free_datasets, 1);
+    assert_eq!(
+        report.bundles_marked_for_deletion, 0,
+        "No deletion needed when free >= target"
+    );
+
+    cptestctx.teardown().await;
 }
