@@ -1105,6 +1105,10 @@ pub static DEMO_SUBNET_POOL_UPDATE: LazyLock<params::SubnetPoolUpdate> =
     });
 pub static DEMO_SUBNET_POOL_SUBNETS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/subnets", *DEMO_SUBNET_POOL_URL));
+pub static DEMO_SUBNET_POOL_SUBNETS_ADD_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/add", *DEMO_SUBNET_POOL_SUBNETS_URL));
+pub static DEMO_SUBNET_POOL_SUBNETS_REMOVE_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/remove", *DEMO_SUBNET_POOL_SUBNETS_URL));
 pub static DEMO_SUBNET_POOL_SUBNET_ADD: LazyLock<params::SubnetPoolSubnetAdd> =
     LazyLock::new(|| params::SubnetPoolSubnetAdd {
         identity: IdentityMetadataCreateParams {
@@ -1115,6 +1119,11 @@ pub static DEMO_SUBNET_POOL_SUBNET_ADD: LazyLock<params::SubnetPoolSubnetAdd> =
         min_alloc: None,
         max_alloc: None,
     });
+pub static DEMO_SUBNET_POOL_SUBNET_REMOVE: LazyLock<
+    params::SubnetPoolSubnetRemove,
+> = LazyLock::new(|| params::SubnetPoolSubnetRemove {
+    subnet: "10.0.0.0/16".parse().unwrap(),
+});
 pub static DEMO_SUBNET_POOL_SILOS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/silos", *DEMO_SUBNET_POOL_URL));
 pub static DEMO_SUBNET_POOL_LINK_SILO: LazyLock<params::SubnetPoolLinkSilo> =
@@ -1752,17 +1761,32 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Delete,
                 ],
             },
+            // Subnet pool subnets list endpoint
             VerifyEndpoint {
                 url: &DEMO_SUBNET_POOL_SUBNETS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![
-                    AllowedMethod::GetUnimplemented,
-                    AllowedMethod::Post(
-                        serde_json::to_value(&*DEMO_SUBNET_POOL_SUBNET_ADD)
-                            .unwrap(),
-                    ),
-                ],
+                allowed_methods: vec![AllowedMethod::GetUnimplemented],
+            },
+            // Subnet pool subnets/add endpoint
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_SUBNETS_ADD_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_SUBNET_POOL_SUBNET_ADD)
+                        .unwrap(),
+                )],
+            },
+            // Subnet pool subnets/remove endpoint
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_SUBNETS_REMOVE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_SUBNET_POOL_SUBNET_REMOVE)
+                        .unwrap(),
+                )],
             },
             VerifyEndpoint {
                 url: &DEMO_SUBNET_POOL_SILOS_URL,
