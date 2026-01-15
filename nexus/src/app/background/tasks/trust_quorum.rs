@@ -402,7 +402,7 @@ async fn commit(
         let config = config.clone();
         let client_ops = if i + 1 == num_clients {
             // Take all remaining ops for the last client.
-            ops.drain(..).collect()
+            std::mem::take(&mut ops)
         } else {
             // Draining removes elements and moves the elements on the back to
             // the front to fill the hole. Therefore the size shrinks and we can
