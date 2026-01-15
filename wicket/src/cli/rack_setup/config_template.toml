@@ -57,7 +57,6 @@ allow = "any"
 
 # TODO: docs on network config
 [rack_network_config]
-rack_subnet_address = ""
 infra_ip_first = ""
 infra_ip_last = ""
 

@@ -245,12 +245,15 @@ fn populate_network_table(
     };
 
     if let Some(rack_subnet_address) = config.rack_subnet_address {
-        *table
-            .get_mut("rack_subnet_address")
-            .unwrap()
-            .as_value_mut()
-            .unwrap() =
-            Value::String(Formatted::new(rack_subnet_address.to_string()));
+        let value = Value::String(Formatted::new(rack_subnet_address.to_string()));
+        match table.entry("rack_subnet_address") {
+            toml_edit::Entry::Occupied(mut entry) => {
+                entry.insert( Item::Value(value));
+            },
+            toml_edit::Entry::Vacant(entry) => {
+                entry.insert(Item::Value(value));
+            },
+        }
     }
 
     for (property, value) in [

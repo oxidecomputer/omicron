@@ -69,9 +69,9 @@ allow = "any"
 
 # TODO: docs on network config
 [rack_network_config]
-rack_subnet_address = "fd00:1122:3344:100::"
 infra_ip_first = "172.30.0.1"
 infra_ip_last = "172.30.0.10"
+rack_subnet_address = "fd00:1122:3344:100::"
 
 [rack_network_config.switch0.port0]
 routes = [{ nexthop = "172.30.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
