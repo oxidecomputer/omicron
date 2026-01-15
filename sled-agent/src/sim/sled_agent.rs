@@ -169,9 +169,9 @@ impl SledAgent {
                 .start(&log, &config.dropshot);
 
         // TODO-K: Uncomment and remove
-        let health_monitor = HealthMonitorHandle::stub();
-        // let health_monitor =
-        //     crate::long_running_tasks::spawn_health_monitor_tasks(&log).await;
+        // let health_monitor = HealthMonitorHandle::stub();
+         let health_monitor =
+             crate::long_running_tasks::spawn_health_monitor_tasks(&log).await;
 
         Arc::new(SledAgent {
             id,

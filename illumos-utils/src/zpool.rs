@@ -216,18 +216,12 @@ pub struct PathInPool {
 pub struct UnhealthyZpoolsResult {
     pub zpools: Vec<String>,
     pub errors: Vec<String>,
-    pub time_of_status: Option<DateTime<Utc>>,
+    pub time_of_status: DateTime<Utc>,
 }
 
 impl UnhealthyZpoolsResult {
     pub fn new() -> Self {
-        Self { zpools: vec![], errors: vec![], time_of_status: None }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.zpools.is_empty()
-            && self.errors.is_empty()
-            && self.time_of_status == None
+        Self { zpools: vec![], errors: vec![], time_of_status: Utc::now() }
     }
 
     #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
@@ -235,7 +229,7 @@ impl UnhealthyZpoolsResult {
         let mut zpools = vec![];
         let mut errors = vec![];
         if data.is_empty() {
-            return Self { zpools, errors, time_of_status: Some(Utc::now()) };
+            return Self { zpools, errors, time_of_status: Utc::now() };
         }
 
         // Example of the response from running `zpool list -Hpo health,name`
@@ -287,7 +281,7 @@ impl UnhealthyZpoolsResult {
             }
         }
 
-        Self { zpools, errors, time_of_status: Some(Utc::now()) }
+        Self { zpools, errors, time_of_status: Utc::now() }
     }
 }
 
@@ -486,12 +480,11 @@ ONLINE  rpool
             vec!["fakepool1".to_string(), "fakepool2".to_string()]
         );
         assert_eq!(result.errors.len(), 0);
-        assert!(result.time_of_status.is_some());
     }
 
     #[test]
     fn test_unhealthy_zpool_parse_none_success() {
-        let output = r#"DEGRADED fakepool1
+        let output = r#"ONLINE fakepool1
 ONLINE   fakepool2
 ONLINE   rpool
 "#;
@@ -502,7 +495,6 @@ ONLINE   rpool
         // We want to make sure we only have zero unhealthy pools
         assert_eq!(result.zpools.len(), 0);
         assert_eq!(result.errors.len(), 0);
-        assert!(result.time_of_status.is_some());
     }
 
     #[test]
@@ -512,10 +504,9 @@ ONLINE   rpool
         let log = log();
         let result = UnhealthyZpoolsResult::parse(&log, output.as_bytes());
 
-        // We want to make sure we only have zero unhealthy pools
+        // We want to make sure we have zero unhealthy pools
         assert_eq!(result.zpools.len(), 0);
         assert_eq!(result.errors.len(), 0);
-        assert!(result.time_of_status.is_some());
     }
 
     #[test]
@@ -536,7 +527,6 @@ ONLINE  rpool
                 .to_string(),
             ]
         );
-        assert!(result.time_of_status.is_some());
     }
 
     #[test]
@@ -553,7 +543,6 @@ ONLINE  rpool
             result.errors,
             vec!["Unexpected output line: FAULTED".to_string(),],
         );
-        assert!(result.time_of_status.is_some());
     }
 
     #[test]
