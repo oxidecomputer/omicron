@@ -52,13 +52,13 @@ async fn test_subnet_pool_create_unimplemented(
 ) {
     let client = &cptestctx.external_client;
 
-    let create_params = params::SubnetPoolCreate {
-        identity: IdentityMetadataCreateParams {
+    let create_params = params::SubnetPoolCreate::new(
+        IdentityMetadataCreateParams {
             name: "test-pool".parse().unwrap(),
             description: String::from("A test subnet pool"),
         },
-        ip_version: IpVersion::V4,
-    };
+        IpVersion::V4,
+    );
 
     NexusRequest::expect_failure_with_body(
         client,
