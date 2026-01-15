@@ -566,42 +566,52 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // Count total and free datasets using a LEFT JOIN to avoid full table scans.
-        // A dataset is "free" if it has no bundle using it (any state).
-        // This uses the one_bundle_per_dataset unique index on support_bundle.dataset_id.
-        let dataset_counts: Vec<(Uuid, Option<Uuid>)> =
-            dataset_dsl::rendezvous_debug_dataset
-                .filter(dataset_dsl::time_tombstoned.is_null())
-                .left_join(
-                    bundle_dsl::support_bundle
-                        .on(dataset_dsl::id.eq(bundle_dsl::dataset_id)),
-                )
-                .select((dataset_dsl::id, bundle_dsl::dataset_id.nullable()))
+        let target = target_free_datasets.get() as usize;
+
+        // Count total non-tombstoned datasets
+        let total_datasets: i64 = dataset_dsl::rendezvous_debug_dataset
+            .filter(dataset_dsl::time_tombstoned.is_null())
+            .count()
+            .get_result_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let total_datasets = total_datasets as usize;
+
+        // Count bundles by state to get both used_datasets and active_bundles
+        // in a single query. Uses the lookup_bundle_by_state_and_creation index.
+        //
+        // Bundles that occupy datasets are:
+        // - Collecting: actively writing to dataset
+        // - Active: has complete data on dataset
+        // - Destroying: waiting for storage cleanup
+        // - Failing: transitional, still has storage to clean
+        // Failed bundles do NOT occupy datasets - they're marked Failed when
+        // their dataset is expunged (see support_bundle_fail_expunged).
+        let bundle_counts: Vec<(SupportBundleState, i64)> =
+            bundle_dsl::support_bundle
+                .filter(bundle_dsl::state.eq_any([
+                    SupportBundleState::Collecting,
+                    SupportBundleState::Active,
+                    SupportBundleState::Destroying,
+                    SupportBundleState::Failing,
+                ]))
+                .group_by(bundle_dsl::state)
+                .select((bundle_dsl::state, diesel::dsl::count_star()))
                 .load_async(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-        let total_datasets = dataset_counts.len();
-        let free_datasets = dataset_counts
+        let used_datasets: usize =
+            bundle_counts.iter().map(|(_, count)| *count as usize).sum();
+        let active_bundles: usize = bundle_counts
             .iter()
-            .filter(|(_, bundle)| bundle.is_none())
-            .count();
+            .find(|(state, _)| *state == SupportBundleState::Active)
+            .map(|(_, count)| *count as usize)
+            .unwrap_or(0);
 
-        // Load Active bundles for deletion candidates
-        // Only Active bundles can be auto-deleted (not Collecting, Destroying, etc.)
-        // Ordered by creation time to get the oldest first for potential deletion
-        let active_bundle_list: Vec<SupportBundle> = bundle_dsl::support_bundle
-            .filter(bundle_dsl::state.eq(SupportBundleState::Active))
-            .order(bundle_dsl::time_created.asc())
-            .select(SupportBundle::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        let active_bundles = active_bundle_list.len();
-
-        let target = target_free_datasets.get() as usize;
+        let free_datasets = total_datasets.saturating_sub(used_datasets);
 
         // If we have enough free datasets, no deletion needed
         if free_datasets >= target {
@@ -634,11 +644,16 @@ impl DataStore {
             });
         }
 
-        // Take oldest bundles from the already-sorted list
-        let bundles_to_delete: Vec<SupportBundle> = active_bundle_list
-            .into_iter()
-            .take(bundles_to_delete_count)
-            .collect();
+        // Query only the oldest bundles we need to delete (with LIMIT)
+        // Uses the lookup_bundle_by_state_and_creation index for efficient ordering
+        let bundles_to_delete: Vec<SupportBundle> = bundle_dsl::support_bundle
+            .filter(bundle_dsl::state.eq(SupportBundleState::Active))
+            .order(bundle_dsl::time_created.asc())
+            .limit(bundles_to_delete_count as i64)
+            .select(SupportBundle::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(AutoDeletionResult {
             bundles_to_delete,
