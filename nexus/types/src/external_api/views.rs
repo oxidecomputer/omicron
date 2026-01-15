@@ -469,6 +469,8 @@ pub struct SubnetPool {
     pub identity: IdentityMetadata,
     /// The IP version for this pool
     pub ip_version: IpVersion,
+    /// Type of subnet pool (unicast or multicast)
+    pub pool_type: shared::IpPoolType,
 }
 
 /// A subnet range within a subnet pool
