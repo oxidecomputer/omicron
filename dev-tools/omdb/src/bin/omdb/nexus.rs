@@ -1250,6 +1250,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "fm_sitrep_gc" => {
             print_task_fm_sitrep_gc(details);
         }
+        "trust_quorum_manager" => {
+            print_task_trust_quorum_manager(details);
+        }
         _ => {
             println!(
                 "warning: unknown background task: {:?} \
@@ -3241,6 +3244,32 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     println!(
         "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
     );
+}
+
+fn print_task_trust_quorum_manager(details: &serde_json::Value) {
+    #[derive(Deserialize)]
+    struct TqManagerResult {
+        statuses: Vec<String>,
+        errors: Vec<String>,
+    }
+
+    let res = match serde_json::from_value::<TqManagerResult>(details.clone()) {
+        Ok(res) => res,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+
+    for status in res.statuses {
+        println!("{status}");
+    }
+    for error in res.errors {
+        println!("{error}");
+    }
 }
 
 const ERRICON: &str = "/!\\";
