@@ -251,11 +251,10 @@ async fn drive_reconfiguration(
     }
 
     // For each unacked node, need to send a `Commit` or `PrepareAndCommit'
-    if config.state.is_committing() {
-        return commit(log, opctx, datastore, config).await;
-    }
-
-    Ok(Status::ConfigInactive)
+    //
+    // At this point we know that the configuration is active and we are not
+    // preparing. Therefore we must be committing.
+    commit(log, opctx, datastore, config).await
 }
 
 async fn prepare(
@@ -347,6 +346,13 @@ async fn commit(
         }
     }
 
+    if ops.is_empty() {
+        bail!(
+            "Unexpected error. No members to commit, \
+            even though configuration was active."
+        );
+    }
+
     //
     // Get a set of random clients. We can proxy requests if these clients are
     // different from the members that need committing.
@@ -395,7 +401,7 @@ async fn commit(
     let ops_per_client = ops.len() / clients.len();
     let num_clients = clients.len();
     let mut client_destinations_by_worker_task_id = BTreeMap::new();
-    for (i, client) in clients.into_iter().enumerate() {
+    for (i, (client_dest, client)) in clients.into_iter().enumerate() {
         let config = config.clone();
         let client_ops = if i + 1 == num_clients {
             // Take all remaining ops for the last client.
@@ -406,9 +412,9 @@ async fn commit(
             // always drain from the front.
             ops.drain(..ops_per_client).collect()
         };
-        let client_dest = client.0.clone();
+        let client_dest2 = client_dest.clone();
         let handle = workers.spawn(async move {
-            run_commit_ops(client.0, client.1, client_ops, config).await
+            run_commit_ops(client_dest2, client, client_ops, config).await
         });
         client_destinations_by_worker_task_id.insert(handle.id(), client_dest);
     }
