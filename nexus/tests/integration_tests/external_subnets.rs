@@ -10,7 +10,6 @@
 //!
 //! TODO(#9453): Replace stub tests with full implementation tests.
 
-use dropshot::HttpErrorResponseBody;
 use http::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -24,6 +23,10 @@ type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 const PROJECT_NAME: &str = "test-project";
+
+// Note: These tests verify that stub endpoints return 500 Internal Server Error.
+// The detailed "endpoint is not implemented" message is intentionally not exposed
+// to clients for security reasons (internal messages are logged server-side only).
 
 fn external_subnets_url(project: &str) -> String {
     format!("/v1/external-subnets?project={}", project)
@@ -50,7 +53,7 @@ async fn test_external_subnet_list_unimplemented(
     // Create a project first (external subnets are project-scoped)
     let _ = create_project(client, PROJECT_NAME).await;
 
-    let error = NexusRequest::expect_failure(
+    NexusRequest::expect_failure(
         client,
         StatusCode::INTERNAL_SERVER_ERROR,
         Method::GET,
@@ -59,15 +62,7 @@ async fn test_external_subnet_list_unimplemented(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("failed to make request")
-    .parsed_body::<HttpErrorResponseBody>()
-    .expect("failed to parse error body");
-
-    assert!(
-        error.message.contains("not implemented"),
-        "expected 'not implemented' error, got: {}",
-        error.message
-    );
+    .expect("failed to make request");
 }
 
 #[nexus_test]
@@ -89,7 +84,7 @@ async fn test_external_subnet_create_unimplemented(
         prefix_len: Some(24),
     };
 
-    let error = NexusRequest::expect_failure_with_body(
+    NexusRequest::expect_failure_with_body(
         client,
         StatusCode::INTERNAL_SERVER_ERROR,
         Method::POST,
@@ -99,15 +94,7 @@ async fn test_external_subnet_create_unimplemented(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("failed to make request")
-    .parsed_body::<HttpErrorResponseBody>()
-    .expect("failed to parse error body");
-
-    assert!(
-        error.message.contains("not implemented"),
-        "expected 'not implemented' error, got: {}",
-        error.message
-    );
+    .expect("failed to make request");
 }
 
 #[nexus_test]
@@ -119,7 +106,7 @@ async fn test_external_subnet_view_unimplemented(
     // Create a project first
     let _ = create_project(client, PROJECT_NAME).await;
 
-    let error = NexusRequest::expect_failure(
+    NexusRequest::expect_failure(
         client,
         StatusCode::INTERNAL_SERVER_ERROR,
         Method::GET,
@@ -128,15 +115,7 @@ async fn test_external_subnet_view_unimplemented(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("failed to make request")
-    .parsed_body::<HttpErrorResponseBody>()
-    .expect("failed to parse error body");
-
-    assert!(
-        error.message.contains("not implemented"),
-        "expected 'not implemented' error, got: {}",
-        error.message
-    );
+    .expect("failed to make request");
 }
 
 #[nexus_test]
@@ -155,7 +134,7 @@ async fn test_external_subnet_update_unimplemented(
         },
     };
 
-    let error = NexusRequest::expect_failure_with_body(
+    NexusRequest::expect_failure_with_body(
         client,
         StatusCode::INTERNAL_SERVER_ERROR,
         Method::PUT,
@@ -165,15 +144,7 @@ async fn test_external_subnet_update_unimplemented(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("failed to make request")
-    .parsed_body::<HttpErrorResponseBody>()
-    .expect("failed to parse error body");
-
-    assert!(
-        error.message.contains("not implemented"),
-        "expected 'not implemented' error, got: {}",
-        error.message
-    );
+    .expect("failed to make request");
 }
 
 #[nexus_test]
@@ -185,7 +156,7 @@ async fn test_external_subnet_delete_unimplemented(
     // Create a project first
     let _ = create_project(client, PROJECT_NAME).await;
 
-    let error = NexusRequest::expect_failure(
+    NexusRequest::expect_failure(
         client,
         StatusCode::INTERNAL_SERVER_ERROR,
         Method::DELETE,
@@ -194,15 +165,7 @@ async fn test_external_subnet_delete_unimplemented(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("failed to make request")
-    .parsed_body::<HttpErrorResponseBody>()
-    .expect("failed to parse error body");
-
-    assert!(
-        error.message.contains("not implemented"),
-        "expected 'not implemented' error, got: {}",
-        error.message
-    );
+    .expect("failed to make request");
 }
 
 #[nexus_test]
@@ -219,7 +182,7 @@ async fn test_external_subnet_attach_unimplemented(
         parent: "test-instance".parse().unwrap(),
     };
 
-    let error = NexusRequest::expect_failure_with_body(
+    NexusRequest::expect_failure_with_body(
         client,
         StatusCode::INTERNAL_SERVER_ERROR,
         Method::POST,
@@ -229,15 +192,7 @@ async fn test_external_subnet_attach_unimplemented(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("failed to make request")
-    .parsed_body::<HttpErrorResponseBody>()
-    .expect("failed to parse error body");
-
-    assert!(
-        error.message.contains("not implemented"),
-        "expected 'not implemented' error, got: {}",
-        error.message
-    );
+    .expect("failed to make request");
 }
 
 #[nexus_test]
@@ -249,7 +204,7 @@ async fn test_external_subnet_detach_unimplemented(
     // Create a project first
     let _ = create_project(client, PROJECT_NAME).await;
 
-    let error = NexusRequest::expect_failure(
+    NexusRequest::expect_failure(
         client,
         StatusCode::INTERNAL_SERVER_ERROR,
         Method::POST,
@@ -258,13 +213,5 @@ async fn test_external_subnet_detach_unimplemented(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("failed to make request")
-    .parsed_body::<HttpErrorResponseBody>()
-    .expect("failed to parse error body");
-
-    assert!(
-        error.message.contains("not implemented"),
-        "expected 'not implemented' error, got: {}",
-        error.message
-    );
+    .expect("failed to make request");
 }
