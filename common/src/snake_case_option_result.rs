@@ -4,15 +4,16 @@
 
 //! A serializable Option<Result> that plays nicely with OpenAPI lints.
 
+use crate::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[serde(untagged)]
+#[serde(rename = "OptionResult{T}Or{E}")]
 pub enum SnakeCaseOptionResult<T, E> {
-    Some(crate::snake_case_result::SnakeCaseResult<T, E>),
+    Some(SnakeCaseResult<T, E>),
     None,
 }
 
@@ -67,7 +68,7 @@ where
     }
 }
 
-/// Serialize an option result as a nullable `SnakeCaseOptionResult`.
+/// Serialize an Option<Result<T, E>> as a `SnakeCaseOptionResult`.
 pub fn serialize<S, T, E>(
     value: &Option<Result<T, E>>,
     serializer: S,
@@ -79,18 +80,18 @@ where
 {
     match value {
         None => serializer.serialize_none(),
-        Some(Ok(val)) => SnakeCaseOptionResult::<&T, &E>::Some(
-            crate::snake_case_result::SnakeCaseResult::Ok(val),
-        )
-        .serialize(serializer),
-        Some(Err(err)) => SnakeCaseOptionResult::<&T, &E>::Some(
-            crate::snake_case_result::SnakeCaseResult::Err(err),
-        )
-        .serialize(serializer),
+        Some(Ok(val)) => {
+            SnakeCaseOptionResult::<&T, &E>::Some(SnakeCaseResult::Ok(val))
+                .serialize(serializer)
+        }
+        Some(Err(err)) => {
+            SnakeCaseOptionResult::<&T, &E>::Some(SnakeCaseResult::Err(err))
+                .serialize(serializer)
+        }
     }
 }
 
-/// Deserialize a nullable `SnakeCaseOptionResult` into an Option<Result>.
+/// Deserialize a `SnakeCaseOptionResult` into an Option<Result>.
 pub fn deserialize<'de, D, T, E>(
     deserializer: D,
 ) -> Result<Option<Result<T, E>>, D::Error>
@@ -101,12 +102,12 @@ where
 {
     SnakeCaseOptionResult::<T, E>::deserialize(deserializer).map(|snek| {
         match snek {
-            SnakeCaseOptionResult::Some(
-                crate::snake_case_result::SnakeCaseResult::Ok(val),
-            ) => Some(Ok(val)),
-            SnakeCaseOptionResult::Some(
-                crate::snake_case_result::SnakeCaseResult::Err(err),
-            ) => Some(Err(err)),
+            SnakeCaseOptionResult::Some(SnakeCaseResult::Ok(val)) => {
+                Some(Ok(val))
+            }
+            SnakeCaseOptionResult::Some(SnakeCaseResult::Err(err)) => {
+                Some(Err(err))
+            }
             SnakeCaseOptionResult::None => None,
         }
     })

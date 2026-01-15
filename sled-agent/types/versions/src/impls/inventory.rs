@@ -476,17 +476,11 @@ impl HealthMonitorInventory {
         }
     }
 
-    // TODO-K: change name of this method?
     pub fn is_empty(&self) -> bool {
         self.smf_services_in_maintenance
             .as_ref()
             .is_ok_and(|svcs| svcs.is_empty())
             && self.unhealthy_zpools.is_none()
-        // TODO-K: Fix this. Add this logic
-        //self
-        // .unhealthy_zpools
-        // .as_ref()
-        // .is_ok_and(|zpools| zpools.is_empty())
     }
 }
 
