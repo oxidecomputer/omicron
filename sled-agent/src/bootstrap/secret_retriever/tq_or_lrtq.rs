@@ -82,25 +82,38 @@ impl TqOrLrtqSecretRetriever {
         RwLockReadGuard<'_, Box<dyn SecretRetriever>>,
         SecretRetrieverError,
     > {
-        if 'should_switch: {
-            // Fast path: if `pending_tq` is None, we've already switched, so do nothing:
-            let Some(tq) = &self.state.read().await.pending_tq else {
-                break 'should_switch false;
-            };
+        // Fast path: if `pending_tq` is None, we've already switched, so do
+        // nothing. We extract the handle here (if any) so we don't hold the
+        // read lock across the async status check below.
+        let pending_tq_handle = self
+            .state
+            .read()
+            .await
+            .pending_tq
+            .as_ref()
+            .map(|tq| tq.handle.clone());
 
-            // Get all commits from the pending TQ:
-            let commits = tq
-                .handle
-                .status()
-                .await
-                .map_err(|e| SecretRetrieverError::TrustQuorum(e.to_string()))?
-                .persistent_state
-                .commits;
+        // Determine if we need to switch to the pending TQ by checking whether
+        // the handle reports any commits.
+        let should_switch = match pending_tq_handle {
+            None => false,
+            Some(handle) => {
+                // Get all commits from the pending TQ:
+                let commits = handle
+                    .status()
+                    .await
+                    .map_err(|e| {
+                        SecretRetrieverError::TrustQuorum(e.to_string())
+                    })?
+                    .persistent_state
+                    .commits;
 
-            // The TQ is active and should be switched to permanently if it has
-            // any commits whatsoever:
-            !commits.is_empty()
-        } {
+                // Switch to the pending TQ if it has any commits.
+                !commits.is_empty()
+            }
+        };
+
+        if should_switch {
             // Attempt to atomically swap in the pending TQ for the active
             // retriever. If someone else has already raced ahead and done this
             // by the time we try, that's fine, because the action is the same
