@@ -89,14 +89,16 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_resolvable_files::{
+    ZoneImageSourceResolver, ramdisk_file_source,
+};
 use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, ZoneKind,
 };
-use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
-use sled_agent_types::zone_images::{
+use sled_agent_types::resolvable_files::{
     MupdateOverrideReadError, PreparedOmicronZone,
 };
-use sled_agent_zone_images::{ZoneImageSourceResolver, ramdisk_file_source};
+use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::is_oxide_sled;

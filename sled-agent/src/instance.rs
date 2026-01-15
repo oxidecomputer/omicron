@@ -41,9 +41,9 @@ use propolis_client::instance_spec::{
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
-use sled_agent_zone_images::ramdisk_file_source;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::SocketAddr;
