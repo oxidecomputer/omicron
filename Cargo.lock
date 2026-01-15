@@ -2199,13 +2199,13 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=7103cd3a3d7b0112d2949dd135db06fef0c156bb#7103cd3a3d7b0112d2949dd135db06fef0c156bb"
+source = "git+https://github.com/oxidecomputer/crucible?rev=ec87da9b0d8997a8c1c969a11d7d41583526ad20#ec87da9b0d8997a8c1c969a11d7d41583526ad20"
 dependencies = [
  "anyhow",
  "chrono",
  "crucible-workspace-hack",
  "percent-encoding",
- "progenitor 0.10.0",
+ "progenitor 0.11.2",
  "reqwest",
  "schemars 0.8.22",
  "serde",
