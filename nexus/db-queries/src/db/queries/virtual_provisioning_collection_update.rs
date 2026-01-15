@@ -447,6 +447,336 @@ FROM
         )
     }
 
+    /// Insert storage accounting for silo-scoped resources (no project).
+    ///
+    /// This updates the Silo and Fleet collections, skipping the Project level.
+    pub fn new_insert_silo_storage(
+        id: uuid::Uuid,
+        disk_byte_diff: ByteCount,
+        silo_id: uuid::Uuid,
+        storage_type: crate::db::datastore::StorageType,
+    ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
+        let mut provision =
+            VirtualProvisioningResource::new(id, storage_type.into());
+        provision.virtual_disk_bytes_provisioned = disk_byte_diff;
+
+        Self::apply_silo_update(UpdateKind::InsertStorage(provision), silo_id)
+    }
+
+    /// Delete storage accounting for silo-scoped resources (no project).
+    ///
+    /// This updates the Silo and Fleet collections, skipping the Project level.
+    pub fn new_delete_silo_storage(
+        id: uuid::Uuid,
+        disk_byte_diff: ByteCount,
+        silo_id: uuid::Uuid,
+    ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
+        Self::apply_silo_update(
+            UpdateKind::DeleteStorage { id, disk_byte_diff },
+            silo_id,
+        )
+    }
+
+    // Similar to apply_update but for silo-scoped resources (no project).
+    //
+    // Propagated updates include:
+    // - Silo
+    // - Fleet
+    fn apply_silo_update(
+        update_kind: UpdateKind,
+        silo_id: uuid::Uuid,
+    ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
+        let mut query = QueryBuilder::new();
+
+        // For silo-scoped resources, we don't need to look up the parent silo
+        // from a project - we use the silo_id directly.
+        query
+            .sql(
+                "
+WITH
+  all_collections
+    AS (
+      (SELECT ",
+            )
+            .param()
+            .sql(
+                " AS id)
+      UNION (SELECT ",
+            )
+            .param()
+            .sql(
+                " AS id)
+    ),",
+            )
+            .bind::<sql_types::Uuid, _>(silo_id)
+            .bind::<sql_types::Uuid, _>(*nexus_db_fixed_data::FLEET_ID)
+            .sql(
+                "
+  quotas
+    AS (
+      SELECT
+        silo_quotas.silo_id,
+        silo_quotas.cpus,
+        silo_quotas.memory_bytes AS memory,
+        silo_quotas.storage_bytes AS storage
+      FROM
+        silo_quotas
+      WHERE
+        silo_quotas.silo_id = ",
+            )
+            .param()
+            .sql(
+                "
+    ),",
+            )
+            .bind::<sql_types::Uuid, _>(silo_id)
+            .sql(
+                "
+  silo_provisioned
+    AS (
+      SELECT
+        virtual_provisioning_collection.id,
+        virtual_provisioning_collection.cpus_provisioned,
+        virtual_provisioning_collection.ram_provisioned,
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned
+      FROM
+        virtual_provisioning_collection
+      WHERE
+        virtual_provisioning_collection.id = ",
+            )
+            .param()
+            .sql(
+                "
+    ),",
+            )
+            .bind::<sql_types::Uuid, _>(silo_id);
+
+        match update_kind.clone() {
+            UpdateKind::InsertStorage(resource) => query
+                .sql(
+                    "
+  do_update
+    AS (
+      SELECT
+        (
+          (
+            SELECT count(*)
+            FROM virtual_provisioning_resource
+            WHERE virtual_provisioning_resource.id = ",
+                )
+                .param()
+                .sql(
+                    "
+            LIMIT 1
+          )
+          = 0
+          AND CAST(
+              IF(
+                (
+                  ",
+                )
+                .param()
+                .sql(
+                    " = 0
+                  OR (SELECT quotas.storage FROM quotas LIMIT 1)
+                    >= (
+                        (
+                          SELECT
+                            silo_provisioned.virtual_disk_bytes_provisioned
+                          FROM
+                            silo_provisioned
+                          LIMIT
+                            1
+                        )
+                        + ",
+                )
+                .param()
+                .sql(concatcp!(
+                    "
+                      )
+                ),
+                'TRUE',
+                '",
+                    NOT_ENOUGH_STORAGE_SENTINEL,
+                    "'
+              )
+                AS BOOL
+            )
+        )
+          AS update
+    ),"
+                ))
+                .bind::<sql_types::Uuid, _>(resource.id)
+                .bind::<sql_types::BigInt, _>(
+                    resource.virtual_disk_bytes_provisioned,
+                )
+                .bind::<sql_types::BigInt, _>(
+                    resource.virtual_disk_bytes_provisioned,
+                ),
+            UpdateKind::DeleteStorage { id, .. } => query
+                .sql(
+                    "
+  do_update
+    AS (
+      SELECT
+        (
+          SELECT
+            count(*)
+          FROM
+            virtual_provisioning_resource
+          WHERE
+            virtual_provisioning_resource.id = ",
+                )
+                .param()
+                .sql(
+                    "
+          LIMIT
+            1
+        ) = 1
+          AS update
+    ),",
+                )
+                .bind::<sql_types::Uuid, _>(id),
+            // Instance operations are not supported for silo-scoped updates
+            UpdateKind::InsertInstance(_)
+            | UpdateKind::DeleteInstance { .. } => {
+                unreachable!(
+                    "Instance operations are not supported for silo-scoped updates"
+                )
+            }
+        };
+
+        match update_kind.clone() {
+            UpdateKind::InsertStorage(resource) => query
+                .sql(
+                    "
+  unused_cte_arm
+    AS (
+      INSERT
+      INTO
+        virtual_provisioning_resource
+          (
+            id,
+            time_modified,
+            resource_type,
+            virtual_disk_bytes_provisioned,
+            cpus_provisioned,
+            ram_provisioned
+          )
+      VALUES
+        (",
+                )
+                .param()
+                .sql(", DEFAULT, ")
+                .param()
+                .sql(", ")
+                .param()
+                .sql(", ")
+                .param()
+                .sql(", ")
+                .param()
+                .sql(
+                    ")
+      ON CONFLICT
+      DO
+        NOTHING
+      RETURNING ",
+                )
+                .sql(AllColumnsOfVirtualResource::with_prefix(
+                    "virtual_provisioning_resource",
+                ))
+                .sql("),")
+                .bind::<sql_types::Uuid, _>(resource.id)
+                .bind::<sql_types::Text, _>(resource.resource_type)
+                .bind::<sql_types::BigInt, _>(
+                    resource.virtual_disk_bytes_provisioned,
+                )
+                .bind::<sql_types::BigInt, _>(resource.cpus_provisioned)
+                .bind::<sql_types::BigInt, _>(resource.ram_provisioned),
+            UpdateKind::DeleteStorage { id, .. } => query
+                .sql(
+                    "
+  unused_cte_arm
+    AS (
+      DELETE FROM
+        virtual_provisioning_resource
+      WHERE
+        virtual_provisioning_resource.id = ",
+                )
+                .param()
+                .sql(
+                    "
+        AND (SELECT do_update.update FROM do_update LIMIT 1)
+      RETURNING ",
+                )
+                .sql(AllColumnsOfVirtualResource::with_prefix(
+                    "virtual_provisioning_resource",
+                ))
+                .sql("),")
+                .bind::<sql_types::Uuid, _>(id),
+            // Instance operations are not supported for silo-scoped updates
+            UpdateKind::InsertInstance(_)
+            | UpdateKind::DeleteInstance { .. } => {
+                unreachable!(
+                    "Instance operations are not supported for silo-scoped updates"
+                )
+            }
+        };
+
+        query.sql(
+            "
+  virtual_provisioning_collection
+    AS (
+      UPDATE
+        virtual_provisioning_collection
+      SET",
+        );
+        match update_kind.clone() {
+            UpdateKind::InsertStorage(resource) => query
+                .sql(
+                    "
+        time_modified = current_timestamp(),
+        virtual_disk_bytes_provisioned
+          = virtual_provisioning_collection.virtual_disk_bytes_provisioned + ",
+                )
+                .param()
+                .bind::<sql_types::BigInt, _>(
+                    resource.virtual_disk_bytes_provisioned,
+                ),
+            UpdateKind::DeleteStorage { disk_byte_diff, .. } => query
+                .sql(
+                    "
+        time_modified = current_timestamp(),
+        virtual_disk_bytes_provisioned
+          = virtual_provisioning_collection.virtual_disk_bytes_provisioned - ",
+                )
+                .param()
+                .bind::<sql_types::BigInt, _>(disk_byte_diff),
+            // Instance operations are not supported for silo-scoped updates
+            UpdateKind::InsertInstance(_)
+            | UpdateKind::DeleteInstance { .. } => {
+                unreachable!(
+                    "Instance operations are not supported for silo-scoped updates"
+                )
+            }
+        };
+
+        query.sql("
+      WHERE
+        virtual_provisioning_collection.id = ANY (SELECT all_collections.id FROM all_collections)
+        AND (SELECT do_update.update FROM do_update LIMIT 1)
+      RETURNING "
+        ).sql(AllColumnsOfVirtualCollection::with_prefix("virtual_provisioning_collection")).sql("
+    )
+SELECT "
+    ).sql(AllColumnsOfVirtualCollection::with_prefix("virtual_provisioning_collection")).sql("
+FROM
+  virtual_provisioning_collection
+");
+
+        query.query()
+    }
+
     pub fn new_insert_instance(
         id: InstanceUuid,
         cpus_diff: i64,
@@ -513,6 +843,25 @@ mod test {
     }
 
     #[tokio::test]
+    async fn expectorate_query_insert_project_image() {
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+        let storage_type = crate::db::datastore::StorageType::Image;
+
+        let query = VirtualProvisioningCollectionUpdate::new_insert_storage(
+            id,
+            disk_byte_diff,
+            project_id,
+            storage_type,
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/virtual_provisioning_collection_update_insert_project_image.sql",
+        ).await;
+    }
+
+    #[tokio::test]
     async fn expectorate_query_delete_storage() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
@@ -527,6 +876,45 @@ mod test {
         expectorate_query_contents(
             &query,
             "tests/output/virtual_provisioning_collection_update_delete_storage.sql",
+        ).await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_insert_silo_storage() {
+        let id = Uuid::nil();
+        let silo_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+        let storage_type = crate::db::datastore::StorageType::Image;
+
+        let query =
+            VirtualProvisioningCollectionUpdate::new_insert_silo_storage(
+                id,
+                disk_byte_diff,
+                silo_id,
+                storage_type,
+            );
+        expectorate_query_contents(
+            &query,
+            "tests/output/virtual_provisioning_collection_update_insert_silo_storage.sql",
+        ).await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_delete_silo_storage() {
+        let id = Uuid::nil();
+        let silo_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+
+        let query =
+            VirtualProvisioningCollectionUpdate::new_delete_silo_storage(
+                id,
+                disk_byte_diff,
+                silo_id,
+            );
+
+        expectorate_query_contents(
+            &query,
+            "tests/output/virtual_provisioning_collection_update_delete_silo_storage.sql",
         ).await;
     }
 
@@ -610,6 +998,60 @@ mod test {
             disk_byte_diff,
             project_id,
         );
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_insert_silo_storage() {
+        let logctx = dev::test_setup_log("explain_insert_silo_storage");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let id = Uuid::nil();
+        let silo_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+        let storage_type = crate::db::datastore::StorageType::Image;
+
+        let query =
+            VirtualProvisioningCollectionUpdate::new_insert_silo_storage(
+                id,
+                disk_byte_diff,
+                silo_id,
+                storage_type,
+            );
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_delete_silo_storage() {
+        let logctx = dev::test_setup_log("explain_delete_silo_storage");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let id = Uuid::nil();
+        let silo_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+
+        let query =
+            VirtualProvisioningCollectionUpdate::new_delete_silo_storage(
+                id,
+                disk_byte_diff,
+                silo_id,
+            );
         let _ = query
             .explain_async(&conn)
             .await

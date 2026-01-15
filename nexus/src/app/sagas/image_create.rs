@@ -10,6 +10,7 @@ use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
+use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
@@ -67,6 +68,10 @@ declare_saga_actions! {
         + simc_create_image_record
         - simc_create_image_record_undo
     }
+    SPACE_ACCOUNT -> "no_result" {
+        + simc_account_space
+        - simc_account_space_undo
+    }
 }
 
 // image create saga: definition
@@ -111,6 +116,7 @@ impl NexusSaga for SagaImageCreate {
 
         builder.append(get_source_volume_action());
         builder.append(create_image_record_action());
+        builder.append(space_account_action());
 
         Ok(builder.build()?)
     }
@@ -321,34 +327,125 @@ async fn simc_create_image_record_undo(
 
     let image_id = sagactx.lookup::<Uuid>("image_id")?;
 
+    // Make this undo idempotent by checking if the image still exists.
+    // If it was already deleted (e.g., by a previous undo attempt), we
+    // can safely skip the delete operation.
     match &params.image_type {
         ImageType::Project { .. } => {
-            let (.., authz_image, db_image) =
-                LookupPath::new(&opctx, osagactx.datastore())
-                    .project_image_id(image_id)
-                    .fetch()
-                    .await?;
-
-            osagactx
-                .datastore()
-                .project_image_delete(&opctx, &authz_image, db_image)
-                .await?;
+            match LookupPath::new(&opctx, osagactx.datastore())
+                .project_image_id(image_id)
+                .fetch()
+                .await
+            {
+                Ok((.., authz_image, db_image)) => {
+                    osagactx
+                        .datastore()
+                        .project_image_delete(&opctx, &authz_image, db_image)
+                        .await?;
+                }
+                Err(Error::ObjectNotFound { .. }) => {}
+                Err(e) => return Err(e.into()),
+            }
         }
 
         ImageType::Silo { .. } => {
-            let (.., authz_image, db_image) =
-                LookupPath::new(&opctx, osagactx.datastore())
-                    .silo_image_id(image_id)
-                    .fetch()
-                    .await?;
-
-            osagactx
-                .datastore()
-                .silo_image_delete(&opctx, &authz_image, db_image)
-                .await?;
+            match LookupPath::new(&opctx, osagactx.datastore())
+                .silo_image_id(image_id)
+                .fetch()
+                .await
+            {
+                Ok((.., authz_image, db_image)) => {
+                    osagactx
+                        .datastore()
+                        .silo_image_delete(&opctx, &authz_image, db_image)
+                        .await?;
+                }
+                Err(Error::ObjectNotFound { .. }) => {}
+                Err(e) => return Err(e.into()),
+            }
         }
     }
 
+    Ok(())
+}
+
+async fn simc_account_space(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let created_image = sagactx.lookup::<db::model::Image>("created_image")?;
+
+    match &params.image_type {
+        ImageType::Project { authz_project, .. } => {
+            osagactx
+                .datastore()
+                .virtual_provisioning_collection_insert_project_image(
+                    &opctx,
+                    created_image.id(),
+                    authz_project.id(),
+                    created_image.size,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        ImageType::Silo { authz_silo } => {
+            osagactx
+                .datastore()
+                .virtual_provisioning_collection_insert_silo_image(
+                    &opctx,
+                    created_image.id(),
+                    authz_silo.id(),
+                    created_image.size,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+    }
+    Ok(())
+}
+
+async fn simc_account_space_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let created_image = sagactx.lookup::<db::model::Image>("created_image")?;
+
+    match &params.image_type {
+        ImageType::Project { authz_project, .. } => {
+            osagactx
+                .datastore()
+                .virtual_provisioning_collection_delete_project_image(
+                    &opctx,
+                    created_image.id(),
+                    authz_project.id(),
+                    created_image.size,
+                )
+                .await?;
+        }
+        ImageType::Silo { authz_silo } => {
+            osagactx
+                .datastore()
+                .virtual_provisioning_collection_delete_silo_image(
+                    &opctx,
+                    created_image.id(),
+                    authz_silo.id(),
+                    created_image.size,
+                )
+                .await?;
+        }
+    }
     Ok(())
 }
 

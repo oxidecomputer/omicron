@@ -3,16 +3,20 @@ use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::datastore::StorageType;
 use crate::db::model::Image;
 use crate::db::model::Project;
 use crate::db::model::ProjectImage;
 use crate::db::model::Silo;
 use crate::db::model::SiloImage;
+use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
+use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::Name;
 use nexus_types::identity::Resource;
@@ -166,6 +170,13 @@ impl DataStore {
         Ok(image)
     }
 
+    /// Promotes a project image to a silo image.
+    ///
+    /// This operation:
+    /// 1. Updates the image record to remove the project association
+    /// 2. Updates virtual provisioning to move accounting from project to silo
+    ///
+    /// All operations are performed in a transaction to ensure atomicity.
     pub async fn project_image_promote(
         &self,
         opctx: &OpContext,
@@ -176,30 +187,101 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
         opctx.authorize(authz::Action::Modify, authz_project_image).await?;
 
-        use nexus_db_schema::schema::image::dsl;
-        let image = diesel::update(dsl::image)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_project_image.id()))
-            .set((
-                dsl::project_id.eq(None::<Uuid>),
-                dsl::time_modified.eq(Utc::now()),
-            ))
-            .returning(Image::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        let image_id = authz_project_image.id();
+        let project_id = project_image.project_id;
+        let silo_id = authz_silo.id();
+        let size = project_image.size;
+        let image_name = project_image.name().as_str().to_string();
+
+        self.transaction_retry_wrapper("project_image_promote")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let image_name = image_name.clone();
+                async move {
+                    // Delete project-level accounting.
+                    //
+                    // This removes the virtual_provisioning_resource entry and
+                    // decrements project, silo, and fleet collections.
+                    VirtualProvisioningCollectionUpdate::new_delete_storage(
+                        image_id,
+                        size,
+                        project_id,
+                    )
+                    .get_results_async::<VirtualProvisioningCollection>(&conn)
+                    .await
+                    .map_err(|e| {
+                        err.bail_retryable_or_else(e, |e| {
+                            crate::db::queries::virtual_provisioning_collection_update::from_diesel(e)
+                        })
+                    })?;
+
+                    // Insert silo-level accounting.
+                    //
+                    // This creates a new virtual_provisioning_resource entry and
+                    // increments silo and fleet collections.
+                    // Net effect: project decremented, silo and fleet unchanged.
+                    VirtualProvisioningCollectionUpdate::new_insert_silo_storage(
+                        image_id,
+                        size,
+                        silo_id,
+                        StorageType::Image,
+                    )
+                    .get_results_async::<VirtualProvisioningCollection>(&conn)
+                    .await
+                    .map_err(|e| {
+                        err.bail_retryable_or_else(e, |e| {
+                            crate::db::queries::virtual_provisioning_collection_update::from_diesel(e)
+                        })
+                    })?;
+
+                    // Update the image record to remove project association.
+                    use nexus_db_schema::schema::image::dsl;
+                    let image = diesel::update(dsl::image)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(image_id))
+                        .set((
+                            dsl::project_id.eq(None::<Uuid>),
+                            dsl::time_modified.eq(Utc::now()),
+                        ))
+                        .returning(Image::as_returning())
+                        .get_result_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Conflict(
+                                        ResourceType::SiloImage,
+                                        image_name.as_str(),
+                                    ),
+                                )
+                            })
+                        })?;
+
+                    Ok(image)
+                }
+            })
             .await
             .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::SiloImage,
-                        project_image.name().as_str(),
-                    ),
-                )
-            })?;
-
-        Ok(image)
+                if let Some(err) = err.take() {
+                    return err;
+                }
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })
     }
 
+    /// Demotes a silo image to a project image.
+    ///
+    /// This operation:
+    /// 1. Updates the image record to add the project association
+    /// 2. Updates virtual provisioning to move accounting from silo to project
+    ///
+    /// All operations are performed in a transaction to ensure atomicity.
+    /// If the project's quota would be exceeded, the operation fails and
+    /// rolls back.
     pub async fn silo_image_demote(
         &self,
         opctx: &OpContext,
@@ -210,29 +292,98 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_silo_image).await?;
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        use nexus_db_schema::schema::image::dsl;
-        let image: Image = diesel::update(dsl::image)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_silo_image.id()))
-            .set((
-                dsl::project_id.eq(Some(authz_project.id())),
-                dsl::time_modified.eq(Utc::now()),
-            ))
-            .returning(Image::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        let image_id = authz_silo_image.id();
+        let project_id = authz_project.id();
+        let silo_id = silo_image.silo_id;
+        let size = silo_image.size;
+        let image_name = silo_image.name().as_str().to_string();
+
+        self.transaction_retry_wrapper("silo_image_demote")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let image_name = image_name.clone();
+                async move {
+                    // Delete silo-level accounting.
+                    //
+                    // This removes the virtual_provisioning_resource entry and
+                    // decrements silo and fleet collections.
+                    VirtualProvisioningCollectionUpdate::new_delete_silo_storage(
+                        image_id,
+                        size,
+                        silo_id,
+                    )
+                    .get_results_async::<VirtualProvisioningCollection>(&conn)
+                    .await
+                    .map_err(|e| {
+                        err.bail_retryable_or_else(e, |e| {
+                            crate::db::queries::virtual_provisioning_collection_update::from_diesel(e)
+                        })
+                    })?;
+
+                    // Insert project-level accounting.
+                    //
+                    // This creates a new virtual_provisioning_resource entry and
+                    // increments project, silo, and fleet collections.
+                    // Net effect: project incremented, silo and fleet unchanged.
+                    // This will fail if the silo quota would be exceeded.
+                    VirtualProvisioningCollectionUpdate::new_insert_storage(
+                        image_id,
+                        size,
+                        project_id,
+                        StorageType::Image,
+                    )
+                    .get_results_async::<VirtualProvisioningCollection>(&conn)
+                    .await
+                    .map_err(|e| {
+                        err.bail_retryable_or_else(e, |e| {
+                            crate::db::queries::virtual_provisioning_collection_update::from_diesel(e)
+                        })
+                    })?;
+
+                    // Update the image record to add project association.
+                    use nexus_db_schema::schema::image::dsl;
+                    let image: Image = diesel::update(dsl::image)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(image_id))
+                        .set((
+                            dsl::project_id.eq(Some(project_id)),
+                            dsl::time_modified.eq(Utc::now()),
+                        ))
+                        .returning(Image::as_returning())
+                        .get_result_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Conflict(
+                                        ResourceType::ProjectImage,
+                                        image_name.as_str(),
+                                    ),
+                                )
+                            })
+                        })?;
+
+                    Ok(image)
+                }
+            })
             .await
             .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::ProjectImage,
-                        silo_image.name().as_str(),
-                    ),
-                )
-            })?;
-        Ok(image)
+                if let Some(err) = err.take() {
+                    return err;
+                }
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })
     }
 
+    /// Deletes a silo image record.
+    ///
+    /// Note: Does not update the corresponding accounting for space used by the
+    /// image. That's the responsibility of the caller (the image deletion
+    /// saga).
     pub async fn silo_image_delete(
         &self,
         opctx: &OpContext,
@@ -243,6 +394,11 @@ impl DataStore {
         self.image_delete(opctx, image.into()).await
     }
 
+    /// Deletes a project image record.
+    ///
+    /// Note: Does not update the corresponding accounting for space used by the
+    /// image. That's the responsibility of the caller (the image deletion
+    /// saga).
     pub async fn project_image_delete(
         &self,
         opctx: &OpContext,
