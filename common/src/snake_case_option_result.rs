@@ -12,6 +12,7 @@ use serde::Serialize;
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(rename = "OptionResult{T}Or{E}")]
+#[serde(untagged)]
 pub enum SnakeCaseOptionResult<T, E> {
     Some(SnakeCaseResult<T, E>),
     None,
