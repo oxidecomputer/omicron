@@ -743,15 +743,15 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: RackUuid,
-        baseboard_id: &BaseboardId,
+        baseboard_id: BaseboardId,
     ) -> Result<Option<Sled>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
         use nexus_db_schema::schema::sled::dsl;
         let sled = dsl::sled
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::part_number.eq(baseboard_id.part_number.clone()))
-            .filter(dsl::serial_number.eq(baseboard_id.serial_number.clone()))
+            .filter(dsl::part_number.eq(baseboard_id.part_number))
+            .filter(dsl::serial_number.eq(baseboard_id.serial_number))
             .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
             .sled_filter(SledFilter::Commissioned)
             .select(Sled::as_select())

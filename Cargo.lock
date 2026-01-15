@@ -6951,6 +6951,7 @@ dependencies = [
  "schemars 0.8.22",
  "scim2-rs",
  "serde",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "uuid",
 ]
