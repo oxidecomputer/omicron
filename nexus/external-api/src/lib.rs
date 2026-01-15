@@ -1477,12 +1477,16 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_view",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
-    // and can't construct Path<T> (Dropshot extractor with private fields).
     async fn v2025121200_multicast_group_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025121200::MulticastGroupPath>,
-    ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError>;
+    ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError> {
+        let path = path_params.map(|p| params::MulticastGroupPath::from(p));
+        match Self::multicast_group_view(rqctx, path).await {
+            Ok(HttpResponseOk(group)) => Ok(HttpResponseOk(group.into())),
+            Err(e) => Err(e),
+        }
+    }
 
     /// Fetch multicast group
     ///
@@ -1554,8 +1558,6 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_member_list",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
-    // and can't construct Path<T> (Dropshot extractor with private fields).
     async fn v2025121200_multicast_group_member_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025121200::MulticastGroupPath>,
@@ -1563,7 +1565,17 @@ pub trait NexusExternalApi {
     ) -> Result<
         HttpResponseOk<ResultsPage<v2025121200::MulticastGroupMember>>,
         HttpError,
-    >;
+    > {
+        let path = path_params.map(|p| params::MulticastGroupPath::from(p));
+        match Self::multicast_group_member_list(rqctx, path, query_params).await
+        {
+            Ok(HttpResponseOk(page)) => Ok(HttpResponseOk(ResultsPage {
+                items: page.items.into_iter().map(|m| m.into()).collect(),
+                next_page: page.next_page,
+            })),
+            Err(e) => Err(e),
+        }
+    }
 
     /// List members of multicast group
     ///
@@ -1644,7 +1656,13 @@ pub trait NexusExternalApi {
     async fn v2025121200_lookup_multicast_group_by_ip(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025121200::MulticastGroupByIpPath>,
-    ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError>;
+    ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError> {
+        let path = path_params.map(|p| params::MulticastGroupPath::from(p));
+        match Self::multicast_group_view(rqctx, path).await {
+            Ok(HttpResponseOk(group)) => Ok(HttpResponseOk(group.into())),
+            Err(e) => Err(e),
+        }
+    }
 
     // Disks
 
@@ -3455,13 +3473,15 @@ pub trait NexusExternalApi {
         operation_id = "instance_multicast_group_leave",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
-    // and can't construct Path<T> (Dropshot extractor with private fields).
     async fn v2025121200_instance_multicast_group_leave(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025121200::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let path =
+            path_params.map(|p| params::InstanceMulticastGroupPath::from(p));
+        Self::instance_multicast_group_leave(rqctx, path, query_params).await
+    }
 
     /// Leave multicast group by name, IP address, or UUID
     #[endpoint {
