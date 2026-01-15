@@ -374,8 +374,6 @@ impl TryFrom<String> for NameOrId {
 }
 
 impl FromStr for NameOrId {
-    // TODO: We should have better error types here.
-    // See https://github.com/oxidecomputer/omicron/issues/347
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
