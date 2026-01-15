@@ -32,9 +32,9 @@ use sled_agent_config_reconciler::{
     AvailableDatasetsReceiver, CurrentlyManagedZpools,
     CurrentlyManagedZpoolsReceiver,
 };
+use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::probes::ExternalIp;
 use sled_agent_types::probes::ProbeCreate;
-use sled_agent_zone_images::ramdisk_file_source;
 use slog::{Logger, error, warn};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};

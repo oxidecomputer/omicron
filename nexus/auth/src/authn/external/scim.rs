@@ -32,7 +32,7 @@ use headers::authorization::{Authorization, Bearer};
 // code usually describes an _authentication_ error.)
 
 pub const SCIM_TOKEN_SCHEME_NAME: authn::SchemeName =
-    authn::SchemeName("scim_token");
+    authn::SchemeName::ScimToken;
 
 /// Prefix used on the bearer token to identify this scheme
 // RFC 6750 expects bearer tokens to be opaque base64-encoded data. In our case,
