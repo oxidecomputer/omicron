@@ -518,6 +518,8 @@ pub struct ExternalSubnet {
     pub project_id: Uuid,
     /// The subnet pool this was allocated from
     pub subnet_pool_id: Uuid,
+    /// The subnet pool member this subnet corresponds to
+    pub subnet_pool_member_id: Uuid,
     /// The instance this subnet is attached to, if any
     pub instance_id: Option<Uuid>,
 }

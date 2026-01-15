@@ -1154,9 +1154,10 @@ pub static DEMO_EXTERNAL_SUBNET_CREATE: LazyLock<params::ExternalSubnetCreate> =
             name: DEMO_EXTERNAL_SUBNET_NAME.clone(),
             description: String::from("an external subnet"),
         },
-        pool: None,
-        subnet: None,
-        prefix_len: Some(24),
+        allocator: params::ExternalSubnetAllocator::Auto {
+            prefix_len: 24,
+            pool_selector: params::PoolSelector::default(),
+        },
     });
 pub static DEMO_EXTERNAL_SUBNET_URL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -1180,8 +1181,7 @@ pub static DEMO_EXTERNAL_SUBNET_ATTACH_URL: LazyLock<String> =
     });
 pub static DEMO_EXTERNAL_SUBNET_ATTACH: LazyLock<params::ExternalSubnetAttach> =
     LazyLock::new(|| params::ExternalSubnetAttach {
-        kind: params::ExternalSubnetParentKind::Instance,
-        parent: DEMO_INSTANCE_NAME.clone().into(),
+        instance: DEMO_INSTANCE_NAME.clone().into(),
     });
 pub static DEMO_EXTERNAL_SUBNET_DETACH_URL: LazyLock<String> =
     LazyLock::new(|| {

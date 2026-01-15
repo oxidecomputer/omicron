@@ -68,7 +68,7 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -985,6 +985,26 @@ impl SledAgentApi for SledAgentSimImpl {
         _request_context: RequestContext<Self::Context>,
         _query_params: Query<BaseboardId>,
     ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_network_config_get(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_network_config_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
 }

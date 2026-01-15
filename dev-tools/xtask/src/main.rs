@@ -74,7 +74,8 @@ enum Cmds {
 
     /// Manage OpenAPI specifications.
     ///
-    /// For more information, see dev-tools/openapi-manager/README.adoc.
+    /// For more information, see
+    /// <https://github.com/oxidecomputer/dropshot-api-manager>
     Openapi(external::External),
 
     #[cfg(target_os = "illumos")]

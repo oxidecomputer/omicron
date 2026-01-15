@@ -1577,20 +1577,45 @@ pub struct ExternalSubnetSelector {
     pub external_subnet: NameOrId,
 }
 
+/// Specify how to allocate an external subnet.
+///
+/// Note: this is modeled after `AddressSelector` for floating IP addresses, but
+/// we call it an "allocator" here rather than a "selector" since it's used in
+/// creation rather than fetching. It does not have an `impl Default` since we
+/// can't guess what prefix length the user might want.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalSubnetAllocator {
+    /// Reserve a specific subnet.
+    Explicit {
+        /// The subnet CIDR to reserve. Must be available in the pool.
+        subnet: IpNet,
+        /// The pool containing this subnet. If not specified, the default
+        /// subnet pool for the subnet's IP version is used.
+        pool: Option<NameOrId>,
+    },
+    /// Automatically allocate a subnet with the specified prefix length.
+    Auto {
+        /// The prefix length for the allocated subnet (e.g., 24 for a /24).
+        prefix_len: u8,
+        /// Pool selection.
+        ///
+        /// If omitted, this field uses the silo's default pool. If the
+        /// silo has default pools for both IPv4 and IPv6, the request will
+        /// fail unless `ip_version` is specified in the pool selector.
+        #[serde(default)]
+        pool_selector: PoolSelector,
+    },
+}
+
 /// Create an external subnet
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ExternalSubnetCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// The subnet pool to allocate from. If not specified, the silo's
-    /// default subnet pool is used.
-    pub pool: Option<NameOrId>,
-    /// The specific subnet to allocate. Must be available in the pool.
-    /// If not specified, a subnet is auto-allocated using `prefix_len`.
-    pub subnet: Option<IpNet>,
-    /// The prefix length for auto-allocation (e.g., 24 for a /24).
-    /// Required if `subnet` is not specified.
-    pub prefix_len: Option<u8>,
+
+    /// Subnet allocation method.
+    pub allocator: ExternalSubnetAllocator,
 }
 
 /// Update an external subnet
@@ -1600,21 +1625,11 @@ pub struct ExternalSubnetUpdate {
     pub identity: IdentityMetadataUpdateParams,
 }
 
-/// Attach an external subnet to a parent resource
+/// Attach an external subnet to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ExternalSubnetAttach {
-    /// The type of resource to attach to
-    pub kind: ExternalSubnetParentKind,
-    /// Name or ID of the parent resource
-    pub parent: NameOrId,
-}
-
-/// Types of resources an external subnet can attach to
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ExternalSubnetParentKind {
-    /// Attach to an instance
-    Instance,
+    /// Name or ID of the instance to attach to
+    pub instance: NameOrId,
 }
 
 // Floating IPs
@@ -1761,7 +1776,7 @@ pub struct InstanceDiskAttach {
     pub name: Name,
 }
 
-/// Specify which IP pool to allocate from.
+/// Specify which IP or external subnet pool to allocate from.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PoolSelector {

@@ -79,9 +79,10 @@ async fn test_external_subnet_create_unimplemented(
             name: "test-subnet".parse().unwrap(),
             description: String::from("A test external subnet"),
         },
-        pool: None,
-        subnet: None,
-        prefix_len: Some(24),
+        allocator: params::ExternalSubnetAllocator::Auto {
+            prefix_len: 24,
+            pool_selector: params::PoolSelector::default(),
+        },
     };
 
     NexusRequest::expect_failure_with_body(
@@ -178,8 +179,7 @@ async fn test_external_subnet_attach_unimplemented(
     let _ = create_project(client, PROJECT_NAME).await;
 
     let attach_params = params::ExternalSubnetAttach {
-        kind: params::ExternalSubnetParentKind::Instance,
-        parent: "test-instance".parse().unwrap(),
+        instance: "test-instance".parse().unwrap(),
     };
 
     NexusRequest::expect_failure_with_body(

@@ -39,7 +39,6 @@ pub use nexus_db_fixed_data::user_builtin::USER_SERVICE_BALANCER;
 
 use crate::authz;
 use chrono::{DateTime, Utc};
-use newtype_derive::NewtypeDisplay;
 use nexus_db_fixed_data::silo::DEFAULT_SILO;
 use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::SiloRole;
@@ -513,11 +512,8 @@ pub struct ConsoleSessionWithSiloId {
     pub silo_id: Uuid,
 }
 
-/// Label for a particular authentication scheme (used in log messages and
-/// internal error messages)
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SchemeName(&'static str);
-NewtypeDisplay! { () pub struct SchemeName(&'static str); }
+// Re-export SchemeName from nexus-types.
+pub use nexus_types::authn::SchemeName;
 
 /// Describes why authentication failed
 ///

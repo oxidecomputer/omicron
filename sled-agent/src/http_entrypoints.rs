@@ -56,7 +56,7 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -1349,5 +1349,48 @@ impl SledAgentApi for SledAgentImpl {
             )?;
 
         Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        let sa = request_context.context();
+
+        let status = sa.trust_quorum().status().await.map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
+
+        Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_network_config_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    {
+        let sa = request_context.context();
+
+        let config = sa.trust_quorum().network_config().await.map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
+
+        Ok(HttpResponseOk(config.map(TrustQuorumNetworkConfig::from)))
+    }
+
+    async fn trust_quorum_network_config_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<TrustQuorumNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let config = body.into_inner();
+
+        sa.trust_quorum().update_network_config(config.into()).await.map_err(
+            |e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            },
+        )?;
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 }
