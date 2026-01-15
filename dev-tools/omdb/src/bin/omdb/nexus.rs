@@ -74,6 +74,7 @@ use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
@@ -3247,14 +3248,10 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
 }
 
 fn print_task_trust_quorum_manager(details: &serde_json::Value) {
-    #[derive(Deserialize)]
-    struct TqManagerResult {
-        statuses: Vec<String>,
-        errors: Vec<String>,
-    }
-
-    let res = match serde_json::from_value::<TqManagerResult>(details.clone()) {
-        Ok(res) => res,
+    let status = match serde_json::from_value::<TrustQuorumManagerStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
         Err(error) => {
             eprintln!(
                 "warning: failed to interpret task details: {:?}: {:#?}",
@@ -3264,11 +3261,23 @@ fn print_task_trust_quorum_manager(details: &serde_json::Value) {
         }
     };
 
-    for status in res.statuses {
-        println!("{status}");
-    }
-    for error in res.errors {
-        println!("{error}");
+    match status {
+        TrustQuorumManagerStatus::PerRackStatus { statuses, errors } => {
+            if statuses.is_empty() && errors.is_empty() {
+                println!("No active reconfigurations");
+                return;
+            }
+            for status in statuses {
+                println!("{status}");
+            }
+
+            for error in errors {
+                println!("{error}");
+            }
+        }
+        TrustQuorumManagerStatus::Error(error) => {
+            println!("    task did not complete successfully: {error}");
+        }
     }
 }
 

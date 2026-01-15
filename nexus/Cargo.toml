@@ -109,6 +109,7 @@ slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-error-chain.workspace = true
+swrite.workspace = true
 display-error-chain.workspace = true
 slog-term.workspace = true
 static_assertions.workspace = true
