@@ -26861,6 +26861,14 @@
               }
             ]
           },
+          "pool_type": {
+            "description": "Type of subnet pool (unicast or multicast)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolType"
+              }
+            ]
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -26877,6 +26885,7 @@
           "id",
           "ip_version",
           "name",
+          "pool_type",
           "time_created",
           "time_modified"
         ]
@@ -26898,6 +26907,15 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "pool_type": {
+            "description": "Type of subnet pool (defaults to Unicast)",
+            "default": "unicast",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolType"
+              }
+            ]
           }
         },
         "required": [
