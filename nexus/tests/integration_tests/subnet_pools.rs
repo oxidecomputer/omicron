@@ -167,3 +167,152 @@ async fn test_subnet_pool_utilization_unimplemented(
     .await
     .expect("failed to make request");
 }
+
+#[nexus_test]
+async fn test_subnet_pool_update_unimplemented(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let url = format!("{}/test-pool", SUBNET_POOLS_URL);
+
+    let update_params = params::SubnetPoolUpdate {
+        identity: omicron_common::api::external::IdentityMetadataUpdateParams {
+            name: None,
+            description: Some(String::from("Updated description")),
+        },
+    };
+
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Method::PUT,
+        &url,
+        &update_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+}
+
+#[nexus_test]
+async fn test_subnet_pool_subnet_add_unimplemented(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let url = format!("{}/test-pool/subnets/add", SUBNET_POOLS_URL);
+
+    let add_params = params::SubnetPoolSubnetAdd {
+        identity: IdentityMetadataCreateParams {
+            name: "test-subnet".parse().unwrap(),
+            description: String::from("A test subnet"),
+        },
+        subnet: "10.0.0.0/16".parse().unwrap(),
+        min_alloc: None,
+        max_alloc: None,
+    };
+
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Method::POST,
+        &url,
+        &add_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+}
+
+#[nexus_test]
+async fn test_subnet_pool_subnet_remove_unimplemented(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let url = format!("{}/test-pool/subnets/remove", SUBNET_POOLS_URL);
+
+    let remove_params = params::SubnetPoolSubnetRemove {
+        subnet: "10.0.0.0/16".parse().unwrap(),
+    };
+
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Method::POST,
+        &url,
+        &remove_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+}
+
+#[nexus_test]
+async fn test_subnet_pool_silo_link_unimplemented(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let url = format!("{}/test-pool/silos", SUBNET_POOLS_URL);
+
+    let link_params = params::SubnetPoolLinkSilo {
+        silo: omicron_common::api::external::NameOrId::Name(
+            "test-silo".parse().unwrap(),
+        ),
+        is_default: false,
+    };
+
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Method::POST,
+        &url,
+        &link_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+}
+
+#[nexus_test]
+async fn test_subnet_pool_silo_update_unimplemented(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let url = format!("{}/test-pool/silos/test-silo", SUBNET_POOLS_URL);
+
+    let update_params = params::SubnetPoolSiloUpdate { is_default: true };
+
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Method::PUT,
+        &url,
+        &update_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+}
+
+#[nexus_test]
+async fn test_subnet_pool_silo_unlink_unimplemented(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let url = format!("{}/test-pool/silos/test-silo", SUBNET_POOLS_URL);
+
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Method::DELETE,
+        &url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+}
