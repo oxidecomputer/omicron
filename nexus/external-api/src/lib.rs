@@ -4378,7 +4378,6 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Retrieve the latest ongoing rack cluster membership change
-    // TODO: Change what this returns to not be so detailed.
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/racks/{rack_id}/sleds",
