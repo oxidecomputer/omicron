@@ -429,8 +429,9 @@ pub struct BfdStatus {
     pub mode: BfdMode,
 }
 
-/// Opaque object representing link state. The contents of this object are not
-/// yet stable.
+/// Opaque object representing link state.
+///
+/// The contents of this object are not yet stable.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SwitchLinkState {
     link: serde_json::Value,
