@@ -21,9 +21,8 @@ use nexus_types::{
     authn::cookies::Cookies,
     external_api::{
         headers, params, shared,
-        views::{self, MulticastGroupMember},
+        views::{self, MulticastGroupMember, RackMembershipChange},
     },
-    trust_quorum::TrustQuorumConfig,
 };
 use omicron_common::api::external::{
     http_pagination::{
@@ -4389,7 +4388,7 @@ pub trait NexusExternalApi {
     async fn trust_quorum_get_latest_config(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackPath>,
-    ) -> Result<HttpResponseOk<Option<TrustQuorumConfig>>, HttpError>;
+    ) -> Result<HttpResponseOk<Option<RackMembershipChange>>, HttpError>;
 
     // Sleds
 

@@ -54,8 +54,8 @@ use nexus_types::{
         headers::RangeRequest,
         params::SystemMetricsPathParam,
         shared::{BfdStatus, ProbeInfo},
+        views::RackMembershipChange,
     },
-    trust_quorum::TrustQuorumConfig,
 };
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
@@ -6224,7 +6224,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn trust_quorum_get_latest_config(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackPath>,
-    ) -> Result<HttpResponseOk<Option<TrustQuorumConfig>>, HttpError> {
+    ) -> Result<HttpResponseOk<Option<RackMembershipChange>>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let rack_id =
@@ -6234,7 +6234,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let config =
                 nexus.datastore().tq_get_latest_config(&opctx, rack_id).await?;
-            Ok(HttpResponseOk(config))
+            Ok(HttpResponseOk(config.map(RackMembershipChange::from)))
         };
         apictx
             .context
