@@ -946,28 +946,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let query = query_params.into_inner();
-                nexus.scim_v2_list_users(&opctx, query).await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
+            nexus.scim_v2_list_users(&opctx, query).await
+        })
+        .await
     }
 
     async fn scim_v2_get_user(
@@ -975,59 +958,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ScimV2UserPathParam>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let query = query_params.into_inner();
-                let path_params = path_params.into_inner();
-
-                nexus
-                    .scim_v2_get_user_by_id(&opctx, query, path_params.user_id)
-                    .await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
+            let path = path_params.into_inner();
+            nexus.scim_v2_get_user_by_id(&opctx, query, path.user_id).await
+        })
+        .await
     }
 
     async fn scim_v2_create_user(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<scim2_rs::CreateUserRequest>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                nexus.scim_v2_create_user(&opctx, body.into_inner()).await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let body = body.into_inner();
+            nexus.scim_v2_create_user(&opctx, body).await
+        })
+        .await
     }
 
     async fn scim_v2_put_user(
@@ -1035,35 +982,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ScimV2UserPathParam>,
         body: TypedBody<scim2_rs::CreateUserRequest>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let path_params = path_params.into_inner();
-
-                nexus
-                    .scim_v2_replace_user(
-                        &opctx,
-                        path_params.user_id,
-                        body.into_inner(),
-                    )
-                    .await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let body = body.into_inner();
+            nexus.scim_v2_replace_user(&opctx, path.user_id, body).await
+        })
+        .await
     }
 
     async fn scim_v2_patch_user(
@@ -1071,93 +995,34 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ScimV2UserPathParam>,
         body: TypedBody<scim2_rs::PatchRequest>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let path_params = path_params.into_inner();
-
-                nexus
-                    .scim_v2_patch_user(
-                        &opctx,
-                        path_params.user_id,
-                        body.into_inner(),
-                    )
-                    .await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let body = body.into_inner();
+            nexus.scim_v2_patch_user(&opctx, path.user_id, body).await
+        })
+        .await
     }
 
     async fn scim_v2_delete_user(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ScimV2UserPathParam>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let path_params = path_params.into_inner();
-
-                nexus.scim_v2_delete_user(&opctx, path_params.user_id).await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            nexus.scim_v2_delete_user(&opctx, path.user_id).await
+        })
+        .await
     }
 
     async fn scim_v2_list_groups(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let query = query_params.into_inner();
-
-                nexus.scim_v2_list_groups(&opctx, query).await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
+            nexus.scim_v2_list_groups(&opctx, query).await
+        })
+        .await
     }
 
     async fn scim_v2_get_group(
@@ -1165,63 +1030,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ScimV2GroupPathParam>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let query = query_params.into_inner();
-                let path_params = path_params.into_inner();
-
-                nexus
-                    .scim_v2_get_group_by_id(
-                        &opctx,
-                        query,
-                        path_params.group_id,
-                    )
-                    .await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
+            let path = path_params.into_inner();
+            nexus.scim_v2_get_group_by_id(&opctx, query, path.group_id).await
+        })
+        .await
     }
 
     async fn scim_v2_create_group(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<scim2_rs::CreateGroupRequest>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                nexus.scim_v2_create_group(&opctx, body.into_inner()).await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let body = body.into_inner();
+            nexus.scim_v2_create_group(&opctx, body).await
+        })
+        .await
     }
 
     async fn scim_v2_put_group(
@@ -1229,35 +1054,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ScimV2GroupPathParam>,
         body: TypedBody<scim2_rs::CreateGroupRequest>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let path_params = path_params.into_inner();
-
-                nexus
-                    .scim_v2_replace_group(
-                        &opctx,
-                        path_params.group_id,
-                        body.into_inner(),
-                    )
-                    .await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let body = body.into_inner();
+            nexus.scim_v2_replace_group(&opctx, path.group_id, body).await
+        })
+        .await
     }
 
     async fn scim_v2_patch_group(
@@ -1265,64 +1067,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ScimV2GroupPathParam>,
         body: TypedBody<scim2_rs::PatchRequest>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let path_params = path_params.into_inner();
-
-                nexus
-                    .scim_v2_patch_group(
-                        &opctx,
-                        path_params.group_id,
-                        body.into_inner(),
-                    )
-                    .await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let body = body.into_inner();
+            nexus.scim_v2_patch_group(&opctx, path.group_id, body).await
+        })
+        .await
     }
 
     async fn scim_v2_delete_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ScimV2GroupPathParam>,
     ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let path_params = path_params.into_inner();
-
-                nexus.scim_v2_delete_group(&opctx, path_params.group_id).await
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            nexus.scim_v2_delete_group(&opctx, path.group_id).await
+        })
+        .await
     }
 
     async fn project_list(
@@ -2693,38 +2454,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::ProjectSelector>,
         new_instance: TypedBody<params::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        let apictx = rqctx.context();
         let project_selector = query_params.into_inner();
         let new_instance_params = new_instance.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let project_lookup =
-                    nexus.project_lookup(&opctx, project_selector)?;
-                let instance = nexus
-                    .project_create_instance(
-                        &opctx,
-                        &project_lookup,
-                        &new_instance_params,
-                    )
-                    .await?;
-                Ok(HttpResponseCreated(instance.into()))
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let project_selector = query_params.into_inner();
+            let new_instance_params = new_instance.into_inner();
+            let project_lookup =
+                nexus.project_lookup(&opctx, project_selector)?;
+            let instance = nexus
+                .project_create_instance(
+                    &opctx,
+                    &project_lookup,
+                    &new_instance_params,
+                )
+                .await?;
+            Ok(HttpResponseCreated(instance.into()))
+        })
+        .await
     }
 
     async fn instance_view(
@@ -2765,38 +2511,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let path = path_params.into_inner();
-                let query = query_params.into_inner();
-                let instance_selector = params::InstanceSelector {
-                    project: query.project,
-                    instance: path.instance,
-                };
-                let instance_lookup =
-                    nexus.instance_lookup(&opctx, instance_selector)?;
-                nexus
-                    .project_destroy_instance(&opctx, &instance_lookup)
-                    .await?;
-                Ok(HttpResponseDeleted())
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let instance_selector = params::InstanceSelector {
+                project: query.project,
+                instance: path.instance,
+            };
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+            nexus.project_destroy_instance(&opctx, &instance_lookup).await?;
+            Ok(HttpResponseDeleted())
+        })
+        .await
     }
 
     async fn instance_update(
@@ -8853,13 +8580,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let nexus = &apictx.context.nexus;
 
-            // By definition, this request is not authenticated.  These operations
-            // happen using the Nexus "external authentication" context, which we
-            // keep specifically for this purpose.
+            // By definition, this request is not authenticated. These
+            // operations happen using the Nexus "external authentication"
+            // context, which we keep specifically for this purpose.
             let opctx = nexus.opctx_external_authn();
-
             let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+                nexus.audit_log_entry_init_unauthed(opctx, &rqctx).await?;
 
             let result = async {
                 let path_params = path_params.into_inner();
@@ -8875,11 +8601,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 let mut response = http_response_see_other(next_url)?;
                 {
                     let headers = response.headers_mut();
+                    // Use absolute timeout even though session might idle out
+                    // first. Browser expiration is mostly for convenience, as
+                    // the API will reject requests with an expired session
+                    // regardless.
                     let cookie = session_cookie::session_cookie_header_value(
                         &session.token,
-                        // use absolute timeout even though session might idle out first.
-                        // browser expiration is mostly for convenience, as the API will
-                        // reject requests with an expired session regardless
                         apictx.context.session_absolute_timeout(),
                         apictx.context.external_tls_enabled,
                     )?;
@@ -8890,8 +8617,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await;
 
             let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-
+                nexus.audit_log_entry_complete(opctx, &audit, &result).await;
             result
         };
         apictx
@@ -8924,22 +8650,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            // By definition, this request is not authenticated.  These operations
-            // happen using the Nexus "external authentication" context, which we
-            // keep specifically for this purpose.
+
+            // By definition, this request is not authenticated. These
+            // operations happen using the Nexus "external authentication"
+            // context, which we keep specifically for this purpose.
             let opctx = nexus.opctx_external_authn();
             let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+                nexus.audit_log_entry_init_unauthed(opctx, &rqctx).await?;
 
             let result = async {
                 let path = path_params.into_inner();
                 let credentials = credentials.into_inner();
                 let silo = path.silo_name.into();
 
-                let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
-                let user = nexus
-                    .login_local(&opctx, &silo_lookup, credentials)
-                    .await?;
+                let silo_lookup = nexus.silo_lookup(opctx, silo)?;
+                let user =
+                    nexus.login_local(opctx, &silo_lookup, credentials).await?;
 
                 let session = nexus.session_create(opctx, &user).await?;
                 let mut response = HttpResponseHeaders::new_unnamed(
@@ -8948,11 +8674,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
                 {
                     let headers = response.headers_mut();
+                    // Use absolute timeout even though session might idle out
+                    // first. Browser expiration is mostly for convenience, as
+                    // the API will reject requests with an expired session
+                    // regardless.
                     let cookie = session_cookie::session_cookie_header_value(
                         &session.token,
-                        // use absolute timeout even though session might idle out first.
-                        // browser expiration is mostly for convenience, as the API will
-                        // reject requests with an expired session regardless
                         apictx.context.session_absolute_timeout(),
                         apictx.context.external_tls_enabled,
                     )?;
@@ -8961,8 +8688,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 Ok(response)
             }
             .await;
+
             let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+                nexus.audit_log_entry_complete(opctx, &audit, &result).await;
             result
         };
         apictx
@@ -9190,59 +8918,39 @@ impl NexusExternalApi for NexusExternalApiImpl {
     // requiring authentication has happened yet -- anybody could spam those
     // requests and nothing would happen.
 
+    // This is an authenticated request, so we know who the user is. In that
+    // respect it's more like a regular resource create operation and not like
+    // the true login endpoints `login_local` and `login_saml`.
     async fn device_auth_confirm(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::DeviceAuthVerify>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let params = params.into_inner();
+            let &actor = opctx.authn.actor_required().internal_context(
+                "creating new device auth session for current user",
+            )?;
 
-            let nexus = &apictx.context.nexus;
+            let silo_user_id = match actor.silo_user_id() {
+                Some(silo_user_id) => silo_user_id,
+                None => {
+                    return Err(Error::non_resourcetype_not_found(
+                        "could not find silo user",
+                    ))?;
+                }
+            };
 
-            // This is an authenticated request, so we know who the user
-            // is. In that respect it's more like a regular resource create
-            // operation and not like the true login endpoints `login_local`
-            // and `login_saml`.
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+            let _token = nexus
+                .device_auth_request_verify(
+                    &opctx,
+                    params.user_code,
+                    silo_user_id,
+                )
+                .await?;
 
-            let result = async {
-                let params = params.into_inner();
-                let &actor = opctx.authn.actor_required().internal_context(
-                    "creating new device auth session for current user",
-                )?;
-
-                let silo_user_id = match actor.silo_user_id() {
-                    Some(silo_user_id) => silo_user_id,
-                    None => {
-                        return Err(Error::non_resourcetype_not_found(
-                            "could not find silo user",
-                        ))?;
-                    }
-                };
-
-                let _token = nexus
-                    .device_auth_request_verify(
-                        &opctx,
-                        params.user_code,
-                        silo_user_id,
-                    )
-                    .await?;
-
-                Ok(HttpResponseUpdatedNoContent())
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+            Ok(HttpResponseUpdatedNoContent())
+        })
+        .await
     }
 
     async fn device_access_token(
