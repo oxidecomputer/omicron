@@ -6,11 +6,11 @@
 
 use crate::app::background::BackgroundTask;
 use anyhow::{Context, Error, anyhow, bail};
-use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_networking::sled_client_by_baseboard_id_and_rack_id_if_commissioned;
+use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::trust_quorum::{
     TrustQuorumConfig as NexusTrustQuorumConfig, TrustQuorumMemberState,
 };
@@ -24,8 +24,8 @@ use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, info, o};
 use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write;
 use std::sync::Arc;
+use swrite::{SWrite, swrite, swriteln};
 use tokio::task::JoinSet;
 use trust_quorum_types::messages::{CommitRequest, PrepareAndCommitRequest};
 use trust_quorum_types::status::CommitStatus;
@@ -39,6 +39,100 @@ impl TrustQuorumManager {
     pub fn new(datastore: Arc<DataStore>) -> Self {
         Self { datastore }
     }
+
+    async fn activate_impl(
+        &mut self,
+        opctx: &OpContext,
+    ) -> TrustQuorumManagerStatus {
+        let opctx = opctx.child(BTreeMap::from([(
+            "bgtask".into(),
+            "TrustQuorumManager".into(),
+        )]));
+        let log = opctx.log.new(o!("bgtask" => "TrustQuorumManager"));
+        // First, see if nexus needs to do any work.
+        let epochs_by_rack_id = match self
+            .datastore
+            .tq_get_all_active_rack_id_and_latest_epoch(&opctx)
+            .await
+        {
+            Ok(epochs_by_rack_id) => epochs_by_rack_id,
+            Err(err) => {
+                let msg = format!(
+                    "Failed to load active trust quorum configs: {}",
+                    InlineErrorChain::new(&err)
+                );
+                error!(log, "{msg}");
+                return TrustQuorumManagerStatus::Error(msg);
+            }
+        };
+
+        info!(
+            log,
+            "Loaded {} active trust quorum configurations from database",
+            epochs_by_rack_id.len()
+        );
+
+        // For each rack, do the work
+        let mut workers = JoinSet::new();
+        let mut config_by_task_id = BTreeMap::new();
+        for (rack_id, epoch) in epochs_by_rack_id {
+            let log = log.clone();
+            let opctx = opctx.child(BTreeMap::from([
+                ("rack_id".into(), rack_id.to_string()),
+                ("epoch".into(), epoch.to_string()),
+            ]));
+            let datastore = self.datastore.clone();
+            let handle = workers.spawn(async move {
+                drive_reconfiguration(log, opctx, datastore, rack_id, epoch)
+                    .await
+            });
+            config_by_task_id.insert(handle.id(), (rack_id, epoch));
+        }
+
+        let mut statuses = vec![];
+        let mut errors = vec![];
+        while let Some(res) = workers.join_next_with_id().await {
+            match res {
+                Ok((task_id, res)) => {
+                    // Safety: We fill in the map directly above
+                    let (rack_id, epoch) = config_by_task_id
+                        .remove(&task_id)
+                        .expect("task id exists");
+                    match res {
+                        Ok(status) => {
+                            let status_string =
+                                status.to_display(rack_id, epoch);
+                            info!(log, "{status_string}");
+                            statuses.push(status_string);
+                        }
+                        Err(err) => {
+                            let msg = format!(
+                                "Reconfiguration worker error for \
+                                rack_id {rack_id}, epoch {epoch}: {}",
+                                InlineErrorChain::new(&*err)
+                            );
+                            error!(log, "{msg}");
+                            errors.push(msg);
+                        }
+                    }
+                }
+                Err(err) => {
+                    // Safety: We fill in the map directly above
+                    let (rack_id, epoch) = config_by_task_id
+                        .remove(&err.id())
+                        .expect("task id exists");
+                    let msg = format!(
+                        "Reconfiguration worker error for \
+                        rack_id {rack_id}, epoch {epoch}: {err}"
+                    );
+                    error!(log, "{msg}");
+                    errors.push(msg);
+                }
+            }
+        }
+
+        TrustQuorumManagerStatus::PerRackStatus { statuses, errors }
+    }
 }
 
 impl BackgroundTask for TrustQuorumManager {
@@ -46,110 +140,18 @@ impl BackgroundTask for TrustQuorumManager {
         &'a mut self,
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
-        async {
-            let opctx = opctx.child(BTreeMap::from([(
-                "bgtask".into(),
-                "TrustQuorumManager".into(),
-            )]));
-            let log = opctx.log.new(o!("bgtask" => "TrustQuorumManager"));
-            // First, see if nexus needs to do any work.
-            let epochs_by_rack_id = match self
-                .datastore
-                .tq_get_all_active_rack_id_and_latest_epoch(&opctx)
-                .await
-            {
-                Ok(epochs_by_rack_id) => epochs_by_rack_id,
-                Err(err) => {
-                    let msg = format!(
-                        "Failed to load active trust quorum configs: {}",
-                        InlineErrorChain::new(&err)
-                    );
-                    error!(log, "{msg}");
-                    return json!({"error": msg});
-                }
-            };
-
-            info!(
-                log,
-                "Loaded {} active trust quorum configurations from database",
-                epochs_by_rack_id.len()
-            );
-
-            // For each rack, do the work
-            let mut workers = JoinSet::new();
-            let mut config_by_task_id = BTreeMap::new();
-            for (rack_id, epoch) in epochs_by_rack_id {
-                let log = log.clone();
-                let opctx = opctx.child(BTreeMap::from([
-                    ("rack_id".into(), rack_id.to_string()),
-                    ("epoch".into(), epoch.to_string()),
-                ]));
-                let datastore = self.datastore.clone();
-                let handle = workers.spawn(async move {
-                    drive_reconfiguration(log, opctx, datastore, rack_id, epoch)
-                        .await
-                });
-                config_by_task_id.insert(handle.id(), (rack_id, epoch));
+        Box::pin(async move {
+            let status = self.activate_impl(opctx).await;
+            match serde_json::to_value(status) {
+                Ok(val) => val,
+                Err(err) => json!({
+                    "error": format!(
+                        "could not serialize task status: {}",
+                         InlineErrorChain::new(&err)
+                     ),
+                }),
             }
-
-            let mut statuses = vec![];
-            let mut errors = vec![];
-            while let Some(res) = workers.join_next_with_id().await {
-                match res {
-                    Ok((task_id, res)) => {
-                        // Safety: We fill in the map directly above
-                        let (rack_id, epoch) = config_by_task_id
-                            .remove(&task_id)
-                            .expect("task id exists");
-                        match res {
-                            Ok(status) => {
-                                match status.to_display(rack_id, epoch) {
-                                    Ok(status_string) => {
-                                        info!(log, "{status_string}");
-                                        statuses.push(status_string);
-                                    }
-                                    Err(e) => {
-                                        let msg = format!(
-                                            "Failed to write status for \
-                                             rack_id {rack_id}, \
-                                             epoch {epoch}: {e}"
-                                        );
-                                        error!(log, "{msg}");
-                                        errors.push(msg);
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                let msg = format!(
-                                    "Reconfiguration worker error for \
-                                    rack_id {rack_id}, epoch {epoch}: {err}"
-                                );
-                                error!(log, "{msg}");
-                                errors.push(msg);
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        // Safety: We fill in the map directly above
-                        let (rack_id, epoch) = config_by_task_id
-                            .remove(&err.id())
-                            .expect("task id exists");
-                        let msg = format!(
-                            "Reconfiguration worker error for \
-                                    rack_id {rack_id}, epoch {epoch}: {err}"
-                        );
-                        error!(log, "{msg}");
-                        errors.push(msg);
-                    }
-                }
-            }
-
-            json!({
-                "statuses": statuses,
-                "errors": errors
-            })
-        }
-        .boxed()
+        })
     }
 }
 
@@ -162,53 +164,48 @@ enum Status {
 }
 
 impl Status {
-    pub fn to_display(
-        &self,
-        rack_id: RackUuid,
-        epoch: Epoch,
-    ) -> anyhow::Result<String> {
+    pub fn to_display(&self, rack_id: RackUuid, epoch: Epoch) -> String {
         let mut s = String::new();
-        writeln!(
+        swriteln!(
             &mut s,
             "Trust Quorum status for rack_id: {rack_id}, epoch: {epoch}:"
-        )?;
+        );
         match self {
             Status::ConfigInactive => {
-                writeln!(
+                swriteln!(
                     &mut s,
                     "    Configuration became inactive: fully committed or \
                     aborted."
-                )?;
+                );
             }
             Status::CoordinatorNoLongerCommissioned(coordinator_id) => {
-                writeln!(
+                swriteln!(
                     &mut s,
                     "    Coordinator ({coordinator_id}) was decommissioned."
-                )?;
+                );
             }
             Status::Preparing => {
-                writeln!(&mut s, "    Prepare phase in progress.")?;
+                swriteln!(&mut s, "    Prepare phase in progress.");
             }
             Status::Commit(op_results) => {
                 for r in op_results {
-                    writeln!(
+                    swriteln!(
                         &mut s,
                         "    Commit Status from client {}:",
                         r.client_destination
-                    )?;
-                    write!(&mut s, "      acked: ")?;
-                    writeln!(&mut s, "{}", itertools::join(&r.acked, ", "))?;
-                    write!(&mut s, "      pending: ")?;
-                    writeln!(&mut s, "{}", itertools::join(&r.pending, ", "))?;
-                    writeln!(&mut s, "      errors:")?;
+                    );
+                    swrite!(&mut s, "      acked: ");
+                    swriteln!(&mut s, "{}", itertools::join(&r.acked, ", "));
+                    swrite!(&mut s, "      pending: ");
+                    swriteln!(&mut s, "{}", itertools::join(&r.pending, ", "));
+                    swriteln!(&mut s, "      errors:");
                     for e in &r.errors {
-                        writeln!(&mut s, "        {e}")?;
+                        swriteln!(&mut s, "        {e}");
                     }
                 }
             }
         }
-
-        Ok(s)
+        s
     }
 }
 
@@ -253,7 +250,7 @@ async fn drive_reconfiguration(
         return prepare(log, opctx, datastore, config).await;
     }
 
-    // For each unacked node, need to send a `Commit` or `PrepareAndCommitt'
+    // For each unacked node, need to send a `Commit` or `PrepareAndCommit'
     if config.state.is_committing() {
         return commit(log, opctx, datastore, config).await;
     }

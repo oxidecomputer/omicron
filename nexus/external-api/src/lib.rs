@@ -4390,7 +4390,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::RackMembershipConfigPathParams>,
     ) -> Result<HttpResponseOk<Option<RackMembershipChange>>, HttpError>;
 
-    /// Retrieve the latest ongoing rack cluster membership change
+    /// Retrieve the latest rack cluster membership change
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/racks/{rack_id}/sleds",
