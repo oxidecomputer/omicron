@@ -1493,6 +1493,27 @@ pub struct SubnetPoolCreate {
     /// The IP version for this pool (IPv4 or IPv6). All subnets in the pool
     /// must match this version.
     pub ip_version: IpVersion,
+    /// Type of subnet pool (defaults to Unicast)
+    #[serde(default)]
+    pub pool_type: shared::IpPoolType,
+}
+
+impl SubnetPoolCreate {
+    /// Create parameters for a unicast subnet pool (the default)
+    pub fn new(
+        identity: IdentityMetadataCreateParams,
+        ip_version: IpVersion,
+    ) -> Self {
+        Self { identity, ip_version, pool_type: shared::IpPoolType::Unicast }
+    }
+
+    /// Create parameters for a multicast subnet pool
+    pub fn new_multicast(
+        identity: IdentityMetadataCreateParams,
+        ip_version: IpVersion,
+    ) -> Self {
+        Self { identity, ip_version, pool_type: shared::IpPoolType::Multicast }
+    }
 }
 
 /// Update a subnet pool
