@@ -275,7 +275,8 @@ async fn spawn_bootstore_tasks(
     node_handle
 }
 
-async fn spawn_health_monitor_tasks(log: &Logger) -> HealthMonitorHandle {
+// TODO-K: Remove pub
+pub async fn spawn_health_monitor_tasks(log: &Logger) -> HealthMonitorHandle {
     info!(log, "Starting health monitor");
     let log = log.new(o!("component" => "HealthMonitor"));
     HealthMonitorHandle::spawn(log)

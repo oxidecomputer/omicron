@@ -5537,6 +5537,8 @@
             ]
           },
           "unhealthy_zpools": {
+            "nullable": true,
+            "default": null,
             "x-rust-type": {
               "crate": "std",
               "parameters": [
@@ -5577,8 +5579,7 @@
           }
         },
         "required": [
-          "smf_services_in_maintenance",
-          "unhealthy_zpools"
+          "smf_services_in_maintenance"
         ]
       },
       "HostIdentifier": {

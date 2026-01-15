@@ -9,7 +9,6 @@ use std::net::{IpAddr, Ipv6Addr};
 use camino::Utf8PathBuf;
 use iddqd::IdOrdMap;
 use illumos_utils::svcs::SvcsInMaintenanceResult;
-use illumos_utils::zpool::UnhealthyZpoolsResult;
 use indent_write::fmt::IndentWriter;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -473,18 +472,21 @@ impl HealthMonitorInventory {
     pub fn new() -> Self {
         Self {
             smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
-            unhealthy_zpools: Ok(UnhealthyZpoolsResult::new()),
+            unhealthy_zpools: None,
         }
     }
 
+    // TODO-K: change name of this method?
     pub fn is_empty(&self) -> bool {
         self.smf_services_in_maintenance
             .as_ref()
             .is_ok_and(|svcs| svcs.is_empty())
-            && self
-                .unhealthy_zpools
-                .as_ref()
-                .is_ok_and(|zpools| zpools.is_empty())
+            && self.unhealthy_zpools.is_none()
+        // TODO-K: Fix this. Add this logic
+        //self
+        // .unhealthy_zpools
+        // .as_ref()
+        // .is_ok_and(|zpools| zpools.is_empty())
     }
 }
 

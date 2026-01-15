@@ -1,6 +1,8 @@
 use illumos_utils::svcs::SvcsInMaintenanceResult;
 use illumos_utils::zpool::UnhealthyZpoolsResult;
 use omicron_common::api::external::ByteCount;
+use omicron_common::snake_case_option_result;
+use omicron_common::snake_case_option_result::SnakeCaseOptionResult;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_uuid_kinds::SledUuid;
@@ -91,11 +93,11 @@ pub struct HealthMonitorInventory {
         schema_with = "SnakeCaseResult::<SvcsInMaintenanceResult, String>::json_schema"
     )]
     pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
-    #[serde(with = "snake_case_result")]
+    #[serde(default, with = "snake_case_option_result")]
     #[schemars(
-        schema_with = "SnakeCaseResult::<UnhealthyZpoolsResult, String>::json_schema"
+        schema_with = "SnakeCaseOptionResult::<UnhealthyZpoolsResult, String>::json_schema"
     )]
-    pub unhealthy_zpools: Result<UnhealthyZpoolsResult, String>,
+    pub unhealthy_zpools: Option<Result<UnhealthyZpoolsResult, String>>,
 }
 
 impl From<HealthMonitorInventory> for v12::inventory::HealthMonitorInventory {

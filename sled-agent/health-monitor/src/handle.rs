@@ -21,7 +21,7 @@ pub struct HealthMonitorHandle {
     pub smf_services_in_maintenance_rx:
         watch::Receiver<Result<SvcsInMaintenanceResult, String>>,
     pub unhealthy_zpools_rx:
-        watch::Receiver<Result<UnhealthyZpoolsResult, String>>,
+        watch::Receiver<Option<Result<UnhealthyZpoolsResult, String>>>,
 }
 
 impl HealthMonitorHandle {
@@ -30,8 +30,7 @@ impl HealthMonitorHandle {
     pub fn stub() -> Self {
         let (_tx, smf_services_in_maintenance_rx) =
             watch::channel(Ok(SvcsInMaintenanceResult::new()));
-        let (_tx, unhealthy_zpools_rx) =
-            watch::channel(Ok(UnhealthyZpoolsResult::new()));
+        let (_tx, unhealthy_zpools_rx) = watch::channel(None);
         Self { smf_services_in_maintenance_rx, unhealthy_zpools_rx }
     }
 
@@ -54,8 +53,7 @@ impl HealthMonitorHandle {
         // Spawn a task to retrieve information about unhealthy zpools
         info!(zpool_log, "Starting Zpool health poller");
 
-        let (unhealthy_zpools_tx, unhealthy_zpools_rx) =
-            watch::channel(Ok(UnhealthyZpoolsResult::new()));
+        let (unhealthy_zpools_tx, unhealthy_zpools_rx) = watch::channel(None);
 
         tokio::spawn(async move {
             poll_unhealthy_zpools(zpool_log, unhealthy_zpools_tx).await
