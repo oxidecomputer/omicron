@@ -32,6 +32,7 @@ use omicron_common::api::external::{
     *,
 };
 use openapiv3::OpenAPI;
+use trust_quorum_types::types::Epoch;
 
 /// Copies of data types that changed between versions
 mod v2025112000;

@@ -6261,11 +6261,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
     // Trust Quorum
     //
 
-    async fn trust_quorum_add_sleds(
+    async fn rack_membership_add_sleds(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackPath>,
         req: TypedBody<params::AddSledsRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseOk<Epoch>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let req = req.into_inner();
@@ -6274,8 +6274,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            nexus.tq_add_sleds(&opctx, rack_id, req.sled_ids).await?;
-            Ok(HttpResponseUpdatedNoContent())
+            let epoch =
+                nexus.tq_add_sleds(&opctx, rack_id, req.sled_ids).await?;
+            Ok(HttpResponseOk(epoch))
         };
         apictx
             .context
@@ -6284,7 +6285,30 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn trust_quorum_get_latest_config(
+    async fn rack_membership_config(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackMembershipConfigPathParams>,
+    ) -> Result<HttpResponseOk<Option<RackMembershipChange>>, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let params = path_params.into_inner();
+        let rack_id = RackUuid::from_untyped_uuid(params.rack_id);
+        let epoch = params.epoch;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let config =
+                nexus.datastore().tq_get_config(&opctx, rack_id, epoch).await?;
+            Ok(HttpResponseOk(config.map(RackMembershipChange::from)))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn rack_membership_config_latest(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackPath>,
     ) -> Result<HttpResponseOk<Option<RackMembershipChange>>, HttpError> {

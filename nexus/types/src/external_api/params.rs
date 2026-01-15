@@ -39,6 +39,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
+use trust_quorum_types::types::Epoch;
 use url::Url;
 use uuid::Uuid;
 
