@@ -2,14 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+/// Resolvable files in Omicron.
+///
+/// A resolvable file is an Oxide system file that in normal operation is
+/// fetched from the artifact repo depot, but if a MUPdate occurred
+/// recently is fetched from the install dataset.
+///
+/// For more about resolvable files, see [RFD 556 Mixing MUPdate with Update](https://rfd.shared.oxide.computer/rfd/0556).
+///
+/// There are currently two kinds of resolvable files:
+///
+/// 1. Omicron-managed zone images (the original motivation for zone images).
+/// 2. Measurement files with sprockets.
 use std::{fmt, fs::FileType, io, sync::Arc};
 
 use camino::Utf8PathBuf;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_common::update::{
     MupdateOverrideInfo, OmicronInstallManifest, OmicronInstallManifestSource,
 };
-use omicron_common::zone_images::ZoneImageFileSource;
 use omicron_uuid_kinds::InternalZpoolUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_types_versions::latest::inventory::ManifestBootInventory;
@@ -38,7 +50,7 @@ pub const RAMDISK_IMAGE_PATH: &str = "/opt/oxide";
 pub const TESTING_MEASUREMENTS_PATH: &str = "/opt/oxide/sled-agent/pkg/";
 pub const TESTING_MEASUREMENTS_FILE: &str = "testing-measurements";
 
-/// Current status of the zone image resolver.
+/// Current status of the omicron file resolver.
 #[derive(Clone, Debug)]
 pub struct ResolverStatus {
     /// The zone manifest status.
@@ -77,11 +89,11 @@ pub struct MeasurementManifestStatus {
 
     /// Status of the boot disk.
     pub boot_disk_result:
-        Result<ZoneManifestArtifactsResult, ZoneManifestReadError>,
+        Result<OmicronManifestArtifactsResult, OmicronManifestReadError>,
 
     /// Status of the non-boot disks. This results in warnings in case of a
     /// mismatch.
-    pub non_boot_disk_metadata: IdOrdMap<ZoneManifestNonBootInfo>,
+    pub non_boot_disk_metadata: IdOrdMap<OmicronManifestNonBootInfo>,
 }
 
 type MeasurementEntry = Result<(String, ArtifactHash), ManifestHashError>;
@@ -154,11 +166,11 @@ pub struct ZoneManifestStatus {
 
     /// Status of the boot disk.
     pub boot_disk_result:
-        Result<ZoneManifestArtifactsResult, ZoneManifestReadError>,
+        Result<OmicronManifestArtifactsResult, OmicronManifestReadError>,
 
     /// Status of the non-boot disks. This results in warnings in case of a
     /// mismatch.
-    pub non_boot_disk_metadata: IdOrdMap<ZoneManifestNonBootInfo>,
+    pub non_boot_disk_metadata: IdOrdMap<OmicronManifestNonBootInfo>,
 }
 
 impl ZoneManifestStatus {
@@ -225,7 +237,7 @@ impl ZoneManifestStatus {
 #[derive(Clone, Debug, thiserror::Error, PartialEq)]
 pub enum ManifestHashError {
     #[error("error reading boot disk")]
-    ReadBootDisk(#[source] ZoneManifestReadError),
+    ReadBootDisk(#[source] OmicronManifestReadError),
     #[error("no artifact found for zone kind {0:?}")]
     NoArtifactForZoneKind(ZoneKind),
     #[error(
@@ -250,20 +262,20 @@ pub enum ManifestHashError {
 /// This may or may not be valid, depending on the status of the artifacts. See
 /// [`Self::is_valid`].
 #[derive(Clone, Debug, PartialEq)]
-pub struct ZoneManifestArtifactsResult {
+pub struct OmicronManifestArtifactsResult {
     pub manifest: OmicronInstallManifest,
-    pub data: IdOrdMap<ZoneManifestArtifactResult>,
+    pub data: IdOrdMap<OmicronManifestArtifactResult>,
 }
 
-impl ZoneManifestArtifactsResult {
+impl OmicronManifestArtifactsResult {
     /// Returns true if all artifacts are valid.
     pub fn is_valid(&self) -> bool {
         self.data.iter().all(|artifact| artifact.is_valid())
     }
 
     /// Returns a displayable representation of the artifacts.
-    pub fn display(&self) -> ZoneManifestArtifactsDisplay<'_> {
-        ZoneManifestArtifactsDisplay {
+    pub fn display(&self) -> OmicronFileManifestArtifactsDisplay<'_> {
+        OmicronFileManifestArtifactsDisplay {
             source: &self.manifest.source,
             artifacts: &self.data,
         }
@@ -278,12 +290,12 @@ impl ZoneManifestArtifactsResult {
     }
 }
 
-pub struct ZoneManifestArtifactsDisplay<'a> {
+pub struct OmicronFileManifestArtifactsDisplay<'a> {
     source: &'a OmicronInstallManifestSource,
-    artifacts: &'a IdOrdMap<ZoneManifestArtifactResult>,
+    artifacts: &'a IdOrdMap<OmicronManifestArtifactResult>,
 }
 
-impl fmt::Display for ZoneManifestArtifactsDisplay<'_> {
+impl fmt::Display for OmicronFileManifestArtifactsDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // First, display a summary of the artifacts.
         let (valid, mismatch, error) = self.artifacts.iter().fold(
@@ -315,7 +327,7 @@ impl fmt::Display for ZoneManifestArtifactsDisplay<'_> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ZoneManifestArtifactResult {
+pub struct OmicronManifestArtifactResult {
     /// The filename.
     pub file_name: String,
 
@@ -332,13 +344,13 @@ pub struct ZoneManifestArtifactResult {
     pub status: ArtifactReadResult,
 }
 
-impl ZoneManifestArtifactResult {
+impl OmicronManifestArtifactResult {
     pub fn is_valid(&self) -> bool {
         matches!(self.status, ArtifactReadResult::Valid)
     }
 
-    pub fn display(&self) -> ZoneManifestArtifactDisplay<'_> {
-        ZoneManifestArtifactDisplay { artifact: self }
+    pub fn display(&self) -> OmicronManifestArtifactDisplay<'_> {
+        OmicronManifestArtifactDisplay { artifact: self }
     }
 
     /// Convert this result to inventory format.
@@ -369,7 +381,7 @@ impl ZoneManifestArtifactResult {
     }
 }
 
-impl IdOrdItem for ZoneManifestArtifactResult {
+impl IdOrdItem for OmicronManifestArtifactResult {
     type Key<'a> = &'a str;
 
     fn key(&self) -> Self::Key<'_> {
@@ -379,11 +391,11 @@ impl IdOrdItem for ZoneManifestArtifactResult {
     id_upcast!();
 }
 
-pub struct ZoneManifestArtifactDisplay<'a> {
-    artifact: &'a ZoneManifestArtifactResult,
+pub struct OmicronManifestArtifactDisplay<'a> {
+    artifact: &'a OmicronManifestArtifactResult,
 }
 
-impl fmt::Display for ZoneManifestArtifactDisplay<'_> {
+impl fmt::Display for OmicronManifestArtifactDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.artifact.status {
             ArtifactReadResult::Valid => {
@@ -420,7 +432,7 @@ impl fmt::Display for ZoneManifestArtifactDisplay<'_> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ZoneManifestNonBootInfo {
+pub struct OmicronManifestNonBootInfo {
     /// The ID of the zpool.
     pub zpool_id: InternalZpoolUuid,
 
@@ -431,10 +443,10 @@ pub struct ZoneManifestNonBootInfo {
     pub path: Utf8PathBuf,
 
     /// The result of performing the read operation.
-    pub result: ZoneManifestNonBootResult,
+    pub result: OmicronManifestNonBootResult,
 }
 
-impl ZoneManifestNonBootInfo {
+impl OmicronManifestNonBootInfo {
     pub fn log_to(&self, log: &slog::Logger) {
         let log = log.new(o!(
             "non_boot_zpool" => self.zpool_id.to_string(),
@@ -444,7 +456,7 @@ impl ZoneManifestNonBootInfo {
     }
 }
 
-impl IdOrdItem for ZoneManifestNonBootInfo {
+impl IdOrdItem for OmicronManifestNonBootInfo {
     type Key<'a> = InternalZpoolUuid;
 
     fn key(&self) -> Self::Key<'_> {
@@ -455,22 +467,22 @@ impl IdOrdItem for ZoneManifestNonBootInfo {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum ZoneManifestNonBootResult {
+pub enum OmicronManifestNonBootResult {
     /// The manifest is present and matches the value on the boot disk.
     ///
     /// This does not necessarily mean that the zone tarballs on the non-boot
     /// disk match the manifest. Information about that is stored in the
-    /// `ZoneManifestArtifactsResult`.
-    Matches(ZoneManifestArtifactsResult),
+    /// `ArtifactsResult`.
+    Matches(OmicronManifestArtifactsResult),
 
     /// A mismatch between the boot disk and the other disk was detected.
-    Mismatch(ZoneManifestNonBootMismatch),
+    Mismatch(OmicronManifestNonBootMismatch),
 
     /// An error occurred while reading the zone manifest on this disk.
-    ReadError(ZoneManifestReadError),
+    ReadError(OmicronManifestReadError),
 }
 
-impl ZoneManifestNonBootResult {
+impl OmicronManifestNonBootResult {
     /// Returns true if the status is valid.
     ///
     /// The necessary conditions for validity are:
@@ -485,8 +497,8 @@ impl ZoneManifestNonBootResult {
     }
 
     /// Returns a displayable representation of this result.
-    pub fn display(&self) -> ZoneManifestNonBootDisplay<'_> {
-        ZoneManifestNonBootDisplay { result: self }
+    pub fn display(&self) -> OmicronManifestNonBootDisplay<'_> {
+        OmicronManifestNonBootDisplay { result: self }
     }
 
     fn log_to(&self, log: &slog::Logger) {
@@ -507,7 +519,7 @@ impl ZoneManifestNonBootResult {
                 }
             }
             Self::Mismatch(mismatch) => match mismatch {
-                ZoneManifestNonBootMismatch::ValueMismatch {
+                OmicronManifestNonBootMismatch::ValueMismatch {
                     non_boot_disk_result,
                 } => {
                     warn!(
@@ -516,7 +528,7 @@ impl ZoneManifestNonBootResult {
                         "non_boot_disk_result" => %non_boot_disk_result.display(),
                     );
                 }
-                ZoneManifestNonBootMismatch::BootDiskReadError {
+                OmicronManifestNonBootMismatch::BootDiskReadError {
                     non_boot_disk_result,
                 } => {
                     warn!(
@@ -538,41 +550,43 @@ impl ZoneManifestNonBootResult {
     }
 }
 
-pub struct ZoneManifestNonBootDisplay<'a> {
-    result: &'a ZoneManifestNonBootResult,
+pub struct OmicronManifestNonBootDisplay<'a> {
+    result: &'a OmicronManifestNonBootResult,
 }
 
-impl fmt::Display for ZoneManifestNonBootDisplay<'_> {
+impl fmt::Display for OmicronManifestNonBootDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.result {
-            ZoneManifestNonBootResult::Matches(result) => {
+            OmicronManifestNonBootResult::Matches(result) => {
                 if result.is_valid() {
                     write!(f, "valid zone manifest: {}", result.display())
                 } else {
                     write!(f, "invalid zone manifest: {}", result.display())
                 }
             }
-            ZoneManifestNonBootResult::Mismatch(mismatch) => match mismatch {
-                ZoneManifestNonBootMismatch::ValueMismatch {
-                    non_boot_disk_result,
-                } => {
-                    write!(
-                        f,
-                        "contents differ from boot disk: {}",
-                        non_boot_disk_result.display()
-                    )
+            OmicronManifestNonBootResult::Mismatch(mismatch) => {
+                match mismatch {
+                    OmicronManifestNonBootMismatch::ValueMismatch {
+                        non_boot_disk_result,
+                    } => {
+                        write!(
+                            f,
+                            "contents differ from boot disk: {}",
+                            non_boot_disk_result.display()
+                        )
+                    }
+                    OmicronManifestNonBootMismatch::BootDiskReadError {
+                        non_boot_disk_result,
+                    } => {
+                        write!(
+                            f,
+                            "boot disk read error, non-boot disk: {}",
+                            non_boot_disk_result.display()
+                        )
+                    }
                 }
-                ZoneManifestNonBootMismatch::BootDiskReadError {
-                    non_boot_disk_result,
-                } => {
-                    write!(
-                        f,
-                        "boot disk read error, non-boot disk: {}",
-                        non_boot_disk_result.display()
-                    )
-                }
-            },
-            ZoneManifestNonBootResult::ReadError(error) => {
+            }
+            OmicronManifestNonBootResult::ReadError(error) => {
                 write!(f, "read error: {}", error)
             }
         }
@@ -580,15 +594,15 @@ impl fmt::Display for ZoneManifestNonBootDisplay<'_> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum ZoneManifestNonBootMismatch {
+pub enum OmicronManifestNonBootMismatch {
     /// The file's contents differ between the boot disk and the other disk.
-    ValueMismatch { non_boot_disk_result: ZoneManifestArtifactsResult },
+    ValueMismatch { non_boot_disk_result: OmicronManifestArtifactsResult },
 
     /// There was a read error on the boot disk, so we were unable to verify
     /// consistency.
     BootDiskReadError {
         /// The value as found on this disk. This value is logged but not used.
-        non_boot_disk_result: ZoneManifestArtifactsResult,
+        non_boot_disk_result: OmicronManifestArtifactsResult,
     },
 }
 
@@ -803,7 +817,7 @@ pub enum MupdateOverrideNonBootMismatch {
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
-pub enum ZoneManifestReadError {
+pub enum OmicronManifestReadError {
     #[error("error reading install metadata")]
     InstallMetadata(#[from] InstallMetadataReadError),
 }
@@ -1203,7 +1217,7 @@ pub struct PreparedOmicronZone<'a> {
     config: &'a OmicronZoneConfig,
 
     /// The file source of the zone.
-    file_source: OmicronZoneFileSource,
+    file_source: OmicronResolvableFileSource,
 }
 
 impl<'a> PreparedOmicronZone<'a> {
@@ -1211,7 +1225,7 @@ impl<'a> PreparedOmicronZone<'a> {
     /// file source.
     pub fn new(
         config: &'a OmicronZoneConfig,
-        file_source: OmicronZoneFileSource,
+        file_source: OmicronResolvableFileSource,
     ) -> Self {
         Self { config, file_source }
     }
@@ -1222,31 +1236,31 @@ impl<'a> PreparedOmicronZone<'a> {
     }
 
     /// Returns the file source of the zone.
-    pub fn file_source(&self) -> &OmicronZoneFileSource {
+    pub fn file_source(&self) -> &OmicronResolvableFileSource {
         &self.file_source
     }
 }
 
-/// Contains information about the location of an Omicron zone image file after
+/// Contains information about the location of an Omicron resolvable file after
 /// being resolved by a `ZoneImageSourceResolver`.
 #[derive(Clone, Debug, PartialEq)]
-pub struct OmicronZoneFileSource {
+pub struct OmicronResolvableFileSource {
     /// The actual source from which the zone image was resolved.
     ///
     /// This is usually derived from the provided `OmicronZoneImageSource`, but
     /// it may be a different source if a mupdate override is active.
-    pub location: OmicronZoneImageLocation,
+    pub location: OmicronResolvableFileLocation,
 
     /// The file name and search locations.
-    pub file_source: ZoneImageFileSource,
+    pub file_source: ResolvableFileSource,
 }
 
 /// The location of an Omicron zone image after mupdate overrides have been
 /// considered, along with the hash corresponding to the zone.
 ///
-/// Part of [`OmicronZoneFileSource`].
+/// Part of [`OmicronResolvableFileSource`].
 #[derive(Clone, Debug, PartialEq)]
-pub enum OmicronZoneImageLocation {
+pub enum OmicronResolvableFileLocation {
     /// The zone was looked up from the artifact store.
     Artifact {
         /// The hash of the zone image as provided, or an error reading the
@@ -1267,24 +1281,24 @@ pub enum OmicronZoneImageLocation {
     },
 }
 
-impl OmicronZoneImageLocation {
+impl OmicronResolvableFileLocation {
     /// Returns a [`RunningZoneImageLocation`], or `None` if it is impossible
     /// to start the zone.
     pub fn to_running(
         &self,
     ) -> Result<RunningZoneImageLocation, MupdateOverrideReadError> {
         match self {
-            OmicronZoneImageLocation::Artifact { hash: Ok(hash) } => {
+            OmicronResolvableFileLocation::Artifact { hash: Ok(hash) } => {
                 Ok(RunningZoneImageLocation::Artifact { hash: *hash })
             }
-            OmicronZoneImageLocation::Artifact { hash: Err(error) } => {
+            OmicronResolvableFileLocation::Artifact { hash: Err(error) } => {
                 // In this case, it's impossible to start the zone.
                 Err(error.clone())
             }
-            OmicronZoneImageLocation::InstallDataset { hash: Ok(hash) } => {
-                Ok(RunningZoneImageLocation::InstallDataset { hash: *hash })
-            }
-            OmicronZoneImageLocation::InstallDataset { hash: Err(_) } => {
+            OmicronResolvableFileLocation::InstallDataset {
+                hash: Ok(hash),
+            } => Ok(RunningZoneImageLocation::InstallDataset { hash: *hash }),
+            OmicronResolvableFileLocation::InstallDataset { hash: Err(_) } => {
                 // In this case, if we can start the zone at all, it must be
                 // from the RAM disk.
                 Ok(RunningZoneImageLocation::Ramdisk)
@@ -1295,7 +1309,7 @@ impl OmicronZoneImageLocation {
 
 /// The location of a running Omicron zone.
 ///
-/// This is a stripped-down variant of [`OmicronZoneImageLocation`], with only
+/// This is a stripped-down variant of [`OmicronResolvableFileLocation`], with only
 /// success variants reported.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RunningZoneImageLocation {

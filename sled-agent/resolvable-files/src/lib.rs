@@ -9,11 +9,11 @@
 
 mod file_source;
 mod install_dataset_metadata;
+mod manifest;
 mod mupdate_override;
 mod source_resolver;
 #[cfg(test)]
 mod test_utils;
-mod zone_manifest;
 
 pub use file_source::*;
 pub use install_dataset_metadata::*;

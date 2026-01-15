@@ -31,11 +31,11 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneConfig;
 use sled_agent_types::inventory::OmicronZoneType;
-use sled_agent_types::zone_images::MupdateOverrideReadError;
-use sled_agent_types::zone_images::OmicronZoneImageLocation;
-use sled_agent_types::zone_images::PreparedOmicronZone;
-use sled_agent_types::zone_images::ResolverStatus;
-use sled_agent_types::zone_images::RunningZoneImageLocation;
+use sled_agent_types::resolvable_files::MupdateOverrideReadError;
+use sled_agent_types::resolvable_files::OmicronResolvableFileLocation;
+use sled_agent_types::resolvable_files::PreparedOmicronZone;
+use sled_agent_types::resolvable_files::ResolverStatus;
+use sled_agent_types::resolvable_files::RunningZoneImageLocation;
 use sled_storage::config::MountConfig;
 use slog::Logger;
 use slog::error;
@@ -1055,7 +1055,7 @@ fn does_new_config_require_zone_restart(
     match (existing_location, desired_location) {
         (
             RunningZoneImageLocation::Artifact { hash: existing_hash },
-            OmicronZoneImageLocation::Artifact { hash: Ok(desired_hash) },
+            OmicronResolvableFileLocation::Artifact { hash: Ok(desired_hash) },
         ) => {
             if existing_hash == desired_hash
                 && config_differs_only_by_image_source(
@@ -1072,7 +1072,9 @@ fn does_new_config_require_zone_restart(
         }
         (
             RunningZoneImageLocation::InstallDataset { hash: existing_hash },
-            OmicronZoneImageLocation::InstallDataset { hash: Ok(desired_hash) },
+            OmicronResolvableFileLocation::InstallDataset {
+                hash: Ok(desired_hash),
+            },
         ) => {
             // In this case, the existing hash and the desired hash must match,
             // because the install dataset zones don't change within a
@@ -1103,11 +1105,13 @@ fn does_new_config_require_zone_restart(
         }
         (
             RunningZoneImageLocation::Artifact { hash: existing_hash },
-            OmicronZoneImageLocation::InstallDataset { hash: Ok(desired_hash) },
+            OmicronResolvableFileLocation::InstallDataset {
+                hash: Ok(desired_hash),
+            },
         )
         | (
             RunningZoneImageLocation::InstallDataset { hash: existing_hash },
-            OmicronZoneImageLocation::Artifact { hash: Ok(desired_hash) },
+            OmicronResolvableFileLocation::Artifact { hash: Ok(desired_hash) },
         ) => {
             if existing_hash == desired_hash
                 && config_differs_only_by_image_source(
@@ -1130,7 +1134,7 @@ fn does_new_config_require_zone_restart(
         }
         (
             RunningZoneImageLocation::Ramdisk,
-            OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileLocation::InstallDataset {
                 hash: Err(desired_error),
             },
         ) => {
@@ -1148,7 +1152,7 @@ fn does_new_config_require_zone_restart(
         }
         (
             RunningZoneImageLocation::InstallDataset { hash: existing_hash },
-            OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileLocation::InstallDataset {
                 hash: Err(desired_error),
             },
         ) => {
@@ -1170,7 +1174,7 @@ fn does_new_config_require_zone_restart(
         }
         (
             RunningZoneImageLocation::Artifact { hash: existing_hash },
-            OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileLocation::InstallDataset {
                 hash: Err(desired_error),
             },
         ) => {
@@ -1192,7 +1196,9 @@ fn does_new_config_require_zone_restart(
         }
         (
             _,
-            OmicronZoneImageLocation::Artifact { hash: Err(desired_error) },
+            OmicronResolvableFileLocation::Artifact {
+                hash: Err(desired_error),
+            },
         ) => {
             // We're doomed in this case -- will not be able to start the zone.
             // Log an error nothing this.
@@ -1209,7 +1215,9 @@ fn does_new_config_require_zone_restart(
         }
         (
             RunningZoneImageLocation::Ramdisk,
-            OmicronZoneImageLocation::InstallDataset { hash: Ok(desired_hash) },
+            OmicronResolvableFileLocation::InstallDataset {
+                hash: Ok(desired_hash),
+            },
         ) => {
             // Some kind of transient error cleared up -- great, let's start the
             // zone from the install dataset.
@@ -1225,7 +1233,7 @@ fn does_new_config_require_zone_restart(
         }
         (
             RunningZoneImageLocation::Ramdisk,
-            OmicronZoneImageLocation::Artifact { hash: Ok(desired_hash) },
+            OmicronResolvableFileLocation::Artifact { hash: Ok(desired_hash) },
         ) => {
             info!(
                 log,
@@ -1285,26 +1293,26 @@ mod tests {
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::disk::SharedDatasetConfig;
+    use omicron_common::resolvable_files::ResolvableFileSource;
     use omicron_common::update::OmicronInstallManifest;
     use omicron_common::update::OmicronInstallManifestSource;
-    use omicron_common::zone_images::ZoneImageFileSource;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::MupdateOverrideUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_resolvable_files_examples::deserialize_error;
     use sled_agent_types::inventory::OmicronZoneDataset;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::ZoneKind;
-    use sled_agent_types::zone_images::MeasurementManifestStatus;
-    use sled_agent_types::zone_images::MupdateOverrideStatus;
-    use sled_agent_types::zone_images::OmicronZoneFileSource;
-    use sled_agent_types::zone_images::RemoveMupdateOverrideBootSuccess;
-    use sled_agent_types::zone_images::RemoveMupdateOverrideResult;
-    use sled_agent_types::zone_images::ResolverStatus;
-    use sled_agent_types::zone_images::ZoneImageLocationError;
-    use sled_agent_types::zone_images::ZoneManifestArtifactsResult;
-    use sled_agent_types::zone_images::ZoneManifestStatus;
-    use sled_agent_zone_images_examples::deserialize_error;
+    use sled_agent_types::resolvable_files::MeasurementManifestStatus;
+    use sled_agent_types::resolvable_files::MupdateOverrideStatus;
+    use sled_agent_types::resolvable_files::OmicronManifestArtifactsResult;
+    use sled_agent_types::resolvable_files::OmicronResolvableFileSource;
+    use sled_agent_types::resolvable_files::RemoveMupdateOverrideBootSuccess;
+    use sled_agent_types::resolvable_files::RemoveMupdateOverrideResult;
+    use sled_agent_types::resolvable_files::ResolverStatus;
+    use sled_agent_types::resolvable_files::ZoneImageLocationError;
+    use sled_agent_types::resolvable_files::ZoneManifestStatus;
     use std::collections::BTreeSet;
     use std::collections::VecDeque;
     use std::net::Ipv6Addr;
@@ -1384,7 +1392,7 @@ mod tests {
         existing_zones: BTreeSet<String>,
         halt_responses: Option<VecDeque<Result<(), ZoneShutdownError>>>,
         removed_gz_addresses: BTreeSet<AddrObject>,
-        zone_image_locations: BTreeMap<ZoneKind, OmicronZoneImageLocation>,
+        zone_image_locations: BTreeMap<ZoneKind, OmicronResolvableFileLocation>,
     }
 
     impl FakeZoneFacilities {
@@ -1401,7 +1409,7 @@ mod tests {
         fn insert_zone_image_location(
             &self,
             zone_kind: ZoneKind,
-            location: OmicronZoneImageLocation,
+            location: OmicronResolvableFileLocation,
         ) {
             let mut inner = self.inner.lock().unwrap();
             inner.zone_image_locations.insert(zone_kind, location);
@@ -1428,9 +1436,9 @@ mod tests {
 
             PreparedOmicronZone::new(
                 zone_config,
-                OmicronZoneFileSource {
+                OmicronResolvableFileSource {
                     location: location.clone(),
-                    file_source: ZoneImageFileSource {
+                    file_source: ResolvableFileSource {
                         file_name: zone_kind
                             .artifact_in_install_dataset()
                             .to_string(),
@@ -1504,7 +1512,7 @@ mod tests {
                 resolver_status: ResolverStatus {
                     measurement_manifest: MeasurementManifestStatus {
                         boot_disk_path: boot_disk_path.clone(),
-                        boot_disk_result: Ok(ZoneManifestArtifactsResult {
+                        boot_disk_result: Ok(OmicronManifestArtifactsResult {
                             manifest: OmicronInstallManifest {
                                 source: OmicronInstallManifestSource::SledAgent,
                                 files: IdOrdMap::new(),
@@ -1515,7 +1523,7 @@ mod tests {
                     },
                     zone_manifest: ZoneManifestStatus {
                         boot_disk_path: boot_disk_path.clone(),
-                        boot_disk_result: Ok(ZoneManifestArtifactsResult {
+                        boot_disk_result: Ok(OmicronManifestArtifactsResult {
                             manifest: OmicronInstallManifest {
                                 source: OmicronInstallManifestSource::SledAgent,
                                 files: IdOrdMap::new(),
@@ -1802,7 +1810,7 @@ mod tests {
         let zone_facilities = FakeZoneFacilities::default();
         zone_facilities.insert_zone_image_location(
             ZoneKind::Oximeter,
-            OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileLocation::InstallDataset {
                 hash: Ok(ArtifactHash([0; 32])),
             },
         );
@@ -1889,7 +1897,7 @@ mod tests {
         zone_facilities.push_existing_zone(fake_zone.zone_name());
         zone_facilities.insert_zone_image_location(
             fake_zone.zone_type.kind(),
-            OmicronZoneImageLocation::Artifact {
+            OmicronResolvableFileLocation::Artifact {
                 hash: Ok(ArtifactHash([0; 32])),
             },
         );
@@ -1953,7 +1961,7 @@ mod tests {
         let zone_facilities = FakeZoneFacilities::default();
         zone_facilities.insert_zone_image_location(
             ZoneKind::Oximeter,
-            OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileLocation::InstallDataset {
                 hash: Ok(ArtifactHash([0; 32])),
             },
         );
@@ -2012,7 +2020,7 @@ mod tests {
         ));
         zone_facilities.insert_zone_image_location(
             ZoneKind::Oximeter,
-            OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileLocation::InstallDataset {
                 hash: Ok(ArtifactHash([0; 32])),
             },
         );
@@ -2070,7 +2078,7 @@ mod tests {
         let zone_facilities = FakeZoneFacilities::default();
         zone_facilities.insert_zone_image_location(
             ZoneKind::Oximeter,
-            OmicronZoneImageLocation::Artifact {
+            OmicronResolvableFileLocation::Artifact {
                 hash: Err(MupdateOverrideReadError::InstallMetadata(
                     deserialize_error(
                         "fake-dir-path".into(),
@@ -2217,7 +2225,7 @@ mod tests {
         let zone_facilities = FakeZoneFacilities::default();
         zone_facilities.insert_zone_image_location(
             ZoneKind::Oximeter,
-            OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileLocation::InstallDataset {
                 hash: Ok(ArtifactHash([0; 32])),
             },
         );
@@ -2308,7 +2316,7 @@ mod tests {
         let zone_facilities = FakeZoneFacilities::default();
         zone_facilities.insert_zone_image_location(
             ZoneKind::Crucible,
-            OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileLocation::InstallDataset {
                 hash: Ok(ArtifactHash([0; 32])),
             },
         );
@@ -2399,13 +2407,15 @@ mod tests {
         // These match the image sources above.
         zone_facilities.insert_zone_image_location(
             ZoneKind::Oximeter,
-            OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileLocation::InstallDataset {
                 hash: Ok(install_dataset_zone_hash),
             },
         );
         zone_facilities.insert_zone_image_location(
             ZoneKind::InternalNtp,
-            OmicronZoneImageLocation::Artifact { hash: Ok(artifact_zone_hash) },
+            OmicronResolvableFileLocation::Artifact {
+                hash: Ok(artifact_zone_hash),
+            },
         );
 
         // "start" both fake zones.
@@ -2436,13 +2446,13 @@ mod tests {
         // `PreparedOmicronZone`.
         zone_facilities.insert_zone_image_location(
             ZoneKind::Oximeter,
-            OmicronZoneImageLocation::Artifact {
+            OmicronResolvableFileLocation::Artifact {
                 hash: Ok(install_dataset_zone_hash),
             },
         );
         zone_facilities.insert_zone_image_location(
             ZoneKind::InternalNtp,
-            OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileLocation::InstallDataset {
                 hash: Ok(artifact_zone_hash),
             },
         );
@@ -2479,7 +2489,7 @@ mod tests {
         // Change the artifact (internal NTP) zone's hash.
         zone_facilities.insert_zone_image_location(
             ZoneKind::InternalNtp,
-            OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileLocation::InstallDataset {
                 hash: Ok(install_dataset_zone_hash),
             },
         );
@@ -2515,7 +2525,7 @@ mod tests {
         // changes.
         zone_facilities.insert_zone_image_location(
             ZoneKind::Oximeter,
-            OmicronZoneImageLocation::Artifact {
+            OmicronResolvableFileLocation::Artifact {
                 hash: Ok(install_dataset_zone_hash),
             },
         );
@@ -2548,11 +2558,11 @@ mod tests {
         let fake_zone_id = OmicronZoneUuid::new_v4();
         let base_config = make_zone_config(fake_zone_id);
 
-        let install_dataset_file_source = OmicronZoneFileSource {
-            location: OmicronZoneImageLocation::InstallDataset {
+        let install_dataset_file_source = OmicronResolvableFileSource {
+            location: OmicronResolvableFileLocation::InstallDataset {
                 hash: Ok(ArtifactHash([1; 32])),
             },
-            file_source: ZoneImageFileSource {
+            file_source: ResolvableFileSource {
                 file_name: "test.tar.gz".to_string(),
                 search_paths: Vec::new(),
             },
@@ -2595,11 +2605,11 @@ mod tests {
         // Case 3: Same config but different hash should require a restart.
         let prepared_zone_different_hash = PreparedOmicronZone::new(
             &base_config,
-            OmicronZoneFileSource {
-                location: OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileSource {
+                location: OmicronResolvableFileLocation::InstallDataset {
                     hash: Ok(ArtifactHash([2; 32])),
                 },
-                file_source: ZoneImageFileSource {
+                file_source: ResolvableFileSource {
                     file_name: "test.tar.gz".to_string(),
                     search_paths: Vec::new(),
                 },
@@ -2617,11 +2627,11 @@ mod tests {
         let ramdisk_location = RunningZoneImageLocation::Ramdisk;
         let prepared_zone_install = PreparedOmicronZone::new(
             &base_config,
-            OmicronZoneFileSource {
-                location: OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileSource {
+                location: OmicronResolvableFileLocation::InstallDataset {
                     hash: Ok(ArtifactHash([1; 32])),
                 },
-                file_source: ZoneImageFileSource {
+                file_source: ResolvableFileSource {
                     file_name: "test.tar.gz".to_string(),
                     search_paths: Vec::new(),
                 },
@@ -2638,11 +2648,11 @@ mod tests {
         // Case 5: Ramdisk -> Artifact, restart needed.
         let prepared_zone_artifact = PreparedOmicronZone::new(
             &base_config,
-            OmicronZoneFileSource {
-                location: OmicronZoneImageLocation::Artifact {
+            OmicronResolvableFileSource {
+                location: OmicronResolvableFileLocation::Artifact {
                     hash: Ok(ArtifactHash([1; 32])),
                 },
-                file_source: ZoneImageFileSource {
+                file_source: ResolvableFileSource {
                     file_name: "test.tar.gz".to_string(),
                     search_paths: Vec::new(),
                 },
@@ -2673,11 +2683,11 @@ mod tests {
         // needed.
         let artifact_prepared_zone = PreparedOmicronZone::new(
             &base_config,
-            OmicronZoneFileSource {
-                location: OmicronZoneImageLocation::Artifact {
+            OmicronResolvableFileSource {
+                location: OmicronResolvableFileLocation::Artifact {
                     hash: Ok(ArtifactHash([1; 32])),
                 },
-                file_source: ZoneImageFileSource {
+                file_source: ResolvableFileSource {
                     file_name: "test.tar.gz".to_string(),
                     search_paths: Vec::new(),
                 },
@@ -2695,11 +2705,11 @@ mod tests {
         // restart if we're already running out of the install dataset.
         let prepared_zone_hash_error = PreparedOmicronZone::new(
             &base_config,
-            OmicronZoneFileSource {
-                location: OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileSource {
+                location: OmicronResolvableFileLocation::InstallDataset {
                     hash: Err(ZoneImageLocationError::BootDiskMissing),
                 },
-                file_source: ZoneImageFileSource {
+                file_source: ResolvableFileSource {
                     file_name: "test.tar.gz".to_string(),
                     search_paths: Vec::new(),
                 },
@@ -2716,11 +2726,11 @@ mod tests {
         // Case 9: Ramdisk to (effectively) Ramdisk, no restart needed.
         let prepared_zone_ramdisk = PreparedOmicronZone::new(
             &base_config,
-            OmicronZoneFileSource {
-                location: OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileSource {
+                location: OmicronResolvableFileLocation::InstallDataset {
                     hash: Err(ZoneImageLocationError::BootDiskMissing),
                 },
-                file_source: ZoneImageFileSource {
+                file_source: ResolvableFileSource {
                     file_name: "test.tar.gz".to_string(),
                     search_paths: Vec::new(),
                 },

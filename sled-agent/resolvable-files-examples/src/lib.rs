@@ -22,10 +22,10 @@ use omicron_common::update::{
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
 use sled_agent_types::inventory::ZoneKind;
-use sled_agent_types::zone_images::{
+use sled_agent_types::resolvable_files::{
     ArcIoError, ArcSerdeJsonError, ArtifactReadResult,
-    InstallMetadataReadError, ManifestHashError, ZoneManifestArtifactResult,
-    ZoneManifestArtifactsResult,
+    InstallMetadataReadError, ManifestHashError, OmicronManifestArtifactResult,
+    OmicronManifestArtifactsResult,
 };
 use tufaceous_artifact::ArtifactHash;
 
@@ -222,7 +222,7 @@ impl WriteInstallDatasetContext {
     pub fn expected_result(
         &self,
         dir: &Utf8Path,
-    ) -> ZoneManifestArtifactsResult {
+    ) -> OmicronManifestArtifactsResult {
         let manifest = self.zone_manifest();
         let data = self
             .zones
@@ -235,7 +235,7 @@ impl WriteInstallDatasetContext {
                 zone.include_in_json.then(|| zone.expected_result(dir))
             })
             .collect();
-        ZoneManifestArtifactsResult { manifest, data }
+        OmicronManifestArtifactsResult { manifest, data }
     }
 
     /// Writes the context to a directory, returning the JSON that was
@@ -295,7 +295,7 @@ impl ZoneContents {
         }
     }
 
-    fn expected_result(&self, dir: &Utf8Path) -> ZoneManifestArtifactResult {
+    fn expected_result(&self, dir: &Utf8Path) -> OmicronManifestArtifactResult {
         let status = if !self.write_to_disk {
             // Missing from the disk
             ArtifactReadResult::Error(ArcIoError::new(io::Error::new(
@@ -315,7 +315,7 @@ impl ZoneContents {
         let file_name = self.zone_kind.artifact_in_install_dataset().to_owned();
         let path = dir.join(&file_name);
 
-        ZoneManifestArtifactResult {
+        OmicronManifestArtifactResult {
             file_name,
             path,
             expected_size: self.json_size,

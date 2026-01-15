@@ -1023,5 +1023,36 @@ mod api_impl {
         > {
             unimplemented!()
         }
+
+        async fn trust_quorum_status(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<trust_quorum_types::status::NodeStatus>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_network_config_get(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<
+                Option<
+                    sled_agent_types::trust_quorum::TrustQuorumNetworkConfig,
+                >,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_network_config_put(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::TrustQuorumNetworkConfig,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
     }
 }

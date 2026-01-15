@@ -230,6 +230,11 @@ async fn check_hardware_environment(
         "BRM27230037",
         "BRM23230018",
         "BRM23230010",
+        // test rig: "berlin"
+        "BRM42220011",
+        "BRM44220007",
+        "BRM42220082",
+        "BRM06240029",
     ];
 
     // Refuse to operate in an environment that might contain real Oxide

@@ -12,12 +12,12 @@ use omicron_uuid_kinds::InternalZpoolUuid;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
-use sled_agent_types::zone_images::{
+use sled_agent_types::resolvable_files::{
     ArcIoError, ArtifactReadResult, InstallMetadataReadError,
-    MeasurementManifestStatus, ZoneManifestArtifactResult,
-    ZoneManifestArtifactsResult, ZoneManifestNonBootInfo,
-    ZoneManifestNonBootMismatch, ZoneManifestNonBootResult,
-    ZoneManifestReadError, ZoneManifestStatus,
+    MeasurementManifestStatus, OmicronManifestArtifactResult,
+    OmicronManifestArtifactsResult, OmicronManifestNonBootInfo,
+    OmicronManifestNonBootMismatch, OmicronManifestNonBootResult,
+    OmicronManifestReadError, ZoneManifestStatus,
 };
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
@@ -33,15 +33,15 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub(crate) struct AllZoneManifests {
+pub(crate) struct AllOmicronManifests {
     boot_zpool: InternalZpoolUuid,
     boot_disk_path: Utf8PathBuf,
     boot_disk_result:
-        Result<ZoneManifestArtifactsResult, ZoneManifestReadError>,
-    non_boot_disk_metadata: IdOrdMap<ZoneManifestNonBootInfo>,
+        Result<OmicronManifestArtifactsResult, OmicronManifestReadError>,
+    non_boot_disk_metadata: IdOrdMap<OmicronManifestNonBootInfo>,
 }
 
-impl AllZoneManifests {
+impl AllOmicronManifests {
     /// Attempt to find measurement manifests.
     pub(crate) fn read_all_measurements(
         log: &slog::Logger,
@@ -66,13 +66,14 @@ impl AllZoneManifests {
 
         // Validate files on the boot disk.
         let boot_disk_result = match files.boot_disk_metadata {
-            Ok(Some(manifest)) => {
-                Ok(make_artifacts_result(&files.boot_dataset_dir, manifest))
-            }
+            Ok(Some(manifest)) => Ok(make_artifacts_result(
+                &files.boot_dataset_dir.join(SUBDIR_NAME),
+                manifest,
+            )),
             Ok(None) => {
                 unreachable!("we always synthesize a manifest")
             }
-            Err(error) => Err(ZoneManifestReadError::InstallMetadata(error)),
+            Err(error) => Err(OmicronManifestReadError::InstallMetadata(error)),
         };
 
         // Validate files on non-boot disks (non-fatal, will produce warnings if
@@ -80,7 +81,18 @@ impl AllZoneManifests {
         let non_boot_disk_metadata = files
             .non_boot_disk_metadata
             .into_iter()
-            .map(make_non_boot_info)
+            .map(|info| {
+                let result = make_non_boot_result(
+                    &info.dataset_dir.join(SUBDIR_NAME),
+                    info.result,
+                );
+                OmicronManifestNonBootInfo {
+                    zpool_id: info.zpool_id,
+                    dataset_dir: info.dataset_dir,
+                    path: info.path,
+                    result,
+                }
+            })
             .collect::<IdOrdMap<_>>();
 
         let ret = Self {
@@ -165,7 +177,7 @@ impl AllZoneManifests {
             Ok(None) => {
                 unreachable!("we always synthesize a manifest")
             }
-            Err(error) => Err(ZoneManifestReadError::InstallMetadata(error)),
+            Err(error) => Err(OmicronManifestReadError::InstallMetadata(error)),
         };
 
         // Validate files on non-boot disks (non-fatal, will produce warnings if
@@ -256,9 +268,9 @@ impl AllZoneManifests {
 
 fn make_non_boot_info(
     info: InstallMetadataNonBootInfo<OmicronInstallManifest>,
-) -> ZoneManifestNonBootInfo {
+) -> OmicronManifestNonBootInfo {
     let result = make_non_boot_result(&info.dataset_dir, info.result);
-    ZoneManifestNonBootInfo {
+    OmicronManifestNonBootInfo {
         zpool_id: info.zpool_id,
         dataset_dir: info.dataset_dir,
         path: info.path,
@@ -269,11 +281,11 @@ fn make_non_boot_info(
 fn make_non_boot_result(
     dataset_dir: &Utf8Path,
     result: InstallMetadataNonBootResult<OmicronInstallManifest>,
-) -> ZoneManifestNonBootResult {
+) -> OmicronManifestNonBootResult {
     match result {
         InstallMetadataNonBootResult::MatchesPresent(
             non_boot_disk_metadata,
-        ) => ZoneManifestNonBootResult::Matches(make_artifacts_result(
+        ) => OmicronManifestNonBootResult::Matches(make_artifacts_result(
             dataset_dir,
             non_boot_disk_metadata,
         )),
@@ -300,8 +312,8 @@ fn make_non_boot_result(
             }
             InstallMetadataNonBootMismatch::ValueMismatch {
                 non_boot_disk_info,
-            } => ZoneManifestNonBootResult::Mismatch(
-                ZoneManifestNonBootMismatch::ValueMismatch {
+            } => OmicronManifestNonBootResult::Mismatch(
+                OmicronManifestNonBootMismatch::ValueMismatch {
                     non_boot_disk_result: make_artifacts_result(
                         dataset_dir,
                         non_boot_disk_info,
@@ -310,8 +322,8 @@ fn make_non_boot_result(
             ),
             InstallMetadataNonBootMismatch::BootDiskReadError {
                 non_boot_disk_info: Some(info),
-            } => ZoneManifestNonBootResult::Mismatch(
-                ZoneManifestNonBootMismatch::BootDiskReadError {
+            } => OmicronManifestNonBootResult::Mismatch(
+                OmicronManifestNonBootMismatch::BootDiskReadError {
                     non_boot_disk_result: make_artifacts_result(
                         dataset_dir,
                         info,
@@ -326,7 +338,7 @@ fn make_non_boot_result(
             ),
         },
         InstallMetadataNonBootResult::ReadError(error) => {
-            ZoneManifestNonBootResult::ReadError(error.into())
+            OmicronManifestNonBootResult::ReadError(error.into())
         }
     }
 }
@@ -334,7 +346,7 @@ fn make_non_boot_result(
 fn make_artifacts_result(
     dir: &Utf8Path,
     manifest: InstallMetadata<OmicronInstallManifest>,
-) -> ZoneManifestArtifactsResult {
+) -> OmicronManifestArtifactsResult {
     let artifacts: Vec<_> = manifest
         .value
         .files
@@ -351,7 +363,7 @@ fn make_artifacts_result(
                 ArtifactReadResult::Valid
             };
 
-            ZoneManifestArtifactResult {
+            OmicronManifestArtifactResult {
                 file_name: zone.file_name.clone(),
                 path: artifact_path,
                 expected_size: zone.file_size,
@@ -361,7 +373,7 @@ fn make_artifacts_result(
         })
         .collect();
 
-    ZoneManifestArtifactsResult {
+    OmicronManifestArtifactsResult {
         manifest: manifest.value,
         data: artifacts.into_iter().collect(),
     }
@@ -577,12 +589,12 @@ mod tests {
     use iddqd::id_ord_map;
     use omicron_uuid_kinds::MupdateUuid;
     use pretty_assertions::assert_eq;
-    use sled_agent_types::zone_images::ZoneManifestNonBootInfo;
-    use sled_agent_zone_images_examples::{
+    use sled_agent_resolvable_files_examples::{
         BOOT_PATHS, BOOT_UUID, NON_BOOT_2_PATHS, NON_BOOT_2_UUID,
         NON_BOOT_3_PATHS, NON_BOOT_3_UUID, NON_BOOT_PATHS, NON_BOOT_UUID,
         WriteInstallDatasetContext, deserialize_error,
     };
+    use sled_agent_types::resolvable_files::OmicronManifestNonBootInfo;
 
     // Much of the logic in this module is shared with mupdate_override.rs, and
     // tested there.
@@ -604,7 +616,7 @@ mod tests {
         let internal_disks =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
-        let manifests = AllZoneManifests::read_all(
+        let manifests = AllOmicronManifests::read_all(
             &logctx.log,
             OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
@@ -620,11 +632,11 @@ mod tests {
         assert_eq!(
             manifests.non_boot_disk_metadata,
             id_ord_map! {
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Matches(
+                    result: OmicronManifestNonBootResult::Matches(
                         cx.expected_result(
                             &dir.path().join(&NON_BOOT_PATHS.install_dataset)
                         )
@@ -659,7 +671,7 @@ mod tests {
         let internal_disks =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
-        let manifests = AllZoneManifests::read_all(
+        let manifests = AllOmicronManifests::read_all(
             &logctx.log,
             OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
@@ -674,15 +686,15 @@ mod tests {
         assert_eq!(
             manifests.non_boot_disk_metadata,
             id_ord_map! {
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Mismatch(
+                    result: OmicronManifestNonBootResult::Mismatch(
                         // This is a mismatch because the boot disk manifest is
                         // synthesized and the non-boot disk manifest is
                         // written by installinator.
-                        ZoneManifestNonBootMismatch::ValueMismatch {
+                        OmicronManifestNonBootMismatch::ValueMismatch {
                             non_boot_disk_result: cx.expected_result(
                                 &dir.path().join(&NON_BOOT_PATHS.install_dataset)
                             ),
@@ -711,7 +723,7 @@ mod tests {
         let internal_disks =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
-        let manifests = AllZoneManifests::read_all(
+        let manifests = AllOmicronManifests::read_all(
             &logctx.log,
             OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
@@ -724,12 +736,12 @@ mod tests {
         assert_eq!(
             manifests.non_boot_disk_metadata,
             id_ord_map! {
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Mismatch(
-                        ZoneManifestNonBootMismatch::BootDiskReadError {
+                    result: OmicronManifestNonBootResult::Mismatch(
+                        OmicronManifestNonBootMismatch::BootDiskReadError {
                             non_boot_disk_result: cx.expected_result(
                                 &dir.path().join(&NON_BOOT_PATHS.install_dataset)
                             ),
@@ -762,7 +774,7 @@ mod tests {
         let internal_disks =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
-        let manifests = AllZoneManifests::read_all(
+        let manifests = AllOmicronManifests::read_all(
             &logctx.log,
             OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
@@ -776,17 +788,17 @@ mod tests {
         assert_eq!(
             manifests.non_boot_disk_metadata,
             id_ord_map! {
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Mismatch(
+                    result: OmicronManifestNonBootResult::Mismatch(
                         // The boot disk was read successfully but the zones on
                         // the boot disk didn't match what was on disk. We could
                         // treat this as either a ValueMismatch or a
                         // BootDiskReadError -- currently, we treat it as a
                         // ValueMismatch for convenience.
-                        ZoneManifestNonBootMismatch::ValueMismatch {
+                        OmicronManifestNonBootMismatch::ValueMismatch {
                             non_boot_disk_result: cx.expected_result(
                                 &dir.path().join(&NON_BOOT_PATHS.install_dataset)
                             ),
@@ -833,7 +845,7 @@ mod tests {
             &[NON_BOOT_UUID, NON_BOOT_2_UUID, NON_BOOT_3_UUID],
         )
         .current_with_boot_disk();
-        let manifests = AllZoneManifests::read_all(
+        let manifests = AllOmicronManifests::read_all(
             &logctx.log,
             OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
@@ -852,33 +864,33 @@ mod tests {
         assert_eq!(
             manifests.non_boot_disk_metadata,
             id_ord_map! {
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Mismatch(
-                        ZoneManifestNonBootMismatch::ValueMismatch {
+                    result: OmicronManifestNonBootResult::Mismatch(
+                        OmicronManifestNonBootMismatch::ValueMismatch {
                             non_boot_disk_result: non_boot_disk_result.clone(),
                         }
                     )
                 },
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_2_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_2_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_2_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Mismatch(
-                        ZoneManifestNonBootMismatch::ValueMismatch {
+                    result: OmicronManifestNonBootResult::Mismatch(
+                        OmicronManifestNonBootMismatch::ValueMismatch {
                             non_boot_disk_result: synthesized_cx.expected_result(
                                 &dir.path().join(&NON_BOOT_2_PATHS.install_dataset),
                             ),
                         }
                     )
                 },
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_3_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_3_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_3_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::ReadError(
+                    result: OmicronManifestNonBootResult::ReadError(
                         deserialize_error(
                             dir.path(),
                             &NON_BOOT_3_PATHS.zones_json,

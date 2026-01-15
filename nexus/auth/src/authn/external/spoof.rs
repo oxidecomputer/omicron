@@ -45,7 +45,7 @@ use std::str::FromStr;
 // they say they are.  That's true of any bearer token, but this one is
 // particularly dangerous because the tokens are long-lived and not secret.
 
-pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName("spoof");
+pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName::Spoof;
 
 /// Magic value to produce a "no such actor" error
 const SPOOF_RESERVED_BAD_ACTOR: &str = "Jack-Donaghy";

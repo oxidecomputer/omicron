@@ -17,6 +17,7 @@ use futures::stream::FuturesUnordered;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::model::OximeterInfo;
 use nexus_db_queries::db::model::ProducerEndpoint;
 use omicron_common::api::external::Error as DbError;
 use oximeter_client::Client as OximeterClient;
@@ -42,7 +43,7 @@ pub enum Error {
     #[error("failed to list expired producers")]
     ListExpiredProducers(#[source] DbError),
     #[error("failed to get Oximeter info for {id}")]
-    GetOximterInfo {
+    GetOximeterInfo {
         id: Uuid,
         #[source]
         err: DbError,
@@ -62,12 +63,21 @@ pub async fn prune_expired_producers(
     // Build a FuturesUnordered to prune each expired producer.
     let mut all_prunes = expired_producers
         .producer_client_pairs()
-        .map(|(producer, client)| async {
-            let result = unregister_producer(
-                opctx, datastore, producer, client, &opctx.log,
-            )
-            .await;
-            (producer.id(), result)
+        .map(|(producer, maybe_client)| async move {
+            match maybe_client {
+                Some(client) => {
+                    let result = unregister_producer(
+                        opctx, datastore, producer, client, &opctx.log,
+                    )
+                    .await;
+                    (producer.id(), result)
+                }
+                // Treat "no client" as success: the only way to have no client
+                // from `expired_producers` is if this producer's Oximeter no
+                // longer exists (in which case we don't need to tell it about
+                // this expired producer!).
+                None => (producer.id(), Ok(())),
+            }
         })
         .collect::<FuturesUnordered<_>>();
 
@@ -139,18 +149,27 @@ impl ExpiredProducers {
             .map_err(Error::ListExpiredProducers)?;
 
         let mut clients = BTreeMap::new();
+        let mut oximeter_by_id = OximeterInfoById::default();
         for producer in &producers {
             let entry = match clients.entry(producer.oximeter_id) {
                 Entry::Vacant(entry) => entry,
                 Entry::Occupied(_) => continue,
             };
-            let info = datastore
-                .oximeter_lookup(opctx, &producer.oximeter_id)
-                .await
-                .map_err(|err| Error::GetOximterInfo {
-                    id: producer.oximeter_id,
-                    err,
-                })?;
+            let Some(info) = oximeter_by_id
+                .get(opctx, datastore, producer.oximeter_id)
+                .await?
+            else {
+                // If the Oximeter for this producer doesn't exist, that's fine
+                // - we don't need to tell it this producer is gone.
+                info!(
+                    opctx.log,
+                    "Oximeter instance not found (presumed expunged); \
+                     skipping notification of expired producer";
+                    "collector-id" => %producer.oximeter_id,
+                    "producer-id" => %producer.id(),
+                );
+                continue;
+            };
             let client_log =
                 opctx.log.new(o!("oximeter-collector" => info.id.to_string()));
             let address = SocketAddr::new(info.ip.ip(), *info.port);
@@ -164,13 +183,39 @@ impl ExpiredProducers {
 
     fn producer_client_pairs(
         &self,
-    ) -> impl Iterator<Item = (&ProducerEndpoint, &OximeterClient)> {
+    ) -> impl Iterator<Item = (&ProducerEndpoint, Option<&OximeterClient>)>
+    {
         self.producers.iter().map(|producer| {
-            // In `new()` we add a client for every producer.oximeter_id, so we
-            // can unwrap this lookup.
-            let client = self.clients.get(&producer.oximeter_id).unwrap();
-            (producer, client)
+            let maybe_client = self.clients.get(&producer.oximeter_id);
+            (producer, maybe_client)
         })
+    }
+}
+
+#[derive(Debug, Default)]
+struct OximeterInfoById(BTreeMap<Uuid, Option<OximeterInfo>>);
+
+impl OximeterInfoById {
+    async fn get(
+        &mut self,
+        opctx: &OpContext,
+        datastore: &DataStore,
+        id: Uuid,
+    ) -> Result<Option<&OximeterInfo>, Error> {
+        // If we've already looked up this Oximeter's info, return it.
+        let vacant_entry = match self.0.entry(id) {
+            Entry::Vacant(entry) => entry,
+            Entry::Occupied(entry) => return Ok(entry.into_mut().as_ref()),
+        };
+
+        // Otherwise, try to look it up. If this succeeds, we'll insert the
+        // `info` into `vacant_entry` so we don't have to look it up again.
+        let info = datastore
+            .oximeter_lookup(opctx, &id)
+            .await
+            .map_err(|err| Error::GetOximeterInfo { id, err })?;
+
+        Ok(vacant_entry.insert(info).as_ref())
     }
 }
 
@@ -186,6 +231,7 @@ mod tests {
     use nexus_db_model::OximeterInfo;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_types::internal_api::params;
+    use omicron_common::api::external::DataPageParams;
     use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;
     use std::time::Duration;
@@ -287,6 +333,102 @@ mod tests {
         .await
         .expect("failed to prune expired producers");
         assert!(pruned.successes.is_empty());
+        assert!(pruned.failures.is_empty());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_prune_expired_producers_expunged_oximeter() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_prune_expired_producers_expunged_oximeter",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Insert two Oximeter collectors
+        let collector_info1 = OximeterInfo::new(&params::OximeterInfo {
+            collector_id: Uuid::new_v4(),
+            address: "[::1]:0".parse().unwrap(),
+        });
+        let collector_info2 = OximeterInfo::new(&params::OximeterInfo {
+            collector_id: Uuid::new_v4(),
+            address: "[::1]:0".parse().unwrap(),
+        });
+        datastore
+            .oximeter_create(&opctx, &collector_info1)
+            .await
+            .expect("failed to insert collector");
+        datastore
+            .oximeter_create(&opctx, &collector_info2)
+            .await
+            .expect("failed to insert collector");
+
+        // Insert several producers; we hope to get at least one assigned to
+        // each collector, so pick a sufficiently large number that almost all
+        // test runs will do so.
+        let total_producers = 32;
+        let mut producers = Vec::new();
+        for _ in 0..total_producers {
+            let producer = nexus::ProducerEndpoint {
+                id: Uuid::new_v4(),
+                kind: nexus::ProducerKind::Service,
+                address: "[::1]:0".parse().unwrap(), // unused
+                interval: Duration::from_secs(0),    // unused
+            };
+            datastore
+                .producer_endpoint_upsert_and_assign(&opctx, &producer)
+                .await
+                .expect("failed to insert producer");
+            producers.push(producer);
+        }
+
+        // Confirm we created `total_producers`, with some split between the two
+        // collectors.
+        let num_assigned_to_collector_1 = datastore
+            .producers_list_by_oximeter_id(
+                opctx,
+                collector_info1.id,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("listed producers")
+            .len();
+        let num_assigned_to_collector_2 = datastore
+            .producers_list_by_oximeter_id(
+                opctx,
+                collector_info2.id,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("listed producers")
+            .len();
+        eprintln!("assigned to collector 1: {num_assigned_to_collector_1}");
+        eprintln!("assigned to collector 2: {num_assigned_to_collector_2}");
+        assert_eq!(
+            num_assigned_to_collector_1 + num_assigned_to_collector_2,
+            total_producers
+        );
+
+        // Expunge one of the collectors.
+        datastore
+            .oximeter_expunge(opctx, collector_info1.id)
+            .await
+            .expect("expunged collector");
+
+        // Attempt to prune; this should report success for all
+        // `total_producers` producers, even though some of them were assigned
+        // to a now-expunged Oximeter.
+        let pruned = prune_expired_producers(
+            &opctx,
+            &datastore,
+            Utc::now() + Duration::from_secs(1),
+        )
+        .await
+        .expect("failed to prune expired producers");
+        assert_eq!(pruned.successes.len(), total_producers);
         assert!(pruned.failures.is_empty());
 
         db.terminate().await;

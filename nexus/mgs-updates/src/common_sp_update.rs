@@ -19,11 +19,11 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::inventory::SpType;
 use omicron_common::disk::M2Slot;
+use std::fmt::Display;
 use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
@@ -192,13 +192,13 @@ pub enum PrecheckError {
         "expected to find active {kind} artifact {expected}, but found {found}"
     )]
     WrongActiveArtifact {
-        kind: ArtifactKind,
+        kind: ExpectedArtifactKind,
         expected: ArtifactHash,
         found: ArtifactHash,
     },
 
     #[error("failed to determine current active {kind} artifact: {err}")]
-    DeterminingActiveArtifact { kind: ArtifactKind, err: String },
+    DeterminingActiveArtifact { kind: ExpectedArtifactKind, err: String },
 
     #[error(
         "expected to find inactive version {expected:?}, but found {found:?}"
@@ -210,7 +210,7 @@ pub enum PrecheckError {
          but found {found}"
     )]
     WrongInactiveArtifact {
-        kind: ArtifactKind,
+        kind: ExpectedArtifactKind,
         expected: ArtifactHash,
         found: ArtifactHash,
     },
@@ -246,6 +246,21 @@ pub enum PrecheckError {
 
     #[error("inventory reported an error determining boot disk: {err}")]
     DeterminingHostOsBootDisk { err: String },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ExpectedArtifactKind {
+    HostPhase1,
+    HostPhase2,
+}
+
+impl Display for ExpectedArtifactKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExpectedArtifactKind::HostPhase1 => write!(f, "host phase 1"),
+            ExpectedArtifactKind::HostPhase2 => write!(f, "host phase 2"),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

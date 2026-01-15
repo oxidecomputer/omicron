@@ -21,7 +21,7 @@ use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
-use omicron_common::zone_images::ZoneImageFileSource;
+use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{Logger, error, info, o, warn};
@@ -701,7 +701,7 @@ pub enum InstallZoneError {
         file_source.file_name,
         file_source.search_paths,
     )]
-    ImageNotFound { file_source: ZoneImageFileSource },
+    ImageNotFound { file_source: ResolvableFileSource },
     #[error("Attempted to call install() on underspecified ZoneBuilder")]
     IncompleteBuilder,
 }
@@ -867,7 +867,7 @@ pub struct ZoneBuilder<'a> {
     /// Filesystem path at which the installed zone will reside.
     zone_root_path: Option<PathInPool>,
     /// The file source.
-    file_source: Option<&'a ZoneImageFileSource>,
+    file_source: Option<&'a ResolvableFileSource>,
     /// The name of the type of zone being created (e.g. "propolis-server")
     zone_type: Option<&'a str>,
     /// Unique ID of the instance of the zone being created. (optional)
@@ -927,7 +927,7 @@ impl<'a> ZoneBuilder<'a> {
     /// The file name and image source.
     pub fn with_file_source(
         mut self,
-        file_source: &'a ZoneImageFileSource,
+        file_source: &'a ResolvableFileSource,
     ) -> Self {
         self.file_source = Some(file_source);
         self

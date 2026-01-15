@@ -16,7 +16,7 @@ use sled_agent_types::inventory::BootPartitionContents as BootPartitionContentsI
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::HostPhase2DesiredContents;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
-use sled_agent_types::zone_images::ResolverStatus;
+use sled_agent_types::resolvable_files::ResolverStatus;
 use sled_hardware::PooledDiskError;
 use slog::Logger;
 use slog::info;
