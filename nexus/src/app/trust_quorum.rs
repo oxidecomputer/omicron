@@ -80,7 +80,7 @@ impl super::Nexus {
                         the abort to the database also failed with error: {e}. \
                         Abort will have to be performed explicitly by the \
                         operator.",
-                        msg.clone()
+                        msg
                     ))
                 })?;
 
@@ -137,7 +137,7 @@ impl super::Nexus {
         if !intersection.is_empty() {
             return Err(Error::invalid_request(format!(
                 "The following sleds are already members of the trust quorum: \
-                 {intersection:?}. Is there a problem with their sled agents?"
+                 {intersection:?}."
             )));
         }
 

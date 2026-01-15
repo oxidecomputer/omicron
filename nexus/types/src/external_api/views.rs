@@ -705,15 +705,22 @@ pub struct RackMembershipChange {
 
 impl From<TrustQuorumConfig> for RackMembershipChange {
     fn from(value: TrustQuorumConfig) -> Self {
+        // `Unacked` means that a member has not received and acked a `Prepare`
+        // yet. `Prepared` means that a member has acknolwedged the prepare but
+        // not the commit. `Committed` is when the member starts participating
+        // in the new group.
+        //
+        // Since we don't want to expose trust quorum specific knowledge to
+        // the operator, and they really only want to know when the membership
+        // change has started to take effect, we say that any member that hasn't
+        // yet committed is unacknowledged.
         let unacknowledged_members = value
             .members
             .iter()
-            .filter_map(|(id, data)| {
-                if data.state == TrustQuorumMemberState::Committed {
-                    Some(id.clone())
-                } else {
-                    None
-                }
+            .filter_map(|(id, data)| match data.state {
+                TrustQuorumMemberState::Unacked => Some(id.clone()),
+                TrustQuorumMemberState::Prepared => Some(id.clone()),
+                TrustQuorumMemberState::Committed => None,
             })
             .collect();
         let state = if value.state.is_committed() {
