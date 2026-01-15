@@ -379,6 +379,7 @@ async fn start_sled_agent(
             long_running_task_handles.trust_quorum.clone(),
             long_running_task_handles.bootstore.clone(),
         )
+        .await
     } else {
         info!(log, "KeyManager: using hardcoded secret retriever");
         GlobalSecretRetriever::init_hardcoded();

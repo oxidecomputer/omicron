@@ -42,6 +42,9 @@ zeroize.workspace = true
 pq-sys = "*"
 omicron-workspace-hack.workspace = true
 
+[features]
+testing = []
+
 [dev-dependencies]
 assert_matches.workspace = true
 camino-tempfile.workspace = true

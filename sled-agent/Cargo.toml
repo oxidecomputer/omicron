@@ -152,9 +152,11 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 zfs-test-harness.workspace = true
 
+bootstore = { workspace = true, features = ["testing"] }
 illumos-utils = { workspace = true, features = ["testing"] }
 sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
 sled-storage = { workspace = true, features = ["testing"] }
+trust-quorum = { workspace = true, features = ["testing"] }
 
 #
 # Disable doc builds by default for our binaries to work around issue

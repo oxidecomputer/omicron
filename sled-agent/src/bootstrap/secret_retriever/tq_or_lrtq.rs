@@ -5,16 +5,10 @@
 //! Combined TQ or LRTQ secret retriever
 //!
 //! This retriever dynamically switches between LRTQ and TQ based on whether
-//! Trust Quorum has committed epochs. It handles three scenarios:
-//!
-//! 1. **LRTQ only**: TQ is not yet initialized; continue using LRTQ
-//! 2. **Upgraded from LRTQ**: TQ starts at epoch 2; LRTQ owns epoch 1
-//! 3. **Fresh install with TQ**: TQ starts at epoch 1; all epochs go to TQ
-//!
-//! Once TQ becomes active (commits exist), the state transitions are one-way
-//! and permanent for the lifetime of the retriever.
+//! Trust Quorum has committed epochs.
 
-use std::sync::RwLock;
+use better_as_any::DowncastRef;
+use tokio::sync::{RwLock, RwLockReadGuard};
 
 use async_trait::async_trait;
 use bootstore::schemes::v0::NodeHandle;
@@ -26,137 +20,113 @@ use trust_quorum::NodeTaskHandle;
 use super::lrtq::LrtqSecretRetriever;
 use super::tq::TqSecretRetriever;
 
-/// The current state of secret retrieval, determining how epochs are routed.
-///
-/// This is a one-way state machine: once we transition away from `Lrtq`, we
-/// never go back. The TQ upgrade is permanent.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TqUpgraded {
-    /// Still using LRTQ, TQ not yet active (no commits in TQ).
-    NotYet,
-
-    /// Upgraded from LRTQ to TQ. Epoch 1 goes to LRTQ, epoch 2+ goes to TQ.
-    ///
-    /// This state occurs when an existing rack running LRTQ upgrades to TQ.
-    Upgraded,
-
-    /// Fresh install with TQ. All epochs go to TQ.
-    ///
-    /// This state occurs when a new rack is initialized directly with TQ
-    /// (no prior LRTQ epochs exist). TQ starts at epoch 1.
-    FreshInstall,
-}
-
 /// A [`key_manager::SecretRetriever`] that dynamically routes requests between
-/// LRTQ and TQ based on the rack's initialization history.
+/// LRTQ and TQ based on whether TQ is active.
 ///
 /// For deployed systems that started with LRTQ, this retriever continues using
-/// LRTQ until TQ commits its first epoch, then switches to TQ while preserving
-/// access to the LRTQ epoch 1 secret for existing encrypted data.
+/// LRTQ until TQ commits its first epoch, then switches to TQ, which implicitly
+/// preserves any rack secret that was created under LRTQ.
 ///
 /// For fresh installs with TQ, all secret retrieval goes through TQ.
 pub struct TqOrLrtqSecretRetriever {
-    pub(super) tq: TqSecretRetriever,
-    lrtq: LrtqSecretRetriever,
-    upgraded: RwLock<TqUpgraded>,
+    /// The inner state of the secret retriever.
+    state: RwLock<State>,
+}
+
+/// The current inner state of the secret retriever: if there's a pending
+/// trust-quorum secret retriever, we should repeatedly poll it to see whether
+/// it has upgraded, then swap it in for active and start using it.
+struct State {
+    /// The pending TQ secret retriever, only present if not yet activated.
+    pending_tq: Option<TqSecretRetriever>,
+    /// The current active secret retriever, which *MUST* be either
+    /// `LrtqSecretRetriever` or `TqSecretRetriever`.
+    active: Box<dyn SecretRetriever>,
 }
 
 impl TqOrLrtqSecretRetriever {
+    /// The salt used for key derivation, for idempotency checking.
+    pub async fn salt(&self) -> [u8; 32] {
+        let active = &self.state.read().await.active;
+        if let Some(lrtq) = active.downcast_ref::<LrtqSecretRetriever>() {
+            lrtq.salt
+        } else if let Some(tq) = active.downcast_ref::<TqSecretRetriever>() {
+            tq.salt
+        } else {
+            unreachable!("inner secret retriever is not TQ or LRTQ");
+        }
+    }
+
     /// Create a new `TqOrLrtqSecretRetriever`.
-    ///
-    /// The retriever starts in `TqUpgraded::NotYet` state and will transition
-    /// to TQ-based states when TQ commits are detected.
     pub fn new(
         salt: [u8; 32],
         tq_handle: NodeTaskHandle,
         lrtq_handle: NodeHandle,
     ) -> Self {
         TqOrLrtqSecretRetriever {
-            tq: TqSecretRetriever::new(salt, tq_handle),
-            lrtq: LrtqSecretRetriever::new(salt, lrtq_handle),
-            upgraded: RwLock::new(TqUpgraded::NotYet),
+            state: RwLock::new(State {
+                pending_tq: Some(TqSecretRetriever::new(salt, tq_handle)),
+                active: Box::new(LrtqSecretRetriever::new(salt, lrtq_handle)),
+            }),
         }
     }
 
-    /// Check if TQ upgrade has occurred.
+    /// Get a guard to the (dynamic) currently active secret retriever,
+    /// potentially switching internally from LRTQ to TQ in the process if TQ is
+    /// found to have become active.
     ///
-    /// The status is cached to avoid repeated status checks once TQ is active.
-    async fn upgraded(&self) -> Result<TqUpgraded, SecretRetrieverError> {
-        // Fast path: check cached state. Once we've transitioned away from
-        // LRTQ, we never need to check again.
-        {
-            let upgraded = self.upgraded.read().unwrap();
-            if *upgraded != TqUpgraded::NotYet {
-                return Ok(*upgraded);
+    /// This is a one-way transition: once TQ is active, we never go back.
+    async fn retriever(
+        &self,
+    ) -> Result<
+        RwLockReadGuard<'_, Box<dyn SecretRetriever>>,
+        SecretRetrieverError,
+    > {
+        if 'should_switch: {
+            // Fast path: if `pending_tq` is None, we've already switched, so do nothing:
+            let Some(tq) = &self.state.read().await.pending_tq else {
+                break 'should_switch false;
+            };
+
+            // Get all commits from the pending TQ:
+            let commits = tq
+                .handle
+                .status()
+                .await
+                .map_err(|e| SecretRetrieverError::TrustQuorum(e.to_string()))?
+                .persistent_state
+                .commits;
+
+            // The TQ is active and should be switched to permanently if it has
+            // any commits whatsoever:
+            !commits.is_empty()
+        } {
+            // Attempt to atomically swap in the pending TQ for the active
+            // retriever. If someone else has already raced ahead and done this
+            // by the time we try, that's fine, because the action is the same
+            // regardless of who is performing it.
+            let State { pending_tq, active } = &mut *self.state.write().await;
+            if let Some(tq) = pending_tq.take() {
+                *active = Box::new(tq);
             }
         }
 
-        // Our cached state says we haven't upgraded, but it could be stale:
-        // check if TQ has become active
-        let status =
-            self.tq.handle.status().await.map_err(|e| {
-                SecretRetrieverError::TrustQuorum(e.to_string())
-            })?;
-
-        let commits = &status.persistent_state.commits;
-        if commits.is_empty() {
-            // TQ has no commits yet, stay in LRTQ mode
-            return Ok(TqUpgraded::NotYet);
-        }
-
-        // TQ is active: determine if this is a fresh install or upgrade
-        // by checking the minimum committed epoch.
-        let min_epoch = commits.iter().min().unwrap();
-        let new_state = if min_epoch.0 == 1 {
-            // TQ starts at epoch 1: fresh install, no LRTQ data
-            TqUpgraded::FreshInstall
-        } else {
-            // TQ starts at epoch 2+: upgraded from LRTQ
-            TqUpgraded::Upgraded
-        };
-
-        // Update cached state. This is a one-way transition that never
-        // reverts back to LRTQ mode.
-        *self.upgraded.write().unwrap() = new_state;
-        Ok(new_state)
+        // Project out the active secret retriever inside a read lock so we can
+        // return it to the caller, who can then invoke method(s) on it.
+        Ok(RwLockReadGuard::map(self.state.read().await, |s| &s.active))
     }
 }
 
 #[async_trait]
 impl SecretRetriever for TqOrLrtqSecretRetriever {
     async fn get_latest(&self) -> Result<VersionedIkm, SecretRetrieverError> {
-        match self.upgraded().await? {
-            TqUpgraded::NotYet => self.lrtq.get_latest().await,
-            TqUpgraded::Upgraded | TqUpgraded::FreshInstall => {
-                self.tq.get_latest().await
-            }
-        }
+        self.retriever().await?.get_latest().await
     }
 
     async fn get(
         &self,
         epoch: u64,
     ) -> Result<SecretState, SecretRetrieverError> {
-        match self.upgraded().await? {
-            TqUpgraded::NotYet => {
-                // Still using LRTQ, all epochs go there
-                self.lrtq.get(epoch).await
-            }
-            TqUpgraded::FreshInstall => {
-                // Fresh install: TQ owns all epochs
-                self.tq.get(epoch).await
-            }
-            TqUpgraded::Upgraded => {
-                // Upgraded: LRTQ owns epoch 1, TQ owns epoch 2+
-                if epoch == 0 {
-                    // There is never such a thing as "epoch 0" in production systems!
-                    Err(SecretRetrieverError::NoSuchEpoch(0))
-                } else if epoch == 1 {
-                    self.lrtq.get(epoch).await
-                } else {
-                    self.tq.get(epoch).await
-                }
-            }
-        }
+        self.retriever().await?.get(epoch).await
     }
 }

@@ -215,6 +215,29 @@ impl NodeTaskHandle {
         &self.baseboard_id
     }
 
+    /// Create a dummy handle for testing idempotency logic.
+    ///
+    /// The returned handle will panic if any API methods are called on it.
+    /// This is intended only for testing code that needs to construct
+    /// retrievers without actually using them.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_for_test() -> Self {
+        let (tx, _rx) = mpsc::channel(1);
+        NodeTaskHandle {
+            baseboard_id: BaseboardId {
+                part_number: "test-part".to_string(),
+                serial_number: "test-serial".to_string(),
+            },
+            tx,
+            listen_addr: SocketAddrV6::new(
+                std::net::Ipv6Addr::LOCALHOST,
+                0,
+                0,
+                0,
+            ),
+        }
+    }
+
     /// Return a [`proxy::Proxy`] that allows callers to proxy certain API requests
     /// to other nodes.
     ///
