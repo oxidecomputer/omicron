@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
+use better_as_any::InheritAny;
 use hkdf::Hkdf;
 use secrecy::{ExposeSecret, ExposeSecretMut, SecretBox};
 use sha3::Sha3_256;
@@ -314,7 +315,7 @@ pub enum SecretRetrieverError {
 /// A mechanism for retrieving a secrets to use as input key material to HKDF-
 /// Extract.
 #[async_trait]
-pub trait SecretRetriever {
+pub trait SecretRetriever: InheritAny + Send + Sync {
     /// Return the latest secret
     ////
     /// This is useful when a new entity is being encrypted and there is no need

@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+better-as-any.workspace = true
 hkdf.workspace = true
 omicron-common.workspace = true
 secrecy.workspace = true

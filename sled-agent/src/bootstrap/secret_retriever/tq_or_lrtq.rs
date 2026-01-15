@@ -14,12 +14,13 @@
 //! Once TQ becomes active (commits exist), the state transitions are one-way
 //! and permanent for the lifetime of the retriever.
 
+use std::sync::RwLock;
+
 use async_trait::async_trait;
 use bootstore::schemes::v0::NodeHandle;
 use key_manager::{
     SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
 };
-use std::sync::RwLock;
 use trust_quorum::NodeTaskHandle;
 
 use super::lrtq::LrtqSecretRetriever;
@@ -55,7 +56,7 @@ enum TqUpgraded {
 ///
 /// For fresh installs with TQ, all secret retrieval goes through TQ.
 pub struct TqOrLrtqSecretRetriever {
-    tq: TqSecretRetriever,
+    pub(super) tq: TqSecretRetriever,
     lrtq: LrtqSecretRetriever,
     upgraded: RwLock<TqUpgraded>,
 }

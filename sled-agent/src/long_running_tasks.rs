@@ -15,7 +15,7 @@
 use crate::bootstrap::bootstore_setup::{
     new_bootstore_config, poll_ddmd_for_bootstore_and_tq_peer_update,
 };
-use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
+use crate::bootstrap::secret_retriever::GlobalSecretRetriever;
 use crate::bootstrap::trust_quorum_setup::new_trust_quorum_config;
 use crate::config::Config;
 use crate::hardware_monitor::{HardwareMonitor, HardwareMonitorHandle};
@@ -163,7 +163,7 @@ pub async fn spawn_all_longrunning_tasks(
 
 fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
     info!(log, "Starting KeyManager");
-    let secret_retriever = LrtqOrHardcodedSecretRetriever::new();
+    let secret_retriever = GlobalSecretRetriever::new();
     let (mut key_manager, storage_key_requester) =
         KeyManager::new(log, secret_retriever);
     tokio::spawn(async move { key_manager.run().await });
