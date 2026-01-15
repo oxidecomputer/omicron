@@ -6264,15 +6264,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn trust_quorum_add_sleds(
         rqctx: RequestContext<Self::Context>,
-        req: TypedBody<params::TrustQuorumAddSledsRequest>,
+        path_params: Path<params::RackPath>,
+        req: TypedBody<params::AddSledsRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let req = req.into_inner();
+        let rack_id =
+            RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            nexus.tq_add_sleds(&opctx, req.rack_id, req.sled_ids).await?;
+            nexus.tq_add_sleds(&opctx, rack_id, req.sled_ids).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx
