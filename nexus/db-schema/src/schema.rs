@@ -2824,17 +2824,17 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        vni -> Int4,
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
-        vni -> Int4,
         multicast_ip -> Inet,
-        source_ips -> Array<Inet>,
         mvlan -> Nullable<Int2>,
         underlay_group_id -> Nullable<Uuid>,
         tag -> Nullable<Text>,
         state -> crate::enums::MulticastGroupStateEnum,
         version_added -> Int8,
         version_removed -> Nullable<Int8>,
+        underlay_salt -> Nullable<Int2>,
     }
 }
 
@@ -2850,6 +2850,8 @@ table! {
         state -> crate::enums::MulticastGroupMemberStateEnum,
         version_added -> Int8,
         version_removed -> Nullable<Int8>,
+        multicast_ip -> Inet,
+        source_ips -> Array<Inet>,
     }
 }
 
@@ -2865,6 +2867,9 @@ table! {
         version_removed -> Nullable<Int8>,
     }
 }
+
+// Allow multicast tables to appear together for NOT EXISTS subqueries
+allow_tables_to_appear_in_same_query!(multicast_group, multicast_group_member);
 
 allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
 

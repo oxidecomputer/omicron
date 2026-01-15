@@ -900,8 +900,8 @@ mod tests {
                             &alias_key_name,
                         ),
                         cert_chain: certlist_path(dir.clone(), &alias_key_name),
-                        // TODO: We need attest-mock to generate a real log
                         log: dir.join("log.bin"),
+                        test_corpus: vec![dir.join("corim.cbor")],
                     },
                     roots: vec![cert_path(dir.clone(), &root_prefix())],
                 };
@@ -945,6 +945,29 @@ mod tests {
         // Write out the log document to the filesystem
         let out = attest_mock::log::mock(attest_log_doc).unwrap();
         std::fs::write(dir.join("log.bin"), &out).unwrap();
+
+        let corim_doc = attest_mock::corim::Document {
+            vendor: "Test Bed".into(),
+            tag_id: "test-v0.0.99999".into(),
+            id: "corim-test-v0.0.99999".into(),
+            measurements: vec![
+                // fake SP digest from the log
+                attest_mock::corim::Measurement {
+                    mkey: "fake-sp".into(),
+                    algorithm: 10,
+                    digest: "be4df4e085175f3de0c8ac4837e1c2c9a34e8983209dac6b549e94154f7cdd9c".into()
+                },
+                // fake fwid from the cert-chain (this is constant currently)
+                attest_mock::corim::Measurement {
+                    mkey: "fake-fwid".into(),
+                    algorithm: 10,
+                    digest: "72fa8f8ea84a42251031366002cbb36281d0131f78cd680436116a720cdd9de5".into()
+                },
+            ],
+        };
+
+        let corim = attest_mock::corim::mock(corim_doc).unwrap();
+        std::fs::write(dir.join("corim.cbor"), &corim).unwrap();
     }
 
     struct TestSetup {

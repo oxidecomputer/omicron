@@ -10,8 +10,8 @@ use nexus_types::{
     deployment::{
         BlueprintArtifactVersion, BlueprintHostPhase2DesiredContents,
         BlueprintHostPhase2DesiredSlots, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneImageSource, PlanningInput,
-        SledFilter, TargetReleaseDescription,
+        BlueprintZoneImageSource, PlanningInput, SledFilter,
+        TargetReleaseDescription,
     },
     inventory::Collection,
 };
@@ -96,10 +96,7 @@ impl NoopConvertInfo {
             // Out of these, which zones' hashes (as reported in the zone
             // manifest) match the corresponding ones in the TUF repo?
             let zones = blueprint
-                .current_sled_zones(
-                    sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                )
+                .current_in_service_sled_zones(sled_id)
                 .map(|zone| {
                     NoopConvertZoneInfo::new(
                         zone,

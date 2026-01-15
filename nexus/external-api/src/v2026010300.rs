@@ -4,28 +4,39 @@
 
 //! Nexus external types that changed from 2026010300 to 2026010500.
 //!
-//! Version 2026010300 types (before pool selection was refactored to use
-//! tagged enums).
+//! ## Pool Selection Changes
 //!
-//! Key differences from newer API versions:
-//! - [`FloatingIpCreate`], [`EphemeralIpCreate`], and [`ExternalIpCreate`]
-//!   use flat structures with `pool` and `ip_version` fields. Newer versions
-//!   use tagged enums ([`AddressSelector`] and [`PoolSelector`]) that
-//!   make invalid states unrepresentable.
+//! [`FloatingIpCreate`], [`EphemeralIpCreate`], and [`ExternalIpCreate`]
+//! use flat structures with `pool` and `ip_version` fields. Newer versions
+//! use tagged enums ([`AddressSelector`] and [`PoolSelector`]) that
+//! make invalid states unrepresentable.
+//!
+//! Affected endpoints:
+//! - `POST /v1/floating-ips` (floating_ip_create)
+//! - `POST /v1/instances/{instance}/external-ips/ephemeral` (instance_ephemeral_ip_attach)
+//! - `POST /v1/instances` (instance_create)
+//! - `POST /experimental/v1/probes` (probe_create)
+//!
+//! ## Multicast Changes
+//!
+//! [`InstanceCreate`] uses `Vec<NameOrId>` for `multicast_groups`. Newer
+//! versions use `Vec<MulticastGroupJoinSpec>` for implicit lifecycle support.
 //!
 //! [`FloatingIpCreate`]: self::FloatingIpCreate
 //! [`EphemeralIpCreate`]: self::EphemeralIpCreate
 //! [`ExternalIpCreate`]: self::ExternalIpCreate
+//! [`InstanceCreate`]: self::InstanceCreate
 //! [`AddressSelector`]: nexus_types::external_api::params::AddressSelector
 //! [`PoolSelector`]: nexus_types::external_api::params::PoolSelector
+//! [`MulticastGroupJoinSpec`]: nexus_types::external_api::params::MulticastGroupJoinSpec
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::v2025121200;
 use nexus_types::external_api::params;
+use omicron_common::api::external;
 use omicron_common::api::external::{
-    ByteCount, Error, Hostname, IdentityMetadataCreateParams,
+    ByteCount, Hostname, IdentityMetadataCreateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
     IpVersion, NameOrId,
 };
@@ -44,17 +55,17 @@ pub struct EphemeralIpCreate {
 }
 
 impl TryFrom<EphemeralIpCreate> for params::EphemeralIpCreate {
-    type Error = Error;
+    type Error = external::Error;
 
     fn try_from(
         old: EphemeralIpCreate,
-    ) -> Result<params::EphemeralIpCreate, Error> {
+    ) -> Result<params::EphemeralIpCreate, external::Error> {
         let pool_selector = match (old.pool, old.ip_version) {
             // Named pool specified -> ip_version must not be set
             (Some(pool), None) => params::PoolSelector::Explicit { pool },
             // Named pool & ip_version is an invalid combination
             (Some(_), Some(_)) => {
-                return Err(Error::invalid_request(
+                return Err(external::Error::invalid_request(
                     "cannot specify both `pool` and `ip_version`; \
                      `ip_version` is only used when allocating from the default pool",
                 ));
@@ -91,11 +102,11 @@ pub enum ExternalIpCreate {
 }
 
 impl TryFrom<ExternalIpCreate> for params::ExternalIpCreate {
-    type Error = Error;
+    type Error = external::Error;
 
     fn try_from(
         old: ExternalIpCreate,
-    ) -> Result<params::ExternalIpCreate, Error> {
+    ) -> Result<params::ExternalIpCreate, external::Error> {
         match old {
             ExternalIpCreate::Ephemeral { pool, ip_version } => {
                 let pool_selector = match (pool, ip_version) {
@@ -105,7 +116,7 @@ impl TryFrom<ExternalIpCreate> for params::ExternalIpCreate {
                     }
                     // Named pool & ip_version is an invalid combination
                     (Some(_), Some(_)) => {
-                        return Err(Error::invalid_request(
+                        return Err(external::Error::invalid_request(
                             "cannot specify both `pool` and `ip_version`; \
                              `ip_version` is only used when allocating from the default pool",
                         ));
@@ -119,19 +130,6 @@ impl TryFrom<ExternalIpCreate> for params::ExternalIpCreate {
             }
             ExternalIpCreate::Floating { floating_ip } => {
                 Ok(params::ExternalIpCreate::Floating { floating_ip })
-            }
-        }
-    }
-}
-
-impl From<v2025121200::ExternalIpCreate> for ExternalIpCreate {
-    fn from(old: v2025121200::ExternalIpCreate) -> ExternalIpCreate {
-        match old {
-            v2025121200::ExternalIpCreate::Ephemeral { pool } => {
-                ExternalIpCreate::Ephemeral { pool, ip_version: None }
-            }
-            v2025121200::ExternalIpCreate::Floating { floating_ip } => {
-                ExternalIpCreate::Floating { floating_ip }
             }
         }
     }
@@ -158,11 +156,11 @@ pub struct FloatingIpCreate {
 }
 
 impl TryFrom<FloatingIpCreate> for params::FloatingIpCreate {
-    type Error = Error;
+    type Error = external::Error;
 
     fn try_from(
         old: FloatingIpCreate,
-    ) -> Result<params::FloatingIpCreate, Error> {
+    ) -> Result<params::FloatingIpCreate, external::Error> {
         let address_selector = match (old.ip, old.pool, old.ip_version) {
             // Explicit IP address provided -> ip_version must not be set
             (Some(ip), pool, None) => {
@@ -170,7 +168,7 @@ impl TryFrom<FloatingIpCreate> for params::FloatingIpCreate {
             }
             // Explicit IP and ip_version is an invalid combination
             (Some(_), _, Some(_)) => {
-                return Err(Error::invalid_request(
+                return Err(external::Error::invalid_request(
                     "cannot specify both `ip` and `ip_version`; \
                      the IP version is determined by the explicit IP address",
                 ));
@@ -181,7 +179,7 @@ impl TryFrom<FloatingIpCreate> for params::FloatingIpCreate {
             },
             // Named pool and ip_version is an invalid combination
             (None, Some(_), Some(_)) => {
-                return Err(Error::invalid_request(
+                return Err(external::Error::invalid_request(
                     "cannot specify both `pool` and `ip_version`; \
                      `ip_version` is only used when allocating from the default pool",
                 ));
@@ -198,7 +196,14 @@ impl TryFrom<FloatingIpCreate> for params::FloatingIpCreate {
     }
 }
 
+// v2026010300 (DUAL_STACK_NICS) uses the current `InstanceNetworkInterfaceAttachment`
+// with `DefaultIpv4`, `DefaultIpv6`, `DefaultDualStack` variants.
+pub use params::InstanceNetworkInterfaceAttachment;
+
 /// Create-time parameters for an `Instance`
+///
+/// This version uses `Vec<NameOrId>` for `multicast_groups` instead of
+/// `Vec<MulticastGroupJoinSpec>` in newer versions.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
     #[serde(flatten)]
@@ -214,12 +219,16 @@ pub struct InstanceCreate {
     pub user_data: Vec<u8>,
     /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interfaces: params::InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: InstanceNetworkInterfaceAttachment,
     /// The external IP addresses provided to this instance.
     // Uses local ExternalIpCreate (has ip_version field) → params::ExternalIpCreate
     #[serde(default)]
     pub external_ips: Vec<ExternalIpCreate>,
     /// The multicast groups this instance should join.
+    ///
+    /// The instance will be automatically added as a member of the specified
+    /// multicast groups during creation, enabling it to send and receive
+    /// multicast traffic for those groups.
     #[serde(default)]
     pub multicast_groups: Vec<NameOrId>,
     /// A list of disks to be attached to the instance.
@@ -245,9 +254,11 @@ pub struct InstanceCreate {
 }
 
 impl TryFrom<InstanceCreate> for params::InstanceCreate {
-    type Error = Error;
+    type Error = external::Error;
 
-    fn try_from(old: InstanceCreate) -> Result<params::InstanceCreate, Error> {
+    fn try_from(
+        old: InstanceCreate,
+    ) -> Result<params::InstanceCreate, external::Error> {
         let external_ips: Vec<params::ExternalIpCreate> = old
             .external_ips
             .into_iter()
@@ -262,7 +273,15 @@ impl TryFrom<InstanceCreate> for params::InstanceCreate {
             user_data: old.user_data,
             network_interfaces: old.network_interfaces,
             external_ips,
-            multicast_groups: old.multicast_groups,
+            multicast_groups: old
+                .multicast_groups
+                .into_iter()
+                .map(|g| params::MulticastGroupJoinSpec {
+                    group: g.into(),
+                    source_ips: None,
+                    ip_version: None,
+                })
+                .collect(),
             disks: old.disks,
             boot_disk: old.boot_disk,
             ssh_public_keys: old.ssh_public_keys,

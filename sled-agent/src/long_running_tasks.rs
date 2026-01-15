@@ -29,8 +29,8 @@ use sled_agent_config_reconciler::{
     TimeSyncConfig,
 };
 use sled_agent_health_monitor::HealthMonitorHandle;
+use sled_agent_resolvable_files::ZoneImageSourceResolver;
 use sled_agent_types::zone_bundle::CleanupContext;
-use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;

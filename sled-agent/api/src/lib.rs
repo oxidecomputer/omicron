@@ -36,7 +36,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (15, ADD_ZPOOLS_HEALTH_CHECK),
+    (16, ADD_ZPOOLS_HEALTH_CHECK),
+    (15, ADD_TRUST_QUORUM_STATUS),
     (14, MEASUREMENTS),
     (13, ADD_TRUST_QUORUM),
     (12, ADD_SMF_SERVICES_HEALTH_CHECK),
@@ -1209,4 +1210,38 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         query_params: Query<sled_hardware_types::BaseboardId>,
     ) -> Result<HttpResponseOk<trust_quorum_types::status::NodeStatus>, HttpError>;
+
+    /// Get the status of this trust quorum node
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/status",
+        versions = VERSION_ADD_TRUST_QUORUM_STATUS..,
+    }]
+    async fn trust_quorum_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<trust_quorum_types::status::NodeStatus>, HttpError>;
+
+    /// Get the current network config from trust quorum
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/network-config",
+        versions = VERSION_ADD_TRUST_QUORUM_STATUS..,
+    }]
+    async fn trust_quorum_network_config_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<Option<latest::trust_quorum::TrustQuorumNetworkConfig>>,
+        HttpError,
+    >;
+
+    /// Update the network config in trust quorum
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/network-config",
+        versions = VERSION_ADD_TRUST_QUORUM_STATUS..,
+    }]
+    async fn trust_quorum_network_config_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::TrustQuorumNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }

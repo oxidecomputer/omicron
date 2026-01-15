@@ -115,8 +115,8 @@ pub mod inventory {
     pub use crate::v14::inventory::OmicronSledConfig;
     pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
-    pub use crate::v15::inventory::HealthMonitorInventory;
-    pub use crate::v15::inventory::Inventory;
+    pub use crate::v16::inventory::HealthMonitorInventory;
+    pub use crate::v16::inventory::Inventory;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
@@ -162,6 +162,8 @@ pub mod trust_quorum {
     // in the crate trust-quorum-types:
     pub use crate::v13::trust_quorum::ProxyCommitRequest;
     pub use crate::v13::trust_quorum::ProxyPrepareAndCommitRequest;
+
+    pub use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
 }
 
 pub mod zone_bundle {

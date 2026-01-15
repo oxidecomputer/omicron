@@ -2558,6 +2558,11 @@ impl Vni {
     pub fn random_system() -> Self {
         Self(rand::rng().random_range(0..Self::MIN_GUEST_VNI))
     }
+
+    /// Returns the VNI as a raw u32.
+    pub const fn as_u32(&self) -> u32 {
+        self.0
+    }
 }
 
 impl From<Vni> for u32 {
