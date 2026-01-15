@@ -2926,6 +2926,11 @@ CREATE INDEX IF NOT EXISTS lookup_bundle_by_creation ON omicron.public.support_b
     time_created
 );
 
+CREATE INDEX IF NOT EXISTS lookup_bundle_by_state_and_creation ON omicron.public.support_bundle (
+    state,
+    time_created
+);
+
 /*******************************************************************/
 
 /*
@@ -7791,7 +7796,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '220.0.0', NULL)
+    (TRUE, NOW(), NOW(), '221.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

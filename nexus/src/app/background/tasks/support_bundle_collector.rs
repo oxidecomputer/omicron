@@ -13,6 +13,7 @@ use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::internal_api::background::SupportBundleAutoDeletionReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use omicron_common::api::external::DataPageParams;
@@ -27,6 +28,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use serde_json::json;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use slog_error_chain::InlineErrorChain;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use super::support_bundle::collection::BundleCollection;
@@ -56,6 +58,10 @@ pub struct SupportBundleCollector {
     resolver: Resolver,
     disable: bool,
     nexus_id: OmicronZoneUuid,
+    /// Target number of free debug datasets to maintain for new allocations.
+    target_free_datasets: Option<NonZeroU32>,
+    /// Minimum number of bundles to retain to prevent aggressive cleanup.
+    min_bundles_to_keep: Option<NonZeroU32>,
 }
 
 impl SupportBundleCollector {
@@ -64,8 +70,17 @@ impl SupportBundleCollector {
         resolver: Resolver,
         disable: bool,
         nexus_id: OmicronZoneUuid,
+        target_free_datasets: Option<NonZeroU32>,
+        min_bundles_to_keep: Option<NonZeroU32>,
     ) -> Self {
-        SupportBundleCollector { datastore, resolver, disable, nexus_id }
+        SupportBundleCollector {
+            datastore,
+            resolver,
+            disable,
+            nexus_id,
+            target_free_datasets,
+            min_bundles_to_keep,
+        }
     }
 
     // Tells a sled agent to delete a support bundle
@@ -308,6 +323,108 @@ impl SupportBundleCollector {
         Ok(report)
     }
 
+    /// Checks for bundles eligible for automatic deletion and marks them
+    /// for destruction.
+    ///
+    /// This maintains a buffer of free debug datasets for new bundle
+    /// allocations by deleting the oldest bundles when the free dataset
+    /// count drops below `target_free_datasets`.
+    async fn auto_delete_bundles(
+        &self,
+        opctx: &OpContext,
+    ) -> SupportBundleAutoDeletionReport {
+        let mut report = SupportBundleAutoDeletionReport::default();
+
+        // Skip if auto-deletion is disabled
+        let Some(target_free) = self.target_free_datasets else {
+            return report;
+        };
+
+        // Query for candidates
+        let result = self
+            .datastore
+            .support_bundle_find_auto_deletion_candidates(
+                opctx,
+                target_free,
+                self.min_bundles_to_keep,
+            )
+            .await;
+
+        let candidates = match result {
+            Ok(r) => r,
+            Err(err) => {
+                warn!(
+                    &opctx.log,
+                    "SupportBundleCollector: Failed to find auto-deletion candidates";
+                    "err" => %err
+                );
+                report
+                    .errors
+                    .push(format!("Failed to query candidates: {}", err));
+                return report;
+            }
+        };
+
+        // Update report with current state
+        report.total_datasets = candidates.total_datasets;
+        report.active_bundles = candidates.active_bundles;
+        report.free_datasets = candidates.free_datasets;
+
+        // Mark each candidate bundle for deletion
+        for bundle in &candidates.bundles_to_delete {
+            let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+
+            info!(
+                &opctx.log,
+                "SupportBundleCollector: Auto-deleting bundle to free dataset capacity";
+                "id" => %bundle.id,
+                "time_created" => %bundle.time_created,
+                "free_datasets" => candidates.free_datasets,
+                "target_free" => target_free.get(),
+            );
+
+            // Transition bundle to Destroying state
+            match self
+                .datastore
+                .support_bundle_update(
+                    opctx,
+                    &authz_bundle,
+                    SupportBundleState::Destroying,
+                )
+                .await
+            {
+                Ok(()) => {
+                    report.bundles_marked_for_deletion += 1;
+                }
+                Err(err) => {
+                    // Handle gracefully - bundle may have been modified
+                    // concurrently by another Nexus or user
+                    if matches!(err, Error::InvalidRequest { .. }) {
+                        info!(
+                            &opctx.log,
+                            "SupportBundleCollector: Concurrent state change during auto-deletion";
+                            "bundle" => %bundle.id,
+                            "err" => ?err,
+                        );
+                    } else {
+                        warn!(
+                            &opctx.log,
+                            "SupportBundleCollector: Failed to mark bundle for auto-deletion";
+                            "bundle" => %bundle.id,
+                            "err" => %err,
+                        );
+                        report.errors.push(format!(
+                            "Failed to mark bundle {} for deletion: {}",
+                            bundle.id, err
+                        ));
+                    }
+                }
+            }
+        }
+
+        report
+    }
+
     async fn collect_bundle(
         &self,
         opctx: &OpContext,
@@ -403,11 +520,16 @@ impl BackgroundTask for SupportBundleCollector {
                 return json!({ "error": "task disabled" });
             }
 
+            let auto_deletion_report;
             let mut cleanup_report = None;
             let mut cleanup_err = None;
             let mut collection_report = None;
             let mut collection_err = None;
 
+            // Phase 1: Auto-delete eligible bundles to maintain free dataset buffer
+            auto_deletion_report = self.auto_delete_bundles(&opctx).await;
+
+            // Phase 2: Cleanup destroyed/failing bundles
             match self.cleanup_destroyed_bundles(&opctx).await {
                 Ok(report) => cleanup_report = Some(report),
                 Err(err) => {
@@ -416,6 +538,7 @@ impl BackgroundTask for SupportBundleCollector {
                 }
             };
 
+            // Phase 3: Collect pending bundles
             let request = BundleRequest::default();
             match self.collect_bundle(&opctx, &request).await {
                 Ok(report) => collection_report = Some(report),
@@ -426,6 +549,7 @@ impl BackgroundTask for SupportBundleCollector {
             };
 
             json!({
+                "auto_deletion_report": Some(auto_deletion_report),
                 "cleanup_report": cleanup_report,
                 "cleanup_err": cleanup_err,
                 "collection_report": collection_report,
@@ -490,6 +614,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
 
         let report = collector
@@ -516,6 +642,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
 
         let request = BundleRequest::default();
@@ -823,6 +951,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
 
         // The bundle collection should complete successfully.
@@ -902,6 +1032,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
 
         // Collect the bundle
@@ -1013,6 +1145,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
 
         // The bundle collection should complete successfully.
@@ -1121,6 +1255,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
@@ -1235,6 +1371,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
 
         let report = collector
@@ -1288,6 +1426,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
         let mut request = BundleRequest::default();
         request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
@@ -1387,6 +1527,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
 
         let report = collector
@@ -1443,6 +1585,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
         let mut request = BundleRequest::default();
         request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
@@ -1528,6 +1672,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
         let mut request = BundleRequest::default();
         request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
@@ -1612,6 +1758,8 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            None, // target_free_datasets
+            None, // min_bundles_to_keep
         );
 
         // Collect the bundle

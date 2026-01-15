@@ -70,6 +70,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
+use nexus_types::internal_api::background::SupportBundleAutoDeletionReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
@@ -2557,6 +2558,7 @@ fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
 fn print_task_support_bundle_collector(details: &serde_json::Value) {
     #[derive(Deserialize)]
     struct SupportBundleCollectionStatus {
+        auto_deletion_report: Option<SupportBundleAutoDeletionReport>,
         cleanup_report: Option<SupportBundleCleanupReport>,
         cleanup_err: Option<String>,
         collection_report: Option<SupportBundleCollectionReport>,
@@ -2571,11 +2573,36 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
             error, details
         ),
         Ok(SupportBundleCollectionStatus {
+            auto_deletion_report,
             cleanup_report,
             cleanup_err,
             collection_report,
             collection_err,
         }) => {
+            // Print auto-deletion report first (since it runs first)
+            if let Some(SupportBundleAutoDeletionReport {
+                bundles_marked_for_deletion,
+                free_datasets,
+                total_datasets,
+                active_bundles,
+                errors,
+            }) = auto_deletion_report
+            {
+                println!("    Support Bundle Auto-Deletion Report:");
+                println!("      Total debug datasets: {total_datasets}");
+                println!("      Active bundles: {active_bundles}");
+                println!("      Free datasets: {free_datasets}");
+                println!(
+                    "      Bundles marked for deletion: {bundles_marked_for_deletion}"
+                );
+                if !errors.is_empty() {
+                    println!("      Errors:");
+                    for error in errors {
+                        println!("        {error}");
+                    }
+                }
+            }
+
             if let Some(cleanup_err) = cleanup_err {
                 println!("    failed to perform cleanup: {cleanup_err}");
             }
