@@ -174,6 +174,8 @@ use std::future::Future;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
+use std::os::unix::process::CommandExt;
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
 use tabled::Tabled;
@@ -352,6 +354,12 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Launch `cockroach-sql`
+    ///
+    /// This launches with the session variable `default_transcation_read_only`
+    /// to on. Because this variable can be disabled, it is required to use
+    /// `--destructive` with this command.
+    Sql,
     /// Print information about blueprints
     ///
     /// Most blueprint information is available via `omdb nexus`, not `omdb db`.
@@ -1156,10 +1164,25 @@ impl DbArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
+        if let DbCommands::Sql = &self.command {
+            let _token = omdb.check_allow_destructive()?;
+            let url = self.db_url_opts.resolve_pg_url(omdb, log).await?;
+            let url = format!(
+                "postgresql://root@{}/omicron?sslmode=disable",
+                url.address()
+            );
+            let mut command =
+                Command::new("/opt/oxide/cockroachdb/bin/cockroach-sql");
+            let error = command.args(["--read-only", "--url", &url]).exec();
+            return Err(error)
+                .with_context(|| format!("failed to exec {command:?}"));
+        }
+
         let fetch_opts = &self.fetch_opts;
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &self.command {
+                    DbCommands::Sql => unreachable!(),
                     DbCommands::Blueprints(args) => {
                         cmd_db_blueprints(&opctx, &datastore, &fetch_opts, &args).await
                     }
