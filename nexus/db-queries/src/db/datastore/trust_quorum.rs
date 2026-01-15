@@ -23,7 +23,8 @@ use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
 use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
 use nexus_types::trust_quorum::{
-    TrustQuorumConfig, TrustQuorumMemberData, TrustQuorumMemberState,
+    TrustQuorumConfig, TrustQuorumConfigState, TrustQuorumMemberData,
+    TrustQuorumMemberState,
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::external::OptionalLookupResult;
@@ -161,6 +162,23 @@ impl DataStore {
         Self::tq_get_latest_config_with_members_conn(opctx, conn, rack_id)
             .await
             .map_err(|err| err.into_public_ignore_retries())
+    }
+
+    /// Get the trust quorum configuration from the database for the given Epoch
+    pub async fn tq_get_config(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> OptionalLookupResult<TrustQuorumConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+
+        Self::tq_get_config_with_members_from_epoch_conn(
+            opctx, conn, rack_id, epoch,
+        )
+        .await
+        .map_err(|err| err.into_public_ignore_retries())
     }
 
     async fn tq_get_latest_config_with_members_conn(
@@ -591,7 +609,7 @@ impl DataStore {
         opctx: &OpContext,
         config: trust_quorum_types::configuration::Configuration,
         acked_prepares: BTreeSet<BaseboardId>,
-    ) -> Result<(), Error> {
+    ) -> Result<TrustQuorumConfigState, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
@@ -739,9 +757,11 @@ impl DataStore {
                         )
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                        return Ok(TrustQuorumConfigState::Committing);
                     }
 
-                    Ok(())
+                    Ok(db_config.state.into())
                 }
             })
             .await

@@ -21,7 +21,7 @@ use nexus_types::{
     authn::cookies::Cookies,
     external_api::{
         headers, params, shared,
-        views::{self, MulticastGroupMember},
+        views::{self, MulticastGroupMember, RackMembershipChange},
     },
 };
 use omicron_common::api::external::{
@@ -32,6 +32,7 @@ use omicron_common::api::external::{
     *,
 };
 use openapiv3::OpenAPI;
+use trust_quorum_types::types::Epoch;
 
 /// Copies of data types that changed between versions
 mod v2025112000;
@@ -70,6 +71,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026011400, TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG),
     (2026011300, DOC_LINT_SUMMARY_TRAILING_PERIOD),
     (2026011100, MULTICAST_JOIN_LEAVE_DOCS),
     (2026010800, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
@@ -4043,6 +4045,44 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         sled: TypedBody<params::UninitializedSledId>,
     ) -> Result<HttpResponseCreated<views::SledId>, HttpError>;
+
+    /// Add new sleds to rack cluster
+    ///
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/sleds",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+    }]
+    async fn rack_membership_add_sleds(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
+        req: TypedBody<params::AddSledsRequest>,
+    ) -> Result<HttpResponseOk<Epoch>, HttpError>;
+
+    /// Retrieve the rack cluster membership change for the given epoch
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks/{rack_id}/sleds/{epoch}",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+    }]
+    async fn rack_membership_config(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackMembershipConfigPathParams>,
+    ) -> Result<HttpResponseOk<Option<RackMembershipChange>>, HttpError>;
+
+    /// Retrieve the latest rack cluster membership change
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks/{rack_id}/sleds",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+    }]
+    async fn rack_membership_config_latest(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
+    ) -> Result<HttpResponseOk<Option<RackMembershipChange>>, HttpError>;
 
     // Sleds
 

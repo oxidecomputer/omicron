@@ -54,6 +54,7 @@ use nexus_types::{
         headers::RangeRequest,
         params::SystemMetricsPathParam,
         shared::{BfdStatus, ProbeInfo},
+        views::RackMembershipChange,
     },
 };
 use omicron_common::api::external::AddressLot;
@@ -114,6 +115,7 @@ use propolis_client::support::tungstenite::protocol::{
 };
 use range_requests::PotentialRange;
 use ref_cast::RefCast;
+use trust_quorum_types::types::Epoch;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
 
@@ -7059,6 +7061,79 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    //
+    // Trust Quorum
+    //
+
+    async fn rack_membership_add_sleds(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
+        req: TypedBody<params::AddSledsRequest>,
+    ) -> Result<HttpResponseOk<Epoch>, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let req = req.into_inner();
+        let rack_id =
+            RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let epoch =
+                nexus.tq_add_sleds(&opctx, rack_id, req.sled_ids).await?;
+            Ok(HttpResponseOk(epoch))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn rack_membership_config(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackMembershipConfigPathParams>,
+    ) -> Result<HttpResponseOk<Option<RackMembershipChange>>, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let params = path_params.into_inner();
+        let rack_id = RackUuid::from_untyped_uuid(params.rack_id);
+        let epoch = params.epoch;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let config =
+                nexus.datastore().tq_get_config(&opctx, rack_id, epoch).await?;
+            Ok(HttpResponseOk(config.map(RackMembershipChange::from)))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn rack_membership_config_latest(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
+    ) -> Result<HttpResponseOk<Option<RackMembershipChange>>, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let rack_id =
+            RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let config =
+                nexus.datastore().tq_get_latest_config(&opctx, rack_id).await?;
+            Ok(HttpResponseOk(config.map(RackMembershipChange::from)))
         };
         apictx
             .context
