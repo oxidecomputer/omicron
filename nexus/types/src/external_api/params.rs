@@ -1477,7 +1477,7 @@ pub struct IpPoolSiloUpdate {
 /// Specify how to allocate a floating IP address.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum AddressSelector {
+pub enum AddressAllocator {
     /// Reserve a specific IP address.
     Explicit {
         /// The IP address to reserve. Must be available in the pool.
@@ -1498,9 +1498,9 @@ pub enum AddressSelector {
     },
 }
 
-impl Default for AddressSelector {
+impl Default for AddressAllocator {
     fn default() -> Self {
-        AddressSelector::Auto { pool_selector: PoolSelector::default() }
+        AddressAllocator::Auto { pool_selector: PoolSelector::default() }
     }
 }
 
@@ -1512,7 +1512,7 @@ pub struct FloatingIpCreate {
 
     /// IP address allocation method.
     #[serde(default)]
-    pub address_selector: AddressSelector,
+    pub address_allocator: AddressAllocator,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1617,7 +1617,7 @@ pub struct InstanceDiskAttach {
 }
 
 /// Specify which IP pool to allocate from.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PoolSelector {
     /// Use the specified pool by name or ID.

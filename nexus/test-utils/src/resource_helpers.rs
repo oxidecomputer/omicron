@@ -389,17 +389,17 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            address_selector: match (ip, parent_pool_name) {
-                (Some(ip), pool) => params::AddressSelector::Explicit {
+            address_allocator: match (ip, parent_pool_name) {
+                (Some(ip), pool) => params::AddressAllocator::Explicit {
                     ip,
                     pool: pool.map(|v| NameOrId::Name(v.parse().unwrap())),
                 },
-                (None, Some(pool)) => params::AddressSelector::Auto {
+                (None, Some(pool)) => params::AddressAllocator::Auto {
                     pool_selector: params::PoolSelector::Explicit {
                         pool: NameOrId::Name(pool.parse().unwrap()),
                     },
                 },
-                (None, None) => params::AddressSelector::Auto {
+                (None, None) => params::AddressAllocator::Auto {
                     pool_selector: params::PoolSelector::Auto {
                         ip_version: None,
                     },

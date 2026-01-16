@@ -123,19 +123,19 @@ pub struct FloatingIpCreate {
 // Converts directly to params::FloatingIpCreate using AddressSelector
 impl From<FloatingIpCreate> for params::FloatingIpCreate {
     fn from(old: FloatingIpCreate) -> params::FloatingIpCreate {
-        let address_selector = match (old.ip, old.pool) {
+        let address_allocator = match (old.ip, old.pool) {
             // Explicit IP address provided
-            (Some(ip), pool) => params::AddressSelector::Explicit { ip, pool },
+            (Some(ip), pool) => params::AddressAllocator::Explicit { ip, pool },
             // Allocate from specified pool
-            (None, Some(pool)) => params::AddressSelector::Auto {
+            (None, Some(pool)) => params::AddressAllocator::Auto {
                 pool_selector: params::PoolSelector::Explicit { pool },
             },
             // Allocate from default pool
-            (None, None) => params::AddressSelector::Auto {
+            (None, None) => params::AddressAllocator::Auto {
                 pool_selector: params::PoolSelector::Auto { ip_version: None },
             },
         };
-        params::FloatingIpCreate { identity: old.identity, address_selector }
+        params::FloatingIpCreate { identity: old.identity, address_allocator }
     }
 }
 
