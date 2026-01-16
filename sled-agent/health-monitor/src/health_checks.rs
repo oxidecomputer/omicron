@@ -6,6 +6,8 @@
 
 use illumos_utils::svcs::Svcs;
 use illumos_utils::svcs::SvcsInMaintenanceResult;
+use illumos_utils::zpool::UnhealthyZpoolsResult;
+use illumos_utils::zpool::Zpool;
 use slog::Logger;
 use tokio::sync::watch;
 use tokio::time::Duration;
@@ -39,6 +41,37 @@ pub(crate) async fn poll_smf_services_in_maintenance(
             }),
             Ok(svcs) => smf_services_in_maintenance_tx.send_modify(|status| {
                 *status = Ok(svcs);
+            }),
+        };
+    }
+}
+
+pub(crate) async fn poll_unhealthy_zpools(
+    log: Logger,
+    unhealthy_zpools_tx: watch::Sender<
+        Option<Result<UnhealthyZpoolsResult, String>>,
+    >,
+) {
+    // We poll every minute to verify the health of all zpools. This interval
+    // is arbitrary.
+    let mut interval = interval(Duration::from_secs(60));
+
+    // If one of these calls to `zpool` takes longer than a minute,
+    // `MissedTickBehavior::Skip` ensures that the health check happens every
+    // interval, rather than bursting.
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+    loop {
+        interval.tick().await;
+        match Zpool::status_unhealthy(&log).await {
+            // As above, there isn't anything waiting for changes because we
+            // only look at the health check status when an inventory request
+            // comes in.
+            Err(e) => unhealthy_zpools_tx.send_modify(|status| {
+                *status = Some(Err(e.to_string()));
+            }),
+            Ok(zpools) => unhealthy_zpools_tx.send_modify(|status| {
+                *status = Some(Ok(zpools));
             }),
         };
     }
