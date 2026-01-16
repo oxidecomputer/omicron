@@ -23,9 +23,9 @@ pub struct ConfigurableSecretRetriever {
     config_rx: Option<oneshot::Receiver<Box<dyn SecretRetriever>>>,
 }
 
-/// Handle to configure a [`PendingSecretRetriever`].
+/// Handle to configure a [`ConfigurableSecretRetriever`].
 ///
-/// Cloneable, but `configure` can only succeed once (panics on second call).
+/// Cloneable, but `init` can only succeed once (panics on second call).
 #[derive(Clone)]
 pub struct ConfigurableSecretRetrieverHandle {
     #[allow(clippy::type_complexity)]
