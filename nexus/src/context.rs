@@ -360,6 +360,9 @@ where
         let opctx = Arc::new(op_context_for_external_api(rqctx).await?);
         let audit = nexus.audit_log_entry_init(&opctx, rqctx).await?;
         let result = handler(Arc::clone(&opctx), Arc::clone(&nexus)).await;
+        // Ignore error: unlike the init line, audit log failures cannot cause
+        // the request to fail because the primary operation has already taken
+        // place. The complete function retries internally and logs on failure.
         let _ = nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
         result
     };
