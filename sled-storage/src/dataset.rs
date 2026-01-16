@@ -63,7 +63,8 @@ pub const U2_EXPECTED_DATASET_COUNT: usize = 2;
 pub const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
     // Stores filesystems for zones
     ExpectedDataset::new(ZONE_DATASET),
-    // For storing full kernel RAM dumps
+    // For long-term storage of  miscellaneous debug data, including kernel
+    // crash dumps, process core dumps, log files, etc.  See `DebugCollector`.
     ExpectedDataset::new(DUMP_DATASET)
         .quota(DUMP_DATASET_QUOTA)
         .compression(DUMP_DATASET_COMPRESSION),
@@ -75,7 +76,7 @@ const M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
     //
     // Should be duplicated to both M.2s.
     ExpectedDataset::new(INSTALL_DATASET),
-    // Stores crash dumps.
+    // Initial staging area for process core dumps.
     ExpectedDataset::new(CRASH_DATASET),
     // Backing store for OS data that should be persisted across reboots.
     // Its children are selectively overlay mounted onto parts of the ramdisk
