@@ -8,7 +8,6 @@
 //! Trust Quorum has committed epochs.
 
 use async_trait::async_trait;
-use better_as_any::DowncastRef;
 use bootstore::schemes::v0::NodeHandle;
 use key_manager::{
     SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
@@ -43,21 +42,6 @@ struct State {
 }
 
 impl TqOrLrtqSecretRetriever {
-    /// The salt used for key derivation, for idempotency checking.
-    pub fn salt(&self) -> [u8; 32] {
-        if let Some(lrtq) =
-            self.state.active.downcast_ref::<LrtqSecretRetriever>()
-        {
-            lrtq.salt
-        } else if let Some(tq) =
-            self.state.active.downcast_ref::<TqSecretRetriever>()
-        {
-            tq.salt
-        } else {
-            unreachable!("inner secret retriever is not TQ or LRTQ");
-        }
-    }
-
     /// Create a new `TqOrLrtqSecretRetriever`.
     pub fn new(
         salt: [u8; 32],

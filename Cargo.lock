@@ -5746,7 +5746,6 @@ name = "key-manager"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "better-as-any",
  "hkdf",
  "omicron-common",
  "omicron-workspace-hack",
