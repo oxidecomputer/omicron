@@ -314,7 +314,7 @@ pub enum SecretRetrieverError {
 /// A mechanism for retrieving a secrets to use as input key material to HKDF-
 /// Extract.
 #[async_trait]
-pub trait SecretRetriever: Send + Sync {
+pub trait SecretRetriever: Send + Sync + 'static {
     /// Return the latest secret
     ////
     /// This is useful when a new entity is being encrypted and there is no need

@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use key_manager::{
     SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 /// A secret retriever that waits to be configured before use.
@@ -19,8 +19,8 @@ use tokio::sync::oneshot;
 /// Created early in boot (before we know which retriever type to use),
 /// configured later once we have the sled agent request.
 pub struct ConfigurableSecretRetriever {
-    inner: Option<Box<dyn SecretRetriever + Send>>,
-    config_rx: Option<oneshot::Receiver<Box<dyn SecretRetriever + Send>>>,
+    inner: Option<Box<dyn SecretRetriever>>,
+    config_rx: Option<oneshot::Receiver<Box<dyn SecretRetriever>>>,
 }
 
 /// Handle to configure a [`PendingSecretRetriever`].
@@ -28,11 +28,8 @@ pub struct ConfigurableSecretRetriever {
 /// Cloneable, but `configure` can only succeed once (panics on second call).
 #[derive(Clone)]
 pub struct ConfigurableSecretRetrieverHandle {
-    tx: Arc<
-        std::sync::Mutex<
-            Option<oneshot::Sender<Box<dyn SecretRetriever + Send>>>,
-        >,
-    >,
+    #[allow(clippy::type_complexity)]
+    tx: Arc<Mutex<Option<oneshot::Sender<Box<dyn SecretRetriever>>>>>,
 }
 
 impl ConfigurableSecretRetriever {
@@ -41,7 +38,7 @@ impl ConfigurableSecretRetriever {
         (
             Self { inner: None, config_rx: Some(rx) },
             ConfigurableSecretRetrieverHandle {
-                tx: Arc::new(std::sync::Mutex::new(Some(tx))),
+                tx: Arc::new(Mutex::new(Some(tx))),
             },
         )
     }
@@ -52,7 +49,7 @@ impl ConfigurableSecretRetrieverHandle {
     ///
     /// Panics if called twice or if the corresponding
     /// [`PendingSecretRetriever`] was dropped.
-    pub fn init(&self, retriever: impl SecretRetriever + Send + 'static) {
+    pub fn init(&self, retriever: impl SecretRetriever) {
         self.tx
             .lock()
             .unwrap()

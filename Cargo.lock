@@ -732,12 +732,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "better-as-any"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef9f02be1d585800e98de043134daa5853cbeb61f9c464c1cfda6dadfe6a73d6"
-
-[[package]]
 name = "bhyve_api"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=2dc643742f82d2e072a1281dab23ba2bfdcee440#2dc643742f82d2e072a1281dab23ba2bfdcee440"
@@ -8822,7 +8816,6 @@ dependencies = [
  "async-trait",
  "atomicwrites",
  "base64 0.22.1",
- "better-as-any",
  "bootstore",
  "bootstrap-agent-api",
  "bootstrap-agent-client",
