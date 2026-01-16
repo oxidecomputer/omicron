@@ -101,7 +101,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e1.operation_id, "project_create");
     assert_eq!(e1.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e1.user_agent, None); // no user agent passed by default
-    assert_eq!(e1.auth_method, Some("spoof".to_string()));
+    assert_eq!(e1.auth_method, Some(views::AuthMethod::Spoof));
     assert!(e1.time_started >= t1 && e1.time_started <= t2);
     assert!(e1.time_completed > e1.time_started);
     assert_eq!(
@@ -145,7 +145,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e3.operation_id, "project_create");
     assert_eq!(e3.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e3.user_agent.clone().unwrap(), "A".repeat(256));
-    assert_eq!(e3.auth_method, Some("session_cookie".to_string()));
+    assert_eq!(e3.auth_method, Some(views::AuthMethod::SessionCookie));
     assert!(e3.time_started >= t3 && e3.time_started <= t4);
     assert!(e3.time_completed > e3.time_started);
     assert_eq!(
@@ -396,6 +396,6 @@ fn verify_entry(
         }
     );
     assert_eq!(entry.source_ip.to_string(), "127.0.0.1");
-    assert_eq!(entry.auth_method, Some("spoof".to_string()));
+    assert_eq!(entry.auth_method, Some(views::AuthMethod::Spoof));
     assert!(entry.time_completed > entry.time_started);
 }
