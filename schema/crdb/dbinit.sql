@@ -6236,6 +6236,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
     'timeout'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.audit_log_auth_method AS ENUM (
+    'session_cookie',
+    'access_token',
+    'scim_token',
+    'spoof'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     id UUID PRIMARY KEY,
     time_started TIMESTAMPTZ NOT NULL,
@@ -6254,9 +6261,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     actor_silo_id UUID,
     -- actor kind indicating builtin user, silo user, or unauthenticated
     actor_kind omicron.public.audit_log_actor_kind NOT NULL,
-    -- The name of the authn scheme used
-    auth_method STRING(63),
-
     -- below are fields we can only fill in after the operation
 
     time_completed TIMESTAMPTZ,
@@ -6268,6 +6272,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
 
     -- result kind indicating success, error, or timeout
     result_kind omicron.public.audit_log_result_kind,
+
+    -- The name of the authn scheme used
+    auth_method omicron.public.audit_log_auth_method,
 
     -- make sure time_completed and result_kind are either both null or both not
     CONSTRAINT time_completed_and_result_kind CHECK (
@@ -6339,12 +6346,12 @@ SELECT
     actor_id,
     actor_silo_id,
     actor_kind,
-    auth_method,
     time_completed,
     http_status_code,
     error_code,
     error_message,
-    result_kind
+    result_kind,
+    auth_method
 FROM omicron.public.audit_log
 WHERE
     time_completed IS NOT NULL
@@ -7791,7 +7798,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '220.0.0', NULL)
+    (TRUE, NOW(), NOW(), '221.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

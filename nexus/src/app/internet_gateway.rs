@@ -278,9 +278,9 @@ impl super::Nexus {
     pub fn internet_gateway_ip_address_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        address_selector: params::InternetGatewayIpAddressSelector,
+        address_allocator: params::InternetGatewayIpAddressSelector,
     ) -> LookupResult<lookup::InternetGatewayIpAddress<'a>> {
-        match address_selector {
+        match address_allocator {
             params::InternetGatewayIpAddressSelector {
                 address: NameOrId::Id(id),
                 gateway: None,

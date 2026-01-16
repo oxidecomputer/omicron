@@ -41,6 +41,7 @@ mod v2025122300;
 mod v2026010100;
 mod v2026010300;
 mod v2026010500;
+mod v2026011500;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -70,7 +71,9 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2026011500, VPC_SUBNET_ATTACHMENT),
+    (2026011601, EXTERNAL_SUBNET_ATTACHMENT),
+    (2026011600, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
+    (2026011500, AUDIT_LOG_AUTH_METHOD_ENUM),
     (2026011300, DOC_LINT_SUMMARY_TRAILING_PERIOD),
     (2026011100, MULTICAST_JOIN_LEAVE_DOCS),
     (2026010800, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
@@ -1293,7 +1296,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_list(
         rqctx: RequestContext<Self::Context>,
@@ -1305,7 +1308,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/subnet-pools",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_create(
         rqctx: RequestContext<Self::Context>,
@@ -1317,7 +1320,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_view(
         rqctx: RequestContext<Self::Context>,
@@ -1329,7 +1332,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/system/subnet-pools/{pool}",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_update(
         rqctx: RequestContext<Self::Context>,
@@ -1342,7 +1345,7 @@ pub trait NexusExternalApi {
         method = DELETE,
         path = "/v1/system/subnet-pools/{pool}",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_delete(
         rqctx: RequestContext<Self::Context>,
@@ -1354,9 +1357,9 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}/subnets",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
-    async fn subnet_pool_subnet_list(
+    async fn subnet_pool_member_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPoolPath>,
         query_params: Query<PaginatedByNameOrId>,
@@ -1367,12 +1370,12 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/subnet-pools/{pool}/subnets/add",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_subnet_add(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPoolPath>,
-        subnet_params: TypedBody<params::SubnetPoolSubnetAdd>,
+        subnet_params: TypedBody<params::SubnetPoolMemberAdd>,
     ) -> Result<HttpResponseCreated<views::SubnetPoolMember>, HttpError>;
 
     /// Remove a subnet from a pool
@@ -1380,12 +1383,12 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/subnet-pools/{pool}/subnets/remove",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_subnet_remove(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPoolPath>,
-        subnet_params: TypedBody<params::SubnetPoolSubnetRemove>,
+        subnet_params: TypedBody<params::SubnetPoolMemberRemove>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// List silos linked to a subnet pool
@@ -1393,7 +1396,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}/silos",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_silo_list(
         rqctx: RequestContext<Self::Context>,
@@ -1406,7 +1409,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/subnet-pools/{pool}/silos",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_silo_link(
         rqctx: RequestContext<Self::Context>,
@@ -1419,7 +1422,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_silo_update(
         rqctx: RequestContext<Self::Context>,
@@ -1432,7 +1435,7 @@ pub trait NexusExternalApi {
         method = DELETE,
         path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_silo_unlink(
         rqctx: RequestContext<Self::Context>,
@@ -1444,7 +1447,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}/utilization",
         tags = ["system/subnet-pools"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn subnet_pool_utilization_view(
         rqctx: RequestContext<Self::Context>,
@@ -1458,7 +1461,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/external-subnets",
         tags = ["external-subnets"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn external_subnet_list(
         rqctx: RequestContext<Self::Context>,
@@ -1470,7 +1473,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/external-subnets",
         tags = ["external-subnets"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn external_subnet_create(
         rqctx: RequestContext<Self::Context>,
@@ -1483,7 +1486,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/external-subnets/{external_subnet}",
         tags = ["external-subnets"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn external_subnet_view(
         rqctx: RequestContext<Self::Context>,
@@ -1496,7 +1499,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/external-subnets/{external_subnet}",
         tags = ["external-subnets"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn external_subnet_update(
         rqctx: RequestContext<Self::Context>,
@@ -1510,7 +1513,7 @@ pub trait NexusExternalApi {
         method = DELETE,
         path = "/v1/external-subnets/{external_subnet}",
         tags = ["external-subnets"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn external_subnet_delete(
         rqctx: RequestContext<Self::Context>,
@@ -1527,7 +1530,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/external-subnets/{external_subnet}/attach",
         tags = ["external-subnets"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn external_subnet_attach(
         rqctx: RequestContext<Self::Context>,
@@ -1544,7 +1547,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/external-subnets/{external_subnet}/detach",
         tags = ["external-subnets"],
-        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
     }]
     async fn external_subnet_detach(
         rqctx: RequestContext<Self::Context>,
@@ -1606,10 +1609,31 @@ pub trait NexusExternalApi {
 
     /// Create floating IP
     #[endpoint {
+        operation_id = "floating_ip_create",
         method = POST,
         path = "/v1/floating-ips",
         tags = ["floating-ips"],
-        versions = VERSION_POOL_SELECTION_ENUMS..,
+        versions = VERSION_POOL_SELECTION_ENUMS..VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR,
+    }]
+    async fn v2026011500_floating_ip_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        floating_params: TypedBody<v2026011500::FloatingIpCreate>,
+    ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
+        Self::floating_ip_create(
+            rqctx,
+            query_params,
+            floating_params.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create floating IP
+    #[endpoint {
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR..,
     }]
     async fn floating_ip_create(
         rqctx: RequestContext<Self::Context>,

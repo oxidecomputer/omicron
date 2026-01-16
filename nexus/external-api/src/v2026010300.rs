@@ -161,10 +161,10 @@ impl TryFrom<FloatingIpCreate> for params::FloatingIpCreate {
     fn try_from(
         old: FloatingIpCreate,
     ) -> Result<params::FloatingIpCreate, external::Error> {
-        let address_selector = match (old.ip, old.pool, old.ip_version) {
+        let address_allocator = match (old.ip, old.pool, old.ip_version) {
             // Explicit IP address provided -> ip_version must not be set
             (Some(ip), pool, None) => {
-                params::AddressSelector::Explicit { ip, pool }
+                params::AddressAllocator::Explicit { ip, pool }
             }
             // Explicit IP and ip_version is an invalid combination
             (Some(_), _, Some(_)) => {
@@ -174,7 +174,7 @@ impl TryFrom<FloatingIpCreate> for params::FloatingIpCreate {
                 ));
             }
             // No explicit IP, but named pool specified -> ip_version must not be set
-            (None, Some(pool), None) => params::AddressSelector::Auto {
+            (None, Some(pool), None) => params::AddressAllocator::Auto {
                 pool_selector: params::PoolSelector::Explicit { pool },
             },
             // Named pool and ip_version is an invalid combination
@@ -185,13 +185,13 @@ impl TryFrom<FloatingIpCreate> for params::FloatingIpCreate {
                 ));
             }
             // Allocate from default pool with optional IP version preference
-            (None, None, ip_version) => params::AddressSelector::Auto {
+            (None, None, ip_version) => params::AddressAllocator::Auto {
                 pool_selector: params::PoolSelector::Auto { ip_version },
             },
         };
         Ok(params::FloatingIpCreate {
             identity: old.identity,
-            address_selector,
+            address_allocator,
         })
     }
 }
