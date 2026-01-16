@@ -50,6 +50,7 @@ use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
 
 use crate::integration_tests::instances as instance_helpers;
+use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
 
 // Shared type alias for all multicast integration tests
 pub(crate) type ControlPlaneTestContext =
@@ -734,9 +735,8 @@ pub(crate) async fn wait_for_instance_sled_assignment(
 /// More robust than passively waiting, as it actively drives instance
 /// simulation while polling for the Running state.
 ///
-/// Only use for Running transitions. For Stopped state, use `instance_simulate`
-/// once followed by `instance_wait_for_state`, as the VMM gets removed during
-/// stop and repeated simulation will fail.
+/// Only use for Running transitions. For Stopped state, use
+/// `wait_for_instance_stopped` which handles the VMM removal race condition.
 pub(crate) async fn instance_wait_for_running_with_simulation(
     cptestctx: &ControlPlaneTestContext,
     instance_id: InstanceUuid,
@@ -784,6 +784,88 @@ pub(crate) async fn instance_wait_for_running_with_simulation(
         Err(poll::Error::PermanentError(err)) => {
             panic!(
                 "failed waiting for instance {instance_id} to reach {expected_state:?}: {err}"
+            );
+        }
+    }
+}
+/// Wait for an instance to reach the Stopped state, poking the simulated
+/// sled-agent on each poll iteration to advance the state machine.
+///
+/// This is more robust than calling `instance_simulate` once because
+/// concurrent operations may require multiple pokes to complete. Uses
+/// `try_vmm_finish_transition` to handle the race where the VMM can
+/// disappear between checking for it and poking.
+pub(crate) async fn wait_for_instance_stopped(
+    cptestctx: &ControlPlaneTestContext,
+    client: &ClientTestContext,
+    instance_id: InstanceUuid,
+    instance_name: &str,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let log = &cptestctx.logctx.log;
+
+    info!(
+        log,
+        "waiting for instance to stop (with sled-agent pokes)";
+        "instance_id" => %instance_id,
+        "instance_name" => instance_name,
+    );
+
+    let url = format!("/v1/instances/{instance_id}");
+    match wait_for_condition(
+        || async {
+            let instance: Instance = NexusRequest::object_get(client, &url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await?
+                .parsed_body()?;
+
+            if instance.runtime.run_state == InstanceState::Stopped {
+                Ok(())
+            } else {
+                debug!(
+                    log,
+                    "instance not yet stopped, poking sled-agent";
+                    "instance_id" => %instance_id,
+                    "current_state" => ?instance.runtime.run_state,
+                );
+
+                // Try to poke the sled-agent. The VMM may not exist (if no
+                // active VMM) or may disappear between the check and the poke
+                // (race condition). Either case is fine since we're polling.
+                if let Ok(Some(sled_info)) =
+                    nexus.active_instance_info(&instance_id, None).await
+                {
+                    let _ = sled_info
+                        .sled_client
+                        .try_vmm_finish_transition(sled_info.propolis_id)
+                        .await;
+                }
+
+                Err(CondCheckError::<anyhow::Error>::NotYet)
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    {
+        Ok(_) => {
+            info!(
+                log,
+                "instance stopped";
+                "instance_id" => %instance_id,
+            );
+        }
+        Err(poll::Error::TimedOut(elapsed)) => {
+            panic!(
+                "instance {instance_name} ({instance_id}) did not stop \
+                 within {elapsed:?}"
+            );
+        }
+        Err(poll::Error::PermanentError(err)) => {
+            panic!(
+                "failed waiting for instance {instance_name} to stop: {err}"
             );
         }
     }
@@ -1244,15 +1326,13 @@ pub(crate) async fn cleanup_instances(
     ops::join_all(delete_futures).await;
 }
 
-/// Stop multiple instances using the exact same pattern as groups.rs.
+/// Stop multiple instances, poking the simulated sled-agent while waiting.
 pub(crate) async fn stop_instances(
     cptestctx: &ControlPlaneTestContext,
     client: &ClientTestContext,
     project_name: &str,
     instance_names: &[&str],
 ) {
-    let nexus = &cptestctx.server.server_context().nexus;
-
     let fetch_futures = instance_names.iter().map(|name| {
         let url = format!("/v1/instances/{name}?project={project_name}");
         async move {
@@ -1308,15 +1388,11 @@ pub(crate) async fn stop_instances(
 
                     match stop_result {
                         Ok(_) => {
-                            instance_helpers::instance_simulate(
-                                nexus,
-                                instance_id,
-                            )
-                            .await;
-                            instance_helpers::instance_wait_for_state(
+                            wait_for_instance_stopped(
+                                cptestctx,
                                 client,
                                 *instance_id,
-                                InstanceState::Stopped,
+                                name,
                             )
                             .await;
                         }

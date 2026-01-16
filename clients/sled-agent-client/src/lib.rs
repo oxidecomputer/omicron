@@ -351,6 +351,13 @@ impl ApiVersionHeader for reqwest::RequestBuilder {
 pub trait TestInterfaces {
     async fn vmm_single_step(&self, id: PropolisUuid);
     async fn vmm_finish_transition(&self, id: PropolisUuid);
+    /// Essentially like `vmm_finish_transition`, but returns an error instead
+    /// of panicking if the request fails. Useful when the VMM may have been
+    /// removed.
+    async fn try_vmm_finish_transition(
+        &self,
+        id: PropolisUuid,
+    ) -> Result<(), reqwest::Error>;
     async fn vmm_simulate_migration_source(
         &self,
         id: PropolisUuid,
@@ -383,6 +390,21 @@ impl TestInterfaces for Client {
             .send()
             .await
             .expect("instance_finish_transition() failed unexpectedly");
+    }
+
+    async fn try_vmm_finish_transition(
+        &self,
+        id: PropolisUuid,
+    ) -> Result<(), reqwest::Error> {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{baseurl}/vmms/{id}/poke");
+        client
+            .post(url)
+            .api_version_header(self.api_version())
+            .send()
+            .await
+            .map(|_| ())
     }
 
     async fn disk_finish_transition(&self, id: Uuid) {
