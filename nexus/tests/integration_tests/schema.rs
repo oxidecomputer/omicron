@@ -4035,6 +4035,59 @@ mod migration_219 {
     }
 }
 
+// Test that the audit_log credential_id constraint migration (version 222)
+// handles existing rows with auth_method set but credential_id NULL.
+fn before_222_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Insert an audit_log entry with auth_method = 'session_cookie'.
+        // After version 222's up1.sql adds credential_id, this row will have
+        // credential_id = NULL. The migration must handle this case.
+        let id = Uuid::new_v4();
+        let actor_id = Uuid::new_v4();
+
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.audit_log (
+                    id,
+                    time_started,
+                    request_id,
+                    request_uri,
+                    operation_id,
+                    source_ip,
+                    actor_id,
+                    actor_kind,
+                    auth_method
+                ) VALUES (
+                    $1,
+                    now(),
+                    'test-request-id',
+                    '/test/uri',
+                    'test_operation',
+                    '127.0.0.1',
+                    $2,
+                    'user_builtin',
+                    'session_cookie'
+                )",
+                &[&id, &actor_id],
+            )
+            .await
+            .expect("inserted audit_log row with session_cookie auth_method");
+    })
+}
+
+fn after_222_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Clean up the test row
+        ctx.client
+            .execute(
+                "DELETE FROM omicron.public.audit_log WHERE request_id = 'test-request-id'",
+                &[],
+            )
+            .await
+            .expect("cleaned up audit_log test row");
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -4160,6 +4213,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new()
             .before(migration_219::before)
             .after(migration_219::after),
+    );
+    map.insert(
+        Version::new(222, 0, 0),
+        DataMigrationFns::new().before(before_222_0_0).after(after_222_0_0),
     );
     map
 }

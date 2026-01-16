@@ -6318,18 +6318,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
         OR
         -- For unauthenticated: must not have actor_id or actor_silo_id
         (actor_kind = 'unauthenticated' AND actor_id IS NULL AND actor_silo_id IS NULL)
-    ),
-
-    -- Ensure credential_id is consistent with auth_method:
-    -- - spoof and unauthenticated: credential_id must be NULL
-    -- - session_cookie, access_token, scim_token: credential_id must be set
-    CONSTRAINT auth_method_and_credential_id_consistent CHECK (
-        (auth_method IS NULL AND credential_id IS NULL)
-        OR (auth_method = 'spoof' AND credential_id IS NULL)
-        OR (auth_method IN ('session_cookie', 'access_token', 'scim_token')
-            AND credential_id IS NOT NULL)
     )
 );
+
+-- Ensure credential_id is consistent with auth_method:
+-- - spoof and unauthenticated: credential_id must be NULL
+-- - session_cookie, access_token, scim_token: credential_id must be set
+-- NOT VALID because existing audit_log entries may have auth_method set but
+-- credential_id NULL (since credential_id didn't exist before this was added).
+-- NOTE: NOT VALID only works with ALTER TABLE. Inline NOT VALID in CREATE TABLE
+-- parses but is silently ignored: https://github.com/cockroachdb/cockroach/pull/53485
+ALTER TABLE omicron.public.audit_log
+ADD CONSTRAINT IF NOT EXISTS auth_method_and_credential_id_consistent CHECK (
+    (auth_method IS NULL AND credential_id IS NULL)
+    OR (auth_method = 'spoof' AND credential_id IS NULL)
+    OR (auth_method IN ('session_cookie', 'access_token', 'scim_token')
+        AND credential_id IS NOT NULL)
+) NOT VALID;
 
 -- When we query the audit log, we filter by time_completed and order by
 -- (time_completed, id). CRDB docs talk about hash-sharded indexes for
