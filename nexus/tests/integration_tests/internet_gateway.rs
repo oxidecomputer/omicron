@@ -13,7 +13,7 @@ use nexus_test_utils::{
         create_local_user, create_project, create_route, create_router,
         create_vpc, delete_internet_gateway, detach_ip_address_from_igw,
         detach_ip_pool_from_igw, link_ip_pool, objects_list_page_authz,
-        test_params,
+        single_unattached_subnet, test_params,
     },
 };
 use nexus_test_utils_macros::nexus_test;
@@ -29,7 +29,8 @@ use nexus_types::identity::Resource;
 use omicron_common::{
     address::{IpRange, Ipv4Range},
     api::external::{
-        IdentityMetadataCreateParams, NameOrId, RouteDestination, RouteTarget,
+        IdentityMetadataCreateParams, NameOrId, RouteDestination,
+        RouteTarget,
     },
 };
 
@@ -371,7 +372,7 @@ async fn test_setup(c: &ClientTestContext) {
                 name: "noname".parse().unwrap(),
             },
             ip_config: PrivateIpStackCreate::auto_ipv4(),
-            subnet_name: "default".parse().unwrap(),
+            subnets: single_unattached_subnet("default"),
             vpc_name: VPC_NAME.parse().unwrap(),
         },
     ]);

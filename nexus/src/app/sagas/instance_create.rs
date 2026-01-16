@@ -21,7 +21,7 @@ use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicEr
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::{
-    InstanceDiskAttachment, PrivateIpStackCreate,
+    InstanceDiskAttachment, NetworkInterfaceSubnetConfig, PrivateIpStackCreate,
 };
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -681,11 +681,24 @@ async fn create_custom_network_interface(
     // should probably either be in a transaction, or the
     // `instance_create_network_interface` function/query needs some JOIN
     // on the `vpc_subnet` table.
+    //
+    // TODO(#9580): For now, we only support a single unattached subnet
+    // specified by name. Fix this to accept multiple subnets, by name or ID,
+    // which might be attached or detached.
+    let [
+        NetworkInterfaceSubnetConfig {
+            subnet: NameOrId::Name(subnet_name),
+            attached: false,
+        },
+    ] = interface_params.subnets.as_slice()
+    else {
+        return Err(ActionError::action_failed(Error::invalid_request(
+            "exactly one subnet must be specified by name for the network interface",
+        )));
+    };
     let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, datastore)
         .vpc_id(authz_vpc.id())
-        .vpc_subnet_name(&db::model::Name::from(
-            interface_params.subnet_name.clone(),
-        ))
+        .vpc_subnet_name(&db::model::Name::from(subnet_name.clone()))
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -770,7 +783,10 @@ async fn create_default_primary_network_interface(
             ),
         },
         vpc_name: default_name.clone(),
-        subnet_name: default_name.clone(),
+        subnets: vec![NetworkInterfaceSubnetConfig {
+            subnet: default_name.clone().into(),
+            attached: false,
+        }],
         ip_config,
     };
 

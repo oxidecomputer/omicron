@@ -78,6 +78,58 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
+/// Helper trait to convert various name types to `NameOrId` for test helpers.
+pub trait IntoSubnetName {
+    fn into_name_or_id(self) -> NameOrId;
+}
+
+impl IntoSubnetName for &Name {
+    fn into_name_or_id(self) -> NameOrId {
+        self.clone().into()
+    }
+}
+
+impl IntoSubnetName for Name {
+    fn into_name_or_id(self) -> NameOrId {
+        self.into()
+    }
+}
+
+impl IntoSubnetName for &str {
+    fn into_name_or_id(self) -> NameOrId {
+        self.parse::<Name>().expect("invalid subnet name").into()
+    }
+}
+
+impl IntoSubnetName for &&str {
+    fn into_name_or_id(self) -> NameOrId {
+        (*self).into_name_or_id()
+    }
+}
+
+/// Creates a single-element subnet configuration for network interface creation.
+///
+/// This is a convenience helper for tests that need to specify a single subnet
+/// without the `attached` flag (the common case).
+///
+/// # Examples
+/// ```ignore
+/// // With a Name reference
+/// let default_name: Name = "default".parse().unwrap();
+/// subnets: single_unattached_subnet(&default_name)
+///
+/// // With a string literal
+/// subnets: single_unattached_subnet("default")
+/// ```
+pub fn single_unattached_subnet(
+    name: impl IntoSubnetName,
+) -> Vec<params::NetworkInterfaceSubnetConfig> {
+    vec![params::NetworkInterfaceSubnetConfig {
+        subnet: name.into_name_or_id(),
+        attached: false,
+    }]
+}
+
 pub async fn objects_list_page_authz<ItemType>(
     client: &ClientTestContext,
     path: &str,

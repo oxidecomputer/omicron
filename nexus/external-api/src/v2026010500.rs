@@ -24,11 +24,11 @@ use omicron_common::api::external::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// v2026010500 (POOL_SELECTION_ENUMS) uses the current `InstanceNetworkInterfaceAttachment`
-// with `DefaultIpv4`, `DefaultIpv6`, `DefaultDualStack` variants.
+// v2026010500 (POOL_SELECTION_ENUMS) uses v2026011300's network interface types
+// (pre-VPC_SUBNET_ATTACHMENT, with `subnet_name: Name`).
 //
 // Only the multicast_groups field differs (Vec<NameOrId> vs Vec<MulticastGroupJoinSpec>).
-pub use params::InstanceNetworkInterfaceAttachment;
+use crate::v2026011300;
 
 /// Create-time parameters for an `Instance`
 ///
@@ -53,7 +53,7 @@ pub struct InstanceCreate {
 
     /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interfaces: InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: v2026011300::InstanceNetworkInterfaceAttachment,
 
     /// The external IP addresses provided to this instance.
     #[serde(default)]
@@ -96,7 +96,7 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
-impl From<InstanceCreate> for params::InstanceCreate {
+impl From<InstanceCreate> for v2026011300::InstanceCreate {
     fn from(value: InstanceCreate) -> Self {
         Self {
             identity: value.identity,
@@ -122,6 +122,53 @@ impl From<InstanceCreate> for params::InstanceCreate {
             auto_restart_policy: value.auto_restart_policy,
             anti_affinity_groups: value.anti_affinity_groups,
             cpu_platform: value.cpu_platform,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn make_instance_create(multicast_groups: Vec<NameOrId>) -> InstanceCreate {
+        InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-instance".parse().unwrap(),
+                description: "test".to_string(),
+            },
+            ncpus: InstanceCpuCount(1),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: "test".parse().unwrap(),
+            user_data: vec![],
+            network_interfaces: Default::default(),
+            external_ips: vec![],
+            multicast_groups,
+            disks: vec![],
+            boot_disk: None,
+            ssh_public_keys: None,
+            start: true,
+            auto_restart_policy: None,
+            anti_affinity_groups: vec![],
+            cpu_platform: None,
+        }
+    }
+
+    proptest! {
+        /// multicast_groups Vec<NameOrId> → Vec<MulticastGroupJoinSpec> with defaults
+        #[test]
+        fn multicast_groups_converted_with_defaults(count in 0usize..10) {
+            let groups: Vec<NameOrId> = (0..count)
+                .map(|i| format!("group{i}").parse::<omicron_common::api::external::Name>().unwrap().into())
+                .collect();
+            let old = make_instance_create(groups);
+            let result: v2026011300::InstanceCreate = old.into();
+
+            prop_assert!(result.multicast_groups.len() == count);
+            for spec in &result.multicast_groups {
+                prop_assert!(spec.source_ips.is_none());
+                prop_assert!(spec.ip_version.is_none());
+            }
         }
     }
 }
