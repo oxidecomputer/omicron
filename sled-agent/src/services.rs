@@ -4003,10 +4003,7 @@ impl ServiceManager {
                     let nameservers = get_internal_dns_server_addresses(
                         info.underlay_address,
                     );
-                    smfh.delpropvalue(
-                        "install_props/nameserver",
-                        "*",
-                    )?;
+                    smfh.delpropvalue("install_props/nameserver", "*")?;
                     for address in &nameservers {
                         smfh.addpropvalue_type(
                             "install_props/nameserver",
