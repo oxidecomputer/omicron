@@ -6221,13 +6221,13 @@ pub(in crate::db::datastore) mod test {
             let datastore = db.datastore().clone();
             let opctx =
                 OpContext::for_tests(logctx.log.clone(), datastore.clone());
-            let instance = Instance::new_with_id(config.instances[0].id);
+            let instance_id = config.instances[0].id;
 
             async move {
                 datastore
                     .sled_reservation_create(
                         &opctx,
-                        instance.id,
+                        instance_id,
                         PropolisUuid::new_v4(),
                         db::model::Resources::new(
                             96,
@@ -6244,13 +6244,13 @@ pub(in crate::db::datastore) mod test {
             let datastore = db.datastore().clone();
             let opctx =
                 OpContext::for_tests(logctx.log.clone(), datastore.clone());
-            let instance = Instance::new_with_id(config.instances[1].id);
+            let instance_id = config.instances[1].id;
 
             async move {
                 datastore
                     .sled_reservation_create(
                         &opctx,
-                        instance.id,
+                        instance_id,
                         PropolisUuid::new_v4(),
                         db::model::Resources::new(
                             96,
