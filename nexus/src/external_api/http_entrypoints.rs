@@ -152,23 +152,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_policy: TypedBody<shared::Policy<shared::FleetRole>>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::FleetRole>>, HttpError>
     {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let new_policy = new_policy.into_inner();
+        let new_policy = new_policy.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let nasgns = new_policy.role_assignments.len();
             // This should have been validated during parsing.
             bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let policy = nexus.fleet_update_policy(&opctx, &new_policy).await?;
             Ok(HttpResponseOk(policy))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn policy_view(
@@ -203,15 +195,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError>
     {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let new_policy = new_policy.into_inner();
+        let new_policy = new_policy.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let nasgns = new_policy.role_assignments.len();
             // This should have been validated during parsing.
             bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let silo: NameOrId = opctx
                 .authn
                 .silo_required()
@@ -223,12 +211,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .silo_update_policy(&opctx, &silo_lookup, &new_policy)
                 .await?;
             Ok(HttpResponseOk(policy))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn auth_settings_view(
@@ -262,12 +246,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<params::SiloAuthSettingsUpdate>,
     ) -> Result<HttpResponseOk<views::SiloAuthSettings>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let new_settings = new_settings.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let new_settings = new_settings.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let silo: NameOrId = opctx
                 .authn
                 .silo_required()
@@ -279,12 +259,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .silo_update_auth_settings(&opctx, &silo_lookup, &new_settings)
                 .await?;
             Ok(HttpResponseOk(settings.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn utilization_view(
@@ -587,27 +563,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError>
     {
-        let apictx = rqctx.context();
-        let handler = async {
-            let new_policy = new_policy.into_inner();
+        let path = path_params.into_inner();
+        let new_policy = new_policy.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let nasgns = new_policy.role_assignments.len();
             // This should have been validated during parsing.
             bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
             let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
             let policy = nexus
                 .silo_update_policy(&opctx, &silo_lookup, &new_policy)
                 .await?;
             Ok(HttpResponseOk(policy))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Silo-specific user endpoints
@@ -714,27 +682,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_provider: TypedBody<params::SamlIdentityProviderCreate>,
     ) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError>
     {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let query = query_params.into_inner();
+        let query = query_params.into_inner();
+        let new_provider = new_provider.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
             let provider = nexus
                 .saml_identity_provider_create(
                     &opctx,
                     &silo_lookup,
-                    new_provider.into_inner(),
+                    new_provider,
                 )
                 .await?;
             Ok(HttpResponseCreated(provider.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn saml_identity_provider_view(
@@ -779,27 +740,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::SiloSelector>,
         new_user_params: TypedBody<params::UserCreate>,
     ) -> Result<HttpResponseCreated<User>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let query = query_params.into_inner();
+        let query = query_params.into_inner();
+        let new_user_params = new_user_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
             let user = nexus
-                .local_idp_create_user(
-                    &opctx,
-                    &silo_lookup,
-                    new_user_params.into_inner(),
-                )
+                .local_idp_create_user(&opctx, &silo_lookup, new_user_params)
                 .await?;
             Ok(HttpResponseCreated(user.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn local_idp_user_delete(
@@ -807,24 +757,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::UserParam>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
             nexus
                 .local_idp_delete_user(&opctx, &silo_lookup, path.user_id)
                 .await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn local_idp_user_set_password(
@@ -833,29 +775,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::SiloPath>,
         update: TypedBody<params::UserPassword>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let update = update.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
             nexus
                 .local_idp_user_set_password(
                     &opctx,
                     &silo_lookup,
                     path.user_id,
-                    update.into_inner(),
+                    update,
                 )
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn scim_token_list(
@@ -1163,13 +1098,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ProjectPath>,
         updated_project: TypedBody<params::ProjectUpdate>,
     ) -> Result<HttpResponseOk<Project>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let path = path_params.into_inner();
         let updated_project = updated_project.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let project_selector =
                 params::ProjectSelector { project: path.project };
             let project_lookup =
@@ -1178,12 +1109,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .project_update(&opctx, &project_lookup, &updated_project)
                 .await?;
             Ok(HttpResponseOk(project.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn project_policy_view(
@@ -1218,13 +1145,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_policy: TypedBody<shared::Policy<shared::ProjectRole>>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::ProjectRole>>, HttpError>
     {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let path = path_params.into_inner();
         let new_policy = new_policy.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let project_selector =
                 params::ProjectSelector { project: path.project };
             let project_lookup =
@@ -1233,12 +1156,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .project_update_policy(&opctx, &project_lookup, &new_policy)
                 .await?;
             Ok(HttpResponseOk(new_policy))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // IP Pools
@@ -1342,20 +1261,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         pool_params: TypedBody<params::IpPoolCreate>,
     ) -> Result<HttpResponseCreated<views::IpPool>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let pool_params = pool_params.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let pool = nexus.ip_pool_create(&opctx, &pool_params).await?;
             Ok(HttpResponseCreated(pool.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn ip_pool_view(
@@ -1385,21 +1296,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
+        let path = path_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             nexus.ip_pool_delete(&opctx, &pool_lookup).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn ip_pool_update(
@@ -1407,23 +1310,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::IpPoolPath>,
         updates: TypedBody<params::IpPoolUpdate>,
     ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let updates = updates.into_inner();
+        let path = path_params.into_inner();
+        let updates = updates.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let pool =
                 nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
             Ok(HttpResponseOk(pool.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn ip_pool_utilization_view(
@@ -1503,48 +1398,32 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::IpPoolPath>,
         resource_assoc: TypedBody<params::IpPoolLinkSilo>,
     ) -> Result<HttpResponseCreated<views::IpPoolSiloLink>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let resource_assoc = resource_assoc.into_inner();
+        let path = path_params.into_inner();
+        let resource_assoc = resource_assoc.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let assoc = nexus
                 .ip_pool_link_silo(&opctx, &pool_lookup, &resource_assoc)
                 .await?;
             Ok(HttpResponseCreated(assoc.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn ip_pool_silo_unlink(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolSiloPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
+        let path = path_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
             nexus
                 .ip_pool_unlink_silo(&opctx, &pool_lookup, &silo_lookup)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn ip_pool_silo_update(
@@ -1552,13 +1431,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::IpPoolSiloPath>,
         update: TypedBody<params::IpPoolSiloUpdate>,
     ) -> Result<HttpResponseOk<views::IpPoolSiloLink>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let update = update.into_inner();
+        let path = path_params.into_inner();
+        let update = update.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
             let assoc = nexus
@@ -1570,12 +1445,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseOk(assoc.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn ip_pool_service_view(
@@ -1644,23 +1515,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::IpPoolPath>,
         range_params: TypedBody<shared::IpRange>,
     ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
-        let apictx = &rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let range = range_params.into_inner();
+        let path = path_params.into_inner();
+        let range = range_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let out =
                 nexus.ip_pool_add_range(&opctx, &pool_lookup, &range).await?;
             Ok(HttpResponseCreated(out.try_into()?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn ip_pool_range_remove(
@@ -1722,40 +1585,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         range_params: TypedBody<shared::IpRange>,
     ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
-        let apictx = &rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let range = range_params.into_inner();
+        let range = range_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let out = nexus.ip_pool_service_add_range(&opctx, &range).await?;
             Ok(HttpResponseCreated(out.try_into()?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn ip_pool_service_range_remove(
         rqctx: RequestContext<ApiContext>,
         range_params: TypedBody<shared::IpRange>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = &rqctx.context();
-        let nexus = &apictx.context.nexus;
         let range = range_params.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus.ip_pool_service_delete_range(&opctx, &range).await?;
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Floating IP Addresses
@@ -1796,24 +1643,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::ProjectSelector>,
         floating_params: TypedBody<params::FloatingIpCreate>,
     ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
+        let project_selector = query_params.into_inner();
         let floating_params = floating_params.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let project_lookup =
-                nexus.project_lookup(&opctx, query_params.into_inner())?;
+                nexus.project_lookup(&opctx, project_selector)?;
             let ip = nexus
                 .floating_ip_create(&opctx, &project_lookup, floating_params)
                 .await?;
             Ok(HttpResponseCreated(ip))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn floating_ip_update(
@@ -1822,14 +1662,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         updated_floating_ip: TypedBody<params::FloatingIpUpdate>,
     ) -> Result<HttpResponseOk<FloatingIp>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let updated_floating_ip_params = updated_floating_ip.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let updated_floating_ip_params = updated_floating_ip.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let floating_ip_selector = params::FloatingIpSelector {
                 project: query.project,
                 floating_ip: path.floating_ip,
@@ -1844,12 +1680,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseOk(floating_ip))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn floating_ip_delete(
@@ -1857,28 +1689,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::FloatingIpPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let floating_ip_selector = params::FloatingIpSelector {
                 floating_ip: path.floating_ip,
                 project: query.project,
             };
             let fip_lookup =
                 nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
-
             nexus.floating_ip_delete(&opctx, fip_lookup).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn floating_ip_view(
@@ -1937,13 +1760,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::FloatingIpPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseAccepted<views::FloatingIp>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let floating_ip_selector = params::FloatingIpSelector {
                 floating_ip: path.floating_ip,
                 project: query.project,
@@ -1952,12 +1771,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
             let ip = nexus.floating_ip_detach(&opctx, fip_lookup).await?;
             Ok(HttpResponseAccepted(ip))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Multicast Groups
@@ -2279,29 +2094,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::DiskPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let disk_selector = params::DiskSelector {
                 disk: path.disk,
                 project: query.project,
             };
             let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
-
             nexus.disk_manual_import_start(&opctx, &disk_lookup).await?;
-
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn disk_bulk_write_import(
@@ -2310,30 +2114,21 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         import_params: TypedBody<params::ImportBlocksBulkWrite>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let params = import_params.into_inner();
-
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let import_params = import_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let disk_selector = params::DiskSelector {
                 disk: path.disk,
                 project: query.project,
             };
             let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
-
-            nexus.disk_manual_import(&opctx, &disk_lookup, params).await?;
-
+            nexus
+                .disk_manual_import(&opctx, &disk_lookup, import_params)
+                .await?;
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn disk_bulk_write_import_stop(
@@ -2341,29 +2136,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::DiskPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let disk_selector = params::DiskSelector {
                 disk: path.disk,
                 project: query.project,
             };
             let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
-
             nexus.disk_manual_import_stop(&opctx, &disk_lookup).await?;
-
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn disk_finalize_import(
@@ -2372,29 +2156,21 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         finalize_params: TypedBody<params::FinalizeDisk>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let params = finalize_params.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let finalize_params = finalize_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let disk_selector = params::DiskSelector {
                 disk: path.disk,
                 project: query.project,
             };
             let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
-
-            nexus.disk_finalize_import(&opctx, &disk_lookup, &params).await?;
-
+            nexus
+                .disk_finalize_import(&opctx, &disk_lookup, &finalize_params)
+                .await?;
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Instances
@@ -2514,8 +2290,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::InstancePath>,
         instance_config: TypedBody<params::InstanceUpdate>,
     ) -> Result<HttpResponseOk<Instance>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let query = query_params.into_inner();
         let path = path_params.into_inner();
         let instance_config = instance_config.into_inner();
@@ -2523,9 +2297,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             project: query.project,
             instance: path.instance,
         };
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
             let instance = nexus
@@ -2536,12 +2308,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseOk(instance.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn instance_reboot(
@@ -2549,28 +2317,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = params::InstanceSelector {
             project: query.project,
             instance: path.instance,
         };
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
             let instance =
                 nexus.instance_reboot(&opctx, &instance_lookup).await?;
             Ok(HttpResponseAccepted(instance.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn instance_start(
@@ -2578,17 +2338,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = params::InstanceSelector {
             project: query.project,
             instance: path.instance,
         };
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
             let instance = nexus
@@ -2599,12 +2355,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseAccepted(instance.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn instance_stop(
@@ -2612,28 +2364,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = params::InstanceSelector {
             project: query.project,
             instance: path.instance,
         };
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
             let instance =
                 nexus.instance_stop(&opctx, &instance_lookup).await?;
             Ok(HttpResponseAccepted(instance.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn instance_serial_console(
@@ -2803,14 +2547,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         disk_to_attach: TypedBody<params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let disk = disk_to_attach.into_inner().disk;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_selector = params::InstanceSelector {
                 project: query.project,
                 instance: path.instance,
@@ -2821,12 +2561,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_attach_disk(&opctx, &instance_lookup, disk)
                 .await?;
             Ok(HttpResponseAccepted(disk.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn instance_disk_detach(
@@ -2835,14 +2571,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         disk_to_detach: TypedBody<params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let disk = disk_to_detach.into_inner().disk;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let disk = disk_to_detach.into_inner().disk;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_selector = params::InstanceSelector {
                 project: query.project,
                 instance: path.instance,
@@ -2853,12 +2585,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_detach_disk(&opctx, &instance_lookup, disk)
                 .await?;
             Ok(HttpResponseAccepted(disk.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn instance_affinity_group_list(
@@ -3630,25 +3358,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         new_address_lot: TypedBody<params::AddressLotCreate>,
     ) -> Result<HttpResponseCreated<AddressLotCreateResponse>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let params = new_address_lot.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let params = new_address_lot.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let result = nexus.address_lot_create(&opctx, params).await?;
-
             let lot: AddressLot = result.lot.into();
             let blocks: Vec<AddressLotBlock> =
                 result.blocks.iter().map(|b| b.clone().into()).collect();
-
             Ok(HttpResponseCreated(AddressLotCreateResponse { lot, blocks }))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_address_lot_view(
@@ -3685,22 +3403,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::AddressLotPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
+        let path = path_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let address_lot_lookup =
                 nexus.address_lot_lookup(&opctx, path.address_lot)?;
             nexus.address_lot_delete(&opctx, &address_lot_lookup).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_address_lot_list(
@@ -3779,42 +3489,28 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         new_loopback_address: TypedBody<params::LoopbackAddressCreate>,
     ) -> Result<HttpResponseCreated<LoopbackAddress>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let params = new_loopback_address.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let params = new_loopback_address.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let result = nexus.loopback_address_create(&opctx, params).await?;
-
             let addr: LoopbackAddress = result.into();
-
             Ok(HttpResponseCreated(addr))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_loopback_address_delete(
         rqctx: RequestContext<ApiContext>,
         path: Path<params::LoopbackAddressPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let addr = match IpNetwork::new(path.address, path.subnet_mask) {
-                Ok(addr) => Ok(addr),
-                Err(_) => Err(HttpError::for_bad_request(
-                    None,
-                    "invalid ip address".into(),
-                )),
-            }?;
+        let path = path.into_inner();
+        let addr = match IpNetwork::new(path.address, path.subnet_mask) {
+            Ok(addr) => Ok(addr),
+            Err(_) => Err(HttpError::for_bad_request(
+                None,
+                "invalid ip address".into(),
+            )),
+        }?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .loopback_address_delete(
                     &opctx,
@@ -3824,12 +3520,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_loopback_address_list(
@@ -3867,43 +3559,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         new_settings: TypedBody<params::SwitchPortSettingsCreate>,
     ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let params = new_settings.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let params = new_settings.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let result =
                 nexus.switch_port_settings_post(&opctx, params).await?;
-
             let settings: SwitchPortSettings = result.into();
             Ok(HttpResponseCreated(settings))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_switch_port_settings_delete(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::SwitchPortSettingsSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let selector = query_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let selector = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus.switch_port_settings_delete(&opctx, &selector).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_switch_port_settings_list(
@@ -4031,24 +3706,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::SwitchPortSelector>,
         settings_body: TypedBody<params::SwitchPortApplySettings>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let port = path_params.into_inner().port;
-            let query = query_params.into_inner();
-            let settings = settings_body.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let port = path_params.into_inner().port;
+        let query = query_params.into_inner();
+        let settings = settings_body.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .switch_port_apply_settings(&opctx, &port, &query, &settings)
                 .await?;
             Ok(HttpResponseUpdatedNoContent {})
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_switch_port_clear_settings(
@@ -4056,21 +3723,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::SwitchPortPathSelector>,
         query_params: Query<params::SwitchPortSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let port = path_params.into_inner().port;
-            let query = query_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let port = path_params.into_inner().port;
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus.switch_port_clear_settings(&opctx, &port, &query).await?;
             Ok(HttpResponseUpdatedNoContent {})
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_switch_port_lldp_config_view(
@@ -4178,20 +3837,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<params::BgpConfigCreate>,
     ) -> Result<HttpResponseCreated<BgpConfig>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let config = config.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let config = config.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let result = nexus.bgp_config_create(&opctx, &config).await?;
             Ok(HttpResponseCreated::<BgpConfig>(result.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_bgp_config_list(
@@ -4306,40 +3957,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         sel: Query<params::BgpConfigSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let sel = sel.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let sel = sel.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus.bgp_config_delete(&opctx, &sel).await?;
             Ok(HttpResponseUpdatedNoContent {})
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<params::BgpAnnounceSetCreate>,
     ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let config = config.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let config = config.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let result = nexus.bgp_update_announce_set(&opctx, &config).await?;
             Ok(HttpResponseOk::<BgpAnnounceSet>(result.0.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_bgp_announce_set_list(
@@ -4374,20 +4009,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::BgpAnnounceSetSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let sel = path_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let sel = path_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus.bgp_delete_announce_set(&opctx, &sel).await?;
             Ok(HttpResponseUpdatedNoContent {})
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_bgp_announcement_list(
@@ -4421,40 +4048,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         session: TypedBody<params::BfdSessionEnable>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let session = session.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-            nexus.bfd_enable(&opctx, session.into_inner()).await?;
+            nexus.bfd_enable(&opctx, session).await?;
             Ok(HttpResponseUpdatedNoContent {})
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_bfd_disable(
         rqctx: RequestContext<ApiContext>,
         session: TypedBody<params::BfdSessionDisable>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let session = session.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-            nexus.bfd_disable(&opctx, session.into_inner()).await?;
+            nexus.bfd_disable(&opctx, session).await?;
             Ok(HttpResponseUpdatedNoContent {})
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_bfd_status(
@@ -4501,25 +4114,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         params: TypedBody<params::AllowListUpdate>,
     ) -> Result<HttpResponseOk<views::AllowList>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let server_kind = apictx.kind;
-            let params = params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let remote_addr = rqctx.request.remote_addr().ip();
+        let server_kind = rqctx.context().kind;
+        let remote_addr = rqctx.request.remote_addr().ip();
+        let params = params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .allow_list_upsert(&opctx, remote_addr, server_kind, params)
                 .await
                 .map(HttpResponseOk)
                 .map_err(HttpError::from)
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_inbound_icmp_view(
@@ -4547,23 +4152,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<ServiceIcmpConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let params = params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let params = params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .nexus_firewall_inbound_icmp_update(&opctx, params)
                 .await
                 .map(|_| HttpResponseUpdatedNoContent())
                 .map_err(HttpError::from)
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Images
@@ -4688,13 +4285,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ImagePath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let image_lookup = nexus
                 .image_lookup(
                     &opctx,
@@ -4706,12 +4299,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .await?;
             nexus.image_delete(&opctx, &image_lookup).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn image_promote(
@@ -4719,13 +4308,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ImagePath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseAccepted<Image>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let image_lookup = nexus
                 .image_lookup(
                     &opctx,
@@ -4737,12 +4322,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .await?;
             let image = nexus.image_promote(&opctx, &image_lookup).await?;
             Ok(HttpResponseAccepted(image.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn image_demote(
@@ -4750,32 +4331,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ImagePath>,
         query_params: Query<params::ProjectSelector>,
     ) -> Result<HttpResponseAccepted<Image>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let image_lookup = nexus
                 .image_lookup(
                     &opctx,
                     params::ImageSelector { image: path.image, project: None },
                 )
                 .await?;
-
             let project_lookup = nexus.project_lookup(&opctx, query)?;
-
             let image = nexus
                 .image_demote(&opctx, &image_lookup, &project_lookup)
                 .await?;
             Ok(HttpResponseAccepted(image.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn instance_network_interface_list(
@@ -4822,27 +4393,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::InstanceSelector>,
         interface_params: TypedBody<params::InstanceNetworkInterfaceCreate>,
     ) -> Result<HttpResponseCreated<InstanceNetworkInterface>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let query = query_params.into_inner();
+        let query = query_params.into_inner();
+        let interface_params = interface_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup = nexus.instance_lookup(&opctx, query)?;
             let iface = nexus
                 .network_interface_create(
                     &opctx,
                     &instance_lookup,
-                    &interface_params.into_inner(),
+                    &interface_params,
                 )
                 .await?;
             iface.try_into().map(HttpResponseCreated).map_err(HttpError::from)
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn instance_network_interface_delete(
@@ -4850,13 +4414,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::NetworkInterfacePath>,
         query_params: Query<params::OptionalInstanceSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let interface_selector = params::InstanceNetworkInterfaceSelector {
                 project: query.project,
                 instance: query.instance,
@@ -4870,12 +4430,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_network_interface_delete(&opctx, &interface_lookup)
                 .await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn instance_network_interface_view(
@@ -4914,14 +4470,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalInstanceSelector>,
         updated_iface: TypedBody<params::InstanceNetworkInterfaceUpdate>,
     ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let updated_iface = updated_iface.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let updated_iface = updated_iface.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let network_interface_selector =
                 params::InstanceNetworkInterfaceSelector {
                     project: query.project,
@@ -4941,12 +4493,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             interface.try_into().map(HttpResponseOk).map_err(HttpError::from)
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // External IP addresses for instances
@@ -4987,21 +4535,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         ip_to_create: TypedBody<params::EphemeralIpCreate>,
     ) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let params::EphemeralIpCreate { pool_selector } =
+            ip_to_create.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_selector = params::InstanceSelector {
                 project: query.project,
                 instance: path.instance,
             };
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let params::EphemeralIpCreate { pool_selector } =
-                ip_to_create.into_inner();
             let (pool, ip_version) = match pool_selector {
                 params::PoolSelector::Explicit { pool } => (Some(pool), None),
                 params::PoolSelector::Auto { ip_version } => (None, ip_version),
@@ -5015,12 +4559,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseAccepted(ip))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn instance_ephemeral_ip_detach(
@@ -5028,13 +4568,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::InstancePath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_selector = params::InstanceSelector {
                 project: query.project,
                 instance: path.instance,
@@ -5049,12 +4585,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Instance Multicast Groups
@@ -5119,13 +4651,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         body_params: TypedBody<params::InstanceMulticastGroupJoin>,
     ) -> Result<HttpResponseCreated<views::MulticastGroupMember>, HttpError>
     {
-        let apictx = rqctx.context();
-        let handler = async {
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let body = body_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let body = body_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_selector = params::InstanceSelector {
                 project: match &path.instance {
                     NameOrId::Name(_) => query.project.clone(),
@@ -5133,13 +4662,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 },
                 instance: path.instance.clone(),
             };
-            let instance_lookup = apictx
-                .context
-                .nexus
-                .instance_lookup(&opctx, instance_selector)?;
-            let result = apictx
-                .context
-                .nexus
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+            let result = nexus
                 .instance_join_multicast_group(
                     &opctx,
                     &path.multicast_group,
@@ -5151,12 +4676,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseCreated(views::MulticastGroupMember::try_from(
                 result,
             )?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn v2025121200_instance_multicast_group_leave(
@@ -5215,12 +4736,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_selector = params::InstanceSelector {
                 project: match &path.instance {
                     NameOrId::Name(_) => query.project.clone(),
@@ -5228,21 +4746,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 },
                 instance: path.instance.clone(),
             };
-            let instance_lookup = apictx
-                .context
-                .nexus
-                .instance_lookup(&opctx, instance_selector)?;
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
             let group_selector = params::MulticastGroupSelector {
                 multicast_group: path.multicast_group,
             };
-            let group_lookup = apictx
-                .context
-                .nexus
-                .multicast_group_lookup(&opctx, &group_selector)
-                .await?;
-            apictx
-                .context
-                .nexus
+            let group_lookup =
+                nexus.multicast_group_lookup(&opctx, &group_selector).await?;
+            nexus
                 .instance_leave_multicast_group(
                     &opctx,
                     &group_lookup,
@@ -5250,12 +4761,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn v2025121200_instance_multicast_group_join(
@@ -5561,23 +5068,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::VpcSelector>,
         create_params: TypedBody<params::VpcSubnetCreate>,
     ) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let query = query_params.into_inner();
-            let create = create_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let query = query_params.into_inner();
+        let create = create_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let vpc_lookup = nexus.vpc_lookup(&opctx, query)?;
             let subnet =
                 nexus.vpc_create_subnet(&opctx, &vpc_lookup, &create).await?;
             Ok(HttpResponseCreated(subnet.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn vpc_subnet_view(
@@ -5615,13 +5114,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::SubnetPath>,
         query_params: Query<params::OptionalVpcSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let subnet_selector = params::SubnetSelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -5631,12 +5126,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.vpc_subnet_lookup(&opctx, subnet_selector)?;
             nexus.vpc_delete_subnet(&opctx, &subnet_lookup).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn vpc_subnet_update(
@@ -5645,14 +5136,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalVpcSelector>,
         subnet_params: TypedBody<params::VpcSubnetUpdate>,
     ) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let subnet_params = subnet_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let subnet_params = subnet_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let subnet_selector = params::SubnetSelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -5664,12 +5151,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .vpc_update_subnet(&opctx, &subnet_lookup, &subnet_params)
                 .await?;
             Ok(HttpResponseOk(subnet.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // This endpoint is likely temporary. We would rather list all IPs allocated in
@@ -6380,19 +5863,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         sled: TypedBody<params::UninitializedSledId>,
     ) -> Result<HttpResponseCreated<views::SledId>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let id = nexus.sled_add(&opctx, sled.into_inner()).await?;
+        let sled = sled.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let id = nexus.sled_add(&opctx, sled).await?;
             Ok(HttpResponseCreated(views::SledId { id }))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Sleds
@@ -6445,32 +5921,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_provision_state: TypedBody<params::SledProvisionPolicyParams>,
     ) -> Result<HttpResponseOk<params::SledProvisionPolicyResponse>, HttpError>
     {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-
-            let path = path_params.into_inner();
-            let new_state = new_provision_state.into_inner().state;
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
+        let path = path_params.into_inner();
+        let new_state = new_provision_state.into_inner().state;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
-
             let old_state = nexus
                 .sled_set_provision_policy(&opctx, &sled_lookup, new_state)
                 .await?;
-
             let response =
                 params::SledProvisionPolicyResponse { old_state, new_state };
-
             Ok(HttpResponseOk(response))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn sled_instance_list(
@@ -6603,12 +6065,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPath>,
     ) -> Result<HttpResponseOk<views::Switch>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let path = path_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let (.., switch) = nexus
                 .switch_lookup(
                     &opctx,
@@ -6617,12 +6075,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .fetch()
                 .await?;
             Ok(HttpResponseOk(switch.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn sled_physical_disk_list(
@@ -6671,16 +6125,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         other_params: Query<params::OptionalSiloSelector>,
     ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError>
     {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let metric_name = path_params.into_inner().metric_name;
-            let pagination = pag_params.into_inner();
-            let limit = rqctx.page_limit(&pagination)?;
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let silo_lookup = match other_params.into_inner().silo {
+        let metric_name = path_params.into_inner().metric_name;
+        let pagination = pag_params.into_inner();
+        let limit = rqctx.page_limit(&pagination)?;
+        let silo_selector = other_params.into_inner().silo;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let silo_lookup = match silo_selector {
                 Some(silo) => Some(nexus.silo_lookup(&opctx, silo)?),
                 _ => None,
             };
@@ -6696,12 +6146,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .await?;
 
             Ok(HttpResponseOk(result))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn silo_metric(
@@ -6713,14 +6159,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         other_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError>
     {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let metric_name = path_params.into_inner().metric_name;
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let project_lookup = match other_params.into_inner().project {
+        let metric_name = path_params.into_inner().metric_name;
+        let pagination = pag_params.into_inner();
+        let limit = rqctx.page_limit(&pagination)?;
+        let project_selector = other_params.into_inner().project;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let project_lookup = match project_selector {
                 Some(project) => {
                     let project_selector = params::ProjectSelector { project };
                     Some(nexus.project_lookup(&opctx, project_selector)?)
@@ -6728,11 +6172,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 _ => None,
             };
 
-            let pagination = pag_params.into_inner();
-            let limit = rqctx.page_limit(&pagination)?;
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let result = nexus
                 .silo_metric_list(
                     &opctx,
@@ -6744,12 +6183,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .await?;
 
             Ok(HttpResponseOk(result))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn system_timeseries_schema_list(
@@ -6759,35 +6194,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
         HttpResponseOk<ResultsPage<oximeter_db::TimeseriesSchema>>,
         HttpError,
     > {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let pagination = pag_params.into_inner();
-            let limit = rqctx.page_limit(&pagination)?;
+        let pagination = pag_params.into_inner();
+        let limit = rqctx.page_limit(&pagination)?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .timeseries_schema_list(&opctx, &pagination, limit)
                 .await
                 .map(HttpResponseOk)
                 .map_err(HttpError::from)
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn system_timeseries_query(
         rqctx: RequestContext<ApiContext>,
         body: TypedBody<params::TimeseriesQuery>,
     ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let body_params = body.into_inner();
             let query = body_params.query;
             let include_summaries = body_params.include_summaries;
@@ -6811,12 +6234,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     })
                 })
                 .map_err(HttpError::from)
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn timeseries_query(
@@ -6824,11 +6243,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::ProjectSelector>,
         body: TypedBody<params::TimeseriesQuery>,
     ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let project_selector = query_params.into_inner();
             let body_params = body.into_inner();
             let query = body_params.query;
@@ -6855,12 +6270,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     })
                 })
                 .map_err(HttpError::from)
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Updates
@@ -6870,45 +6281,29 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query: Query<params::UpdatesPutRepositoryParams>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<views::TufRepoUpload>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query.into_inner();
             let body = body.into_stream();
             let update = nexus
                 .updates_put_repository(&opctx, body, query.file_name)
                 .await?;
             Ok(HttpResponseOk(update.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn system_update_repository_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<views::TufRepo>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let params = path_params.into_inner();
             let repo = nexus
                 .updates_get_repository(&opctx, params.system_version)
                 .await?;
             Ok(HttpResponseOk(repo.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn system_update_repository_list(
@@ -6983,24 +6378,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<shared::TufSignedRootRole>,
     ) -> Result<HttpResponseCreated<views::UpdatesTrustRoot>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-
+        let body = body.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             Ok(HttpResponseCreated(
-                nexus
-                    .updates_add_trust_root(&opctx, body.into_inner())
-                    .await?
-                    .into(),
+                nexus.updates_add_trust_root(&opctx, body).await?.into(),
             ))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn system_update_trust_root_view(
@@ -7032,36 +6416,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::TufTrustRootPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-
-            let id = TufTrustRootUuid::from_untyped_uuid(
-                path_params.into_inner().trust_root_id,
-            );
+        let id = TufTrustRootUuid::from_untyped_uuid(
+            path_params.into_inner().trust_root_id,
+        );
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus.updates_delete_trust_root(&opctx, id).await?;
-
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn target_release_update(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let params = body.into_inner();
+        let params = body.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let system_version = params.system_version;
 
             // We don't need a transaction for the following queries because
@@ -7127,12 +6497,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .target_release_insert(&opctx, next_target_release)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn system_update_status(
@@ -7294,20 +6660,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UserPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let path = path_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus.current_silo_user_logout(&opctx, path.user_id).await?;
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Silo groups
@@ -7546,11 +6904,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         new_key: TypedBody<params::SshKeyCreate>,
     ) -> Result<HttpResponseCreated<SshKey>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        let new_key = new_key.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let &actor = opctx
                 .authn
                 .actor_required()
@@ -7565,17 +6920,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 }
             };
 
-            let ssh_key = nexus
-                .ssh_key_create(&opctx, silo_user_id, new_key.into_inner())
-                .await?;
-
+            let ssh_key =
+                nexus.ssh_key_create(&opctx, silo_user_id, new_key).await?;
             Ok(HttpResponseCreated(ssh_key.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn current_user_ssh_key_view(
@@ -7623,12 +6972,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SshKeyPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
+        let path = path_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let &actor = opctx
                 .authn
                 .actor_required()
@@ -7645,19 +6990,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let ssh_key_selector =
                 params::SshKeySelector { silo_user_id, ssh_key: path.ssh_key };
-
             let ssh_key_lookup =
                 nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
-
             nexus.ssh_key_delete(&opctx, silo_user_id, &ssh_key_lookup).await?;
-
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn current_user_access_token_list(
@@ -7957,14 +7295,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::SupportBundleCreate>,
     ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let create_params = body.into_inner();
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
+        let create_params = body.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let bundle = nexus
                 .support_bundle_create(
                     &opctx,
@@ -7973,40 +7305,25 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseCreated(bundle.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn support_bundle_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
+        let path = path_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .support_bundle_delete(
                     &opctx,
                     SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                 )
                 .await?;
-
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn support_bundle_update(
@@ -8014,15 +7331,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::SupportBundlePath>,
         body: TypedBody<params::SupportBundleUpdate>,
     ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let update = body.into_inner();
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
+        let path = path_params.into_inner();
+        let update = body.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let bundle = nexus
                 .support_bundle_update_user_comment(
                     &opctx,
@@ -8030,14 +7341,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     update.user_comment,
                 )
                 .await?;
-
             Ok(HttpResponseOk(bundle.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn probe_list(
@@ -8755,22 +8061,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::WebhookCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookReceiver>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let params = params.into_inner();
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        let params = params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let receiver =
                 nexus.webhook_receiver_create(&opctx, params).await?;
             Ok(HttpResponseCreated(views::WebhookReceiver::try_from(receiver)?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn webhook_receiver_update(
@@ -8778,49 +8075,27 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
-            let webhook_selector = path_params.into_inner();
-            let params = params.into_inner();
+        let webhook_selector = path_params.into_inner();
+        let params = params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             nexus.webhook_receiver_update(&opctx, rx, params).await?;
-
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn alert_receiver_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::AlertReceiverSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
-            let webhook_selector = path_params.into_inner();
+        let webhook_selector = path_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             nexus.webhook_receiver_delete(&opctx, rx).await?;
-
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn alert_receiver_subscription_add(
@@ -8829,56 +8104,32 @@ impl NexusExternalApi for NexusExternalApiImpl {
         params: TypedBody<params::AlertSubscriptionCreate>,
     ) -> Result<HttpResponseCreated<views::AlertSubscriptionCreated>, HttpError>
     {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
-            let webhook_selector = path_params.into_inner();
-            let subscription = params.into_inner();
+        let webhook_selector = path_params.into_inner();
+        let subscription = params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
-
             let subscription = nexus
                 .alert_receiver_subscription_add(&opctx, rx, subscription)
                 .await?;
-
             Ok(HttpResponseCreated(subscription))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn alert_receiver_subscription_remove(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::AlertSubscriptionSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
-            let params::AlertSubscriptionSelector { receiver, subscription } =
-                path_params.into_inner();
+        let params::AlertSubscriptionSelector { receiver, subscription } =
+            path_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let rx = nexus.alert_receiver_lookup(&opctx, receiver)?;
-
             nexus
                 .alert_receiver_subscription_remove(&opctx, rx, subscription)
                 .await?;
-
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn alert_receiver_probe(
@@ -8886,25 +8137,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::AlertReceiverSelector>,
         query_params: Query<params::AlertReceiverProbe>,
     ) -> Result<HttpResponseOk<views::AlertProbeResult>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
-            let webhook_selector = path_params.into_inner();
-            let probe_params = query_params.into_inner();
+        let webhook_selector = path_params.into_inner();
+        let probe_params = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let result =
                 nexus.webhook_receiver_probe(&opctx, rx, probe_params).await?;
             Ok(HttpResponseOk(result))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn webhook_secrets_list(
@@ -8942,24 +8183,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookSecret>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
-            let params::WebhookSecretCreate { secret } = params.into_inner();
-            let webhook_selector = query_params.into_inner();
+        let params::WebhookSecretCreate { secret } = params.into_inner();
+        let webhook_selector = query_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let secret =
                 nexus.webhook_receiver_secret_add(&opctx, rx, secret).await?;
             Ok(HttpResponseCreated(secret))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     /// Delete a secret from a webhook receiver.
@@ -8967,25 +8199,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSecretSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
-            let secret_selector = path_params.into_inner();
+        let secret_selector = path_params.into_inner();
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let secret =
                 nexus.webhook_secret_lookup(&opctx, secret_selector)?;
             nexus.webhook_receiver_secret_delete(&opctx, secret).await?;
-
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn alert_delivery_list(
