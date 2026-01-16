@@ -126,7 +126,7 @@ impl super::Nexus {
             AuditLogActor::UserBuiltin { .. }
             | AuditLogActor::SiloUser { .. }
             | AuditLogActor::Scim { .. } => {
-                opctx.authn.scheme_used().map(|s| s.to_string())
+                opctx.authn.scheme_used().map(Into::into)
             }
             // if we tried to pull it off the opctx this would be None anyway,
             // but it's better to be explicit

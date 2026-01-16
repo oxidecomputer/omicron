@@ -38,7 +38,7 @@ pub struct AuditLogEntryInitParams {
     pub source_ip: IpAddr,
     pub user_agent: Option<String>,
     pub actor: AuditLogActor,
-    pub auth_method: Option<String>,
+    pub auth_method: Option<AuditLogAuthMethod>,
 }
 
 impl_enum_type!(
@@ -86,6 +86,54 @@ impl_enum_type!(
     Timeout => b"timeout"
 );
 
+impl_enum_type!(
+    AuditLogAuthMethodEnum:
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+        PartialEq,
+        Eq,
+    )]
+    pub enum AuditLogAuthMethod;
+
+    // Enum values
+    SessionCookie => b"session_cookie"
+    AccessToken => b"access_token"
+    ScimToken => b"scim_token"
+    Spoof => b"spoof"
+);
+
+impl From<AuditLogAuthMethod> for views::AuthMethod {
+    fn from(m: AuditLogAuthMethod) -> Self {
+        match m {
+            AuditLogAuthMethod::SessionCookie => {
+                views::AuthMethod::SessionCookie
+            }
+            AuditLogAuthMethod::AccessToken => views::AuthMethod::AccessToken,
+            AuditLogAuthMethod::ScimToken => views::AuthMethod::ScimToken,
+            AuditLogAuthMethod::Spoof => views::AuthMethod::Spoof,
+        }
+    }
+}
+
+impl From<&nexus_types::authn::SchemeName> for AuditLogAuthMethod {
+    fn from(s: &nexus_types::authn::SchemeName) -> Self {
+        use nexus_types::authn::SchemeName;
+        match s {
+            SchemeName::SessionCookie => AuditLogAuthMethod::SessionCookie,
+            SchemeName::AccessToken => AuditLogAuthMethod::AccessToken,
+            SchemeName::ScimToken => AuditLogAuthMethod::ScimToken,
+            SchemeName::Spoof => AuditLogAuthMethod::Spoof,
+        }
+    }
+}
+
 #[derive(Queryable, Insertable, Selectable, Clone, Debug)]
 #[diesel(table_name = audit_log)]
 pub struct AuditLogEntryInit {
@@ -115,7 +163,7 @@ pub struct AuditLogEntryInit {
 
     /// API token or session cookie. Optional because it will not be defined
     /// on unauthenticated requests like login attempts.
-    pub auth_method: Option<String>,
+    pub auth_method: Option<AuditLogAuthMethod>,
 }
 
 impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
@@ -182,20 +230,20 @@ pub struct AuditLogEntry {
     /// Actor kind indicating builtin user, silo user, or unauthenticated
     pub actor_kind: AuditLogActorKind,
 
-    /// The name of the authn scheme used. None if unauthenticated.
-    pub auth_method: Option<String>,
-
     // Fields that are not present on init
     /// Time log entry was completed with info about result of operation
     pub time_completed: DateTime<Utc>,
-    /// Result kind indicating success, error, or timeout
-    pub result_kind: AuditLogResultKind,
     /// Optional because not present for timeout result
     pub http_status_code: Option<SqlU16>,
     /// Optional even if result is an error
     pub error_code: Option<String>,
     /// Always present if result is an error
     pub error_message: Option<String>,
+    /// Result kind indicating success, error, or timeout
+    pub result_kind: AuditLogResultKind,
+
+    /// The authn scheme used. None if unauthenticated.
+    pub auth_method: Option<AuditLogAuthMethod>,
 }
 
 /// Struct that we can use as a kind of constructor arg for our actual audit
@@ -320,7 +368,7 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                     views::AuditLogEntryActor::Unauthenticated
                 }
             },
-            auth_method: entry.auth_method,
+            auth_method: entry.auth_method.map(Into::into),
             time_completed: entry.time_completed,
             result: match entry.result_kind {
                 AuditLogResultKind::Success => {

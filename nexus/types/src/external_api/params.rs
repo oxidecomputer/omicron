@@ -1525,24 +1525,30 @@ pub struct SubnetPoolUpdate {
 
 /// Add a subnet to a pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SubnetPoolSubnetAdd {
+pub struct SubnetPoolMemberAdd {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
     /// The subnet to add to the pool
     pub subnet: IpNet,
-    /// Minimum prefix length for allocations from this subnet.
-    /// For IPv4: 0-32, for IPv6: 0-128. A smaller number means larger
-    /// allocations are allowed (e.g., /16 is larger than /24).
+    /// Minimum prefix length for allocations from this subnet; a smaller prefix
+    /// means larger allocations are allowed (e.g. a /16 prefix yields larger
+    /// subnet allocations than a /24 prefix).
+    ///
+    /// Valid values: 0-32 for IPv4, 0-128 for IPv6.
+    /// Default if not specified is equal to the subnet's prefix length.
     pub min_alloc: Option<u8>,
-    /// Maximum prefix length for allocations from this subnet.
-    /// For IPv4: 0-32, for IPv6: 0-128. A larger number means smaller
-    /// allocations are allowed (e.g., /28 is smaller than /24).
+    /// Maximum prefix length for allocations from this subnet; a larger prefix
+    /// means smaller allocations are allowed (e.g. a /24 prefix yields smaller
+    /// subnet allocations than a /16 prefix).
+    ///
+    /// Valid values: 0-32 for IPv4, 0-128 for IPv6.
+    /// Default if not specified is 32 for IPv4 and 128 for IPv6.
     pub max_alloc: Option<u8>,
 }
 
 /// Remove a subnet from a pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SubnetPoolSubnetRemove {
+pub struct SubnetPoolMemberRemove {
     /// The subnet to remove from the pool. Must match an existing entry exactly.
     pub subnet: IpNet,
 }
@@ -1569,7 +1575,7 @@ pub struct SubnetPoolSiloUpdate {
 /// Specify how to allocate a floating IP address.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum AddressSelector {
+pub enum AddressAllocator {
     /// Reserve a specific IP address.
     Explicit {
         /// The IP address to reserve. Must be available in the pool.
@@ -1590,9 +1596,9 @@ pub enum AddressSelector {
     },
 }
 
-impl Default for AddressSelector {
+impl Default for AddressAllocator {
     fn default() -> Self {
-        AddressSelector::Auto { pool_selector: PoolSelector::default() }
+        AddressAllocator::Auto { pool_selector: PoolSelector::default() }
     }
 }
 
@@ -1604,7 +1610,7 @@ pub struct FloatingIpCreate {
 
     /// IP address allocation method.
     #[serde(default)]
-    pub address_selector: AddressSelector,
+    pub address_allocator: AddressAllocator,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1709,7 +1715,7 @@ pub struct InstanceDiskAttach {
 }
 
 /// Specify which IP pool to allocate from.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PoolSelector {
     /// Use the specified pool by name or ID.

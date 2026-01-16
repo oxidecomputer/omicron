@@ -24,6 +24,7 @@ define_enums! {
     AffinityPolicyEnum => "affinity_policy",
     AlertClassEnum => "alert_class",
     AuditLogActorKindEnum => "audit_log_actor_kind",
+    AuditLogAuthMethodEnum => "audit_log_auth_method",
     AuditLogResultKindEnum => "audit_log_result_kind",
     AlertDeliveryTriggerEnum => "alert_delivery_trigger",
     AlertDeliveryStateEnum => "alert_delivery_state",

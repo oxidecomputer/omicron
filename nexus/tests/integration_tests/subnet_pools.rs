@@ -112,7 +112,7 @@ async fn test_subnet_pool_delete_unimplemented(
 }
 
 #[nexus_test]
-async fn test_subnet_pool_subnet_list_unimplemented(
+async fn test_subnet_pool_member_list_unimplemented(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -202,7 +202,7 @@ async fn test_subnet_pool_subnet_add_unimplemented(
     let client = &cptestctx.external_client;
     let url = format!("{}/test-pool/subnets/add", SUBNET_POOLS_URL);
 
-    let add_params = params::SubnetPoolSubnetAdd {
+    let add_params = params::SubnetPoolMemberAdd {
         identity: IdentityMetadataCreateParams {
             name: "test-subnet".parse().unwrap(),
             description: String::from("A test subnet"),
@@ -232,7 +232,7 @@ async fn test_subnet_pool_subnet_remove_unimplemented(
     let client = &cptestctx.external_client;
     let url = format!("{}/test-pool/subnets/remove", SUBNET_POOLS_URL);
 
-    let remove_params = params::SubnetPoolSubnetRemove {
+    let remove_params = params::SubnetPoolMemberRemove {
         subnet: "10.0.0.0/16".parse().unwrap(),
     };
 
