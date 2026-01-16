@@ -9,7 +9,7 @@
 //! [`FloatingIpCreate`] prior to v2026011600 has an `address_selector` field
 //! with type [`AddressSelector`]. This is a bit of a misnomer in our current
 //! scheme, where "selector" implies filtering/fetching from existing resources.
-//! Newer versions use `address_allocator` field with type `AddressAllocator`,
+//! Newer versions use `address_allocator` field with type [`AddressAllocator`],
 //! which better describes the action of reserving/assigning a floating IP
 //! address from a pool.
 //!
@@ -18,6 +18,7 @@
 //!
 //! [`FloatingIpCreate`]: self::FloatingIpCreate
 //! [`AddressSelector`]: self::AddressSelector
+//! [`AddressAllocator`]: nexus_types::external_api::params::AddressAllocator
 
 use nexus_types::external_api::params;
 use omicron_common::api::external::{IdentityMetadataCreateParams, NameOrId};
