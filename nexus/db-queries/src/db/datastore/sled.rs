@@ -4235,7 +4235,7 @@ pub(in crate::db::datastore) mod test {
     async fn validate_no_orphaned_allocation_records(datastore: &DataStore) {
         let disks: Vec<_> = {
             use nexus_db_schema::schema::disk_type_local_storage::dsl;
-// Allow `transaction_async`; this is a test, and does not need to retry
+            // Allow `transaction_async`; this is a test, and does not need to retry
             #[allow(clippy::disallowed_methods)]
             datastore
                 .pool_connection_for_tests()
