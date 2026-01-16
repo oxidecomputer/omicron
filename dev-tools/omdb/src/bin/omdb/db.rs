@@ -2432,7 +2432,20 @@ async fn cmd_db_disk_info(
     datastore: &DataStore,
     args: &DiskInfoArgs,
 ) -> Result<(), anyhow::Error> {
-    match datastore.disk_get(opctx, args.uuid).await? {
+    let disk = {
+        use nexus_db_schema::schema::disk::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        dsl::disk
+            .filter(dsl::id.eq(args.uuid))
+            .select(nexus_db_model::Disk::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap()
+    };
+
+    match datastore.disk_get_with_model(opctx, disk).await? {
         Disk::Crucible(disk) => {
             crucible_disk_info(opctx, datastore, disk).await
         }
