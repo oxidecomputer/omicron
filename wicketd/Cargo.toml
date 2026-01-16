@@ -43,6 +43,7 @@ serde_json.workspace = true
 sha2.workspace = true
 slog-dtrace.workspace = true
 slog.workspace = true
+rand.workspace = true
 thiserror.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
@@ -88,7 +89,6 @@ maplit.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
-rand.workspace = true
 serde_json.workspace = true
 sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
 sled-agent-types.workspace = true

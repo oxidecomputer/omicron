@@ -244,6 +244,19 @@ fn populate_network_table(
         return;
     };
 
+    if let Some(rack_subnet_address) = config.rack_subnet_address {
+        let value =
+            Value::String(Formatted::new(rack_subnet_address.to_string()));
+        match table.entry("rack_subnet_address") {
+            toml_edit::Entry::Occupied(mut entry) => {
+                entry.insert(Item::Value(value));
+            }
+            toml_edit::Entry::Vacant(entry) => {
+                entry.insert(Item::Value(value));
+            }
+        }
+    }
+
     for (property, value) in [
         ("infra_ip_first", config.infra_ip_first.to_string()),
         ("infra_ip_last", config.infra_ip_last.to_string()),

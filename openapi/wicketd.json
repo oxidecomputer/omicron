@@ -7784,6 +7784,11 @@
             "type": "string",
             "format": "ipv4"
           },
+          "rack_subnet_address": {
+            "nullable": true,
+            "type": "string",
+            "format": "ipv6"
+          },
           "switch0": {
             "type": "object",
             "additionalProperties": {
