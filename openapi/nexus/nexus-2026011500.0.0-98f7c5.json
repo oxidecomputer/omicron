@@ -6073,6 +6073,7 @@
           "experimental"
         ],
         "summary": "List multicast groups",
+        "description": "This version includes mvlan in the response for backwards compatibility.",
         "operationId": "multicast_group_list",
         "parameters": [
           {
@@ -6131,8 +6132,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Fetch a multicast group",
-        "description": "The group can be specified by name, UUID, or multicast IP address (e.g., \"224.1.2.3\" or \"ff38::1\").",
+        "summary": "Fetch multicast group",
+        "description": "The group can be specified by name, UUID, or multicast IP address. (e.g., \"224.1.2.3\" or \"ff38::1\").\n\nThis version includes mvlan in the response for backwards compatibility.",
         "operationId": "multicast_group_view",
         "parameters": [
           {
@@ -15240,8 +15241,12 @@
           },
           "auth_method": {
             "nullable": true,
-            "description": "How the user authenticated the request. Possible values are \"session_cookie\" and \"access_token\". Optional because it will not be defined on unauthenticated requests like login attempts.",
-            "type": "string"
+            "description": "How the user authenticated the request (access token, session, or SCIM token). Null for unauthenticated requests like login attempts.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuthMethod"
+              }
+            ]
           },
           "id": {
             "description": "Unique identifier for the audit log entry",
@@ -15472,6 +15477,32 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "AuthMethod": {
+        "description": "Authentication method used for a request",
+        "oneOf": [
+          {
+            "description": "Console session cookie",
+            "type": "string",
+            "enum": [
+              "session_cookie"
+            ]
+          },
+          {
+            "description": "Device access token (OAuth 2.0 device authorization flow)",
+            "type": "string",
+            "enum": [
+              "access_token"
+            ]
+          },
+          {
+            "description": "SCIM client bearer token",
+            "type": "string",
+            "enum": [
+              "scim_token"
+            ]
+          }
         ]
       },
       "AuthzScope": {
@@ -23009,7 +23040,7 @@
         ]
       },
       "MulticastGroup": {
-        "description": "View of a Multicast Group",
+        "description": "View of a Multicast Group.\n\nThis version includes `mvlan` for backwards compatibility with clients using API version 2026010800..2026011000.",
         "type": "object",
         "properties": {
           "description": {
@@ -23031,6 +23062,13 @@
             "type": "string",
             "format": "ip"
           },
+          "mvlan": {
+            "nullable": true,
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -23040,7 +23078,7 @@
             ]
           },
           "source_ips": {
-            "description": "Union of all member source IP addresses (computed, read-only).\n\nThis field shows the combined source IPs across all group members. Individual members may subscribe to different sources; this union reflects all sources that any member is subscribed to. Empty array means no members have source filtering enabled.",
+            "description": "Source IP addresses for multicast source filtering (SSM requires these; ASM can optionally use them via IGMPv3/MLDv2). Empty array means any source.",
             "type": "array",
             "items": {
               "type": "string",

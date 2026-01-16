@@ -33,7 +33,7 @@ use headers::authorization::{Authorization, Bearer};
 // _authentication_ information.  Similarly, the "Unauthorized" HTTP response
 // code usually describes an _authentication_ error.)
 
-pub const TOKEN_SCHEME_NAME: authn::SchemeName = authn::SchemeName("token");
+pub const TOKEN_SCHEME_NAME: authn::SchemeName = authn::SchemeName::AccessToken;
 
 /// Prefix used on the bearer token to identify this scheme
 // RFC 6750 expects bearer tokens to be opaque base64-encoded data.  In our

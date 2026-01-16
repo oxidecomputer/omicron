@@ -3970,7 +3970,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- similar to `usable_hardware_threads` and friends above.
     cpu_family omicron.public.sled_cpu_family NOT NULL,
 
-    -- Columns making up the resolver's measurement manifest description 
+    -- Columns making up the resolver's measurement manifest description
     --
     -- The path to the boot disk file
     measurement_manifest_boot_disk_path TEXT NOT NULL,
@@ -4292,7 +4292,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- NULL is translated to `HostPhase2DesiredContents::CurrentContents`
     host_phase_2_desired_slot_a STRING(64),
     host_phase_2_desired_slot_b STRING(64),
-    
+
     -- the set of artifact hashes used with trust quorum, can be empty
     measurements STRING(64)[],
 
@@ -4303,7 +4303,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_measurements (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
- 
+
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
@@ -4429,10 +4429,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_measurement (
 
     -- The full path to the file.
     path TEXT NOT NULL,
-    
+
     -- The expected file size.
     expected_size INT8 NOT NULL,
-    
+
     -- The expected hash.
     expected_sha256 STRING(64) NOT NULL,
 
@@ -6236,6 +6236,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
     'timeout'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.audit_log_auth_method AS ENUM (
+    'session_cookie',
+    'access_token',
+    'scim_token',
+    'spoof'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     id UUID PRIMARY KEY,
     time_started TIMESTAMPTZ NOT NULL,
@@ -6254,9 +6261,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     actor_silo_id UUID,
     -- actor kind indicating builtin user, silo user, or unauthenticated
     actor_kind omicron.public.audit_log_actor_kind NOT NULL,
-    -- The name of the authn scheme used
-    auth_method STRING(63),
-
     -- below are fields we can only fill in after the operation
 
     time_completed TIMESTAMPTZ,
@@ -6268,6 +6272,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
 
     -- result kind indicating success, error, or timeout
     result_kind omicron.public.audit_log_result_kind,
+
+    -- The name of the authn scheme used
+    auth_method omicron.public.audit_log_auth_method,
 
     -- make sure time_completed and result_kind are either both null or both not
     CONSTRAINT time_completed_and_result_kind CHECK (
@@ -6339,12 +6346,12 @@ SELECT
     actor_id,
     actor_silo_id,
     actor_kind,
-    auth_method,
     time_completed,
     http_status_code,
     error_code,
     error_message,
-    result_kind
+    result_kind,
+    auth_method
 FROM omicron.public.audit_log
 WHERE
     time_completed IS NOT NULL
@@ -7781,7 +7788,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '221.0.0', NULL)
+    (TRUE, NOW(), NOW(), '222.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
