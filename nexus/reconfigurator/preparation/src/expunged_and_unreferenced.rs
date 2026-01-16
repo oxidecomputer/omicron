@@ -4,6 +4,8 @@
 
 //! Helpers for identifying when expunged zones are no longer referenced in the
 //! database.
+//!
+//! TODO-john more explanation
 
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -12,12 +14,15 @@ use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::PaginationOrder;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use std::cell::OnceCell;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
+use std::num::NonZeroU32;
 
 pub(super) async fn find_expunged_and_unreferenced_zones(
     opctx: &OpContext,
@@ -53,8 +58,10 @@ pub(super) async fn find_expunged_and_unreferenced_zones(
                     || is_external_ip_referenced(zone.id, external_ip_rows)
                     || is_service_nic_referenced(zone.id, service_nic_rows)
             }
-            BlueprintZoneType::Nexus(nexus) => {
-                todo!("john-{nexus:?}")
+            BlueprintZoneType::Nexus(_) => {
+                is_nexus_referenced(opctx, datastore, zone.id).await?
+                    || is_external_ip_referenced(zone.id, external_ip_rows)
+                    || is_service_nic_referenced(zone.id, service_nic_rows)
             }
             BlueprintZoneType::Oximeter(_) => {
                 is_oximeter_referenced(opctx, datastore, zone.id).await?
@@ -148,6 +155,14 @@ fn is_external_dns_referenced(
     !bp_refs.in_service_external_dns_ips().contains(&expunged_zone_ip)
 }
 
+async fn is_nexus_referenced(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    zone_id: OmicronZoneUuid,
+) -> Result<bool, Error> {
+    unimplemented!()
+}
+
 async fn is_oximeter_referenced(
     opctx: &OpContext,
     datastore: &DataStore,
@@ -157,16 +172,35 @@ async fn is_oximeter_referenced(
     // BlueprintExpungedZoneAccessReason::OximeterExpungeAndReassignProducers:
     // this zone ID should not refer to an in-service Oximeter collector, and it
     // should have no producers assigned to it.
-    match datastore.oximeter_lookup(opctx, zone_id.as_untyped_uuid()).await {
-        Ok(_info) => {
+    match datastore.oximeter_lookup(opctx, zone_id.as_untyped_uuid()).await? {
+        Some(_info) => {
             // If the lookup succeeded, we haven't yet performed the necessary
             // cleanup to mark this oximeter as expunged.
             return Ok(true);
         }
-        Err(err) => {
-            todo!("john")
+        None => {
+            // Oximeter has been expunged (or was never inserted in the first
+            // place); fall through to check whether there are any producers
+            // assigned to it.
         }
     }
+
+    // Ask for a page with a single item; all we care about is whether _any_
+    // producers are assigned to this oximeter.
+    let assigned_producers = datastore
+        .producers_list_by_oximeter_id(
+            opctx,
+            zone_id.into_untyped_uuid(),
+            &DataPageParams {
+                marker: None,
+                direction: PaginationOrder::Ascending,
+                limit: NonZeroU32::new(1).expect("1 is not 0"),
+            },
+        )
+        .await?;
+
+    // This oximeter is referenced if our set of assigned producers is nonempty.
+    Ok(!assigned_producers.is_empty())
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
