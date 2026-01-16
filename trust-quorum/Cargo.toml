@@ -45,9 +45,6 @@ uuid.workspace = true
 zeroize.workspace = true
 omicron-workspace-hack.workspace = true
 
-[features]
-testing = []
-
 [dev-dependencies]
 assert_matches.workspace = true
 attest-mock.workspace = true

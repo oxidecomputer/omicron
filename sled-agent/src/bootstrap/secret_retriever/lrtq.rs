@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! LRTQ (Legacy Rack Trust Quorum) secret retriever
+//! LRTQ (Low Rent Trust Quorum) secret retriever
 
 use async_trait::async_trait;
 use bootstore::schemes::v0::NodeHandle;

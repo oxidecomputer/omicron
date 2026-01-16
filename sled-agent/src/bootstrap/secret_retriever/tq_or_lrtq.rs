@@ -77,9 +77,10 @@ impl TqOrLrtqSecretRetriever {
 
             // Switch to TQ if it has any commits.
             if !commits.is_empty() {
-                if let Some(tq) = self.state.pending_tq.take() {
-                    self.state.active = Box::new(tq);
-                }
+                let tq = self.state.pending_tq.take().expect(
+                    "pending_tq must be Some when switching to TQ",
+                );
+                self.state.active = Box::new(tq);
             }
         }
 
