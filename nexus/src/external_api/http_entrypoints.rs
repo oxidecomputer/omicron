@@ -152,8 +152,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_policy: TypedBody<shared::Policy<shared::FleetRole>>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::FleetRole>>, HttpError>
     {
-        let new_policy = new_policy.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let new_policy = new_policy.into_inner();
             let nasgns = new_policy.role_assignments.len();
             // This should have been validated during parsing.
             bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
@@ -195,8 +195,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError>
     {
-        let new_policy = new_policy.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let new_policy = new_policy.into_inner();
             let nasgns = new_policy.role_assignments.len();
             // This should have been validated during parsing.
             bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
@@ -246,8 +246,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<params::SiloAuthSettingsUpdate>,
     ) -> Result<HttpResponseOk<views::SiloAuthSettings>, HttpError> {
-        let new_settings = new_settings.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let new_settings = new_settings.into_inner();
             let silo: NameOrId = opctx
                 .authn
                 .silo_required()
@@ -563,9 +563,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError>
     {
-        let path = path_params.into_inner();
-        let new_policy = new_policy.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let new_policy = new_policy.into_inner();
             let nasgns = new_policy.role_assignments.len();
             // This should have been validated during parsing.
             bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
@@ -682,9 +682,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_provider: TypedBody<params::SamlIdentityProviderCreate>,
     ) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError>
     {
-        let query = query_params.into_inner();
-        let new_provider = new_provider.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
+            let new_provider = new_provider.into_inner();
             let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
             let provider = nexus
                 .saml_identity_provider_create(
@@ -740,9 +740,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::SiloSelector>,
         new_user_params: TypedBody<params::UserCreate>,
     ) -> Result<HttpResponseCreated<User>, HttpError> {
-        let query = query_params.into_inner();
-        let new_user_params = new_user_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
+            let new_user_params = new_user_params.into_inner();
             let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
             let user = nexus
                 .local_idp_create_user(&opctx, &silo_lookup, new_user_params)
@@ -757,9 +757,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::UserParam>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
             nexus
                 .local_idp_delete_user(&opctx, &silo_lookup, path.user_id)
@@ -775,10 +775,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::SiloPath>,
         update: TypedBody<params::UserPassword>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let update = update.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let update = update.into_inner();
             let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
             nexus
                 .local_idp_user_set_password(
@@ -1098,9 +1098,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ProjectPath>,
         updated_project: TypedBody<params::ProjectUpdate>,
     ) -> Result<HttpResponseOk<Project>, HttpError> {
-        let path = path_params.into_inner();
-        let updated_project = updated_project.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let updated_project = updated_project.into_inner();
             let project_selector =
                 params::ProjectSelector { project: path.project };
             let project_lookup =
@@ -1145,9 +1145,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_policy: TypedBody<shared::Policy<shared::ProjectRole>>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::ProjectRole>>, HttpError>
     {
-        let path = path_params.into_inner();
-        let new_policy = new_policy.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let new_policy = new_policy.into_inner();
             let project_selector =
                 params::ProjectSelector { project: path.project };
             let project_lookup =
@@ -1261,8 +1261,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         pool_params: TypedBody<params::IpPoolCreate>,
     ) -> Result<HttpResponseCreated<views::IpPool>, HttpError> {
-        let pool_params = pool_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let pool_params = pool_params.into_inner();
             let pool = nexus.ip_pool_create(&opctx, &pool_params).await?;
             Ok(HttpResponseCreated(pool.into()))
         })
@@ -1296,8 +1296,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             nexus.ip_pool_delete(&opctx, &pool_lookup).await?;
             Ok(HttpResponseDeleted())
@@ -1310,9 +1310,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::IpPoolPath>,
         updates: TypedBody<params::IpPoolUpdate>,
     ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
-        let path = path_params.into_inner();
-        let updates = updates.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let updates = updates.into_inner();
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let pool =
                 nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
@@ -1398,9 +1398,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::IpPoolPath>,
         resource_assoc: TypedBody<params::IpPoolLinkSilo>,
     ) -> Result<HttpResponseCreated<views::IpPoolSiloLink>, HttpError> {
-        let path = path_params.into_inner();
-        let resource_assoc = resource_assoc.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let resource_assoc = resource_assoc.into_inner();
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let assoc = nexus
                 .ip_pool_link_silo(&opctx, &pool_lookup, &resource_assoc)
@@ -1414,8 +1414,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolSiloPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let path = path_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
             nexus
@@ -1431,9 +1431,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::IpPoolSiloPath>,
         update: TypedBody<params::IpPoolSiloUpdate>,
     ) -> Result<HttpResponseOk<views::IpPoolSiloLink>, HttpError> {
-        let path = path_params.into_inner();
-        let update = update.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let update = update.into_inner();
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
             let assoc = nexus
@@ -1515,9 +1515,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::IpPoolPath>,
         range_params: TypedBody<shared::IpRange>,
     ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
-        let path = path_params.into_inner();
-        let range = range_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let range = range_params.into_inner();
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let out =
                 nexus.ip_pool_add_range(&opctx, &pool_lookup, &range).await?;
@@ -1585,8 +1585,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         range_params: TypedBody<shared::IpRange>,
     ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
-        let range = range_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let range = range_params.into_inner();
             let out = nexus.ip_pool_service_add_range(&opctx, &range).await?;
             Ok(HttpResponseCreated(out.try_into()?))
         })
@@ -1597,8 +1597,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         range_params: TypedBody<shared::IpRange>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let range = range_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let range = range_params.into_inner();
             nexus.ip_pool_service_delete_range(&opctx, &range).await?;
             Ok(HttpResponseUpdatedNoContent())
         })
@@ -1643,9 +1643,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::ProjectSelector>,
         floating_params: TypedBody<params::FloatingIpCreate>,
     ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
-        let project_selector = query_params.into_inner();
-        let floating_params = floating_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let project_selector = query_params.into_inner();
+            let floating_params = floating_params.into_inner();
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
             let ip = nexus
@@ -1662,10 +1662,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         updated_floating_ip: TypedBody<params::FloatingIpUpdate>,
     ) -> Result<HttpResponseOk<FloatingIp>, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let updated_floating_ip_params = updated_floating_ip.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let updated_floating_ip_params = updated_floating_ip.into_inner();
             let floating_ip_selector = params::FloatingIpSelector {
                 project: query.project,
                 floating_ip: path.floating_ip,
@@ -1689,9 +1689,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::FloatingIpPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let floating_ip_selector = params::FloatingIpSelector {
                 floating_ip: path.floating_ip,
                 project: query.project,
@@ -1760,9 +1760,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::FloatingIpPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseAccepted<views::FloatingIp>, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let floating_ip_selector = params::FloatingIpSelector {
                 floating_ip: path.floating_ip,
                 project: query.project,
@@ -2094,9 +2094,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::DiskPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let disk_selector = params::DiskSelector {
                 disk: path.disk,
                 project: query.project,
@@ -2114,10 +2114,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         import_params: TypedBody<params::ImportBlocksBulkWrite>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let import_params = import_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let import_params = import_params.into_inner();
             let disk_selector = params::DiskSelector {
                 disk: path.disk,
                 project: query.project,
@@ -2136,9 +2136,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::DiskPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let disk_selector = params::DiskSelector {
                 disk: path.disk,
                 project: query.project,
@@ -2156,10 +2156,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         finalize_params: TypedBody<params::FinalizeDisk>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let finalize_params = finalize_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let finalize_params = finalize_params.into_inner();
             let disk_selector = params::DiskSelector {
                 disk: path.disk,
                 project: query.project,
@@ -2547,10 +2547,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         disk_to_attach: TypedBody<params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let disk = disk_to_attach.into_inner().disk;
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let disk = disk_to_attach.into_inner().disk;
             let instance_selector = params::InstanceSelector {
                 project: query.project,
                 instance: path.instance,
@@ -2571,10 +2571,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         disk_to_detach: TypedBody<params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let disk = disk_to_detach.into_inner().disk;
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let disk = disk_to_detach.into_inner().disk;
             let instance_selector = params::InstanceSelector {
                 project: query.project,
                 instance: path.instance,
@@ -3358,8 +3358,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         new_address_lot: TypedBody<params::AddressLotCreate>,
     ) -> Result<HttpResponseCreated<AddressLotCreateResponse>, HttpError> {
-        let params = new_address_lot.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let params = new_address_lot.into_inner();
             let result = nexus.address_lot_create(&opctx, params).await?;
             let lot: AddressLot = result.lot.into();
             let blocks: Vec<AddressLotBlock> =
@@ -3403,8 +3403,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::AddressLotPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
             let address_lot_lookup =
                 nexus.address_lot_lookup(&opctx, path.address_lot)?;
             nexus.address_lot_delete(&opctx, &address_lot_lookup).await?;
@@ -3489,8 +3489,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         new_loopback_address: TypedBody<params::LoopbackAddressCreate>,
     ) -> Result<HttpResponseCreated<LoopbackAddress>, HttpError> {
-        let params = new_loopback_address.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let params = new_loopback_address.into_inner();
             let result = nexus.loopback_address_create(&opctx, params).await?;
             let addr: LoopbackAddress = result.into();
             Ok(HttpResponseCreated(addr))
@@ -3559,8 +3559,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         new_settings: TypedBody<params::SwitchPortSettingsCreate>,
     ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError> {
-        let params = new_settings.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let params = new_settings.into_inner();
             let result =
                 nexus.switch_port_settings_post(&opctx, params).await?;
             let settings: SwitchPortSettings = result.into();
@@ -3573,8 +3573,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::SwitchPortSettingsSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let selector = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let selector = query_params.into_inner();
             nexus.switch_port_settings_delete(&opctx, &selector).await?;
             Ok(HttpResponseDeleted())
         })
@@ -3707,9 +3707,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         settings_body: TypedBody<params::SwitchPortApplySettings>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let port = path_params.into_inner().port;
-        let query = query_params.into_inner();
-        let settings = settings_body.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
+            let settings = settings_body.into_inner();
             nexus
                 .switch_port_apply_settings(&opctx, &port, &query, &settings)
                 .await?;
@@ -3724,8 +3724,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::SwitchPortSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let port = path_params.into_inner().port;
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
             nexus.switch_port_clear_settings(&opctx, &port, &query).await?;
             Ok(HttpResponseUpdatedNoContent {})
         })
@@ -3837,8 +3837,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<params::BgpConfigCreate>,
     ) -> Result<HttpResponseCreated<BgpConfig>, HttpError> {
-        let config = config.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let config = config.into_inner();
             let result = nexus.bgp_config_create(&opctx, &config).await?;
             Ok(HttpResponseCreated::<BgpConfig>(result.into()))
         })
@@ -3957,8 +3957,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         sel: Query<params::BgpConfigSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sel = sel.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = sel.into_inner();
             nexus.bgp_config_delete(&opctx, &sel).await?;
             Ok(HttpResponseUpdatedNoContent {})
         })
@@ -3969,8 +3969,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<params::BgpAnnounceSetCreate>,
     ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError> {
-        let config = config.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let config = config.into_inner();
             let result = nexus.bgp_update_announce_set(&opctx, &config).await?;
             Ok(HttpResponseOk::<BgpAnnounceSet>(result.0.into()))
         })
@@ -4009,8 +4009,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::BgpAnnounceSetSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sel = path_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
             nexus.bgp_delete_announce_set(&opctx, &sel).await?;
             Ok(HttpResponseUpdatedNoContent {})
         })
@@ -4048,8 +4048,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         session: TypedBody<params::BfdSessionEnable>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let session = session.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let session = session.into_inner();
             opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             nexus.bfd_enable(&opctx, session).await?;
             Ok(HttpResponseUpdatedNoContent {})
@@ -4061,8 +4061,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         session: TypedBody<params::BfdSessionDisable>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let session = session.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let session = session.into_inner();
             opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             nexus.bfd_disable(&opctx, session).await?;
             Ok(HttpResponseUpdatedNoContent {})
@@ -4116,8 +4116,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseOk<views::AllowList>, HttpError> {
         let server_kind = rqctx.context().kind;
         let remote_addr = rqctx.request.remote_addr().ip();
-        let params = params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let params = params.into_inner();
             nexus
                 .allow_list_upsert(&opctx, remote_addr, server_kind, params)
                 .await
@@ -4152,8 +4152,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<ServiceIcmpConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let params = params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let params = params.into_inner();
             nexus
                 .nexus_firewall_inbound_icmp_update(&opctx, params)
                 .await
@@ -4285,9 +4285,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ImagePath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let image_lookup = nexus
                 .image_lookup(
                     &opctx,
@@ -4308,9 +4308,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ImagePath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseAccepted<Image>, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let image_lookup = nexus
                 .image_lookup(
                     &opctx,
@@ -4331,9 +4331,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ImagePath>,
         query_params: Query<params::ProjectSelector>,
     ) -> Result<HttpResponseAccepted<Image>, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let image_lookup = nexus
                 .image_lookup(
                     &opctx,
@@ -4393,9 +4393,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::InstanceSelector>,
         interface_params: TypedBody<params::InstanceNetworkInterfaceCreate>,
     ) -> Result<HttpResponseCreated<InstanceNetworkInterface>, HttpError> {
-        let query = query_params.into_inner();
-        let interface_params = interface_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
+            let interface_params = interface_params.into_inner();
             let instance_lookup = nexus.instance_lookup(&opctx, query)?;
             let iface = nexus
                 .network_interface_create(
@@ -4414,9 +4414,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::NetworkInterfacePath>,
         query_params: Query<params::OptionalInstanceSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let interface_selector = params::InstanceNetworkInterfaceSelector {
                 project: query.project,
                 instance: query.instance,
@@ -4470,10 +4470,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalInstanceSelector>,
         updated_iface: TypedBody<params::InstanceNetworkInterfaceUpdate>,
     ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let updated_iface = updated_iface.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let updated_iface = updated_iface.into_inner();
             let network_interface_selector =
                 params::InstanceNetworkInterfaceSelector {
                     project: query.project,
@@ -4535,11 +4535,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         ip_to_create: TypedBody<params::EphemeralIpCreate>,
     ) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let params::EphemeralIpCreate { pool_selector } =
-            ip_to_create.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let params::EphemeralIpCreate { pool_selector } =
+                ip_to_create.into_inner();
             let instance_selector = params::InstanceSelector {
                 project: query.project,
                 instance: path.instance,
@@ -4568,9 +4568,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::InstancePath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let instance_selector = params::InstanceSelector {
                 project: query.project,
                 instance: path.instance,
@@ -4651,10 +4651,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         body_params: TypedBody<params::InstanceMulticastGroupJoin>,
     ) -> Result<HttpResponseCreated<views::MulticastGroupMember>, HttpError>
     {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let body = body_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let body = body_params.into_inner();
             let instance_selector = params::InstanceSelector {
                 project: match &path.instance {
                     NameOrId::Name(_) => query.project.clone(),
@@ -4736,9 +4736,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let instance_selector = params::InstanceSelector {
                 project: match &path.instance {
                     NameOrId::Name(_) => query.project.clone(),
@@ -5068,9 +5068,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::VpcSelector>,
         create_params: TypedBody<params::VpcSubnetCreate>,
     ) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
-        let query = query_params.into_inner();
-        let create = create_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
+            let create = create_params.into_inner();
             let vpc_lookup = nexus.vpc_lookup(&opctx, query)?;
             let subnet =
                 nexus.vpc_create_subnet(&opctx, &vpc_lookup, &create).await?;
@@ -5114,9 +5114,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::SubnetPath>,
         query_params: Query<params::OptionalVpcSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
             let subnet_selector = params::SubnetSelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -5136,10 +5136,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalVpcSelector>,
         subnet_params: TypedBody<params::VpcSubnetUpdate>,
     ) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let subnet_params = subnet_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let subnet_params = subnet_params.into_inner();
             let subnet_selector = params::SubnetSelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -5863,8 +5863,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         sled: TypedBody<params::UninitializedSledId>,
     ) -> Result<HttpResponseCreated<views::SledId>, HttpError> {
-        let sled = sled.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sled = sled.into_inner();
             let id = nexus.sled_add(&opctx, sled).await?;
             Ok(HttpResponseCreated(views::SledId { id }))
         })
@@ -5921,9 +5921,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_provision_state: TypedBody<params::SledProvisionPolicyParams>,
     ) -> Result<HttpResponseOk<params::SledProvisionPolicyResponse>, HttpError>
     {
-        let path = path_params.into_inner();
-        let new_state = new_provision_state.into_inner().state;
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let new_state = new_provision_state.into_inner().state;
             let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
             let old_state = nexus
                 .sled_set_provision_policy(&opctx, &sled_lookup, new_state)
@@ -6065,8 +6065,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPath>,
     ) -> Result<HttpResponseOk<views::Switch>, HttpError> {
-        let path = path_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
             let (.., switch) = nexus
                 .switch_lookup(
                     &opctx,
@@ -6125,11 +6125,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
         other_params: Query<params::OptionalSiloSelector>,
     ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError>
     {
-        let metric_name = path_params.into_inner().metric_name;
         let pagination = pag_params.into_inner();
         let limit = rqctx.page_limit(&pagination)?;
-        let silo_selector = other_params.into_inner().silo;
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let metric_name = path_params.into_inner().metric_name;
+            let silo_selector = other_params.into_inner().silo;
             let silo_lookup = match silo_selector {
                 Some(silo) => Some(nexus.silo_lookup(&opctx, silo)?),
                 _ => None,
@@ -6159,11 +6159,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
         other_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError>
     {
-        let metric_name = path_params.into_inner().metric_name;
         let pagination = pag_params.into_inner();
         let limit = rqctx.page_limit(&pagination)?;
-        let project_selector = other_params.into_inner().project;
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let metric_name = path_params.into_inner().metric_name;
+            let project_selector = other_params.into_inner().project;
             let project_lookup = match project_selector {
                 Some(project) => {
                     let project_selector = params::ProjectSelector { project };
@@ -6378,8 +6378,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<shared::TufSignedRootRole>,
     ) -> Result<HttpResponseCreated<views::UpdatesTrustRoot>, HttpError> {
-        let body = body.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let body = body.into_inner();
             Ok(HttpResponseCreated(
                 nexus.updates_add_trust_root(&opctx, body).await?.into(),
             ))
@@ -6430,8 +6430,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let params = body.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let params = body.into_inner();
             let system_version = params.system_version;
 
             // We don't need a transaction for the following queries because
@@ -6660,8 +6660,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UserPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let path = path_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
             nexus.current_silo_user_logout(&opctx, path.user_id).await?;
             Ok(HttpResponseUpdatedNoContent())
         })
@@ -6904,8 +6904,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         new_key: TypedBody<params::SshKeyCreate>,
     ) -> Result<HttpResponseCreated<SshKey>, HttpError> {
-        let new_key = new_key.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let new_key = new_key.into_inner();
             let &actor = opctx
                 .authn
                 .actor_required()
@@ -6972,8 +6972,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SshKeyPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
             let &actor = opctx
                 .authn
                 .actor_required()
@@ -7295,8 +7295,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::SupportBundleCreate>,
     ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError> {
-        let create_params = body.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let create_params = body.into_inner();
             let bundle = nexus
                 .support_bundle_create(
                     &opctx,
@@ -7313,8 +7313,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
             nexus
                 .support_bundle_delete(
                     &opctx,
@@ -7331,9 +7331,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::SupportBundlePath>,
         body: TypedBody<params::SupportBundleUpdate>,
     ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError> {
-        let path = path_params.into_inner();
-        let update = body.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let update = body.into_inner();
             let bundle = nexus
                 .support_bundle_update_user_comment(
                     &opctx,
@@ -8061,8 +8061,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::WebhookCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookReceiver>, HttpError> {
-        let params = params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let params = params.into_inner();
             let receiver =
                 nexus.webhook_receiver_create(&opctx, params).await?;
             Ok(HttpResponseCreated(views::WebhookReceiver::try_from(receiver)?))
@@ -8104,9 +8104,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         params: TypedBody<params::AlertSubscriptionCreate>,
     ) -> Result<HttpResponseCreated<views::AlertSubscriptionCreated>, HttpError>
     {
-        let webhook_selector = path_params.into_inner();
-        let subscription = params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let webhook_selector = path_params.into_inner();
+            let subscription = params.into_inner();
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let subscription = nexus
                 .alert_receiver_subscription_add(&opctx, rx, subscription)
@@ -8120,9 +8120,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::AlertSubscriptionSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let params::AlertSubscriptionSelector { receiver, subscription } =
-            path_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let params::AlertSubscriptionSelector { receiver, subscription } =
+                path_params.into_inner();
             let rx = nexus.alert_receiver_lookup(&opctx, receiver)?;
             nexus
                 .alert_receiver_subscription_remove(&opctx, rx, subscription)
@@ -8137,9 +8137,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::AlertReceiverSelector>,
         query_params: Query<params::AlertReceiverProbe>,
     ) -> Result<HttpResponseOk<views::AlertProbeResult>, HttpError> {
-        let webhook_selector = path_params.into_inner();
-        let probe_params = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let webhook_selector = path_params.into_inner();
+            let probe_params = query_params.into_inner();
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let result =
                 nexus.webhook_receiver_probe(&opctx, rx, probe_params).await?;
@@ -8183,9 +8183,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookSecret>, HttpError> {
-        let params::WebhookSecretCreate { secret } = params.into_inner();
-        let webhook_selector = query_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let params::WebhookSecretCreate { secret } = params.into_inner();
+            let webhook_selector = query_params.into_inner();
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let secret =
                 nexus.webhook_receiver_secret_add(&opctx, rx, secret).await?;
@@ -8199,8 +8199,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSecretSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let secret_selector = path_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let secret_selector = path_params.into_inner();
             let secret =
                 nexus.webhook_secret_lookup(&opctx, secret_selector)?;
             nexus.webhook_receiver_secret_delete(&opctx, secret).await?;
