@@ -48,7 +48,7 @@ impl ConfigurableSecretRetrieverHandle {
     /// Configure the pending retriever with the actual implementation.
     ///
     /// Panics if called twice or if the corresponding
-    /// [`PendingSecretRetriever`] was dropped.
+    /// [`ConfigurableSecretRetriever`] was dropped.
     pub fn init(&self, retriever: impl SecretRetriever) {
         self.tx
             .lock()
