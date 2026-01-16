@@ -726,7 +726,7 @@ pub static DEMO_INSTANCE_NIC_CREATE: LazyLock<
         description: String::from(""),
     },
     vpc_name: DEMO_VPC_NAME.clone(),
-    subnets: single_unattached_subnet(DEMO_VPC_SUBNET_NAME.clone()),
+    subnets: single_unattached_subnet(DEMO_VPC_SUBNET_NAME.as_str()),
     ip_config: PrivateIpStackCreate::auto_ipv4(),
 });
 pub static DEMO_INSTANCE_NIC_PUT: LazyLock<

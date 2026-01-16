@@ -545,7 +545,10 @@ mod tests {
     fn no_ip_no_transit_defaults_to_dual_stack() {
         let result: v2026011300::InstanceNetworkInterfaceCreate =
             make_nic(None, vec![]).try_into().unwrap();
-        assert!(matches!(result.ip_config, PrivateIpStackCreate::DualStack { .. }));
+        assert!(matches!(
+            result.ip_config,
+            PrivateIpStackCreate::DualStack { .. }
+        ));
     }
 
     proptest! {

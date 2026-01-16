@@ -103,8 +103,12 @@ impl From<InstanceNetworkInterfaceAttachment>
             InstanceNetworkInterfaceAttachment::Create(nics) => {
                 Self::Create(nics.into_iter().map(Into::into).collect())
             }
-            InstanceNetworkInterfaceAttachment::DefaultIpv4 => Self::DefaultIpv4,
-            InstanceNetworkInterfaceAttachment::DefaultIpv6 => Self::DefaultIpv6,
+            InstanceNetworkInterfaceAttachment::DefaultIpv4 => {
+                Self::DefaultIpv4
+            }
+            InstanceNetworkInterfaceAttachment::DefaultIpv6 => {
+                Self::DefaultIpv6
+            }
             InstanceNetworkInterfaceAttachment::DefaultDualStack => {
                 Self::DefaultDualStack
             }

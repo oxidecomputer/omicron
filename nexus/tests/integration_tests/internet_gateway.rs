@@ -29,8 +29,7 @@ use nexus_types::identity::Resource;
 use omicron_common::{
     address::{IpRange, Ipv4Range},
     api::external::{
-        IdentityMetadataCreateParams, NameOrId, RouteDestination,
-        RouteTarget,
+        IdentityMetadataCreateParams, NameOrId, RouteDestination, RouteTarget,
     },
 };
 

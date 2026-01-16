@@ -2690,7 +2690,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
             description: String::from("first custom interface"),
         },
         vpc_name: default_name.clone(),
-        subnets: single_unattached_subnet(&default_name),
+        subnets: single_unattached_subnet(default_name.as_str()),
         ip_config: PrivateIpStackCreate::from_ipv4(requested_address),
     };
     let interface_params =
@@ -2776,7 +2776,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
             description: String::from("first custom interface"),
         },
         vpc_name: default_name.clone(),
-        subnets: single_unattached_subnet(&default_name),
+        subnets: single_unattached_subnet(default_name.as_str()),
         ip_config: PrivateIpStackCreate::from_ipv4(requested_address),
     };
     let interface_params =
@@ -2878,7 +2878,7 @@ async fn test_instance_with_single_explicit_ip_address_impl(
             description: String::from("first custom interface"),
         },
         vpc_name: default_name.clone(),
-        subnets: single_unattached_subnet(&default_name),
+        subnets: single_unattached_subnet(default_name.as_str()),
         ip_config: ip_config.clone(),
     };
     let interface_params =
@@ -3049,7 +3049,7 @@ async fn test_instance_with_new_custom_network_interfaces(
             description: String::from("first custom interface"),
         },
         vpc_name: default_name.clone(),
-        subnets: single_unattached_subnet(&default_name),
+        subnets: single_unattached_subnet(default_name.as_str()),
         ip_config: PrivateIpStackCreate::auto_ipv4(),
     };
     let if1_params = params::InstanceNetworkInterfaceCreate {
@@ -3058,7 +3058,7 @@ async fn test_instance_with_new_custom_network_interfaces(
             description: String::from("second custom interface"),
         },
         vpc_name: default_name.clone(),
-        subnets: single_unattached_subnet(&non_default_subnet_name),
+        subnets: single_unattached_subnet(non_default_subnet_name.as_str()),
         ip_config: PrivateIpStackCreate::auto_dual_stack(),
     };
     let interface_params =
@@ -3269,7 +3269,9 @@ async fn test_instance_create_delete_network_interface(
                 description: String::from("a new nic"),
             },
             vpc_name: "default".parse().unwrap(),
-            subnets: single_unattached_subnet(&secondary_subnet.identity.name),
+            subnets: single_unattached_subnet(
+                secondary_subnet.identity.name.as_str(),
+            ),
             ip_config: PrivateIpStackCreate::V4(PrivateIpv4StackCreate {
                 ip: IpAssignment::Explicit("172.31.0.11".parse().unwrap()),
                 transit_ips: vec!["192.168.1.0/24".parse().unwrap()],
@@ -3532,7 +3534,9 @@ async fn test_instance_update_network_interfaces(
                 description: String::from("a new nic"),
             },
             vpc_name: "default".parse().unwrap(),
-            subnets: single_unattached_subnet(&secondary_subnet.identity.name),
+            subnets: single_unattached_subnet(
+                secondary_subnet.identity.name.as_str(),
+            ),
             ip_config: PrivateIpStackCreate::from_ipv4(
                 "172.31.0.11".parse().unwrap(),
             ),
@@ -3944,7 +3948,9 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
             description: String::from("a new nic"),
         },
         vpc_name: "default".parse().unwrap(),
-        subnets: single_unattached_subnet(&secondary_subnet.identity.name),
+        subnets: single_unattached_subnet(
+            secondary_subnet.identity.name.as_str(),
+        ),
         ip_config: PrivateIpStackCreate::auto_ipv6(),
     };
 
@@ -4260,7 +4266,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
             description: String::from("first custom interface"),
         },
         vpc_name: default_name.clone(),
-        subnets: single_unattached_subnet(&default_name),
+        subnets: single_unattached_subnet(default_name.as_str()),
         ip_config: PrivateIpStackCreate::from_ipv4(
             "172.30.0.6".parse().unwrap(),
         ),
@@ -4271,7 +4277,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
             description: String::from("second custom interface"),
         },
         vpc_name: default_name.clone(),
-        subnets: single_unattached_subnet(&default_name),
+        subnets: single_unattached_subnet(default_name.as_str()),
         ip_config: PrivateIpStackCreate::from_ipv4(
             "172.30.0.7".parse().unwrap(),
         ),
@@ -9104,10 +9110,7 @@ async fn test_instance_create_with_old_subnet_name_api_version(
     // Send request with old API version header
     let instance: Instance = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &get_instances_url())
-            .header(
-                omicron_common::api::VERSION_HEADER,
-                "2026011300.0.0",
-            )
+            .header(omicron_common::api::VERSION_HEADER, "2026011300.0.0")
             .body(Some(&body))
             .expect_status(Some(StatusCode::CREATED)),
     )
@@ -9173,15 +9176,11 @@ async fn test_network_interface_create_with_old_subnet_name_api_version(
     // Send request with old API version header
     let url = format!(
         "/v1/network-interfaces?project={}&instance={}",
-        PROJECT_NAME,
-        instance.identity.name
+        PROJECT_NAME, instance.identity.name
     );
     let nic: InstanceNetworkInterface = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
-            .header(
-                omicron_common::api::VERSION_HEADER,
-                "2026011300.0.0",
-            )
+            .header(omicron_common::api::VERSION_HEADER, "2026011300.0.0")
             .body(Some(&body))
             .expect_status(Some(StatusCode::CREATED)),
     )

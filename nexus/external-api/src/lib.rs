@@ -3474,11 +3474,17 @@ pub trait NexusExternalApi {
     async fn v2026011300_instance_network_interface_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::InstanceSelector>,
-        interface_params: TypedBody<v2026011300::InstanceNetworkInterfaceCreate>,
+        interface_params: TypedBody<
+            v2026011300::InstanceNetworkInterfaceCreate,
+        >,
     ) -> Result<HttpResponseCreated<InstanceNetworkInterface>, HttpError> {
         let interface_params = interface_params.map(Into::into);
-        Self::instance_network_interface_create(rqctx, query_params, interface_params)
-            .await
+        Self::instance_network_interface_create(
+            rqctx,
+            query_params,
+            interface_params,
+        )
+        .await
     }
 
     /// Create network interface
