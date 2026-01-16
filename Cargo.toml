@@ -139,8 +139,8 @@ members = [
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
-    "sled-agent/zone-images",
-    "sled-agent/zone-images-examples",
+    "sled-agent/resolvable-files",
+    "sled-agent/resolvable-files-examples",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -311,8 +311,8 @@ default-members = [
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
-    "sled-agent/zone-images",
-    "sled-agent/zone-images-examples",
+    "sled-agent/resolvable-files",
+    "sled-agent/resolvable-files-examples",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -747,8 +747,8 @@ sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-types-versions = { path = "sled-agent/types/versions" }
-sled-agent-zone-images = { path = "sled-agent/zone-images" }
-sled-agent-zone-images-examples = { path = "sled-agent/zone-images-examples" }
+sled-agent-resolvable-files = { path = "sled-agent/resolvable-files" }
+sled-agent-resolvable-files-examples = { path = "sled-agent/resolvable-files-examples" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }
@@ -763,8 +763,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210" }
-sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "1b01d737447c6c72380a5fe51ebb1dd0f111de1f" }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "1b01d737447c6c72380a5fe51ebb1dd0f111de1f" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
