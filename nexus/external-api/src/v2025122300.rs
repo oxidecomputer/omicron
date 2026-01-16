@@ -197,7 +197,6 @@ impl From<MulticastGroupCreate> for InternalMulticastGroupCreate {
                 description: old.description,
             },
             multicast_ip: old.multicast_ip,
-            mvlan: old.mvlan,
             has_sources,
             // Old API version doesn't have ip_version preference
             ip_version: None,
@@ -215,8 +214,10 @@ pub struct MulticastGroup {
     /// Source IP addresses for multicast source filtering (SSM requires these;
     /// ASM can optionally use them via IGMPv3/MLDv2). Empty array means any source.
     pub source_ips: Vec<IpAddr>,
+    // Deprecated: Always None. Field kept for backwards compatibility with
+    // clients using API version 2025122300..2026011000. Removed in 2026011000
+    // as egress multicast is not in MVP scope.
     /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
-    /// None means no VLAN tagging on egress.
     pub mvlan: Option<VlanID>,
     /// The ID of the IP pool this resource belongs to.
     pub ip_pool_id: Uuid,
@@ -230,7 +231,9 @@ impl From<views::MulticastGroup> for MulticastGroup {
             identity: v.identity,
             multicast_ip: v.multicast_ip,
             source_ips: v.source_ips,
-            mvlan: v.mvlan,
+            // mvlan has been removed from multicast groups. Return None for
+            // backwards compatibility with old API clients.
+            mvlan: None,
             ip_pool_id: v.ip_pool_id,
             state: v.state,
         }

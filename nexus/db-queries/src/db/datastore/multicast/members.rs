@@ -932,7 +932,6 @@ mod tests {
             },
             multicast_ip: Some("224.10.1.6".parse().unwrap()),
             // Pool resolved via authz_pool argument to datastore call
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };

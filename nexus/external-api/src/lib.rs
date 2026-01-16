@@ -41,6 +41,7 @@ mod v2025122300;
 mod v2026010100;
 mod v2026010300;
 mod v2026010500;
+mod v2026010800;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -70,6 +71,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026011600, MULTICAST_DROP_MVLAN),
     (2026011500, AUDIT_LOG_AUTH_METHOD_ENUM),
     (2026011300, DOC_LINT_SUMMARY_TRAILING_PERIOD),
     (2026011100, MULTICAST_JOIN_LEAVE_DOCS),
@@ -1432,11 +1434,35 @@ pub trait NexusExternalApi {
     }
 
     /// List multicast groups
+    ///
+    /// This version includes mvlan in the response for backwards compatibility.
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups",
         tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        operation_id = "multicast_group_list",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_MULTICAST_DROP_MVLAN,
+    }]
+    async fn v2026010800_multicast_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026010800::MulticastGroup>>,
+        HttpError,
+    > {
+        let page = Self::multicast_group_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// List multicast groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_DROP_MVLAN..,
     }]
     async fn multicast_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -1489,11 +1515,32 @@ pub trait NexusExternalApi {
     ///
     /// The group can be specified by name, UUID, or multicast IP address.
     /// (e.g., "224.1.2.3" or "ff38::1").
+    ///
+    /// This version includes mvlan in the response for backwards compatibility.
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups/{multicast_group}",
         tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        operation_id = "multicast_group_view",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_MULTICAST_DROP_MVLAN,
+    }]
+    async fn v2026010800_multicast_group_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::MulticastGroupPath>,
+    ) -> Result<HttpResponseOk<v2026010800::MulticastGroup>, HttpError> {
+        let group = Self::multicast_group_view(rqctx, path_params).await?.0;
+        Ok(HttpResponseOk(group.into()))
+    }
+
+    /// Fetch a multicast group
+    ///
+    /// The group can be specified by name, UUID, or multicast IP address
+    /// (e.g., "224.1.2.3" or "ff38::1").
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_DROP_MVLAN..,
     }]
     async fn multicast_group_view(
         rqctx: RequestContext<Self::Context>,

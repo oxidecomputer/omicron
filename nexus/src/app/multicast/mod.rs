@@ -247,7 +247,7 @@ impl super::Nexus {
             .map(|state| state.specific_sources.iter().copied().collect())
             .unwrap_or_default();
 
-        ExternalMulticastGroupWithSources { group, source_ips }.try_into()
+        Ok(ExternalMulticastGroupWithSources { group, source_ips }.into())
     }
 
     /// Resolve which multicast pool contains a given IP address.
@@ -306,7 +306,7 @@ impl super::Nexus {
             .multicast_groups_source_filter_state(opctx, &group_ids)
             .await?;
 
-        groups
+        Ok(groups
             .into_iter()
             .map(|group| {
                 let source_ips = filter_state_map
@@ -315,10 +315,9 @@ impl super::Nexus {
                         state.specific_sources.iter().copied().collect()
                     })
                     .unwrap_or_default();
-                ExternalMulticastGroupWithSources { group, source_ips }
-                    .try_into()
+                ExternalMulticastGroupWithSources { group, source_ips }.into()
             })
-            .collect()
+            .collect())
     }
 
     /// Join an instance to a multicast group by identifier (IP, name, or ID).
@@ -439,7 +438,6 @@ impl super::Nexus {
                 ),
             },
             multicast_ip: Some(ip),
-            mvlan: None,
             has_sources,
             // IP version is determined by the multicast IP address itself
             ip_version: None,
@@ -520,7 +518,6 @@ impl super::Nexus {
                     .to_string(),
             },
             multicast_ip: None,
-            mvlan: None,
             has_sources,
             ip_version,
         };

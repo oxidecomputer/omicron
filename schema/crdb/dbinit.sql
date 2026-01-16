@@ -3970,7 +3970,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- similar to `usable_hardware_threads` and friends above.
     cpu_family omicron.public.sled_cpu_family NOT NULL,
 
-    -- Columns making up the resolver's measurement manifest description 
+    -- Columns making up the resolver's measurement manifest description
     --
     -- The path to the boot disk file
     measurement_manifest_boot_disk_path TEXT NOT NULL,
@@ -4292,7 +4292,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- NULL is translated to `HostPhase2DesiredContents::CurrentContents`
     host_phase_2_desired_slot_a STRING(64),
     host_phase_2_desired_slot_b STRING(64),
-    
+
     -- the set of artifact hashes used with trust quorum, can be empty
     measurements STRING(64)[],
 
@@ -4303,7 +4303,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_measurements (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
- 
+
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
@@ -4429,10 +4429,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_measurement (
 
     -- The full path to the file.
     path TEXT NOT NULL,
-    
+
     -- The expected file size.
     expected_size INT8 NOT NULL,
-    
+
     -- The expected hash.
     expected_sha256 STRING(64) NOT NULL,
 
@@ -7277,11 +7277,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     ip_pool_range_id UUID NOT NULL,
     multicast_ip INET NOT NULL,
 
-    /* Multicast VLAN (MVLAN) for egress to upstream networks */
-    /* Tags packets leaving the rack to traverse VLAN-segmented upstream networks */
-    /* Internal rack traffic uses VNI-based underlay forwarding */
-    mvlan INT2,
-
     /* Associated underlay group for NAT */
     /* We fill this as part of the RPW */
     underlay_group_id UUID,
@@ -7322,11 +7317,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
             NOT multicast_ip << 'ff01::/16' AND         -- Interface-local scope
             NOT multicast_ip << 'ff02::/16'             -- Link-local scope
         )
-    ),
-
-    -- MVLAN validation (Dendrite requires >= 2)
-    CONSTRAINT mvlan_valid_range CHECK (
-        mvlan IS NULL OR (mvlan >= 2 AND mvlan <= 4094)
     )
 );
 
@@ -7798,7 +7788,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '221.0.0', NULL)
+    (TRUE, NOW(), NOW(), '222.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
