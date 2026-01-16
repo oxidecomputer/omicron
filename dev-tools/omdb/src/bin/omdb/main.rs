@@ -42,7 +42,6 @@ use clap::Parser;
 use clap::Subcommand;
 use futures::StreamExt;
 use internal_dns_types::names::ServiceName;
-use omicron_common::address::Ipv6Subnet;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tokio::net::TcpSocket;
