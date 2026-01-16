@@ -33,7 +33,9 @@ async fn fetch_log(
     start: DateTime<Utc>,
     end: Option<DateTime<Utc>>,
 ) -> ResultsPage<views::AuditLogEntry> {
-    let mut qs = vec![format!("start_time={}", to_q(start))];
+    // Use a large limit to avoid pagination hiding results
+    let mut qs =
+        vec![format!("start_time={}", to_q(start)), "limit=1000".to_string()];
     if let Some(end) = end {
         qs.push(format!("end_time={}", to_q(end)));
     }
@@ -311,11 +313,14 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
     let init_log = fetch_log(client, t0, None).await;
     assert_eq!(init_log.items.len(), 0);
 
-    let t1 = Utc::now();
-
-    // Set up disk test infrastructure and create resources with audit logging
+    // Set up disk test infrastructure (this may create audit log entries
+    // for covered endpoints, but we're testing the explicit CRUD ops below)
     DiskTest::new(&ctx).await;
     create_default_ip_pools(client).await;
+
+    // Start timing AFTER setup so we only count entries from our test ops
+    let t1 = Utc::now();
+
     let _project = create_project(client, "test-project").await;
     let _instance = create_instance_with(
         client,
@@ -351,9 +356,9 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
 
     let t3 = Utc::now();
 
-    // Fetch and verify all audit log entries in a single call
-    let audit_log = fetch_log(client, t0, None).await;
-    assert_eq!(audit_log.items.len(), 6);
+    // Fetch audit log entries created during our test ops (after t1)
+    let audit_log = fetch_log(client, t1, None).await;
+    assert_eq!(audit_log.items.len(), 8);
 
     let items = &audit_log.items;
 
@@ -364,10 +369,19 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
     let disks_url = "/v1/disks?project=test-project";
     verify_entry(&items[2], "disk_create", disks_url, 201, t1, t2);
 
-    // Verify delete entries
+    // Verify delete entries (instance, disk, subnet, vpc, project)
     verify_entry(&items[3], "instance_delete", instance_del_url, 204, t2, t3);
     verify_entry(&items[4], "disk_delete", disk_del_url, 204, t2, t3);
-    verify_entry(&items[5], "project_delete", project_del_url, 204, t2, t3);
+    verify_entry(
+        &items[5],
+        "vpc_subnet_delete",
+        subnet_delete_url,
+        204,
+        t2,
+        t3,
+    );
+    verify_entry(&items[6], "vpc_delete", vpc_delete_url, 204, t2, t3);
+    verify_entry(&items[7], "project_delete", project_del_url, 204, t2, t3);
 }
 
 /// Test that mutating endpoints in VERIFY_ENDPOINTS create audit log entries.
