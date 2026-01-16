@@ -6274,11 +6274,11 @@ pub(in crate::db::datastore) mod test {
                 }
 
                 (Err(_), Err(_)) => {
-                    panic!("both didn't work!");
+                    panic!("expected one allocation to succeed");
                 }
 
                 (Ok(_), Ok(_)) => {
-                    panic!("both worked!");
+                    panic!("only one allocation should have succeeded");
                 }
             }
         }
