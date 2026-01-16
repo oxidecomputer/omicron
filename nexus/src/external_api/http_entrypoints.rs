@@ -2260,7 +2260,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn subnet_pool_subnet_list(
+    async fn subnet_pool_member_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SubnetPoolPath>,
         query_params: Query<PaginatedByNameOrId>,
@@ -2277,7 +2277,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
             let path = path_params.into_inner();
             let members = nexus
-                .subnet_pool_subnet_list(&opctx, &path.pool, &paginated_by)
+                .subnet_pool_member_list(&opctx, &path.pool, &paginated_by)
                 .await?;
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
@@ -2295,7 +2295,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn subnet_pool_subnet_add(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SubnetPoolPath>,
-        subnet_params: TypedBody<params::SubnetPoolSubnetAdd>,
+        subnet_params: TypedBody<params::SubnetPoolMemberAdd>,
     ) -> Result<HttpResponseCreated<views::SubnetPoolMember>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -2319,7 +2319,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn subnet_pool_subnet_remove(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SubnetPoolPath>,
-        subnet_params: TypedBody<params::SubnetPoolSubnetRemove>,
+        subnet_params: TypedBody<params::SubnetPoolMemberRemove>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let handler = async {

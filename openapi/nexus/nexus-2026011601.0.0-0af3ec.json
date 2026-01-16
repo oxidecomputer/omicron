@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026011500.0.0"
+    "version": "2026011601.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -11758,7 +11758,7 @@
           "system/subnet-pools"
         ],
         "summary": "List subnets in a pool",
-        "operationId": "subnet_pool_subnet_list",
+        "operationId": "subnet_pool_member_list",
         "parameters": [
           {
             "in": "path",
@@ -11842,7 +11842,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SubnetPoolSubnetAdd"
+                "$ref": "#/components/schemas/SubnetPoolMemberAdd"
               }
             }
           },
@@ -11890,7 +11890,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SubnetPoolSubnetRemove"
+                "$ref": "#/components/schemas/SubnetPoolMemberRemove"
               }
             }
           },
@@ -14655,6 +14655,68 @@
           "address_lot"
         ]
       },
+      "AddressAllocator": {
+        "description": "Specify how to allocate a floating IP address.",
+        "oneOf": [
+          {
+            "description": "Reserve a specific IP address.",
+            "type": "object",
+            "properties": {
+              "ip": {
+                "description": "The IP address to reserve. Must be available in the pool.",
+                "type": "string",
+                "format": "ip"
+              },
+              "pool": {
+                "nullable": true,
+                "description": "The pool containing this address. If not specified, the default pool for the address's IP version is used.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NameOrId"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "type"
+            ]
+          },
+          {
+            "description": "Automatically allocate an IP address from a specified pool.",
+            "type": "object",
+            "properties": {
+              "pool_selector": {
+                "description": "Pool selection.\n\nIf omitted, this field uses the silo's default pool. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified in the pool selector.",
+                "default": {
+                  "ip_version": null,
+                  "type": "auto"
+                },
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PoolSelector"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "auto"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "AddressConfig": {
         "description": "A set of addresses associated with a port configuration.",
         "type": "object",
@@ -14917,68 +14979,6 @@
         "required": [
           "blocks",
           "lot"
-        ]
-      },
-      "AddressSelector": {
-        "description": "Specify how to allocate a floating IP address.",
-        "oneOf": [
-          {
-            "description": "Reserve a specific IP address.",
-            "type": "object",
-            "properties": {
-              "ip": {
-                "description": "The IP address to reserve. Must be available in the pool.",
-                "type": "string",
-                "format": "ip"
-              },
-              "pool": {
-                "nullable": true,
-                "description": "The pool containing this address. If not specified, the default pool for the address's IP version is used.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NameOrId"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "explicit"
-                ]
-              }
-            },
-            "required": [
-              "ip",
-              "type"
-            ]
-          },
-          {
-            "description": "Automatically allocate an IP address from a specified pool.",
-            "type": "object",
-            "properties": {
-              "pool_selector": {
-                "description": "Pool selection.\n\nIf omitted, this field uses the silo's default pool. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified in the pool selector.",
-                "default": {
-                  "ip_version": null,
-                  "type": "auto"
-                },
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/PoolSelector"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "auto"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
         ]
       },
       "AffinityGroup": {
@@ -15851,8 +15851,12 @@
           },
           "auth_method": {
             "nullable": true,
-            "description": "How the user authenticated the request. Possible values are \"session_cookie\" and \"access_token\". Optional because it will not be defined on unauthenticated requests like login attempts.",
-            "type": "string"
+            "description": "How the user authenticated the request (access token, session, or SCIM token). Null for unauthenticated requests like login attempts.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuthMethod"
+              }
+            ]
           },
           "id": {
             "description": "Unique identifier for the audit log entry",
@@ -16083,6 +16087,32 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "AuthMethod": {
+        "description": "Authentication method used for a request",
+        "oneOf": [
+          {
+            "description": "Console session cookie",
+            "type": "string",
+            "enum": [
+              "session_cookie"
+            ]
+          },
+          {
+            "description": "Device access token (OAuth 2.0 device authorization flow)",
+            "type": "string",
+            "enum": [
+              "access_token"
+            ]
+          },
+          {
+            "description": "SCIM client bearer token",
+            "type": "string",
+            "enum": [
+              "scim_token"
+            ]
+          }
         ]
       },
       "AuthzScope": {
@@ -20103,7 +20133,7 @@
         "description": "Parameters for creating a new floating IP address for instances.",
         "type": "object",
         "properties": {
-          "address_selector": {
+          "address_allocator": {
             "description": "IP address allocation method.",
             "default": {
               "pool_selector": {
@@ -20114,7 +20144,7 @@
             },
             "allOf": [
               {
-                "$ref": "#/components/schemas/AddressSelector"
+                "$ref": "#/components/schemas/AddressAllocator"
               }
             ]
           },
@@ -26947,7 +26977,7 @@
         ]
       },
       "SubnetPoolMember": {
-        "description": "A subnet range within a subnet pool",
+        "description": "A subnet within a subnet pool",
         "type": "object",
         "properties": {
           "description": {
@@ -26960,15 +26990,13 @@
             "format": "uuid"
           },
           "max_alloc": {
-            "nullable": true,
-            "description": "Maximum prefix length for allocations",
+            "description": "Maximum prefix length for allocations from this subnet; a larger prefix means smaller allocations are allowed (e.g. a /24 prefix yields smaller subnet allocations than a /16 prefix).",
             "type": "integer",
             "format": "uint8",
             "minimum": 0
           },
           "min_alloc": {
-            "nullable": true,
-            "description": "Minimum prefix length for allocations",
+            "description": "Minimum prefix length for allocations from this subnet; a smaller prefix means larger allocations are allowed (e.g. a /16 prefix yields larger subnet allocations than a /24 prefix).",
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -27008,11 +27036,69 @@
         "required": [
           "description",
           "id",
+          "max_alloc",
+          "min_alloc",
           "name",
           "subnet",
           "subnet_pool_id",
           "time_created",
           "time_modified"
+        ]
+      },
+      "SubnetPoolMemberAdd": {
+        "description": "Add a subnet to a pool",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "max_alloc": {
+            "nullable": true,
+            "description": "Maximum prefix length for allocations from this subnet; a larger prefix means smaller allocations are allowed (e.g. a /24 prefix yields smaller subnet allocations than a /16 prefix).\n\nValid values: 0-32 for IPv4, 0-128 for IPv6. Default if not specified is 32 for IPv4 and 128 for IPv6.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "min_alloc": {
+            "nullable": true,
+            "description": "Minimum prefix length for allocations from this subnet; a smaller prefix means larger allocations are allowed (e.g. a /16 prefix yields larger subnet allocations than a /24 prefix).\n\nValid values: 0-32 for IPv4, 0-128 for IPv6. Default if not specified is equal to the subnet's prefix length.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "subnet": {
+            "description": "The subnet to add to the pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "subnet"
+        ]
+      },
+      "SubnetPoolMemberRemove": {
+        "description": "Remove a subnet from a pool",
+        "type": "object",
+        "properties": {
+          "subnet": {
+            "description": "The subnet to remove from the pool. Must match an existing entry exactly.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subnet"
         ]
       },
       "SubnetPoolMemberResultsPage": {
@@ -27111,62 +27197,6 @@
         },
         "required": [
           "is_default"
-        ]
-      },
-      "SubnetPoolSubnetAdd": {
-        "description": "Add a subnet to a pool",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "max_alloc": {
-            "nullable": true,
-            "description": "Maximum prefix length for allocations from this subnet. For IPv4: 0-32, for IPv6: 0-128. A larger number means smaller allocations are allowed (e.g., /28 is smaller than /24).",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          },
-          "min_alloc": {
-            "nullable": true,
-            "description": "Minimum prefix length for allocations from this subnet. For IPv4: 0-32, for IPv6: 0-128. A smaller number means larger allocations are allowed (e.g., /16 is larger than /24).",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "subnet": {
-            "description": "The subnet to add to the pool",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpNet"
-              }
-            ]
-          }
-        },
-        "required": [
-          "description",
-          "name",
-          "subnet"
-        ]
-      },
-      "SubnetPoolSubnetRemove": {
-        "description": "Remove a subnet from a pool",
-        "type": "object",
-        "properties": {
-          "subnet": {
-            "description": "The subnet to remove from the pool. Must match an existing entry exactly.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpNet"
-              }
-            ]
-          }
-        },
-        "required": [
-          "subnet"
         ]
       },
       "SubnetPoolUpdate": {

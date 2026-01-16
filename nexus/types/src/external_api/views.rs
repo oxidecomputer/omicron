@@ -473,7 +473,7 @@ pub struct SubnetPool {
     pub pool_type: shared::IpPoolType,
 }
 
-/// A subnet range within a subnet pool
+/// A subnet within a subnet pool
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolMember {
     #[serde(flatten)]
@@ -482,10 +482,14 @@ pub struct SubnetPoolMember {
     pub subnet_pool_id: Uuid,
     /// The subnet CIDR
     pub subnet: IpNet,
-    /// Minimum prefix length for allocations
-    pub min_alloc: Option<u8>,
-    /// Maximum prefix length for allocations
-    pub max_alloc: Option<u8>,
+    /// Minimum prefix length for allocations from this subnet; a smaller prefix
+    /// means larger allocations are allowed (e.g. a /16 prefix yields larger
+    /// subnet allocations than a /24 prefix).
+    pub min_alloc: u8,
+    /// Maximum prefix length for allocations from this subnet; a larger prefix
+    /// means smaller allocations are allowed (e.g. a /24 prefix yields smaller
+    /// subnet allocations than a /16 prefix).
+    pub max_alloc: u8,
 }
 
 /// A link between a subnet pool and a silo
@@ -1844,6 +1848,23 @@ pub enum AuditLogEntryActor {
     Unauthenticated,
 }
 
+/// Authentication method used for a request
+#[derive(
+    Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMethod {
+    /// Console session cookie
+    SessionCookie,
+    /// Device access token (OAuth 2.0 device authorization flow)
+    AccessToken,
+    /// SCIM client bearer token
+    ScimToken,
+    /// Spoof authentication (test only)
+    #[schemars(skip)]
+    Spoof,
+}
+
 /// Result of an audit log entry
 #[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -1896,10 +1917,9 @@ pub struct AuditLogEntry {
 
     pub actor: AuditLogEntryActor,
 
-    /// How the user authenticated the request. Possible values are
-    /// "session_cookie" and "access_token". Optional because it will not be
-    /// defined on unauthenticated requests like login attempts.
-    pub auth_method: Option<String>,
+    /// How the user authenticated the request (access token, session, or SCIM
+    /// token). Null for unauthenticated requests like login attempts.
+    pub auth_method: Option<AuthMethod>,
 
     // Fields that are optional because they get filled in after the action completes
     /// Time operation completed

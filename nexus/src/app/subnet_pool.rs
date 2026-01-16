@@ -96,7 +96,7 @@ impl super::Nexus {
     // === Subnet Range Management ===
 
     // TODO(#9453): Implement using subnet_pool_lookup and datastore list
-    pub(crate) async fn subnet_pool_subnet_list(
+    pub(crate) async fn subnet_pool_member_list(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
@@ -113,7 +113,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        _params: &params::SubnetPoolSubnetAdd,
+        _params: &params::SubnetPoolMemberAdd,
     ) -> Result<views::SubnetPoolMember, Error> {
         let not_found = not_found_error(pool, ResourceType::SubnetPool);
         Err(self
@@ -126,7 +126,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        _params: &params::SubnetPoolSubnetRemove,
+        _params: &params::SubnetPoolMemberRemove,
     ) -> DeleteResult {
         let not_found = not_found_error(pool, ResourceType::SubnetPool);
         Err(self

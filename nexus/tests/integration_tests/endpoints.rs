@@ -1111,8 +1111,8 @@ pub static DEMO_SUBNET_POOL_SUBNETS_ADD_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/add", *DEMO_SUBNET_POOL_SUBNETS_URL));
 pub static DEMO_SUBNET_POOL_SUBNETS_REMOVE_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/remove", *DEMO_SUBNET_POOL_SUBNETS_URL));
-pub static DEMO_SUBNET_POOL_SUBNET_ADD: LazyLock<params::SubnetPoolSubnetAdd> =
-    LazyLock::new(|| params::SubnetPoolSubnetAdd {
+pub static DEMO_SUBNET_POOL_SUBNET_ADD: LazyLock<params::SubnetPoolMemberAdd> =
+    LazyLock::new(|| params::SubnetPoolMemberAdd {
         identity: IdentityMetadataCreateParams {
             name: "demo-subnet".parse().unwrap(),
             description: String::from("a demo subnet"),
@@ -1122,8 +1122,8 @@ pub static DEMO_SUBNET_POOL_SUBNET_ADD: LazyLock<params::SubnetPoolSubnetAdd> =
         max_alloc: None,
     });
 pub static DEMO_SUBNET_POOL_SUBNET_REMOVE: LazyLock<
-    params::SubnetPoolSubnetRemove,
-> = LazyLock::new(|| params::SubnetPoolSubnetRemove {
+    params::SubnetPoolMemberRemove,
+> = LazyLock::new(|| params::SubnetPoolMemberRemove {
     subnet: "10.0.0.0/16".parse().unwrap(),
 });
 pub static DEMO_SUBNET_POOL_SILOS_URL: LazyLock<String> =
@@ -1210,7 +1210,7 @@ pub static DEMO_FLOAT_IP_CREATE: LazyLock<params::FloatingIpCreate> =
             name: DEMO_FLOAT_IP_NAME.clone(),
             description: String::from("a new IP pool"),
         },
-        address_selector: params::AddressSelector::Explicit {
+        address_allocator: params::AddressAllocator::Explicit {
             ip: Ipv4Addr::new(10, 0, 0, 141).into(),
             pool: None,
         },
