@@ -323,12 +323,15 @@ impl SupportBundleCollector {
         Ok(report)
     }
 
-    /// Checks for bundles eligible for automatic deletion and marks them
-    /// for destruction.
+    /// Atomically finds and marks bundles for automatic deletion.
     ///
     /// This maintains a buffer of free debug datasets for new bundle
     /// allocations by deleting the oldest bundles when the free dataset
     /// count drops below `target_free_datasets`.
+    ///
+    /// The operation is atomic: finding candidates and transitioning them
+    /// to Destroying state happens in a single database query. This prevents
+    /// over-deletion when multiple Nexuses run concurrently.
     async fn auto_delete_bundles(
         &self,
         opctx: &OpContext,
@@ -340,86 +343,46 @@ impl SupportBundleCollector {
             return report;
         };
 
-        // Query for candidates
+        // Atomically find and delete bundles in a single query
         let result = self
             .datastore
-            .support_bundle_find_auto_deletion_candidates(
+            .support_bundle_auto_delete(
                 opctx,
                 target_free,
                 self.min_bundles_to_keep,
             )
             .await;
 
-        let candidates = match result {
+        let auto_deleted = match result {
             Ok(r) => r,
             Err(err) => {
                 warn!(
                     &opctx.log,
-                    "SupportBundleCollector: Failed to find auto-deletion candidates";
+                    "SupportBundleCollector: Failed to auto-delete bundles";
                     "err" => %err
                 );
                 report
                     .errors
-                    .push(format!("Failed to query candidates: {}", err));
+                    .push(format!("Failed to auto-delete bundles: {}", err));
                 return report;
             }
         };
 
-        // Update report with current state
-        report.total_datasets = candidates.total_datasets;
-        report.active_bundles = candidates.active_bundles;
-        report.free_datasets = candidates.free_datasets;
+        // Update report with state (as of before any deletions)
+        report.total_datasets = auto_deleted.total_datasets;
+        report.active_bundles = auto_deleted.active_bundles;
+        report.free_datasets = auto_deleted.free_datasets;
+        report.bundles_marked_for_deletion = auto_deleted.deleted_ids.len();
 
-        // Mark each candidate bundle for deletion
-        for bundle in &candidates.bundles_to_delete {
-            let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
-
+        // Log each bundle that was marked for deletion
+        for id in &auto_deleted.deleted_ids {
             info!(
                 &opctx.log,
-                "SupportBundleCollector: Auto-deleting bundle to free dataset capacity";
-                "id" => %bundle.id,
-                "time_created" => %bundle.time_created,
-                "free_datasets" => candidates.free_datasets,
+                "SupportBundleCollector: Auto-deleted bundle to free dataset capacity";
+                "id" => %id,
+                "free_datasets" => auto_deleted.free_datasets,
                 "target_free" => target_free.get(),
             );
-
-            // Transition bundle to Destroying state
-            match self
-                .datastore
-                .support_bundle_update(
-                    opctx,
-                    &authz_bundle,
-                    SupportBundleState::Destroying,
-                )
-                .await
-            {
-                Ok(()) => {
-                    report.bundles_marked_for_deletion += 1;
-                }
-                Err(err) => {
-                    // Handle gracefully - bundle may have been modified
-                    // concurrently by another Nexus or user
-                    if matches!(err, Error::InvalidRequest { .. }) {
-                        info!(
-                            &opctx.log,
-                            "SupportBundleCollector: Concurrent state change during auto-deletion";
-                            "bundle" => %bundle.id,
-                            "err" => ?err,
-                        );
-                    } else {
-                        warn!(
-                            &opctx.log,
-                            "SupportBundleCollector: Failed to mark bundle for auto-deletion";
-                            "bundle" => %bundle.id,
-                            "err" => %err,
-                        );
-                        report.errors.push(format!(
-                            "Failed to mark bundle {} for deletion: {}",
-                            bundle.id, err
-                        ));
-                    }
-                }
-            }
         }
 
         report

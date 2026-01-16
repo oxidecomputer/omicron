@@ -12,6 +12,7 @@ use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
+use crate::db::raw_query_builder::TypedSqlQuery;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -63,11 +64,11 @@ pub struct SupportBundleExpungementReport {
     pub bundles_reassigned: usize,
 }
 
-/// Result of querying for bundles eligible for automatic deletion.
+/// Result of atomically deleting support bundles for capacity management.
 #[derive(Debug, Clone)]
 pub struct AutoDeletionResult {
-    /// Bundles that should be marked for deletion (oldest first).
-    pub bundles_to_delete: Vec<SupportBundle>,
+    /// IDs of bundles that were transitioned to Destroying state.
+    pub deleted_ids: Vec<SupportBundleUuid>,
     /// Total number of debug datasets available.
     pub total_datasets: usize,
     /// Number of active bundles (before any deletions).
@@ -539,129 +540,161 @@ impl DataStore {
         Ok(())
     }
 
-    /// Finds support bundles eligible for automatic deletion to maintain
-    /// a buffer of free debug datasets.
+    /// Atomically finds and deletes support bundles to maintain free dataset buffer.
     ///
-    /// This method checks if there are fewer free debug datasets than
-    /// `target_free_datasets`, and if so, returns the oldest active bundles
-    /// that should be deleted to restore the buffer.
+    /// This method performs a single atomic operation that:
+    /// 1. Calculates how many deletions are needed (free_datasets < target)
+    /// 2. Applies min_bundles_to_keep constraint (never delete below minimum)
+    /// 3. Finds the N oldest Active bundles
+    /// 4. Transitions them to Destroying state atomically
+    /// 5. Returns what was actually deleted
+    ///
+    /// This prevents over-deletion when multiple Nexuses run concurrently,
+    /// because the calculation and state transitions happen in a single
+    /// database operation.
     ///
     /// The `min_bundles_to_keep` parameter prevents aggressive cleanup on
     /// small systems by ensuring we never delete bundles if doing so would
     /// leave fewer than this many bundles.
-    ///
-    /// Returns an `AutoDeletionResult` containing:
-    /// - The bundles that should be marked for deletion (oldest first)
-    /// - Statistics about the current state of datasets and bundles
-    pub async fn support_bundle_find_auto_deletion_candidates(
+    pub async fn support_bundle_auto_delete(
         &self,
         opctx: &OpContext,
         target_free_datasets: NonZeroU32,
         min_bundles_to_keep: Option<NonZeroU32>,
     ) -> Result<AutoDeletionResult, Error> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        use nexus_db_schema::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
-        use nexus_db_schema::schema::support_bundle::dsl as bundle_dsl;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let target = target_free_datasets.get() as usize;
+        let query = support_bundle_auto_delete_query(
+            target_free_datasets,
+            min_bundles_to_keep,
+        );
 
-        // Count total non-tombstoned datasets
-        let total_datasets: i64 = dataset_dsl::rendezvous_debug_dataset
-            .filter(dataset_dsl::time_tombstoned.is_null())
-            .count()
+        // Return type: (total_datasets, used_datasets, active_bundles, deleted_ids)
+        let result: (i64, i64, i64, Vec<Uuid>) = query
             .get_result_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        let total_datasets = total_datasets as usize;
 
-        // Count bundles by state to get both used_datasets and active_bundles
-        // in a single query. Uses the lookup_bundle_by_state_and_creation index.
-        //
-        // Bundles that occupy datasets are:
-        // - Collecting: actively writing to dataset
-        // - Active: has complete data on dataset
-        // - Destroying: waiting for storage cleanup
-        // - Failing: transitional, still has storage to clean
-        // Failed bundles do NOT occupy datasets - they're marked Failed when
-        // their dataset is expunged (see support_bundle_fail_expunged).
-        let bundle_counts: Vec<(SupportBundleState, i64)> =
-            bundle_dsl::support_bundle
-                .filter(bundle_dsl::state.eq_any([
-                    SupportBundleState::Collecting,
-                    SupportBundleState::Active,
-                    SupportBundleState::Destroying,
-                    SupportBundleState::Failing,
-                ]))
-                .group_by(bundle_dsl::state)
-                .select((bundle_dsl::state, diesel::dsl::count_star()))
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-
-        let used_datasets: usize =
-            bundle_counts.iter().map(|(_, count)| *count as usize).sum();
-        let active_bundles: usize = bundle_counts
-            .iter()
-            .find(|(state, _)| *state == SupportBundleState::Active)
-            .map(|(_, count)| *count as usize)
-            .unwrap_or(0);
-
-        let free_datasets = total_datasets.saturating_sub(used_datasets);
-
-        // If we have enough free datasets, no deletion needed
-        if free_datasets >= target {
-            return Ok(AutoDeletionResult {
-                bundles_to_delete: Vec::new(),
-                total_datasets,
-                active_bundles,
-                free_datasets,
-            });
-        }
-
-        // Calculate how many bundles we need to delete
-        let mut bundles_to_delete_count = target - free_datasets;
-
-        // Apply min_bundles_to_keep constraint
-        if let Some(min_keep) = min_bundles_to_keep {
-            let min_keep = min_keep.get() as usize;
-            let max_deletable = active_bundles.saturating_sub(min_keep);
-            bundles_to_delete_count =
-                bundles_to_delete_count.min(max_deletable);
-        }
-
-        // If we can't delete any bundles, return empty
-        if bundles_to_delete_count == 0 {
-            return Ok(AutoDeletionResult {
-                bundles_to_delete: Vec::new(),
-                total_datasets,
-                active_bundles,
-                free_datasets,
-            });
-        }
-
-        // Query only the oldest bundles we need to delete (with LIMIT)
-        // Uses the lookup_bundle_by_state_and_creation index for efficient ordering
-        let bundles_to_delete: Vec<SupportBundle> = bundle_dsl::support_bundle
-            .filter(bundle_dsl::state.eq(SupportBundleState::Active))
-            .order(bundle_dsl::time_created.asc())
-            .limit(bundles_to_delete_count as i64)
-            .select(SupportBundle::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let total_datasets = result.0 as usize;
+        let used_datasets = result.1 as usize;
+        let active_bundles = result.2 as usize;
+        let deleted_ids: Vec<SupportBundleUuid> = result
+            .3
+            .into_iter()
+            .map(SupportBundleUuid::from_untyped_uuid)
+            .collect();
 
         Ok(AutoDeletionResult {
-            bundles_to_delete,
+            deleted_ids,
             total_datasets,
             active_bundles,
-            free_datasets,
+            free_datasets: total_datasets.saturating_sub(used_datasets),
         })
     }
+}
+
+/// Builds the CTE query for atomic support bundle auto-deletion.
+///
+/// This query atomically:
+/// 1. Counts datasets and bundles
+/// 2. Calculates how many bundles to delete (respecting min_bundles_to_keep)
+/// 3. Selects the oldest Active bundles
+/// 4. Transitions them to Destroying state
+/// 5. Returns the stats and deleted IDs
+pub fn support_bundle_auto_delete_query(
+    target_free_datasets: NonZeroU32,
+    min_bundles_to_keep: Option<NonZeroU32>,
+) -> TypedSqlQuery<(
+    diesel::sql_types::BigInt,
+    diesel::sql_types::BigInt,
+    diesel::sql_types::BigInt,
+    diesel::sql_types::Array<diesel::sql_types::Uuid>,
+)> {
+    use crate::db::raw_query_builder::QueryBuilder;
+
+    let min_keep = min_bundles_to_keep.map(|n| i64::from(n.get())).unwrap_or(0);
+
+    let mut query = QueryBuilder::new();
+
+    // Build the CTE query
+    query
+        .sql(
+            "
+WITH
+  -- Count non-tombstoned datasets (uses lookup_usable_rendezvous_debug_dataset index)
+  dataset_count AS (
+    SELECT COUNT(*) as total
+    FROM rendezvous_debug_dataset
+    WHERE time_tombstoned IS NULL
+  ),
+  -- Count bundles occupying datasets.
+  -- Bundles that occupy datasets: Collecting, Active, Destroying, Failing
+  -- Failed bundles do NOT occupy datasets (their dataset was expunged).
+  -- Uses lookup_bundle_by_state_and_creation index.
+  used_count AS (
+    SELECT COUNT(*) as used
+    FROM support_bundle
+    WHERE state IN ('collecting', 'active', 'destroying', 'failing')
+  ),
+  -- Count active bundles (for min_bundles_to_keep check)
+  active_count AS (
+    SELECT COUNT(*) as active
+    FROM support_bundle
+    WHERE state = 'active'
+  ),
+  -- Calculate how many bundles we need AND are allowed to delete.
+  -- min_bundles_to_keep is respected first (max_deletable constraint).
+  deletion_calc AS (
+    SELECT
+      (SELECT total FROM dataset_count) as total_datasets,
+      (SELECT used FROM used_count) as used_datasets,
+      (SELECT active FROM active_count) as active_bundles,
+      GREATEST(0,
+        ",
+        )
+        .param()
+        .sql(
+            " - ((SELECT total FROM dataset_count) - (SELECT used FROM used_count))
+      ) as bundles_needed,
+      GREATEST(0,
+        (SELECT active FROM active_count) - ",
+        )
+        .param()
+        .sql(
+            "
+      ) as max_deletable
+  ),
+  -- Find the N oldest active bundles we're allowed to delete.
+  -- Uses lookup_bundle_by_state_and_creation index for ordering.
+  candidates AS (
+    SELECT id
+    FROM support_bundle
+    WHERE state = 'active'
+    ORDER BY time_created ASC
+    LIMIT (SELECT LEAST(bundles_needed, max_deletable) FROM deletion_calc)
+  ),
+  -- Atomically transition to Destroying (only if still Active).
+  -- The state='active' check handles concurrent user deletions.
+  deleted AS (
+    UPDATE support_bundle
+    SET state = 'destroying'
+    WHERE id IN (SELECT id FROM candidates)
+      AND state = 'active'
+    RETURNING id
+  )
+SELECT
+  (SELECT total_datasets FROM deletion_calc),
+  (SELECT used_datasets FROM deletion_calc),
+  (SELECT active_bundles FROM deletion_calc),
+  ARRAY(SELECT id FROM deleted) as deleted_ids
+",
+        )
+        .bind::<diesel::sql_types::BigInt, _>(i64::from(target_free_datasets.get()))
+        .bind::<diesel::sql_types::BigInt, _>(min_keep);
+
+    query.query()
 }
 
 #[cfg(test)]
@@ -1687,7 +1720,7 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // Tests for support_bundle_find_auto_deletion_candidates
+    // Tests for support_bundle_auto_delete
 
     #[tokio::test]
     async fn test_auto_deletion_no_bundles() {
@@ -1699,9 +1732,9 @@ mod test {
         let _test_sled = create_sled_and_zpools(&datastore, &opctx, 5).await;
 
         // With target_free=3 and 5 datasets, no bundles, free=5 >= 3
-        // Should return no bundles to delete
+        // Should delete no bundles
         let result = datastore
-            .support_bundle_find_auto_deletion_candidates(
+            .support_bundle_auto_delete(
                 &opctx,
                 NonZeroU32::new(3).unwrap(),
                 None,
@@ -1712,7 +1745,7 @@ mod test {
         assert_eq!(result.total_datasets, 5);
         assert_eq!(result.active_bundles, 0);
         assert_eq!(result.free_datasets, 5);
-        assert!(result.bundles_to_delete.is_empty());
+        assert!(result.deleted_ids.is_empty());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1748,9 +1781,9 @@ mod test {
                 .expect("Should update state");
         }
 
-        // With target_free=3 and free=5 >= 3, should return no bundles
+        // With target_free=3 and free=5 >= 3, should delete no bundles
         let result = datastore
-            .support_bundle_find_auto_deletion_candidates(
+            .support_bundle_auto_delete(
                 &opctx,
                 NonZeroU32::new(3).unwrap(),
                 None,
@@ -1761,7 +1794,7 @@ mod test {
         assert_eq!(result.total_datasets, 10);
         assert_eq!(result.active_bundles, 5);
         assert_eq!(result.free_datasets, 5);
-        assert!(result.bundles_to_delete.is_empty());
+        assert!(result.deleted_ids.is_empty());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1805,7 +1838,7 @@ mod test {
 
         // With target_free=2 and free=0, we need to delete 2 bundles
         let result = datastore
-            .support_bundle_find_auto_deletion_candidates(
+            .support_bundle_auto_delete(
                 &opctx,
                 NonZeroU32::new(2).unwrap(),
                 None,
@@ -1816,13 +1849,11 @@ mod test {
         assert_eq!(result.total_datasets, 5);
         assert_eq!(result.active_bundles, 5);
         assert_eq!(result.free_datasets, 0);
-        assert_eq!(result.bundles_to_delete.len(), 2);
+        assert_eq!(result.deleted_ids.len(), 2);
 
         // Verify the oldest bundles are selected (first two created)
-        let delete_ids: Vec<_> =
-            result.bundles_to_delete.iter().map(|b| b.id).collect();
-        assert!(delete_ids.contains(&bundle_ids[0]));
-        assert!(delete_ids.contains(&bundle_ids[1]));
+        assert!(result.deleted_ids.contains(&bundle_ids[0].into()));
+        assert!(result.deleted_ids.contains(&bundle_ids[1].into()));
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1862,7 +1893,7 @@ mod test {
         // With target_free=3 and free=0, we'd want to delete 3 bundles
         // But min_bundles_to_keep=4 means we can only delete 1 (5-4=1)
         let result = datastore
-            .support_bundle_find_auto_deletion_candidates(
+            .support_bundle_auto_delete(
                 &opctx,
                 NonZeroU32::new(3).unwrap(),
                 Some(NonZeroU32::new(4).unwrap()),
@@ -1874,7 +1905,7 @@ mod test {
         assert_eq!(result.active_bundles, 5);
         assert_eq!(result.free_datasets, 0);
         // Can only delete 1 bundle due to min_bundles_to_keep constraint
-        assert_eq!(result.bundles_to_delete.len(), 1);
+        assert_eq!(result.deleted_ids.len(), 1);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1915,7 +1946,7 @@ mod test {
         // We'd want to delete 3 bundles, but min_bundles_to_keep=5 is > 3 active
         // So we can't delete any
         let result = datastore
-            .support_bundle_find_auto_deletion_candidates(
+            .support_bundle_auto_delete(
                 &opctx,
                 NonZeroU32::new(5).unwrap(),
                 Some(NonZeroU32::new(5).unwrap()),
@@ -1927,7 +1958,7 @@ mod test {
         assert_eq!(result.active_bundles, 3);
         assert_eq!(result.free_datasets, 2);
         // min_bundles_to_keep (5) > active_bundles (3), so no deletion
-        assert!(result.bundles_to_delete.is_empty());
+        assert!(result.deleted_ids.is_empty());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1985,7 +2016,7 @@ mod test {
         // free_datasets = 5 - 3 = 2 (ALL bundles occupy datasets, not just Active)
         // We should only delete Active bundles though
         let result = datastore
-            .support_bundle_find_auto_deletion_candidates(
+            .support_bundle_auto_delete(
                 &opctx,
                 NonZeroU32::new(5).unwrap(),
                 None,
@@ -2001,10 +2032,221 @@ mod test {
         assert_eq!(result.free_datasets, 2);
         // We want 5 free but only have 2, so we want to delete 3
         // But we only have 1 Active bundle to delete
-        assert_eq!(result.bundles_to_delete.len(), 1);
-        assert_eq!(result.bundles_to_delete[0].id, bundle1.id);
+        assert_eq!(result.deleted_ids.len(), 1);
+        assert_eq!(result.deleted_ids[0], bundle1.id.into());
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_auto_deletion_verifies_state_transition() {
+        let logctx =
+            dev::test_setup_log("test_auto_deletion_verifies_state_transition");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let nexus_id = OmicronZoneUuid::new_v4();
+
+        // Create 3 debug datasets
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 3).await;
+
+        // Create 3 bundles
+        let mut bundle_ids = Vec::new();
+        for _ in 0..3 {
+            let bundle = datastore
+                .support_bundle_create(&opctx, "for tests", nexus_id, None)
+                .await
+                .expect("Should be able to create bundle");
+
+            // Mark as active
+            let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+            datastore
+                .support_bundle_update(
+                    &opctx,
+                    &authz_bundle,
+                    SupportBundleState::Active,
+                )
+                .await
+                .expect("Should update state");
+
+            bundle_ids.push(bundle.id);
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        // Verify bundles start in Active state
+        for id in &bundle_ids {
+            let bundle = datastore
+                .support_bundle_get(&opctx, (*id).into())
+                .await
+                .unwrap();
+            assert_eq!(bundle.state, SupportBundleState::Active);
+        }
+
+        // With target_free=2 and free=0, delete 2 bundles
+        let result = datastore
+            .support_bundle_auto_delete(
+                &opctx,
+                NonZeroU32::new(2).unwrap(),
+                None,
+            )
+            .await
+            .expect("Should succeed");
+
+        assert_eq!(result.deleted_ids.len(), 2);
+
+        // Verify deleted bundles are now in Destroying state
+        for id in &result.deleted_ids {
+            let bundle =
+                datastore.support_bundle_get(&opctx, *id).await.unwrap();
+            assert_eq!(
+                bundle.state,
+                SupportBundleState::Destroying,
+                "Bundle {} should be Destroying",
+                id
+            );
+        }
+
+        // Verify the remaining bundle is still Active
+        let remaining_id = bundle_ids
+            .iter()
+            .find(|id| {
+                !result.deleted_ids.contains(&SupportBundleUuid::from(**id))
+            })
+            .unwrap();
+        let remaining_bundle = datastore
+            .support_bundle_get(&opctx, (*remaining_id).into())
+            .await
+            .unwrap();
+        assert_eq!(remaining_bundle.state, SupportBundleState::Active);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_auto_deletion_failed_bundles_dont_occupy_datasets() {
+        let logctx = dev::test_setup_log(
+            "test_auto_deletion_failed_bundles_dont_occupy_datasets",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let nexus_id = OmicronZoneUuid::new_v4();
+
+        // Create 3 debug datasets
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 3).await;
+
+        // Create 3 bundles, all Active
+        let mut bundle_ids = Vec::new();
+        for _ in 0..3 {
+            let bundle = datastore
+                .support_bundle_create(&opctx, "for tests", nexus_id, None)
+                .await
+                .expect("Should be able to create bundle");
+
+            let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+            datastore
+                .support_bundle_update(
+                    &opctx,
+                    &authz_bundle,
+                    SupportBundleState::Active,
+                )
+                .await
+                .expect("Should update state");
+
+            bundle_ids.push(bundle.id);
+        }
+
+        // All 3 datasets are used, free=0
+        let result = datastore
+            .support_bundle_auto_delete(
+                &opctx,
+                NonZeroU32::new(1).unwrap(),
+                None,
+            )
+            .await
+            .expect("Should succeed");
+
+        assert_eq!(result.free_datasets, 0);
+        assert_eq!(result.deleted_ids.len(), 1);
+
+        // Manually mark one bundle as Failed (simulating dataset expungement)
+        // Failed bundles don't occupy datasets
+        let authz_bundle = authz_support_bundle_from_id(bundle_ids[1].into());
+        datastore
+            .support_bundle_update(
+                &opctx,
+                &authz_bundle,
+                SupportBundleState::Failing,
+            )
+            .await
+            .expect("Should update state");
+        datastore
+            .support_bundle_update(
+                &opctx,
+                &authz_bundle,
+                SupportBundleState::Failed,
+            )
+            .await
+            .expect("Should update state");
+
+        // Now we have: 1 Destroying, 1 Failed, 1 Active
+        // - Total datasets: 3
+        // - Used by non-Failed bundles: 2 (Destroying + Active)
+        // - Free datasets: 3 - 2 = 1
+        let result = datastore
+            .support_bundle_auto_delete(
+                &opctx,
+                NonZeroU32::new(1).unwrap(),
+                None,
+            )
+            .await
+            .expect("Should succeed");
+
+        // Free should be 1 now (Failed bundle doesn't count as using a dataset)
+        assert_eq!(result.free_datasets, 1);
+        // Since free=1 >= target=1, no deletion needed
+        assert!(result.deleted_ids.is_empty());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Tests for the auto_delete CTE query
+
+    #[tokio::test]
+    async fn test_auto_delete_query_explains() {
+        use crate::db::explain::ExplainableAsync;
+        use crate::db::pub_test_utils::TestDatabase;
+
+        let logctx = dev::test_setup_log("test_auto_delete_query_explains");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let conn = db.pool().claim().await.unwrap();
+
+        let query = support_bundle_auto_delete_query(
+            NonZeroU32::new(3).unwrap(),
+            Some(NonZeroU32::new(5).unwrap()),
+        );
+
+        let _ = query.explain_async(&conn).await.unwrap_or_else(|e| {
+            panic!("Failed to explain query, is it valid SQL?\nerror: {e:#?}")
+        });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_auto_delete_query() {
+        use crate::db::raw_query_builder::expectorate_query_contents;
+
+        let query = support_bundle_auto_delete_query(
+            NonZeroU32::new(3).unwrap(),
+            Some(NonZeroU32::new(5).unwrap()),
+        );
+        expectorate_query_contents(
+            query,
+            "tests/output/support_bundle_auto_delete.sql",
+        )
+        .await;
     }
 }
