@@ -8075,9 +8075,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let webhook_selector = path_params.into_inner();
-        let params = params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let webhook_selector = path_params.into_inner();
+            let params = params.into_inner();
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             nexus.webhook_receiver_update(&opctx, rx, params).await?;
             Ok(HttpResponseUpdatedNoContent())
@@ -8089,8 +8089,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::AlertReceiverSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let webhook_selector = path_params.into_inner();
         audit_and_time(&rqctx, |opctx, nexus| async move {
+            let webhook_selector = path_params.into_inner();
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             nexus.webhook_receiver_delete(&opctx, rx).await?;
             Ok(HttpResponseDeleted())

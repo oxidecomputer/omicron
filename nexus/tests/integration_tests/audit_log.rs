@@ -456,8 +456,17 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
             // resources (e.g., removing our own permissions via fleet policy).
             let http_method = method.http_method().clone();
             let body = method.body().cloned();
+
+            // Replace {id} placeholders with a valid UUID so path parsing
+            // succeeds and the request reaches the handler. The actual UUID
+            // doesn't matter since we're testing as unprivileged and will fail
+            // authz anyway - we just need the request to reach the handler.
+            let url = endpoint
+                .url
+                .replace("{id}", "00000000-0000-0000-0000-000000000000");
+
             let result = NexusRequest::new(
-                RequestBuilder::new(client, http_method.clone(), endpoint.url)
+                RequestBuilder::new(client, http_method.clone(), &url)
                     .body(body.as_ref())
                     .expect_status(None), // accept any status
             )

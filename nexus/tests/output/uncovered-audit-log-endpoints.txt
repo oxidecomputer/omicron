@@ -1,8 +1,1 @@
 Mutating endpoints without audit logging:
-local_idp_user_delete                        (delete "/v1/system/identity-providers/local/users/{user_id}")
-local_idp_user_set_password                  (post   "/v1/system/identity-providers/local/users/{user_id}/set-password")
-support_bundle_delete                        (delete "/experimental/v1/system/support-bundles/{bundle_id}")
-support_bundle_update                        (put    "/experimental/v1/system/support-bundles/{bundle_id}")
-system_update_trust_root_delete              (delete "/v1/system/update/trust-roots/{trust_root_id}")
-user_logout                                  (post   "/v1/users/{user_id}/logout")
-webhook_secrets_delete                       (delete "/v1/webhook-secrets/{secret_id}")
