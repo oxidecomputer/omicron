@@ -196,9 +196,10 @@ impl TryFrom<FloatingIpCreate> for params::FloatingIpCreate {
     }
 }
 
-// v2026010300 (DUAL_STACK_NICS) uses the current `InstanceNetworkInterfaceAttachment`
-// with `DefaultIpv4`, `DefaultIpv6`, `DefaultDualStack` variants.
-pub use params::InstanceNetworkInterfaceAttachment;
+// v2026010300 (DUAL_STACK_NICS) uses v2026011300's network interface types
+// (pre-VPC_SUBNET_ATTACHMENT, with `subnet_name: Name`).
+use crate::v2026010500;
+use crate::v2026011300;
 
 /// Create-time parameters for an `Instance`
 ///
@@ -219,7 +220,7 @@ pub struct InstanceCreate {
     pub user_data: Vec<u8>,
     /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interfaces: InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: v2026011300::InstanceNetworkInterfaceAttachment,
     /// The external IP addresses provided to this instance.
     // Uses local ExternalIpCreate (has ip_version field) → params::ExternalIpCreate
     #[serde(default)]
@@ -253,19 +254,19 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
-impl TryFrom<InstanceCreate> for params::InstanceCreate {
+impl TryFrom<InstanceCreate> for v2026010500::InstanceCreate {
     type Error = external::Error;
 
     fn try_from(
         old: InstanceCreate,
-    ) -> Result<params::InstanceCreate, external::Error> {
+    ) -> Result<v2026010500::InstanceCreate, external::Error> {
         let external_ips: Vec<params::ExternalIpCreate> = old
             .external_ips
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(params::InstanceCreate {
+        Ok(v2026010500::InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,
             memory: old.memory,
@@ -273,15 +274,7 @@ impl TryFrom<InstanceCreate> for params::InstanceCreate {
             user_data: old.user_data,
             network_interfaces: old.network_interfaces,
             external_ips,
-            multicast_groups: old
-                .multicast_groups
-                .into_iter()
-                .map(|g| params::MulticastGroupJoinSpec {
-                    group: g.into(),
-                    source_ips: None,
-                    ip_version: None,
-                })
-                .collect(),
+            multicast_groups: old.multicast_groups,
             disks: old.disks,
             boot_disk: old.boot_disk,
             ssh_public_keys: old.ssh_public_keys,
@@ -313,6 +306,148 @@ impl From<ProbeCreate> for params::ProbeCreate {
             identity: old.identity,
             sled: old.sled,
             pool_selector,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn make_floating_ip(
+        ip: Option<std::net::IpAddr>,
+        pool: Option<NameOrId>,
+        ip_version: Option<IpVersion>,
+    ) -> FloatingIpCreate {
+        FloatingIpCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "fip".parse().unwrap(),
+                description: "test".to_string(),
+            },
+            ip,
+            pool,
+            ip_version,
+        }
+    }
+
+    // =========================================================================
+    // Error cases: these test invalid input combinations that must be rejected
+    // =========================================================================
+
+    #[test]
+    fn ephemeral_ip_with_pool_and_ip_version_fails() {
+        let old = EphemeralIpCreate {
+            pool: Some("my-pool".parse::<external::Name>().unwrap().into()),
+            ip_version: Some(IpVersion::V4),
+        };
+        assert!(TryInto::<params::EphemeralIpCreate>::try_into(old).is_err());
+    }
+
+    #[test]
+    fn floating_ip_with_ip_and_ip_version_fails() {
+        let old = make_floating_ip(
+            Some("10.0.0.1".parse().unwrap()),
+            None,
+            Some(IpVersion::V4),
+        );
+        assert!(TryInto::<params::FloatingIpCreate>::try_into(old).is_err());
+    }
+
+    #[test]
+    fn floating_ip_with_pool_and_ip_version_fails() {
+        let old = make_floating_ip(
+            None,
+            Some("my-pool".parse::<external::Name>().unwrap().into()),
+            Some(IpVersion::V4),
+        );
+        assert!(TryInto::<params::FloatingIpCreate>::try_into(old).is_err());
+    }
+
+    // =========================================================================
+    // Property tests
+    // =========================================================================
+
+    proptest! {
+        /// EphemeralIpCreate: ip_version is preserved when using default pool
+        #[test]
+        fn ephemeral_ip_preserves_ip_version(
+            ip_version in prop::option::of(prop_oneof![
+                Just(IpVersion::V4),
+                Just(IpVersion::V6),
+            ])
+        ) {
+            let old = EphemeralIpCreate { pool: None, ip_version };
+            let result: params::EphemeralIpCreate = old.try_into().unwrap();
+            match result.pool_selector {
+                params::PoolSelector::Auto { ip_version: v } => {
+                    prop_assert!(v == ip_version);
+                }
+                _ => panic!("expected Auto variant"),
+            }
+        }
+
+        /// EphemeralIpCreate: explicit pool produces Explicit selector
+        #[test]
+        fn ephemeral_ip_with_pool_produces_explicit(
+            pool_name in "[a-z][a-z0-9]{0,8}"
+        ) {
+            let pool: NameOrId = pool_name.parse::<external::Name>().unwrap().into();
+            let old = EphemeralIpCreate { pool: Some(pool), ip_version: None };
+            let result: params::EphemeralIpCreate = old.try_into().unwrap();
+            match result.pool_selector {
+                params::PoolSelector::Explicit { .. } => {}
+                _ => panic!("expected Explicit variant"),
+            }
+        }
+
+        /// FloatingIpCreate: explicit IP is preserved in output
+        #[test]
+        fn floating_ip_preserves_explicit_ip(ip in any::<std::net::IpAddr>()) {
+            let old = make_floating_ip(Some(ip), None, None);
+            let result: params::FloatingIpCreate = old.try_into().unwrap();
+            match result.address_selector {
+                params::AddressSelector::Explicit { ip: addr, .. } => {
+                    prop_assert!(addr == ip);
+                }
+                _ => panic!("expected Explicit variant"),
+            }
+        }
+
+        /// FloatingIpCreate: explicit pool produces correct selector
+        #[test]
+        fn floating_ip_with_pool_produces_explicit(
+            pool_name in "[a-z][a-z0-9]{0,8}"
+        ) {
+            let pool: NameOrId = pool_name.parse::<external::Name>().unwrap().into();
+            let old = make_floating_ip(None, Some(pool), None);
+            let result: params::FloatingIpCreate = old.try_into().unwrap();
+            match result.address_selector {
+                params::AddressSelector::Auto {
+                    pool_selector: params::PoolSelector::Explicit { .. }
+                } => {}
+                _ => panic!("expected Auto/Explicit variant"),
+            }
+        }
+
+        /// FloatingIpCreate: ip_version is preserved when using default pool
+        #[test]
+        fn floating_ip_preserves_ip_version(
+            ip_version in prop::option::of(prop_oneof![
+                Just(IpVersion::V4),
+                Just(IpVersion::V6),
+            ])
+        ) {
+            let old = make_floating_ip(None, None, ip_version);
+            let result: params::FloatingIpCreate = old.try_into().unwrap();
+            match result.address_selector {
+                params::AddressSelector::Auto {
+                    pool_selector: params::PoolSelector::Auto { ip_version: v }
+                } => {
+                    prop_assert!(v == ip_version);
+                }
+                _ => panic!("expected Auto/Auto variant"),
+            }
         }
     }
 }

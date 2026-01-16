@@ -22576,13 +22576,12 @@
           "name": {
             "$ref": "#/components/schemas/Name"
           },
-          "subnet_name": {
-            "description": "The VPC Subnet in which to create the interface.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+          "subnets": {
+            "description": "Subnets for this interface. The first subnet is primary.\n\nMust contain at least one entry. Set `attached: true` to directly attach the entire subnet, allowing traffic from/to any address in that subnet.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterfaceSubnetConfig"
+            }
           },
           "vpc_name": {
             "description": "The VPC in which to create the interface.",
@@ -22596,7 +22595,7 @@
         "required": [
           "description",
           "name",
-          "subnet_name",
+          "subnets",
           "vpc_name"
         ]
       },
@@ -24599,6 +24598,28 @@
               "type"
             ]
           }
+        ]
+      },
+      "NetworkInterfaceSubnetConfig": {
+        "description": "Configuration for a subnet on a network interface.",
+        "type": "object",
+        "properties": {
+          "attached": {
+            "description": "If true, the entire subnet is attached to this interface, allowing traffic from/to any IP in the subnet.\n\nThis is useful for container orchestration platforms that need to manage addressing within a subnet. When a subnet is attached, its CIDR is automatically added to the interface's `transit_ips`.\n\nDefaults to `false` (standard behavior: interface gets a single IP from the subnet).",
+            "default": false,
+            "type": "boolean"
+          },
+          "subnet": {
+            "description": "Name or ID of the VPC subnet.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subnet"
         ]
       },
       "OxqlQueryResult": {

@@ -17,6 +17,7 @@ use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::single_unattached_subnet;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::PrivateIpStackCreate;
@@ -47,7 +48,7 @@ async fn create_instance_expect_failure(
                     description: String::from("description"),
                 },
                 vpc_name: "default".parse().unwrap(),
-                subnet_name: subnet_name.parse().unwrap(),
+                subnets: single_unattached_subnet(subnet_name),
                 ip_config: PrivateIpStackCreate::auto_ipv4(),
             },
         ]);
@@ -136,7 +137,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
                 description: String::from("some iface"),
             },
             vpc_name: "default".parse().unwrap(),
-            subnet_name: SUBNET_NAME.parse().unwrap(),
+            subnets: single_unattached_subnet(SUBNET_NAME),
             ip_config: PrivateIpStackCreate::auto_ipv4(),
         },
     ]);

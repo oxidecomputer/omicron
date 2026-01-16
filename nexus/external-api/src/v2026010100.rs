@@ -86,8 +86,16 @@ pub enum InstanceNetworkInterfaceAttachment {
     None,
 }
 
+// v2026010100 (PRE_DUAL_STACK_NICS) uses v2026011300's network interface types
+// (pre-VPC_SUBNET_ATTACHMENT, with `subnet_name: Name`).
+//
+// The difference is in the NIC create parameters:
+// - v2026010100 uses `ip: Option<IpAddr>` + `transit_ips: Vec<IpNet>`
+// - v2026011300 uses `ip_config: PrivateIpStackCreate`
+use crate::v2026011300;
+
 impl TryFrom<InstanceNetworkInterfaceAttachment>
-    for params::InstanceNetworkInterfaceAttachment
+    for v2026011300::InstanceNetworkInterfaceAttachment
 {
     type Error = external::Error;
 
@@ -245,7 +253,7 @@ pub struct InstanceNetworkInterfaceCreate {
 }
 
 impl TryFrom<InstanceNetworkInterfaceCreate>
-    for params::InstanceNetworkInterfaceCreate
+    for v2026011300::InstanceNetworkInterfaceCreate
 {
     type Error = external::Error;
 
@@ -426,7 +434,7 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<external::InstanceCpuPlatform>,
 }
 
-impl TryFrom<InstanceCreate> for params::InstanceCreate {
+impl TryFrom<InstanceCreate> for v2026010300::InstanceCreate {
     type Error = external::Error;
 
     fn try_from(value: InstanceCreate) -> Result<Self, Self::Error> {
@@ -438,20 +446,8 @@ impl TryFrom<InstanceCreate> for params::InstanceCreate {
             hostname: value.hostname,
             user_data: value.user_data,
             network_interfaces,
-            external_ips: value
-                .external_ips
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<Vec<_>, _>>()?,
-            multicast_groups: value
-                .multicast_groups
-                .into_iter()
-                .map(|g| params::MulticastGroupJoinSpec {
-                    group: g.into(),
-                    source_ips: None,
-                    ip_version: None,
-                })
-                .collect(),
+            external_ips: value.external_ips,
+            multicast_groups: value.multicast_groups,
             disks: value.disks,
             boot_disk: value.boot_disk,
             ssh_public_keys: value.ssh_public_keys,
@@ -485,5 +481,246 @@ impl TryFrom<nexus_types::external_api::shared::ProbeInfo> for ProbeInfo {
             external_ips: value.external_ips,
             interface: value.interface.try_into()?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::external_api::params::IpAssignment;
+    use proptest::prelude::*;
+
+    /// Helper to create a NIC with the given IP and transit IPs.
+    fn make_nic(
+        ip: Option<IpAddr>,
+        transit_ips: Vec<IpNet>,
+    ) -> InstanceNetworkInterfaceCreate {
+        InstanceNetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "nic0".parse().unwrap(),
+                description: "test".to_string(),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: "default".parse().unwrap(),
+            ip,
+            transit_ips,
+        }
+    }
+
+    /// Strategy for generating IPv4 networks (address + prefix 8-30).
+    fn arb_ipv4_net() -> impl Strategy<Value = oxnet::Ipv4Net> {
+        (any::<std::net::Ipv4Addr>(), 8u8..=30).prop_map(|(addr, prefix)| {
+            oxnet::Ipv4Net::new(addr, prefix)
+                .unwrap_or_else(|_| oxnet::Ipv4Net::new(addr, 24).unwrap())
+        })
+    }
+
+    /// Strategy for generating IPv6 networks (address + prefix 16-120).
+    fn arb_ipv6_net() -> impl Strategy<Value = oxnet::Ipv6Net> {
+        (any::<std::net::Ipv6Addr>(), 16u8..=120).prop_map(|(addr, prefix)| {
+            oxnet::Ipv6Net::new(addr, prefix)
+                .unwrap_or_else(|_| oxnet::Ipv6Net::new(addr, 64).unwrap())
+        })
+    }
+
+    // =========================================================================
+    // Semantic choice: old `Default` maps to new `DefaultDualStack`
+    // =========================================================================
+
+    #[test]
+    fn attachment_default_converts_to_dual_stack() {
+        let result: v2026011300::InstanceNetworkInterfaceAttachment =
+            InstanceNetworkInterfaceAttachment::Default.try_into().unwrap();
+        assert!(matches!(
+            result,
+            v2026011300::InstanceNetworkInterfaceAttachment::DefaultDualStack
+        ));
+    }
+
+    // =========================================================================
+    // Semantic choice: no IP + no transit IPs defaults to dual-stack
+    // =========================================================================
+
+    #[test]
+    fn no_ip_no_transit_defaults_to_dual_stack() {
+        let result: v2026011300::InstanceNetworkInterfaceCreate =
+            make_nic(None, vec![]).try_into().unwrap();
+        assert!(matches!(
+            result.ip_config,
+            PrivateIpStackCreate::DualStack { .. }
+        ));
+    }
+
+    proptest! {
+        // =====================================================================
+        // Property: IPv4 address produces V4 stack with that address
+        // =====================================================================
+
+        #[test]
+        fn ipv4_address_produces_v4_stack(ip in any::<std::net::Ipv4Addr>()) {
+            let nic = make_nic(Some(ip.into()), vec![]);
+            let result: v2026011300::InstanceNetworkInterfaceCreate =
+                nic.try_into().unwrap();
+
+            prop_assert!(matches!(
+                result.ip_config,
+                PrivateIpStackCreate::V4(v4)
+                    if matches!(v4.ip, IpAssignment::Explicit(x) if x == ip)
+            ));
+        }
+
+        // =====================================================================
+        // Property: IPv6 address produces V6 stack with that address
+        // =====================================================================
+
+        #[test]
+        fn ipv6_address_produces_v6_stack(ip in any::<std::net::Ipv6Addr>()) {
+            let nic = make_nic(Some(ip.into()), vec![]);
+            let result: v2026011300::InstanceNetworkInterfaceCreate =
+                nic.try_into().unwrap();
+
+            prop_assert!(matches!(
+                result.ip_config,
+                PrivateIpStackCreate::V6(v6)
+                    if matches!(v6.ip, IpAssignment::Explicit(x) if x == ip)
+            ));
+        }
+
+        // =====================================================================
+        // Property: IPv4 transit IPs are preserved in output
+        // =====================================================================
+
+        #[test]
+        fn ipv4_transit_ips_preserved(
+            ip in any::<std::net::Ipv4Addr>(),
+            transit in proptest::collection::vec(arb_ipv4_net(), 0..4),
+        ) {
+            let transit_ipnet: Vec<IpNet> =
+                transit.iter().copied().map(Into::into).collect();
+            let nic = make_nic(Some(ip.into()), transit_ipnet);
+            let result: v2026011300::InstanceNetworkInterfaceCreate =
+                nic.try_into().unwrap();
+
+            prop_assert!(matches!(
+                result.ip_config,
+                PrivateIpStackCreate::V4(v4) if v4.transit_ips == transit
+            ));
+        }
+
+        // =====================================================================
+        // Property: IPv6 transit IPs are preserved in output
+        // =====================================================================
+
+        #[test]
+        fn ipv6_transit_ips_preserved(
+            ip in any::<std::net::Ipv6Addr>(),
+            transit in proptest::collection::vec(arb_ipv6_net(), 0..4),
+        ) {
+            let transit_ipnet: Vec<IpNet> =
+                transit.iter().copied().map(Into::into).collect();
+            let nic = make_nic(Some(ip.into()), transit_ipnet);
+            let result: v2026011300::InstanceNetworkInterfaceCreate =
+                nic.try_into().unwrap();
+
+            prop_assert!(matches!(
+                result.ip_config,
+                PrivateIpStackCreate::V6(v6) if v6.transit_ips == transit
+            ));
+        }
+
+        // =====================================================================
+        // Property: Mixed IPv4/IPv6 transit IPs always fail
+        // =====================================================================
+
+        #[test]
+        fn mixed_transit_ip_families_fail(
+            v4_transit in proptest::collection::vec(arb_ipv4_net(), 1..3),
+            v6_transit in proptest::collection::vec(arb_ipv6_net(), 1..3),
+        ) {
+            let mut transit: Vec<IpNet> =
+                v4_transit.into_iter().map(IpNet::from).collect();
+            transit.extend(v6_transit.into_iter().map(IpNet::from));
+
+            let nic = make_nic(None, transit);
+            let result: Result<v2026011300::InstanceNetworkInterfaceCreate, _> =
+                nic.try_into();
+            prop_assert!(result.is_err());
+        }
+
+        // =====================================================================
+        // Property: IPv4 address with IPv6 transit IPs fails
+        // =====================================================================
+
+        #[test]
+        fn ipv4_with_ipv6_transit_fails(
+            ip in any::<std::net::Ipv4Addr>(),
+            v6_transit in proptest::collection::vec(arb_ipv6_net(), 1..3),
+        ) {
+            let transit: Vec<IpNet> =
+                v6_transit.into_iter().map(Into::into).collect();
+            let nic = make_nic(Some(ip.into()), transit);
+            let result: Result<v2026011300::InstanceNetworkInterfaceCreate, _> =
+                nic.try_into();
+            prop_assert!(result.is_err());
+        }
+
+        // =====================================================================
+        // Property: IPv6 address with IPv4 transit IPs fails
+        // =====================================================================
+
+        #[test]
+        fn ipv6_with_ipv4_transit_fails(
+            ip in any::<std::net::Ipv6Addr>(),
+            v4_transit in proptest::collection::vec(arb_ipv4_net(), 1..3),
+        ) {
+            let transit: Vec<IpNet> =
+                v4_transit.into_iter().map(Into::into).collect();
+            let nic = make_nic(Some(ip.into()), transit);
+            let result: Result<v2026011300::InstanceNetworkInterfaceCreate, _> =
+                nic.try_into();
+            prop_assert!(result.is_err());
+        }
+
+        // =====================================================================
+        // Property: No IP + IPv4-only transit produces V4 stack with Auto IP
+        // =====================================================================
+
+        #[test]
+        fn no_ip_with_ipv4_transit_produces_v4_auto(
+            v4_transit in proptest::collection::vec(arb_ipv4_net(), 1..4),
+        ) {
+            let transit: Vec<IpNet> =
+                v4_transit.iter().copied().map(Into::into).collect();
+            let nic = make_nic(None, transit);
+            let result: v2026011300::InstanceNetworkInterfaceCreate =
+                nic.try_into().unwrap();
+
+            prop_assert!(matches!(
+                result.ip_config,
+                PrivateIpStackCreate::V4(v4)
+                    if matches!(v4.ip, IpAssignment::Auto) && v4.transit_ips == v4_transit
+            ));
+        }
+
+        // =====================================================================
+        // Property: No IP + IPv6-only transit produces V6 stack with Auto IP
+        // =====================================================================
+
+        #[test]
+        fn no_ip_with_ipv6_transit_produces_v6_auto(
+            v6_transit in proptest::collection::vec(arb_ipv6_net(), 1..4),
+        ) {
+            let transit: Vec<IpNet> =
+                v6_transit.iter().copied().map(Into::into).collect();
+            let nic = make_nic(None, transit);
+            let result: v2026011300::InstanceNetworkInterfaceCreate =
+                nic.try_into().unwrap();
+
+            prop_assert!(matches!(
+                result.ip_config,
+                PrivateIpStackCreate::V6(v6)
+                    if matches!(v6.ip, IpAssignment::Auto) && v6.transit_ips == v6_transit
+            ));
+        }
     }
 }

@@ -78,6 +78,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
+/// Creates a single-element subnet configuration for network interface creation.
+///
+/// This is a convenience helper for tests that need to specify a single subnet
+/// without the `attached` flag (the common case).
+pub fn single_unattached_subnet(
+    name: &str,
+) -> Vec<params::NetworkInterfaceSubnetConfig> {
+    vec![params::NetworkInterfaceSubnetConfig {
+        subnet: name.parse::<Name>().expect("invalid subnet name").into(),
+        attached: false,
+    }]
+}
+
 pub async fn objects_list_page_authz<ItemType>(
     client: &ClientTestContext,
     path: &str,

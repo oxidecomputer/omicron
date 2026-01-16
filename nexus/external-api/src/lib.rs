@@ -41,6 +41,7 @@ mod v2025122300;
 mod v2026010100;
 mod v2026010300;
 mod v2026010500;
+mod v2026011300;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -2180,7 +2181,8 @@ pub trait NexusExternalApi {
         new_instance: TypedBody<v2026010100::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
         let new_instance = new_instance.try_map(TryInto::try_into)?;
-        Self::instance_create(rqctx, query_params, new_instance).await
+        Self::v2026010300_instance_create(rqctx, query_params, new_instance)
+            .await
     }
 
     /// Create instance
@@ -2197,7 +2199,8 @@ pub trait NexusExternalApi {
         new_instance: TypedBody<v2026010300::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
         let new_instance = new_instance.try_map(TryInto::try_into)?;
-        Self::instance_create(rqctx, query_params, new_instance).await
+        Self::v2026010500_instance_create(rqctx, query_params, new_instance)
+            .await
     }
 
     /// Create instance
@@ -2213,8 +2216,26 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         new_instance: TypedBody<v2026010500::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+        let new_instance = new_instance.map(Into::into);
+        Self::v2026011300_instance_create(rqctx, query_params, new_instance)
             .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_VPC_SUBNET_ATTACHMENT,
+    }]
+    async fn v2026011300_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2026011300::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        let new_instance = new_instance.map(Into::into);
+        Self::instance_create(rqctx, query_params, new_instance).await
     }
 
     /// Create instance
@@ -2222,7 +2243,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
@@ -3432,13 +3453,38 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         let interface_params = interface_params.try_map(TryInto::try_into)?;
-        let HttpResponseCreated(nic) = Self::instance_network_interface_create(
+        let HttpResponseCreated(nic) =
+            Self::v2026011300_instance_network_interface_create(
+                rqctx,
+                query_params,
+                interface_params,
+            )
+            .await?;
+        nic.try_into().map(HttpResponseCreated).map_err(HttpError::from)
+    }
+
+    /// Create network interface
+    #[endpoint {
+        operation_id = "instance_network_interface_create",
+        method = POST,
+        path = "/v1/network-interfaces",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..VERSION_VPC_SUBNET_ATTACHMENT,
+    }]
+    async fn v2026011300_instance_network_interface_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::InstanceSelector>,
+        interface_params: TypedBody<
+            v2026011300::InstanceNetworkInterfaceCreate,
+        >,
+    ) -> Result<HttpResponseCreated<InstanceNetworkInterface>, HttpError> {
+        let interface_params = interface_params.map(Into::into);
+        Self::instance_network_interface_create(
             rqctx,
             query_params,
             interface_params,
         )
-        .await?;
-        nic.try_into().map(HttpResponseCreated).map_err(HttpError::from)
+        .await
     }
 
     /// Create network interface
@@ -3446,7 +3492,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/network-interfaces",
         tags = ["instances"],
-        versions = VERSION_DUAL_STACK_NICS..,
+        versions = VERSION_VPC_SUBNET_ATTACHMENT..,
     }]
     async fn instance_network_interface_create(
         rqctx: RequestContext<Self::Context>,

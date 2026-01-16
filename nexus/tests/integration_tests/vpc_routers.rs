@@ -20,6 +20,7 @@ use nexus_test_utils::resource_helpers::create_router;
 use nexus_test_utils::resource_helpers::create_vpc_subnet;
 use nexus_test_utils::resource_helpers::object_delete;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::single_unattached_subnet;
 use nexus_test_utils::resource_helpers::{create_project, create_vpc};
 use nexus_test_utils::resource_helpers::{object_put, object_put_error};
 use nexus_test_utils_macros::nexus_test;
@@ -509,7 +510,7 @@ async fn test_vpc_routers_custom_delivered_to_instance(
                         description: "".into(),
                     },
                     vpc_name: vpc.name().clone(),
-                    subnet_name: subnet_name.parse().unwrap(),
+                    subnets: single_unattached_subnet(subnet_name),
                     ip_config: PrivateIpStackCreate::from_ipv4(
                         format!("192.168.{i}.10").parse().unwrap(),
                     ),

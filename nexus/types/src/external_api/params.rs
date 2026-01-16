@@ -1063,6 +1063,25 @@ pub struct ProjectUpdate {
 
 // NETWORK INTERFACES
 
+/// Configuration for a subnet on a network interface.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NetworkInterfaceSubnetConfig {
+    /// Name or ID of the VPC subnet.
+    pub subnet: NameOrId,
+
+    /// If true, the entire subnet is attached to this interface, allowing
+    /// traffic from/to any IP in the subnet.
+    ///
+    /// This is useful for container orchestration platforms that need to manage
+    /// addressing within a subnet. When a subnet is attached, its CIDR is
+    /// automatically added to the interface's `transit_ips`.
+    ///
+    /// Defaults to `false` (standard behavior: interface gets a single IP from
+    /// the subnet).
+    #[serde(default)]
+    pub attached: bool,
+}
+
 /// Create-time parameters for an `InstanceNetworkInterface`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceNetworkInterfaceCreate {
@@ -1070,8 +1089,11 @@ pub struct InstanceNetworkInterfaceCreate {
     pub identity: IdentityMetadataCreateParams,
     /// The VPC in which to create the interface.
     pub vpc_name: Name,
-    /// The VPC Subnet in which to create the interface.
-    pub subnet_name: Name,
+    /// Subnets for this interface. The first subnet is primary.
+    ///
+    /// Must contain at least one entry. Set `attached: true` to directly attach
+    /// the entire subnet, allowing traffic from/to any address in that subnet.
+    pub subnets: Vec<NetworkInterfaceSubnetConfig>,
     /// The IP stack configuration for this interface.
     ///
     /// If not provided, a default configuration will be used, which creates a

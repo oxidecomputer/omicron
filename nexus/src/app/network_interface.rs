@@ -9,6 +9,7 @@ use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::queries::network_interface;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::NetworkInterfaceSubnetConfig;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -83,8 +84,23 @@ impl super::Nexus {
 
         // NOTE: We need to lookup the VPC and VPC Subnet, since we need both
         // IDs for creating the network interface.
+        //
+        // TODO(#9580): For now, we only support a single unattached subnet
+        // specified by name. Fix this to accept multiple subnets, by name or ID,
+        // which might be attached or detached.
+        let [
+            NetworkInterfaceSubnetConfig {
+                subnet: NameOrId::Name(subnet_name),
+                attached: false,
+            },
+        ] = params.subnets.as_slice()
+        else {
+            return Err(Error::invalid_request(
+                "exactly one subnet must be specified by name for the network interface",
+            ));
+        };
         let vpc_name = db::model::Name(params.vpc_name.clone());
-        let subnet_name = db::model::Name(params.subnet_name.clone());
+        let subnet_name = db::model::Name(subnet_name.clone());
         let (.., authz_subnet, db_subnet) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())

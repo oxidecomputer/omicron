@@ -18,6 +18,7 @@ use nexus_test_utils::PHYSICAL_DISK_UUID;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
+use nexus_test_utils::resource_helpers::single_unattached_subnet;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::PrivateIpStackCreate;
@@ -725,7 +726,7 @@ pub static DEMO_INSTANCE_NIC_CREATE: LazyLock<
         description: String::from(""),
     },
     vpc_name: DEMO_VPC_NAME.clone(),
-    subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
+    subnets: single_unattached_subnet(DEMO_VPC_SUBNET_NAME.as_str()),
     ip_config: PrivateIpStackCreate::auto_ipv4(),
 });
 pub static DEMO_INSTANCE_NIC_PUT: LazyLock<
