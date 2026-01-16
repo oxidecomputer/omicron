@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2026011500 to 2026011600.
+//! Nexus external types that changed from 2026011501 to 2026011600.
 //!
 //! ## AddressSelector -> AddressAllocator Rename
 //!

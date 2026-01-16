@@ -14,6 +14,7 @@ use dropshot::HttpError;
 use http::HeaderValue;
 use nexus_types::authn::cookies::parse_cookies;
 use omicron_uuid_kinds::ConsoleSessionUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use slog::debug;
 use uuid::Uuid;
@@ -183,6 +184,7 @@ where
         SchemeResult::Authenticated(Details {
             actor,
             device_token_expiration: None,
+            credential_id: Some(session.id().into_untyped_uuid()),
         })
     }
 }

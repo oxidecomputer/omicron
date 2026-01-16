@@ -172,6 +172,7 @@ mod tests {
             user_agent: Some("Firefox or whatever".to_string()),
             actor: AuditLogActor::Unauthenticated,
             auth_method: None,
+            credential_id: None,
         };
         let entry1 = datastore
             .audit_log_entry_init(opctx, entry1_params.clone().into())
@@ -205,6 +206,7 @@ mod tests {
             user_agent: Some("Chrome???".to_string()),
             actor: AuditLogActor::Unauthenticated,
             auth_method: None,
+            credential_id: None,
         };
         let entry2 = datastore
             .audit_log_entry_init(opctx, entry2_params.clone().into())
@@ -303,6 +305,7 @@ mod tests {
             user_agent: Some("Fake-User-Agent".to_string()),
             actor: AuditLogActor::Unauthenticated,
             auth_method: None,
+            credential_id: None,
         };
         // we have to do the from() out here because that's what sets
         // time_completed, and we need them to all have the same time

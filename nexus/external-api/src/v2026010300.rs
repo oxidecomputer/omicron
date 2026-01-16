@@ -26,7 +26,7 @@
 //! [`EphemeralIpCreate`]: self::EphemeralIpCreate
 //! [`ExternalIpCreate`]: self::ExternalIpCreate
 //! [`InstanceCreate`]: self::InstanceCreate
-//! [`AddressSelector`]: crate::v2026011500::AddressSelector
+//! [`AddressSelector`]: crate::v2026011501::AddressSelector
 //! [`PoolSelector`]: nexus_types::external_api::params::PoolSelector
 //! [`MulticastGroupJoinSpec`]: nexus_types::external_api::params::MulticastGroupJoinSpec
 
