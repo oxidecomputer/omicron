@@ -251,10 +251,7 @@ impl<'t> SmfHelper<'t> {
         self.running_zone
             .run_cmd(&[SVCADM, "enable", "-s", &self.default_smf_name])
             .map_err(|err| Error::ZoneCommand {
-                intent: format!(
-                    "Enable SMF service {}",
-                    self.default_smf_name
-                ),
+                intent: format!("Enable SMF service {}", self.default_smf_name),
                 err,
             })?;
         Ok(())
