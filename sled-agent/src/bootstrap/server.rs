@@ -15,7 +15,9 @@ use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
 use crate::bootstrap::rack_ops::RssAccess;
-use crate::bootstrap::secret_retriever::GlobalSecretRetriever;
+use crate::bootstrap::secret_retriever::{
+    HardcodedSecretRetriever, TqOrLrtqSecretRetriever,
+};
 use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
@@ -370,19 +372,22 @@ async fn start_sled_agent(
     // all the changes we've made (e.g., initializing LRTQ, informing the
     // storage manager about keys, advertising prefixes, ...).
 
-    // Initialize the secret retriever used by the `KeyManager`
+    // Configure the secret retriever used by the `KeyManager`
     if request.body.use_trust_quorum {
         info!(log, "KeyManager: using TQ/LRTQ secret retriever");
         let salt = request.hash_rack_id();
-        GlobalSecretRetriever::init_trust_quorum(
-            salt,
-            long_running_task_handles.trust_quorum.clone(),
-            long_running_task_handles.bootstore.clone(),
-        )
-        .await
+        long_running_task_handles.secret_retriever.init(
+            TqOrLrtqSecretRetriever::new(
+                salt,
+                long_running_task_handles.trust_quorum.clone(),
+                long_running_task_handles.bootstore.clone(),
+            ),
+        );
     } else {
         info!(log, "KeyManager: using hardcoded secret retriever");
-        GlobalSecretRetriever::init_hardcoded();
+        long_running_task_handles
+            .secret_retriever
+            .init(HardcodedSecretRetriever::new());
     }
 
     if request.body.use_trust_quorum && request.body.is_lrtq_learner {

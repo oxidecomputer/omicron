@@ -8,8 +8,8 @@
 //! protocol, supporting arbitrary epochs. Until all deployed systems are
 //! updated past LRTQ, this module shouldn't be used directly, but instead
 //! within the dynamically-switching
-//! [`TqOrLrtqRetriever`](super::TqOrLrtqSecretRetriever) to allow LRTQ to function
-//! during its deprecation period.
+//! [`TqOrLrtqRetriever`](super::TqOrLrtqSecretRetriever) to allow LRTQ to
+//! function during its deprecation period.
 
 use async_trait::async_trait;
 use key_manager::{
@@ -92,7 +92,9 @@ impl TqSecretRetriever {
 
 #[async_trait]
 impl SecretRetriever for TqSecretRetriever {
-    async fn get_latest(&self) -> Result<VersionedIkm, SecretRetrieverError> {
+    async fn get_latest(
+        &mut self,
+    ) -> Result<VersionedIkm, SecretRetrieverError> {
         // Use atomic load_latest_rack_secret to avoid TOCTOU between
         // checking the latest epoch and loading its secret.
         let (epoch, secret) = self.load_latest_with_retry().await?;
@@ -100,7 +102,7 @@ impl SecretRetriever for TqSecretRetriever {
     }
 
     async fn get(
-        &self,
+        &mut self,
         epoch: u64,
     ) -> Result<SecretState, SecretRetrieverError> {
         let requested_epoch = Epoch(epoch);

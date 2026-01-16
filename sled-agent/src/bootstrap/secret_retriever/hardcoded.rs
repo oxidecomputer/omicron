@@ -14,7 +14,7 @@ use key_manager::{
 ///
 /// The local retriever only returns keys for epoch 0
 #[derive(Debug)]
-pub(super) struct HardcodedSecretRetriever {}
+pub struct HardcodedSecretRetriever {}
 
 impl HardcodedSecretRetriever {
     pub fn new() -> Self {
@@ -24,7 +24,9 @@ impl HardcodedSecretRetriever {
 
 #[async_trait]
 impl SecretRetriever for HardcodedSecretRetriever {
-    async fn get_latest(&self) -> Result<VersionedIkm, SecretRetrieverError> {
+    async fn get_latest(
+        &mut self,
+    ) -> Result<VersionedIkm, SecretRetrieverError> {
         let epoch = 0;
         let salt = [0u8; 32];
         let secret = [0x1d; 32];
@@ -34,7 +36,7 @@ impl SecretRetriever for HardcodedSecretRetriever {
 
     /// We don't plan to do any key rotation before trust quorum is ready
     async fn get(
-        &self,
+        &mut self,
         epoch: u64,
     ) -> Result<SecretState, SecretRetrieverError> {
         if epoch != 0 {

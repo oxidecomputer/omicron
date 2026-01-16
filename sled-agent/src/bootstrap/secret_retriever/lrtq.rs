@@ -27,7 +27,9 @@ impl LrtqSecretRetriever {
 
 #[async_trait]
 impl SecretRetriever for LrtqSecretRetriever {
-    async fn get_latest(&self) -> Result<VersionedIkm, SecretRetrieverError> {
+    async fn get_latest(
+        &mut self,
+    ) -> Result<VersionedIkm, SecretRetrieverError> {
         let epoch = 1;
         let rack_secret = self
             .bootstore
@@ -39,7 +41,7 @@ impl SecretRetriever for LrtqSecretRetriever {
     }
 
     async fn get(
-        &self,
+        &mut self,
         epoch: u64,
     ) -> Result<SecretState, SecretRetrieverError> {
         if epoch != 1 {

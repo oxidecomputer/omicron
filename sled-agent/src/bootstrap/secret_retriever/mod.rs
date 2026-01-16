@@ -4,11 +4,14 @@
 
 //! Key retrieval mechanisms for use by [`key_manager::KeyManager`]
 
-mod global;
+mod configurable;
 mod hardcoded;
 mod lrtq;
 mod tq;
 mod tq_or_lrtq;
 
-pub use global::GlobalSecretRetriever;
+pub use configurable::{
+    ConfigurableSecretRetriever, ConfigurableSecretRetrieverHandle,
+};
+pub use hardcoded::HardcodedSecretRetriever;
 pub use tq_or_lrtq::TqOrLrtqSecretRetriever;

@@ -7,10 +7,8 @@
 //! This retriever dynamically switches between LRTQ and TQ based on whether
 //! Trust Quorum has committed epochs.
 
-use better_as_any::DowncastRef;
-use tokio::sync::{RwLock, RwLockReadGuard};
-
 use async_trait::async_trait;
+use better_as_any::DowncastRef;
 use bootstore::schemes::v0::NodeHandle;
 use key_manager::{
     SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
@@ -30,7 +28,7 @@ use super::tq::TqSecretRetriever;
 /// For fresh installs with TQ, all secret retrieval goes through TQ.
 pub struct TqOrLrtqSecretRetriever {
     /// The inner state of the secret retriever.
-    state: RwLock<State>,
+    state: State,
 }
 
 /// The current inner state of the secret retriever: if there's a pending
@@ -46,11 +44,14 @@ struct State {
 
 impl TqOrLrtqSecretRetriever {
     /// The salt used for key derivation, for idempotency checking.
-    pub async fn salt(&self) -> [u8; 32] {
-        let active = &self.state.read().await.active;
-        if let Some(lrtq) = active.downcast_ref::<LrtqSecretRetriever>() {
+    pub fn salt(&self) -> [u8; 32] {
+        if let Some(lrtq) =
+            self.state.active.downcast_ref::<LrtqSecretRetriever>()
+        {
             lrtq.salt
-        } else if let Some(tq) = active.downcast_ref::<TqSecretRetriever>() {
+        } else if let Some(tq) =
+            self.state.active.downcast_ref::<TqSecretRetriever>()
+        {
             tq.salt
         } else {
             unreachable!("inner secret retriever is not TQ or LRTQ");
@@ -64,80 +65,54 @@ impl TqOrLrtqSecretRetriever {
         lrtq_handle: NodeHandle,
     ) -> Self {
         TqOrLrtqSecretRetriever {
-            state: RwLock::new(State {
+            state: State {
                 pending_tq: Some(TqSecretRetriever::new(salt, tq_handle)),
                 active: Box::new(LrtqSecretRetriever::new(salt, lrtq_handle)),
-            }),
+            },
         }
     }
 
-    /// Get a guard to the (dynamic) currently active secret retriever,
+    /// Get a mutable reference to the currently active secret retriever,
     /// potentially switching internally from LRTQ to TQ in the process if TQ is
     /// found to have become active.
     ///
     /// This is a one-way transition: once TQ is active, we never go back.
     async fn retriever(
-        &self,
-    ) -> Result<
-        RwLockReadGuard<'_, Box<dyn SecretRetriever>>,
-        SecretRetrieverError,
-    > {
-        // Fast path: if `pending_tq` is None, we've already switched, so do
-        // nothing. We extract the handle here (if any) so we don't hold the
-        // read lock across the async status check below.
-        let pending_tq_handle = self
-            .state
-            .read()
-            .await
-            .pending_tq
-            .as_ref()
-            .map(|tq| tq.handle.clone());
+        &mut self,
+    ) -> Result<&mut dyn SecretRetriever, SecretRetrieverError> {
+        // Fast path: if `pending_tq` is None, we've already switched.
+        if let Some(pending_tq) = &self.state.pending_tq {
+            // Check if TQ has any commits yet.
+            let commits = pending_tq
+                .handle
+                .status()
+                .await
+                .map_err(|e| SecretRetrieverError::TrustQuorum(e.to_string()))?
+                .persistent_state
+                .commits;
 
-        // Determine if we need to switch to the pending TQ by checking whether
-        // the handle reports any commits.
-        let should_switch = match pending_tq_handle {
-            None => false,
-            Some(handle) => {
-                // Get all commits from the pending TQ:
-                let commits = handle
-                    .status()
-                    .await
-                    .map_err(|e| {
-                        SecretRetrieverError::TrustQuorum(e.to_string())
-                    })?
-                    .persistent_state
-                    .commits;
-
-                // Switch to the pending TQ if it has any commits.
-                !commits.is_empty()
-            }
-        };
-
-        if should_switch {
-            // Attempt to atomically swap in the pending TQ for the active
-            // retriever. If someone else has already raced ahead and done this
-            // by the time we try, that's fine, because the action is the same
-            // regardless of who is performing it.
-            let State { pending_tq, active } = &mut *self.state.write().await;
-            if let Some(tq) = pending_tq.take() {
-                *active = Box::new(tq);
+            // Switch to TQ if it has any commits.
+            if !commits.is_empty() {
+                if let Some(tq) = self.state.pending_tq.take() {
+                    self.state.active = Box::new(tq);
+                }
             }
         }
 
-        // Project out the active secret retriever inside a read lock so we can
-        // return it to the caller, who can then invoke method(s) on it.
-        Ok(RwLockReadGuard::map(self.state.read().await, |s| &s.active))
+        Ok(self.state.active.as_mut())
     }
 }
 
 #[async_trait]
 impl SecretRetriever for TqOrLrtqSecretRetriever {
-    async fn get_latest(&self) -> Result<VersionedIkm, SecretRetrieverError> {
+    async fn get_latest(
+        &mut self,
+    ) -> Result<VersionedIkm, SecretRetrieverError> {
         self.retriever().await?.get_latest().await
     }
 
     async fn get(
-        &self,
+        &mut self,
         epoch: u64,
     ) -> Result<SecretState, SecretRetrieverError> {
         self.retriever().await?.get(epoch).await
