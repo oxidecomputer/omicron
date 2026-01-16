@@ -4236,6 +4236,7 @@ pub(in crate::db::datastore) mod test {
         let disks: Vec<_> = {
             use nexus_db_schema::schema::disk_type_local_storage::dsl;
 
+            #[allow(clippy::disallowed_methods)]
             datastore
                 .pool_connection_for_tests()
                 .await
