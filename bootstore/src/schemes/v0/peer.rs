@@ -125,17 +125,6 @@ pub struct NodeHandle {
 }
 
 impl NodeHandle {
-    /// Create a dummy handle for testing idempotency logic.
-    ///
-    /// The returned handle will panic if any API methods are called on it.
-    /// This is intended only for testing code that needs to construct
-    /// retrievers without actually using them.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn new_for_test() -> Self {
-        let (tx, _rx) = mpsc::channel(1);
-        NodeHandle { tx }
-    }
-
     /// Initialize a rack at the behest of RSS running on the same scrimlet as
     /// this Node
     pub async fn init_rack(
