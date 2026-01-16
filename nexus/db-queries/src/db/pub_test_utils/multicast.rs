@@ -4,11 +4,16 @@
 
 //! Multicast-specific datastore test helpers.
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
+
+/// Empty source IPs slice for passing to functions that take `Option<&[IpAddr]>`.
+///
+/// Use `Some(NO_SOURCE_IPS)` to explicitly clear source IPs (switch to ASM),
+/// vs `None` which preserves existing source IPs on reactivation.
+pub const NO_SOURCE_IPS: &[IpAddr] = &[];
 
 use uuid::Uuid;
 
-use nexus_db_model::MulticastGroupState;
 use nexus_db_model::{
     IncompleteIpPoolResource, IncompleteVpc, IpPool, IpPoolReservationType,
     IpPoolResourceType, IpVersion,
@@ -16,6 +21,7 @@ use nexus_db_model::{
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared::{IpRange, Ipv4Range};
 use nexus_types::identity::Resource;
+use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::api::external::{IdentityMetadataCreateParams, LookupType};
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid, SledUuid};
 
@@ -187,15 +193,15 @@ pub async fn create_test_group_with_state(
     multicast_ip: &str,
     make_active: bool,
 ) -> nexus_db_model::ExternalMulticastGroup {
-    let params = params::MulticastGroupCreate {
+    let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: group_name.parse().unwrap(),
-            description: format!("Test group: {}", group_name),
+            description: format!("Test group: {group_name}"),
         },
         multicast_ip: Some(multicast_ip.parse().unwrap()),
-        source_ips: None,
-        pool: None,
         mvlan: None,
+        has_sources: false,
+        ip_version: None,
     };
 
     let group = datastore
@@ -205,10 +211,9 @@ pub async fn create_test_group_with_state(
 
     if make_active {
         datastore
-            .multicast_group_set_state(
+            .multicast_group_set_active(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                MulticastGroupState::Active,
             )
             .await
             .expect("Should transition group to 'Active' state");

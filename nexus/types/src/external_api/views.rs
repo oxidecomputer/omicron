@@ -559,11 +559,16 @@ pub struct MulticastGroup {
     pub identity: IdentityMetadata,
     /// The multicast IP address held by this resource.
     pub multicast_ip: IpAddr,
-    /// Source IP addresses for Source-Specific Multicast (SSM).
-    /// Empty array means any source is allowed.
+    /// Union of all member source IP addresses (computed, read-only).
+    ///
+    /// This field shows the combined source IPs across all group members.
+    /// Individual members may subscribe to different sources; this union
+    /// reflects all sources that any member is subscribed to.
+    /// Empty array means no members have source filtering enabled.
     pub source_ips: Vec<IpAddr>,
     /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
     /// None means no VLAN tagging on egress.
+    // TODO(multicast): Remove mvlan field - being deprecated from multicast groups
     pub mvlan: Option<VlanID>,
     /// The ID of the IP pool this resource belongs to.
     pub ip_pool_id: Uuid,
@@ -580,8 +585,16 @@ pub struct MulticastGroupMember {
     pub identity: IdentityMetadata,
     /// The ID of the multicast group this member belongs to.
     pub multicast_group_id: Uuid,
+    /// The multicast IP address of the group this member belongs to.
+    pub multicast_ip: IpAddr,
     /// The ID of the instance that is a member of this group.
     pub instance_id: Uuid,
+    /// Source IP addresses for this member's multicast subscription.
+    ///
+    /// - **ASM**: Sources are optional. Empty array means any source is allowed.
+    ///   Non-empty array enables source filtering (IGMPv3/MLDv2).
+    /// - **SSM**: Sources are required for SSM addresses (232/8, ff3x::/32).
+    pub source_ips: Vec<IpAddr>,
     /// Current state of the multicast group membership.
     pub state: String,
 }
@@ -1786,6 +1799,23 @@ pub enum AuditLogEntryActor {
     Unauthenticated,
 }
 
+/// Authentication method used for a request
+#[derive(
+    Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMethod {
+    /// Console session cookie
+    SessionCookie,
+    /// Device access token (OAuth 2.0 device authorization flow)
+    AccessToken,
+    /// SCIM client bearer token
+    ScimToken,
+    /// Spoof authentication (test only)
+    #[schemars(skip)]
+    Spoof,
+}
+
 /// Result of an audit log entry
 #[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -1838,10 +1868,9 @@ pub struct AuditLogEntry {
 
     pub actor: AuditLogEntryActor,
 
-    /// How the user authenticated the request. Possible values are
-    /// "session_cookie" and "access_token". Optional because it will not be
-    /// defined on unauthenticated requests like login attempts.
-    pub auth_method: Option<String>,
+    /// How the user authenticated the request (access token, session, or SCIM
+    /// token). Null for unauthenticated requests like login attempts.
+    pub auth_method: Option<AuthMethod>,
 
     // Fields that are optional because they get filled in after the action completes
     /// Time operation completed

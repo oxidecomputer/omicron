@@ -146,7 +146,7 @@ impl DebugCollector {
     }
 
     /// Request archive of logs from the specified directory, which is assumed
-    /// to correspond to the root filesystem of a zone that is no longer
+    /// to correspond to the filesystem of a non-global zone that is no longer
     /// running.
     ///
     /// Unlike typical log file archival, this includes non-rotated log files.
@@ -159,17 +159,17 @@ impl DebugCollector {
     /// `completion_tx`.
     pub async fn archive_former_zone_root(
         &self,
-        zone_root: &Utf8Path,
+        zone_path: &Utf8Path,
         completion_tx: oneshot::Sender<()>,
     ) {
-        let log = self.log.new(o!("zone_root" => zone_root.to_string()));
+        let log = self.log.new(o!("zone_path" => zone_path.to_string()));
 
         // Validate the path that we were given.  We're only ever given zone
         // root filesystems, whose basename is always a zonename, and we always
         // prefix our zone names with `oxz_`.  If that's not what we find here,
         // log an error and bail out.  These error cases should be impossible to
         // hit in practice.
-        let Some(file_name) = zone_root.file_name() else {
+        let Some(file_name) = zone_path.file_name() else {
             error!(
                 log,
                 "cannot archive former zone root";
@@ -188,10 +188,10 @@ impl DebugCollector {
         }
 
         info!(log, "requesting archive of former zone root");
-        let zone_root = zone_root.to_owned();
+        let zone_path = zone_path.to_owned();
         let zone_name = file_name.to_string();
         let cmd = DebugCollectorCmd::ArchiveFormerZoneRoot {
-            zone_root,
+            zone_path,
             zone_name,
             completion_tx,
         };

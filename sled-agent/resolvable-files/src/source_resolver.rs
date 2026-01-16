@@ -4,16 +4,16 @@
 
 //! Zone image lookup.
 
+use crate::manifest::AllOmicronManifests;
 use crate::mupdate_override::AllMupdateOverrides;
-use crate::zone_manifest::AllZoneManifests;
 use camino::Utf8PathBuf;
 use omicron_common::update::OmicronInstallManifest;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use sled_agent_types::inventory::OmicronZoneImageSource;
-use sled_agent_types::zone_images::RemoveMupdateOverrideResult;
-use sled_agent_types::zone_images::ResolverStatus;
+use sled_agent_types::resolvable_files::RemoveMupdateOverrideResult;
+use sled_agent_types::resolvable_files::ResolverStatus;
 use slog::o;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -94,10 +94,10 @@ struct ResolverInner {
     measurement_directory_override: Option<Utf8PathBuf>,
     // Store all collected information for zones -- we're going to need to
     // report this via inventory.
-    zone_manifests: AllZoneManifests,
+    zone_manifests: AllOmicronManifests,
     // Store all collected information for zones -- we're going to need to
     // report this via inventory.
-    measurement_manifests: AllZoneManifests,
+    measurement_manifests: AllOmicronManifests,
 
     // Store all collected information for mupdate overrides -- we're going to
     // need to report this via inventory.
@@ -111,12 +111,12 @@ impl ResolverInner {
     ) -> Self {
         let log = log.new(o!("component" => "ZoneImageSourceResolver"));
 
-        let zone_manifests = AllZoneManifests::read_all(
+        let zone_manifests = AllOmicronManifests::read_all(
             &log,
             OmicronInstallManifest::ZONES_FILE_NAME,
             &internal_disks,
         );
-        let measurement_manifests = AllZoneManifests::read_all_measurements(
+        let measurement_manifests = AllOmicronManifests::read_all_measurements(
             &log,
             OmicronInstallManifest::MEASUREMENT_FILE_NAME,
             &internal_disks,
@@ -143,18 +143,18 @@ mod tests {
 
     use camino_tempfile_ext::prelude::*;
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
-    use omicron_common::zone_images::ZoneImageFileSource;
+    use omicron_common::resolvable_files::ResolvableFileSource;
     use sled_agent_config_reconciler::{
         HostPhase2PreparedContents, ResolverStatusExt,
     };
-    use sled_agent_types::inventory::{HostPhase2DesiredContents, ZoneKind};
-    use sled_agent_types::zone_images::{
-        ManifestHashError, MupdateOverrideReadError, OmicronZoneFileSource,
-        OmicronZoneImageLocation, RAMDISK_IMAGE_PATH, ZoneImageLocationError,
-        ZoneManifestReadError,
-    };
-    use sled_agent_zone_images_examples::{
+    use sled_agent_resolvable_files_examples::{
         BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext, deserialize_error,
+    };
+    use sled_agent_types::inventory::{HostPhase2DesiredContents, ZoneKind};
+    use sled_agent_types::resolvable_files::{
+        ManifestHashError, MupdateOverrideReadError, OmicronManifestReadError,
+        OmicronResolvableFileLocation, OmicronResolvableFileSource,
+        RAMDISK_IMAGE_PATH, ZoneImageLocationError,
     };
     use tufaceous_artifact::ArtifactHash;
 
@@ -189,11 +189,11 @@ mod tests {
         // return the install dataset.
         assert_eq!(
             file_source,
-            OmicronZoneFileSource {
-                location: OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileSource {
+                location: OmicronResolvableFileLocation::InstallDataset {
                     hash: Err(ZoneImageLocationError::ZoneHash(
                         ManifestHashError::ReadBootDisk(
-                            ZoneManifestReadError::InstallMetadata(
+                            OmicronManifestReadError::InstallMetadata(
                                 deserialize_error(
                                     dir.path(),
                                     &BOOT_PATHS.zones_json,
@@ -203,7 +203,7 @@ mod tests {
                         ),
                     )),
                 },
-                file_source: ZoneImageFileSource {
+                file_source: ResolvableFileSource {
                     file_name: ZoneKind::CockroachDb
                         .artifact_in_install_dataset()
                         .to_owned(),
@@ -248,8 +248,8 @@ mod tests {
         );
         assert_eq!(
             file_source,
-            OmicronZoneFileSource {
-                location: OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileSource {
+                location: OmicronResolvableFileLocation::InstallDataset {
                     hash: Ok(manifest
                         .files
                         .get(
@@ -258,7 +258,7 @@ mod tests {
                         .unwrap()
                         .hash)
                 },
-                file_source: ZoneImageFileSource {
+                file_source: ResolvableFileSource {
                     file_name: ZoneKind::CockroachDb
                         .artifact_in_install_dataset()
                         .to_string(),
@@ -287,13 +287,13 @@ mod tests {
             );
             assert_eq!(
                 file_source,
-                OmicronZoneFileSource {
-                    location: OmicronZoneImageLocation::InstallDataset {
+                OmicronResolvableFileSource {
+                    location: OmicronResolvableFileLocation::InstallDataset {
                         hash: Err(ZoneImageLocationError::ZoneHash(
                             error.error.clone()
                         )),
                     },
-                    file_source: ZoneImageFileSource {
+                    file_source: ResolvableFileSource {
                         file_name: zone_kind
                             .artifact_in_install_dataset()
                             .to_owned(),
@@ -349,8 +349,8 @@ mod tests {
 
         assert_eq!(
             file_source,
-            OmicronZoneFileSource {
-                location: OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileSource {
+                location: OmicronResolvableFileLocation::InstallDataset {
                     // The hash should be looked up from the zone manifest.
                     hash: Ok(manifest
                         .files
@@ -360,7 +360,7 @@ mod tests {
                         .unwrap()
                         .hash),
                 },
-                file_source: ZoneImageFileSource {
+                file_source: ResolvableFileSource {
                     file_name: ZoneKind::CockroachDb
                         .artifact_in_install_dataset()
                         .to_owned(),
@@ -442,8 +442,8 @@ mod tests {
 
         assert_eq!(
             file_source,
-            OmicronZoneFileSource {
-                location: OmicronZoneImageLocation::Artifact {
+            OmicronResolvableFileSource {
+                location: OmicronResolvableFileLocation::Artifact {
                     // The hash should be looked up from the zone manifest.
                     hash: Err(MupdateOverrideReadError::InstallMetadata(
                         deserialize_error(
@@ -453,7 +453,7 @@ mod tests {
                         )
                     )),
                 },
-                file_source: ZoneImageFileSource {
+                file_source: ResolvableFileSource {
                     file_name: artifact_hash.to_string(),
                     // The search paths will be empty, causing zone startup to
                     // fail.
@@ -473,8 +473,8 @@ mod tests {
 
         assert_eq!(
             file_source,
-            OmicronZoneFileSource {
-                location: OmicronZoneImageLocation::InstallDataset {
+            OmicronResolvableFileSource {
+                location: OmicronResolvableFileLocation::InstallDataset {
                     // The hash should be looked up from the zone manifest.
                     hash: Ok(manifest
                         .files
@@ -484,7 +484,7 @@ mod tests {
                         .unwrap()
                         .hash),
                 },
-                file_source: ZoneImageFileSource {
+                file_source: ResolvableFileSource {
                     file_name: ZoneKind::CockroachDb
                         .artifact_in_install_dataset()
                         .to_owned(),
