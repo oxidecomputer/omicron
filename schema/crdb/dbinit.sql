@@ -6930,12 +6930,29 @@ CREATE INDEX IF NOT EXISTS
     lookup_ereports_assigned_to_fm_case
 ON omicron.public.fm_ereport_in_case (sitrep_id, case_id);
 
+-- Alerts requested by a fault management sitrep.
+--
+-- These represent the list of alerts which the fault management system would
+-- like to have created as of a given sitrep. If (and only if) the sitrep is
+-- made current, then the `fm_rendezvous` background task will create
+-- corresponding entries in the `omicron.public.fm_alert` table. The primary
+-- keys for these alerts (the alert UUID) is provided by the alert request,
+-- preventing the same alert from being created multiple times.
+--
+-- Records in this table are inserted when a sitrep is created, and are deleted
+-- when the sitrep corresponding to the alert request record's `sitrep_id` is
+-- deleted. However, alert requests are carried forwards into subsequent sitreps
+-- for as long as the fault management case containing them exists, so that the
+-- fault management system may track which events within a case it has already
+-- requested alerts for.
 CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
     -- Requested alert UUID
     id UUID NOT NULL,
-    -- UUID of the sitrep in which the alert is requested.
+    -- UUID of the current sitrep that this alert request record is part of.
+    --
+    -- Note that this is *not* the sitrep in which the alert was requested.
     sitrep_id UUID NOT NULL,
-    -- UUID of the sitrep in which the alert request was created.
+    -- UUID of the original sitrep in which the alert was first requested.
     requested_sitrep_id UUID NOT NULL,
     -- UUID of the case to which this alert request belongs.
     case_id UUID NOT NULL,
