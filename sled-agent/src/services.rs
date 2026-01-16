@@ -51,6 +51,7 @@ use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,
 };
+use illumos_utils::smf_helper::Service as _;
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
@@ -469,7 +470,7 @@ enum SwitchService {
 }
 
 impl illumos_utils::smf_helper::Service for SwitchService {
-    fn service_name(&self) -> String {
+    fn service_name(&self) -> &str {
         match self {
             SwitchService::ManagementGatewayService => "mgs",
             SwitchService::Wicketd { .. } => "wicketd",
@@ -482,10 +483,28 @@ impl illumos_utils::smf_helper::Service for SwitchService {
             SwitchService::Mgd => "mgd",
             SwitchService::SpSim => "sp-sim",
         }
-        .to_owned()
     }
     fn smf_name(&self) -> String {
         format!("svc:/oxide/{}", self.service_name())
+    }
+}
+
+/// Describes SMF services related to DNS.
+#[derive(Debug, Clone, Copy)]
+enum DnsService {
+    Client,
+    Install,
+}
+
+impl illumos_utils::smf_helper::Service for DnsService {
+    fn service_name(&self) -> &str {
+        match self {
+            Self::Client => "network/dns/client",
+            Self::Install => "network/dns/install",
+        }
+    }
+    fn smf_name(&self) -> String {
+        format!("svc:/{}", self.service_name())
     }
 }
 
@@ -1244,7 +1263,7 @@ impl ServiceManager {
         needed
     }
 
-    async fn dns_install(
+    fn dns_install(
         info: &SledAgentInfo,
         ip_addrs: Option<Vec<IpAddr>>,
         domain: Option<&str>,
@@ -1286,7 +1305,7 @@ impl ServiceManager {
             None => (),
         }
 
-        Ok(ServiceBuilder::new("network/dns/install")
+        Ok(ServiceBuilder::new(DnsService::Install.service_name())
             .add_property_group(dns_config_builder)
             // We do need to enable the default instance of the
             // dns/install service.  It's enough to just mention it
@@ -1517,11 +1536,11 @@ impl ServiceManager {
             .add_instance(ServiceInstanceBuilder::new("default").disable());
 
         let disabled_dns_client_service =
-            ServiceBuilder::new("network/dns/client")
+            ServiceBuilder::new(DnsService::Client.service_name())
                 .add_instance(ServiceInstanceBuilder::new("default").disable());
 
         let enabled_dns_client_service =
-            ServiceBuilder::new("network/dns/client")
+            ServiceBuilder::new(DnsService::Client.service_name())
                 .add_instance(ServiceInstanceBuilder::new("default"));
 
         let running_zone = match config {
@@ -1539,7 +1558,7 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, None).await?;
+                let dns_service = Self::dns_install(info, None, None)?;
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1624,7 +1643,7 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, None).await?;
+                let dns_service = Self::dns_install(info, None, None)?;
 
                 let clickhouse_server_config =
                     PropertyGroupBuilder::new("config")
@@ -1709,7 +1728,7 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, None).await?;
+                let dns_service = Self::dns_install(info, None, None)?;
 
                 let clickhouse_keeper_config =
                     PropertyGroupBuilder::new("config")
@@ -1800,7 +1819,7 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, None).await?;
+                let dns_service = Self::dns_install(info, None, None)?;
 
                 // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
@@ -2083,8 +2102,7 @@ impl ServiceManager {
                     info,
                     Some(dns_servers.to_vec()),
                     domain.as_deref(),
-                )
-                .await?;
+                )?;
 
                 let mut chrony_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
@@ -2176,8 +2194,7 @@ impl ServiceManager {
                         .net()
                         .to_string();
 
-                let dns_install_service =
-                    Self::dns_install(info, None, None).await?;
+                let dns_install_service = Self::dns_install(info, None, None)?;
 
                 let chrony_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
@@ -2508,7 +2525,7 @@ impl ServiceManager {
         let SwitchZoneConfig { id, services, addresses, .. } = config;
 
         let disabled_dns_client_service =
-            ServiceBuilder::new("network/dns/client")
+            ServiceBuilder::new(DnsService::Client.service_name())
                 .add_instance(ServiceInstanceBuilder::new("default").disable());
 
         let info = self.inner.sled_info.get();
@@ -3126,7 +3143,7 @@ impl ServiceManager {
                 .add_property_group(switch_zone_setup_config),
         );
 
-        let profile = ProfileBuilder::new("omicron")
+        let mut profile = ProfileBuilder::new("omicron")
             .add_service(nw_setup_service)
             .add_service(disabled_dns_client_service)
             .add_service(mgs_service)
@@ -3139,9 +3156,17 @@ impl ServiceManager {
             .add_service(mgd_service)
             .add_service(mg_ddm_service)
             .add_service(uplink_service);
+
+        // If we have the rack subnet, also set up /etc/resolv.conf.
+        if let Some(info) = info {
+            let dns_service = Self::dns_install(info, None, None)?;
+            profile = profile.add_service(dns_service);
+        }
+
         profile.add_to_zone(&self.inner.log, &installed_zone).await.map_err(
             |err| Error::io("Failed to setup Switch zone profile", err),
         )?;
+
         Ok(RunningZone::boot(installed_zone).await?)
     }
 
@@ -3967,6 +3992,34 @@ impl ServiceManager {
                             )
                         }
                     }
+                }
+
+                // If we have our sled-agent info (which we should, if we're
+                // reconfiguring the switch zone!), we also need to set up
+                // `/etc/resolv.conf`. Do so by reconfiguring
+                // `network/dns/install` and enabling that service.
+                if let Some(info) = self.inner.sled_info.get() {
+                    let smfh = SmfHelper::new(&zone, &DnsService::Install);
+                    let nameservers = get_internal_dns_server_addresses(
+                        info.underlay_address,
+                    );
+                    smfh.delpropvalue(
+                        "install_props/nameserver",
+                        "*",
+                    )?;
+                    for address in &nameservers {
+                        smfh.addpropvalue_type(
+                            "install_props/nameserver",
+                            &format!("{address}"),
+                            "net_address",
+                        )?;
+                    }
+                    smfh.enable()?;
+                    info!(
+                        self.inner.log,
+                        "enabled DNS install service with new nameservers";
+                        "nameservers" => ?nameservers,
+                    );
                 }
 
                 // We also need to ensure any uplinks are configured. Spawn a
