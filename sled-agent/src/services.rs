@@ -4011,6 +4011,7 @@ impl ServiceManager {
                             "net_address",
                         )?;
                     }
+                    smfh.refresh()?;
                     smfh.enable()?;
                     info!(
                         self.inner.log,
