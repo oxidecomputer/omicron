@@ -12,6 +12,7 @@
 //! these tasks are supposed to run forever, and they can shutdown if their
 //! handles are dropped.
 
+use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
 use crate::bootstrap::bootstore_setup::{
     new_bootstore_config, poll_ddmd_for_bootstore_and_tq_peer_update,
 };
@@ -25,8 +26,8 @@ use crate::zone_bundle::ZoneBundler;
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
 use sled_agent_config_reconciler::{
-    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, RawDisksSender,
-    TimeSyncConfig,
+    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisksReceiver,
+    RawDisksSender, TimeSyncConfig,
 };
 use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_resolvable_files::ZoneImageSourceResolver;
@@ -74,6 +75,22 @@ pub struct LongRunningTaskHandles {
 
     /// A handle for interacting with the trust quorum
     pub trust_quorum: trust_quorum::NodeTaskHandle,
+    /// Handle to the artifact store
+    pub artifact_store: Arc<ArtifactStore<InternalDisksReceiver>>,
+}
+
+pub struct LongRunningTaskResult {
+    /// Handles to the long running tasks
+    pub long_running_task_handles: LongRunningTaskHandles,
+
+    /// Token spawning the config reconciler
+    pub config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
+
+    /// sled agent started channel
+    pub sled_agent_started_tx: oneshot::Sender<SledAgent>,
+
+    /// service manager ready channel
+    pub service_manager_ready_tx: oneshot::Sender<ServiceManager>,
 }
 
 /// Spawn all long running tasks
@@ -82,12 +99,7 @@ pub async fn spawn_all_longrunning_tasks(
     sled_mode: SledMode,
     global_zone_bootstrap_ip: Ipv6Addr,
     config: &Config,
-) -> (
-    LongRunningTaskHandles,
-    ConfigReconcilerSpawnToken,
-    oneshot::Sender<SledAgent>,
-    oneshot::Sender<ServiceManager>,
-) {
+) -> LongRunningTaskResult {
     let storage_key_requester = spawn_key_manager(log);
 
     let time_sync_config = if let Some(true) = config.skip_timesync {
@@ -122,6 +134,26 @@ pub async fn spawn_all_longrunning_tasks(
     let internal_disks = config_reconciler.wait_for_boot_disk().await;
     info!(log, "Found boot disk {:?}", internal_disks.boot_disk_id());
 
+    let zone_bundler = spawn_zone_bundler_tasks(log, &config_reconciler).await;
+    let zone_image_resolver = ZoneImageSourceResolver::new(log, internal_disks);
+
+    let config_reconciler = Arc::new(config_reconciler);
+
+    let artifact_store = Arc::new(
+        ArtifactStore::new(
+            &log,
+            config_reconciler.internal_disks_rx().clone(),
+            Some(Arc::clone(&config_reconciler)),
+        )
+        .await,
+    );
+
+    let config_reconciler_spawn_token = config_reconciler
+        .pre_spawn_reconciliation_task(
+            SledAgentArtifactStoreWrapper(Arc::clone(&artifact_store)),
+            config_reconciler_spawn_token,
+        );
+
     let trust_quorum = spawn_trust_quorum_task(
         log,
         &config_reconciler,
@@ -140,13 +172,11 @@ pub async fn spawn_all_longrunning_tasks(
     )
     .await;
 
-    let zone_bundler = spawn_zone_bundler_tasks(log, &config_reconciler).await;
-    let zone_image_resolver = ZoneImageSourceResolver::new(log, internal_disks);
     let health_monitor = spawn_health_monitor_tasks(log).await;
 
-    (
-        LongRunningTaskHandles {
-            config_reconciler: Arc::new(config_reconciler),
+    LongRunningTaskResult {
+        long_running_task_handles: LongRunningTaskHandles {
+            config_reconciler,
             hardware_manager,
             hardware_monitor,
             bootstore,
@@ -154,11 +184,12 @@ pub async fn spawn_all_longrunning_tasks(
             zone_image_resolver,
             health_monitor,
             trust_quorum,
+            artifact_store,
         },
         config_reconciler_spawn_token,
         sled_agent_started_tx,
         service_manager_ready_tx,
-    )
+    }
 }
 
 fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {

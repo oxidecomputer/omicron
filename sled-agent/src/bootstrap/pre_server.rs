@@ -17,7 +17,7 @@ use crate::config::Config;
 use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::long_running_tasks::{
-    LongRunningTaskHandles, spawn_all_longrunning_tasks,
+    LongRunningTaskHandles, LongRunningTaskResult, spawn_all_longrunning_tasks,
 };
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
@@ -120,12 +120,12 @@ impl BootstrapAgentStartup {
 
         // Spawn all important long running tasks that live for the lifetime of
         // the process and are used by both the bootstrap agent and sled agent
-        let (
+        let LongRunningTaskResult {
             long_running_task_handles,
             config_reconciler_spawn_token,
             sled_agent_started_tx,
             service_manager_ready_tx,
-        ) = spawn_all_longrunning_tasks(
+        } = spawn_all_longrunning_tasks(
             &base_log,
             sled_mode,
             startup_networking.global_zone_bootstrap_ip,
