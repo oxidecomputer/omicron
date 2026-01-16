@@ -5731,11 +5731,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         // TODO: Check If-Match and fail if the ETag doesn't match anymore.
         // Without this check, if firewall rules change while someone is listing
         // the rules, they will see a mix of the old and new rules.
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();
             let vpc_lookup = nexus.vpc_lookup(&opctx, query)?;
             let rules =
@@ -5743,12 +5739,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(VpcFirewallRules {
                 rules: rules.into_iter().map(|rule| rule.into()).collect(),
             }))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Note: the limits in the below comment come from the firewall rules model
@@ -5761,11 +5753,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
         // TODO: Check If-Match and fail if the ETag doesn't match anymore.
         // TODO: limit size of the ruleset because the GET endpoint is not paginated
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();
             let router_params = router_params.into_inner();
             let vpc_lookup = nexus.vpc_lookup(&opctx, query)?;
@@ -5775,12 +5763,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(VpcFirewallRules {
                 rules: rules.into_iter().map(|rule| rule.into()).collect(),
             }))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // VPC Routers
@@ -5824,13 +5808,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::RouterPath>,
         query_params: Query<params::OptionalVpcSelector>,
     ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let router_selector = params::RouterSelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -5841,12 +5821,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .fetch()
                 .await?;
             Ok(HttpResponseOk(vpc_router.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn vpc_router_create(
@@ -5854,13 +5830,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::VpcSelector>,
         create_params: TypedBody<params::VpcRouterCreate>,
     ) -> Result<HttpResponseCreated<VpcRouter>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();
             let create = create_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let vpc_lookup = nexus.vpc_lookup(&opctx, query)?;
             let router = nexus
                 .vpc_create_router(
@@ -5871,12 +5843,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseCreated(router.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn vpc_router_delete(
@@ -5884,13 +5852,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::RouterPath>,
         query_params: Query<params::OptionalVpcSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let router_selector = params::RouterSelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -5900,12 +5864,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.vpc_router_lookup(&opctx, router_selector)?;
             nexus.vpc_delete_router(&opctx, &router_lookup).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn vpc_router_update(
@@ -5914,14 +5874,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalVpcSelector>,
         router_params: TypedBody<params::VpcRouterUpdate>,
     ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let router_params = router_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let router_selector = params::RouterSelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -5933,12 +5889,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .vpc_update_router(&opctx, &router_lookup, &router_params)
                 .await?;
             Ok(HttpResponseOk(router.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn vpc_router_route_list(
@@ -5982,11 +5934,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::RoutePath>,
         query_params: Query<params::OptionalRouterSelector>,
     ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let route_selector = params::RouteSelector {
@@ -6000,12 +5948,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .fetch()
                 .await?;
             Ok(HttpResponseOk(route.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn vpc_router_route_create(
@@ -6013,11 +5957,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::RouterSelector>,
         create_params: TypedBody<params::RouterRouteCreate>,
     ) -> Result<HttpResponseCreated<RouterRoute>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();
             let create = create_params.into_inner();
             let router_lookup = nexus.vpc_router_lookup(&opctx, query)?;
@@ -6030,12 +5970,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseCreated(route.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn vpc_router_route_delete(
@@ -6043,11 +5979,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::RoutePath>,
         query_params: Query<params::OptionalRouterSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let route_selector = params::RouteSelector {
@@ -6060,12 +5992,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.vpc_router_route_lookup(&opctx, route_selector)?;
             nexus.router_delete_route(&opctx, &route_lookup).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn vpc_router_route_update(
@@ -6074,14 +6002,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalRouterSelector>,
         router_params: TypedBody<params::RouterRouteUpdate>,
     ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let router_params = router_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let route_selector = params::RouteSelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -6094,12 +6018,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_update_route(&opctx, &route_lookup, &router_params)
                 .await?;
             Ok(HttpResponseOk(route.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Internet gateways
@@ -6146,13 +6066,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::InternetGatewayPath>,
         query_params: Query<params::OptionalVpcSelector>,
     ) -> Result<HttpResponseOk<views::InternetGateway>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let selector = params::InternetGatewaySelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -6163,12 +6079,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .fetch()
                 .await?;
             Ok(HttpResponseOk(internet_gateway.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     /// Create VPC internet gateway
@@ -6177,24 +6089,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::VpcSelector>,
         create_params: TypedBody<params::InternetGatewayCreate>,
     ) -> Result<HttpResponseCreated<views::InternetGateway>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let create = create_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();
+            let create = create_params.into_inner();
             let vpc_lookup = nexus.vpc_lookup(&opctx, query)?;
             let result = nexus
                 .internet_gateway_create(&opctx, &vpc_lookup, &create)
                 .await?;
             Ok(HttpResponseCreated(result.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     /// Delete internet gateway
@@ -6203,13 +6107,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::InternetGatewayPath>,
         query_params: Query<params::InternetGatewayDeleteSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let selector = params::InternetGatewaySelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -6220,12 +6120,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .internet_gateway_delete(&opctx, &lookup, query.cascade)
                 .await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     /// List IP pools attached to an internet gateway.
@@ -6277,11 +6173,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         create_params: TypedBody<params::InternetGatewayIpPoolCreate>,
     ) -> Result<HttpResponseCreated<views::InternetGatewayIpPool>, HttpError>
     {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();
             let create = create_params.into_inner();
             let lookup = nexus.internet_gateway_lookup(&opctx, query)?;
@@ -6289,12 +6181,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .internet_gateway_ip_pool_attach(&opctx, &lookup, &create)
                 .await?;
             Ok(HttpResponseCreated(result.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     /// Detach an IP pool from an internet gateway
@@ -6303,11 +6191,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::IpPoolPath>,
         query_params: Query<params::DeleteInternetGatewayElementSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let selector = params::InternetGatewayIpPoolSelector {
@@ -6322,12 +6206,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .internet_gateway_ip_pool_detach(&opctx, &lookup, query.cascade)
                 .await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     /// List addresses attached to an internet gateway.
@@ -6383,11 +6263,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         create_params: TypedBody<params::InternetGatewayIpAddressCreate>,
     ) -> Result<HttpResponseCreated<views::InternetGatewayIpAddress>, HttpError>
     {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();
             let create = create_params.into_inner();
             let lookup = nexus.internet_gateway_lookup(&opctx, query)?;
@@ -6395,12 +6271,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .internet_gateway_ip_address_attach(&opctx, &lookup, &create)
                 .await?;
             Ok(HttpResponseCreated(route.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     /// Detach an IP address from an internet gateway
@@ -6409,11 +6281,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::IpAddressPath>,
         query_params: Query<params::DeleteInternetGatewayElementSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let selector = params::InternetGatewayIpAddressSelector {
@@ -6432,12 +6300,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Racks
@@ -6475,20 +6339,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::RackPath>,
     ) -> Result<HttpResponseOk<Rack>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let rack_info = nexus.rack_lookup(&opctx, &path.rack_id).await?;
             Ok(HttpResponseOk(rack_info.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn sled_list_uninitialized(
@@ -6574,21 +6430,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SledPath>,
     ) -> Result<HttpResponseOk<Sled>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             let (.., sled) =
                 nexus.sled_lookup(&opctx, &path.sled_id)?.fetch().await?;
             Ok(HttpResponseOk(sled.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn sled_set_provision_policy(
