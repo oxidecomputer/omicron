@@ -123,7 +123,7 @@ impl SecretRetriever for TqSecretRetriever {
 
         if requested_epoch == latest_epoch {
             Ok(SecretState::Current(ikm))
-        } else {
+        } else if requested_epoch < latest_epoch {
             // Requested epoch is older than latest: return both secrets so the
             // caller can decrypt with old and re-encrypt with new.
             let new_ikm = VersionedIkm::new(
@@ -132,6 +132,8 @@ impl SecretRetriever for TqSecretRetriever {
                 latest_secret.expose_secret(),
             );
             Ok(SecretState::Reconfiguration { old: ikm, new: new_ikm })
+        } else {
+            panic!("Requested epoch is newer than latest known epoch");
         }
     }
 }
