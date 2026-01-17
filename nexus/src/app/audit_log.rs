@@ -141,6 +141,7 @@ impl super::Nexus {
             user_agent,
             actor,
             auth_method,
+            credential_id: opctx.authn.credential_id(),
         };
         self.db_datastore.audit_log_entry_init(opctx, entry_params.into()).await
     }

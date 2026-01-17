@@ -39,6 +39,9 @@ pub struct AuditLogEntryInitParams {
     pub user_agent: Option<String>,
     pub actor: AuditLogActor,
     pub auth_method: Option<AuditLogAuthMethod>,
+    /// ID of the credential used to authenticate (session ID, access token ID,
+    /// or SCIM token ID). Not set for unauthenticated requests or spoof auth.
+    pub credential_id: Option<Uuid>,
 }
 
 impl_enum_type!(
@@ -164,6 +167,10 @@ pub struct AuditLogEntryInit {
     /// API token or session cookie. Optional because it will not be defined
     /// on unauthenticated requests like login attempts.
     pub auth_method: Option<AuditLogAuthMethod>,
+
+    /// ID of the credential used to authenticate (session ID, access token ID,
+    /// or SCIM token ID). Not set for unauthenticated requests or spoof auth.
+    pub credential_id: Option<Uuid>,
 }
 
 impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
@@ -176,6 +183,7 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             user_agent,
             actor,
             auth_method,
+            credential_id,
         } = params;
 
         let (actor_id, actor_silo_id, actor_kind) = match actor {
@@ -209,6 +217,7 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             source_ip: source_ip.into(),
             user_agent,
             auth_method,
+            credential_id,
         }
     }
 }
@@ -244,6 +253,10 @@ pub struct AuditLogEntry {
 
     /// The authn scheme used. None if unauthenticated.
     pub auth_method: Option<AuditLogAuthMethod>,
+
+    /// ID of the credential used to authenticate (session ID, access token ID,
+    /// or SCIM token ID). Not set for unauthenticated requests or spoof auth.
+    pub credential_id: Option<Uuid>,
 }
 
 /// Struct that we can use as a kind of constructor arg for our actual audit
@@ -401,6 +414,7 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                     views::AuditLogEntryResult::Unknown
                 }
             },
+            credential_id: entry.credential_id,
         })
     }
 }

@@ -75,10 +75,27 @@ pub enum NodeApiRequest {
     CoordinatorStatus { tx: oneshot::Sender<Option<CoordinatorStatus>> },
 
     /// Load a rack secret for the given epoch
+    ///
+    /// Returns `None` if share collection is still in progress.
     LoadRackSecret {
         epoch: Epoch,
         tx: oneshot::Sender<
             Result<Option<ReconstructedRackSecret>, LoadRackSecretError>,
+        >,
+    },
+
+    /// Load the rack secret for the latest committed epoch
+    ///
+    /// Returns `(Epoch, ReconstructedRackSecret)` if available, or `None` if
+    /// share collection is still in progress. The epoch is guaranteed to match
+    /// the secret returned, though subsequent actions could cause the returned
+    /// epoch to be superseded.
+    LoadLatestRackSecret {
+        tx: oneshot::Sender<
+            Result<
+                Option<(Epoch, ReconstructedRackSecret)>,
+                LoadRackSecretError,
+            >,
         >,
     },
 
@@ -254,6 +271,22 @@ impl NodeTaskHandle {
     ) -> Result<Option<ReconstructedRackSecret>, NodeApiError> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(NodeApiRequest::LoadRackSecret { epoch, tx }).await?;
+        let rs = rx.await??;
+        Ok(rs)
+    }
+
+    /// Load the rack secret for the latest committed epoch
+    ///
+    /// Returns the epoch and secret together, or `None` if share collection is
+    /// still in progress. This operation atomically determines the latest epoch
+    /// and loads its secret. Note that it is still possible for the rack secret
+    /// to be superseded at any time after this call returns; it is only
+    /// guaranteed to be the latest as of the moment it is retrieved internally.
+    pub async fn load_latest_rack_secret(
+        &self,
+    ) -> Result<Option<(Epoch, ReconstructedRackSecret)>, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(NodeApiRequest::LoadLatestRackSecret { tx }).await?;
         let rs = rx.await??;
         Ok(rs)
     }
@@ -631,6 +664,26 @@ impl NodeTask {
             }
             NodeApiRequest::LoadRackSecret { epoch, tx } => {
                 let res = self.node.load_rack_secret(&mut self.ctx, epoch);
+                let _ = tx.send(res);
+            }
+            NodeApiRequest::LoadLatestRackSecret { tx } => {
+                // Atomically determine the latest committed epoch and load its
+                // secret, avoiding a commit occurring in between the epoch
+                // check and the secret retrieval.
+                let res = match self
+                    .ctx
+                    .persistent_state()
+                    .latest_committed_epoch()
+                {
+                    Some(epoch) => {
+                        match self.node.load_rack_secret(&mut self.ctx, epoch) {
+                            Ok(Some(secret)) => Ok(Some((epoch, secret))),
+                            Ok(None) => Ok(None),
+                            Err(e) => Err(e),
+                        }
+                    }
+                    None => Err(LoadRackSecretError::NoCommittedConfigurations),
+                };
                 let _ = tx.send(res);
             }
             NodeApiRequest::LrtqUpgrade { msg, tx } => {

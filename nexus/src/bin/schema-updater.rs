@@ -16,6 +16,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DatastoreSetupAction;
 use nexus_db_queries::db::datastore::IdentityCheckPolicy;
+use omicron_common::backoff::BackoffError;
 use semver::Version;
 use slog::Drain;
 use slog::Level;
@@ -125,7 +126,10 @@ async fn main_impl() -> anyhow::Result<()> {
                     datastore
                         .update_schema(checked_action, Some(&all_versions))
                         .await
-                        .map_err(|e| anyhow!(e))?;
+                        .map_err(|e| match e {
+                            BackoffError::Permanent(e)
+                            | BackoffError::Transient { err: e, .. } => e,
+                        })?;
                     println!("Update to {version} complete");
                 }
                 DatastoreSetupAction::Refuse => {
