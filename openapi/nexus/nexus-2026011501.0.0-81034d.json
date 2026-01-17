@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026011600.0.0"
+    "version": "2026011501.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -14044,68 +14044,6 @@
           "address_lot"
         ]
       },
-      "AddressAllocator": {
-        "description": "Specify how to allocate a floating IP address.",
-        "oneOf": [
-          {
-            "description": "Reserve a specific IP address.",
-            "type": "object",
-            "properties": {
-              "ip": {
-                "description": "The IP address to reserve. Must be available in the pool.",
-                "type": "string",
-                "format": "ip"
-              },
-              "pool": {
-                "nullable": true,
-                "description": "The pool containing this address. If not specified, the default pool for the address's IP version is used.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NameOrId"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "explicit"
-                ]
-              }
-            },
-            "required": [
-              "ip",
-              "type"
-            ]
-          },
-          {
-            "description": "Automatically allocate an IP address from a specified pool.",
-            "type": "object",
-            "properties": {
-              "pool_selector": {
-                "description": "Pool selection.\n\nIf omitted, this field uses the silo's default pool. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified in the pool selector.",
-                "default": {
-                  "ip_version": null,
-                  "type": "auto"
-                },
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/PoolSelector"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "auto"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
-        ]
-      },
       "AddressConfig": {
         "description": "A set of addresses associated with a port configuration.",
         "type": "object",
@@ -14368,6 +14306,68 @@
         "required": [
           "blocks",
           "lot"
+        ]
+      },
+      "AddressSelector": {
+        "description": "Specify how to allocate a floating IP address.",
+        "oneOf": [
+          {
+            "description": "Reserve a specific IP address.",
+            "type": "object",
+            "properties": {
+              "ip": {
+                "description": "The IP address to reserve. Must be available in the pool.",
+                "type": "string",
+                "format": "ip"
+              },
+              "pool": {
+                "nullable": true,
+                "description": "The pool containing this address. If not specified, the default pool for the address's IP version is used.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NameOrId"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "type"
+            ]
+          },
+          {
+            "description": "Automatically allocate an IP address from a specified pool.",
+            "type": "object",
+            "properties": {
+              "pool_selector": {
+                "description": "Pool selection.\n\nIf omitted, this field uses the silo's default pool. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified in the pool selector.",
+                "default": {
+                  "ip_version": null,
+                  "type": "auto"
+                },
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PoolSelector"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "auto"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "AffinityGroup": {
@@ -15246,6 +15246,12 @@
                 "$ref": "#/components/schemas/AuthMethod"
               }
             ]
+          },
+          "credential_id": {
+            "nullable": true,
+            "description": "ID of the credential used for authentication. Null for unauthenticated requests. The value of `auth_method` indicates what kind of credential it is (access token, session, or SCIM token).",
+            "type": "string",
+            "format": "uuid"
           },
           "id": {
             "description": "Unique identifier for the audit log entry",
@@ -19522,7 +19528,7 @@
         "description": "Parameters for creating a new floating IP address for instances.",
         "type": "object",
         "properties": {
-          "address_allocator": {
+          "address_selector": {
             "description": "IP address allocation method.",
             "default": {
               "pool_selector": {
@@ -19533,7 +19539,7 @@
             },
             "allOf": [
               {
-                "$ref": "#/components/schemas/AddressAllocator"
+                "$ref": "#/components/schemas/AddressSelector"
               }
             ]
           },

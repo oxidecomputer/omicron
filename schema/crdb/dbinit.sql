@@ -6276,6 +6276,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     -- The name of the authn scheme used
     auth_method omicron.public.audit_log_auth_method,
 
+    -- ID of the credential used to authenticate. Session ID, access token ID,
+    -- or SCIM token ID.
+    credential_id UUID,
+
     -- make sure time_completed and result_kind are either both null or both not
     CONSTRAINT time_completed_and_result_kind CHECK (
         (time_completed IS NULL AND result_kind IS NULL)
@@ -6317,6 +6321,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     )
 );
 
+-- Ensure credential_id is consistent with auth_method:
+-- - spoof and unauthenticated: credential_id must be NULL
+-- - session_cookie, access_token, scim_token: credential_id must be set
+-- NOT VALID because existing audit_log entries may have auth_method set but
+-- credential_id NULL (since credential_id didn't exist before this was added).
+-- NOTE: NOT VALID only works with ALTER TABLE. Inline NOT VALID in CREATE TABLE
+-- parses but is silently ignored: https://github.com/cockroachdb/cockroach/pull/53485
+ALTER TABLE omicron.public.audit_log
+ADD CONSTRAINT IF NOT EXISTS auth_method_and_credential_id_consistent CHECK (
+    (auth_method IS NULL AND credential_id IS NULL)
+    OR (auth_method = 'spoof' AND credential_id IS NULL)
+    OR (auth_method IN ('session_cookie', 'access_token', 'scim_token')
+        AND credential_id IS NOT NULL)
+) NOT VALID;
+
 -- When we query the audit log, we filter by time_completed and order by
 -- (time_completed, id). CRDB docs talk about hash-sharded indexes for
 -- sequential keys, but the PK on this table is the ID alone.
@@ -6351,7 +6370,8 @@ SELECT
     error_code,
     error_message,
     result_kind,
-    auth_method
+    auth_method,
+    credential_id
 FROM omicron.public.audit_log
 WHERE
     time_completed IS NOT NULL
@@ -7798,7 +7818,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '221.0.0', NULL)
+    (TRUE, NOW(), NOW(), '222.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

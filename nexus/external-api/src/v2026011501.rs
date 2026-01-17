@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2026011500 to 2026011600.
+//! Nexus external types that changed from 2026011501 to 2026011600.
 //!
 //! ## AddressSelector -> AddressAllocator Rename
 //!
@@ -97,77 +97,24 @@ impl From<FloatingIpCreate> for params::FloatingIpCreate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use omicron_common::api::external::{IpVersion, Name};
+    use crate::test_utils::{
+        identity_strategy, optional_name_or_id_strategy, pool_selector_strategy,
+    };
     use proptest::prelude::*;
+    use std::net::IpAddr;
     use test_strategy::proptest;
-    use uuid::Uuid;
 
-    // =========================================================================
-    // Proptest strategies
-    // =========================================================================
-    //
-    // TODO: Add proptests for the conversions in all of the other version
-    // modules, and extract common strategies into a separate test-utils module.
-    //
-    // Alternatively, consider adding `#[cfg_attr(any(test, feature = "testing"),
-    // derive(test_strategy::Arbitrary))]` to types like `PoolSelector`,
-    // `NameOrId`, and `Name` in their defining crates. This pattern is used
-    // elsewhere in omicron (e.g., `Generation` in omicron-common, `BaseboardId`
-    // in sled-hardware/types) with a `testing` feature that enables `proptest`
-    // and `test-strategy` dependencies.
-
-    /// Strategy for generating valid `Name` values.
-    ///
-    /// Per RFD 4, names must be 1-63 characters and match the regex
-    /// `[a-z]([-a-z0-9]*[a-z0-9])?`. We use `{0,61}` instead of `*` to
-    /// bound generation length and avoid filtering out long strings.
-    fn name_strategy() -> impl Strategy<Value = Name> {
-        "[a-z]([-a-z0-9]{0,61}[a-z0-9])?"
-            .prop_filter_map("valid name", |s| s.parse::<Name>().ok())
-    }
-
-    fn name_or_id_strategy() -> impl Strategy<Value = NameOrId> {
-        prop_oneof![
-            name_strategy().prop_map(NameOrId::Name),
-            any::<u128>().prop_map(|n| NameOrId::Id(Uuid::from_u128(n))),
-        ]
-    }
-
-    fn ip_version_strategy() -> impl Strategy<Value = IpVersion> {
-        prop_oneof![Just(IpVersion::V4), Just(IpVersion::V6)]
-    }
-
-    fn pool_selector_strategy() -> impl Strategy<Value = params::PoolSelector> {
-        prop_oneof![
-            name_or_id_strategy()
-                .prop_map(|pool| params::PoolSelector::Explicit { pool }),
-            proptest::option::of(ip_version_strategy()).prop_map(
-                |ip_version| params::PoolSelector::Auto { ip_version }
-            ),
-        ]
-    }
-
-    fn address_selector_strategy() -> impl Strategy<Value = AddressSelector> {
-        prop_oneof![
-            (any::<IpAddr>(), proptest::option::of(name_or_id_strategy()))
+    fn floating_ip_create_strategy() -> impl Strategy<Value = FloatingIpCreate>
+    {
+        let address_selector = prop_oneof![
+            (any::<IpAddr>(), optional_name_or_id_strategy())
                 .prop_map(|(ip, pool)| AddressSelector::Explicit { ip, pool }),
             pool_selector_strategy().prop_map(|pool_selector| {
                 AddressSelector::Auto { pool_selector }
             }),
-        ]
-    }
+        ];
 
-    fn identity_strategy() -> impl Strategy<Value = IdentityMetadataCreateParams>
-    {
-        // Description is limited to 512 characters in the database.
-        (name_strategy(), ".{0,512}").prop_map(|(name, description)| {
-            IdentityMetadataCreateParams { name, description }
-        })
-    }
-
-    fn floating_ip_create_strategy() -> impl Strategy<Value = FloatingIpCreate>
-    {
-        (identity_strategy(), address_selector_strategy()).prop_map(
+        (identity_strategy(), address_selector).prop_map(
             |(identity, address_selector)| FloatingIpCreate {
                 identity,
                 address_selector,
@@ -175,10 +122,8 @@ mod tests {
         )
     }
 
-    // =========================================================================
-    // Property tests
-    // =========================================================================
-
+    /// Verifies that conversion to params::FloatingIpCreate preserves identity
+    /// and correctly maps AddressSelector to AddressAllocator.
     #[proptest]
     fn floating_ip_create_converts_correctly(
         #[strategy(floating_ip_create_strategy())] expected: FloatingIpCreate,
