@@ -123,7 +123,7 @@ impl super::Nexus {
             for r in &router_info {
                 let asn = r.asn;
 
-                let peers = match client.get_neighbors_v2(asn).await {
+                let peers = match client.get_neighbors_v3(asn).await {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
                         error!(
@@ -146,8 +146,11 @@ impl super::Nexus {
                         addr: host,
                         local_asn: r.asn,
                         remote_asn: info.asn.unwrap_or(0),
-                        state: info.state.into(),
-                        state_duration_millis: info.duration_millis,
+                        state: info.fsm_state.into(),
+                        state_duration_millis: u64::try_from(
+                            info.fsm_state_duration.as_millis(),
+                        )
+                        .unwrap_or(u64::MAX),
                     });
                 }
             }
