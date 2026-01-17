@@ -29658,6 +29658,13 @@
       }
     },
     {
+      "name": "system/subnet-pools",
+      "description": "Subnet pools are collections of IP subnets that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate external subnets from the pool.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-subnet-pools"
+      }
+    },
+    {
       "name": "system/update",
       "description": "Upload and manage system updates",
       "externalDocs": {

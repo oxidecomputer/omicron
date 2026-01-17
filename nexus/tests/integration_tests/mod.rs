@@ -52,6 +52,7 @@ mod sleds;
 mod snapshots;
 mod ssh_keys;
 mod subnet_allocation;
+mod subnet_pools;
 mod support_bundles;
 mod switch_port;
 mod target_release;

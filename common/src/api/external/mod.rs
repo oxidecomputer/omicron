@@ -996,6 +996,8 @@ pub enum ResourceType {
     Snapshot,
     SshKey,
     SupportBundle,
+    SubnetPool,
+    SubnetPoolMember,
     Switch,
     SwitchPort,
     SwitchPortSettings,

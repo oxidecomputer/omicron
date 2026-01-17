@@ -97,6 +97,7 @@ mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
+mod subnet_pool;
 pub(crate) mod support_bundles;
 mod switch;
 mod switch_interface;
