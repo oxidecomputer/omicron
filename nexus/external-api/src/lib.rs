@@ -1020,10 +1020,9 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
     ) -> Result<HttpResponseOk<v2025122300::SiloIpPool>, HttpError> {
-        match Self::project_ip_pool_view(rqctx, path_params).await {
-            Ok(HttpResponseOk(pool)) => Ok(HttpResponseOk(pool.into())),
-            Err(e) => Err(e),
-        }
+        Self::project_ip_pool_view(rqctx, path_params)
+            .await
+            .map(|resp| resp.map(Into::into))
     }
 
     /// Fetch IP pool
@@ -1421,13 +1420,14 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025121200::MulticastGroup>>,
         HttpError,
     > {
-        match Self::multicast_group_list(rqctx, query_params).await {
-            Ok(HttpResponseOk(page)) => Ok(HttpResponseOk(ResultsPage {
-                items: page.items.into_iter().map(|g| g.into()).collect(),
-                next_page: page.next_page,
-            })),
-            Err(e) => Err(e),
-        }
+        Self::multicast_group_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
     }
 
     /// List multicast groups
@@ -1481,11 +1481,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025121200::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError> {
-        let path = path_params.map(|p| params::MulticastGroupPath::from(p));
-        match Self::multicast_group_view(rqctx, path).await {
-            Ok(HttpResponseOk(group)) => Ok(HttpResponseOk(group.into())),
-            Err(e) => Err(e),
-        }
+        let path = path_params.map(Into::into);
+        Self::multicast_group_view(rqctx, path)
+            .await
+            .map(|resp| resp.map(Into::into))
     }
 
     /// Fetch multicast group
@@ -1566,15 +1565,15 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025121200::MulticastGroupMember>>,
         HttpError,
     > {
-        let path = path_params.map(|p| params::MulticastGroupPath::from(p));
-        match Self::multicast_group_member_list(rqctx, path, query_params).await
-        {
-            Ok(HttpResponseOk(page)) => Ok(HttpResponseOk(ResultsPage {
-                items: page.items.into_iter().map(|m| m.into()).collect(),
-                next_page: page.next_page,
-            })),
-            Err(e) => Err(e),
-        }
+        let path = path_params.map(Into::into);
+        Self::multicast_group_member_list(rqctx, path, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(|m| m.into()).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
     }
 
     /// List members of multicast group
@@ -1657,11 +1656,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025121200::MulticastGroupByIpPath>,
     ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError> {
-        let path = path_params.map(|p| params::MulticastGroupPath::from(p));
-        match Self::multicast_group_view(rqctx, path).await {
-            Ok(HttpResponseOk(group)) => Ok(HttpResponseOk(group.into())),
-            Err(e) => Err(e),
-        }
+        let path = path_params.map(Into::into);
+        Self::multicast_group_view(rqctx, path)
+            .await
+            .map(|resp| resp.map(Into::into))
     }
 
     // Disks
@@ -1678,23 +1676,18 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<v2025112000::Disk>>, HttpError> {
-        match Self::disk_list(rqctx, query_params).await {
-            Ok(page) => {
-                let new_page = ResultsPage {
-                    next_page: page.0.next_page,
-                    items: {
-                        let mut items = Vec::with_capacity(page.0.items.len());
-                        for item in page.0.items {
-                            items.push(item.try_into()?);
-                        }
-                        items
-                    },
-                };
-
-                Ok(HttpResponseOk(new_page))
-            }
-            Err(e) => Err(e),
-        }
+        Self::disk_list(rqctx, query_params).await.and_then(
+            |HttpResponseOk(page)| {
+                let items: Result<Vec<_>, _> =
+                    page.items.into_iter().map(TryInto::try_into).collect();
+                items.map(|items| {
+                    HttpResponseOk(ResultsPage {
+                        next_page: page.next_page,
+                        items,
+                    })
+                })
+            },
+        )
     }
 
     /// List disks
@@ -1723,14 +1716,9 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         new_disk: TypedBody<v2025112000::DiskCreate>,
     ) -> Result<HttpResponseCreated<v2025112000::Disk>, HttpError> {
-        match Self::disk_create(rqctx, query_params, new_disk.map(Into::into))
+        Self::disk_create(rqctx, query_params, new_disk.map(Into::into))
             .await
-        {
-            Ok(HttpResponseCreated(disk)) => {
-                Ok(HttpResponseCreated(disk.try_into()?))
-            }
-            Err(e) => Err(e),
-        }
+            .and_then(|resp| resp.try_map(TryInto::try_into))
     }
 
     // TODO-correctness See note about instance create.  This should be async.
@@ -1760,10 +1748,9 @@ pub trait NexusExternalApi {
         path_params: Path<params::DiskPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseOk<v2025112000::Disk>, HttpError> {
-        match Self::disk_view(rqctx, path_params, query_params).await {
-            Ok(HttpResponseOk(disk)) => Ok(HttpResponseOk(disk.try_into()?)),
-            Err(e) => Err(e),
-        }
+        Self::disk_view(rqctx, path_params, query_params)
+            .await
+            .and_then(|resp| resp.try_map(TryInto::try_into))
     }
 
     /// Fetch disk
@@ -2120,24 +2107,18 @@ pub trait NexusExternalApi {
         >,
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseOk<ResultsPage<v2025112000::Disk>>, HttpError> {
-        match Self::instance_disk_list(rqctx, query_params, path_params).await {
-            Ok(page) => {
-                let page = ResultsPage {
-                    next_page: page.0.next_page,
-                    items: {
-                        let mut items = Vec::with_capacity(page.0.items.len());
-                        for item in page.0.items {
-                            items.push(item.try_into()?);
-                        }
-                        items
-                    },
-                };
-
-                Ok(HttpResponseOk(page))
-            }
-
-            Err(e) => Err(e),
-        }
+        Self::instance_disk_list(rqctx, query_params, path_params)
+            .await
+            .and_then(|HttpResponseOk(page)| {
+                let items: Result<Vec<_>, _> =
+                    page.items.into_iter().map(TryInto::try_into).collect();
+                items.map(|items| {
+                    HttpResponseOk(ResultsPage {
+                        next_page: page.next_page,
+                        items,
+                    })
+                })
+            })
     }
 
     /// List disks for instance
@@ -2169,20 +2150,14 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
         disk_to_attach: TypedBody<params::DiskPath>,
     ) -> Result<HttpResponseAccepted<v2025112000::Disk>, HttpError> {
-        match Self::instance_disk_attach(
+        Self::instance_disk_attach(
             rqctx,
             path_params,
             query_params,
             disk_to_attach,
         )
         .await
-        {
-            Ok(HttpResponseAccepted(disk)) => {
-                Ok(HttpResponseAccepted(disk.try_into()?))
-            }
-
-            Err(e) => Err(e),
-        }
+        .and_then(|resp| resp.try_map(TryInto::try_into))
     }
 
     /// Attach disk to instance
@@ -2213,20 +2188,14 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
         disk_to_detach: TypedBody<params::DiskPath>,
     ) -> Result<HttpResponseAccepted<v2025112000::Disk>, HttpError> {
-        match Self::instance_disk_detach(
+        Self::instance_disk_detach(
             rqctx,
             path_params,
             query_params,
             disk_to_detach,
         )
         .await
-        {
-            Ok(HttpResponseAccepted(disk)) => {
-                Ok(HttpResponseAccepted(disk.try_into()?))
-            }
-
-            Err(e) => Err(e),
-        }
+        .and_then(|resp| resp.try_map(TryInto::try_into))
     }
 
     /// Detach disk from instance
@@ -3388,22 +3357,14 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025121200::MulticastGroupMember>>,
         HttpError,
     > {
-        match Self::instance_multicast_group_list(
-            rqctx,
-            query_params,
-            path_params,
-        )
-        .await
-        {
-            Ok(page) => {
-                let new_page = ResultsPage {
-                    next_page: page.0.next_page,
-                    items: page.0.items.into_iter().map(Into::into).collect(),
-                };
-                Ok(HttpResponseOk(new_page))
-            }
-            Err(e) => Err(e),
-        }
+        Self::instance_multicast_group_list(rqctx, query_params, path_params)
+            .await
+            .map(|HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    next_page: page.next_page,
+                    items: page.items.into_iter().map(Into::into).collect(),
+                })
+            })
     }
 
     /// List multicast groups for an instance
@@ -3478,8 +3439,7 @@ pub trait NexusExternalApi {
         path_params: Path<v2025121200::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let path =
-            path_params.map(|p| params::InstanceMulticastGroupPath::from(p));
+        let path = path_params.map(Into::into);
         Self::instance_multicast_group_leave(rqctx, path, query_params).await
     }
 
