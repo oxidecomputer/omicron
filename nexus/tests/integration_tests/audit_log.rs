@@ -34,7 +34,9 @@ async fn fetch_log(
     start: DateTime<Utc>,
     end: Option<DateTime<Utc>>,
 ) -> ResultsPage<views::AuditLogEntry> {
-    let mut qs = vec![format!("start_time={}", to_q(start))];
+    // Use a large limit to avoid pagination hiding results
+    let mut qs =
+        vec![format!("start_time={}", to_q(start)), "limit=1000".to_string()];
     if let Some(end) = end {
         qs.push(format!("end_time={}", to_q(end)));
     }
@@ -321,11 +323,14 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
     let init_log = fetch_log(client, t0, None).await;
     assert_eq!(init_log.items.len(), 0);
 
-    let t1 = Utc::now();
-
-    // Set up disk test infrastructure and create resources with audit logging
+    // Set up disk test infrastructure (this may create audit log entries
+    // for covered endpoints, but we're testing the explicit CRUD ops below)
     DiskTest::new(&ctx).await;
     create_default_ip_pools(client).await;
+
+    // Start timing AFTER setup so we only count entries from our test ops
+    let t1 = Utc::now();
+
     let _project = create_project(client, "test-project").await;
     let _instance = create_instance_with(
         client,
@@ -361,9 +366,9 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
 
     let t3 = Utc::now();
 
-    // Fetch and verify all audit log entries in a single call
-    let audit_log = fetch_log(client, t0, None).await;
-    assert_eq!(audit_log.items.len(), 6);
+    // Fetch audit log entries created during our test ops (after t1)
+    let audit_log = fetch_log(client, t1, None).await;
+    assert_eq!(audit_log.items.len(), 8);
 
     let items = &audit_log.items;
 
@@ -374,10 +379,190 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
     let disks_url = "/v1/disks?project=test-project";
     verify_entry(&items[2], "disk_create", disks_url, 201, t1, t2);
 
-    // Verify delete entries
+    // Verify delete entries (instance, disk, subnet, vpc, project)
     verify_entry(&items[3], "instance_delete", instance_del_url, 204, t2, t3);
     verify_entry(&items[4], "disk_delete", disk_del_url, 204, t2, t3);
-    verify_entry(&items[5], "project_delete", project_del_url, 204, t2, t3);
+    verify_entry(
+        &items[5],
+        "vpc_subnet_delete",
+        subnet_delete_url,
+        204,
+        t2,
+        t3,
+    );
+    verify_entry(&items[6], "vpc_delete", vpc_delete_url, 204, t2, t3);
+    verify_entry(&items[7], "project_delete", project_del_url, 204, t2, t3);
+}
+
+/// Test that mutating endpoints in VERIFY_ENDPOINTS create audit log entries.
+/// This is a coverage test to catch endpoints that forget to add audit logging.
+/// The snapshot file lists endpoints that are known to not have audit logging.
+/// As audit logging is added to endpoints, they should be removed from the file.
+#[nexus_test]
+async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
+    use super::endpoints::{AllowedMethod, VERIFY_ENDPOINTS};
+    use expectorate::assert_contents;
+    use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
+    use openapiv3::OpenAPI;
+    use std::collections::BTreeMap;
+
+    let client = &ctx.external_client;
+
+    // Load the OpenAPI schema to get operation IDs
+    let schema_path = "../openapi/nexus/nexus-latest.json";
+    let schema_contents = std::fs::read_to_string(schema_path)
+        .expect("failed to read Nexus OpenAPI spec");
+    let spec: OpenAPI = serde_json::from_str(&schema_contents)
+        .expect("Nexus OpenAPI spec was not valid OpenAPI");
+
+    // Build a map from (method, url_regex) to (operation_id, path_template)
+    let spec_operations: BTreeMap<(String, String), (String, String)> = spec
+        .operations()
+        .map(|(path, method, op)| {
+            // Convert path template to regex pattern
+            let re = regex::Regex::new("/\\{[^}]+\\}").unwrap();
+            let regex_path = re.replace_all(path, "/[^/]+");
+            let regex = format!("^{}$", regex_path);
+            let label = op
+                .operation_id
+                .clone()
+                .unwrap_or_else(|| String::from("unknown"));
+            ((method.to_uppercase(), regex), (label, path.to_string()))
+        })
+        .collect();
+
+    // Set up resources needed by many endpoints
+    DiskTest::new(&ctx).await;
+    create_default_ip_pools(client).await;
+    let _project = create_project(client, "demo-project").await;
+
+    let t_start = Utc::now();
+
+    let mut missing_audit: BTreeMap<String, (String, String)> = BTreeMap::new();
+
+    for endpoint in &*VERIFY_ENDPOINTS {
+        for method in &endpoint.allowed_methods {
+            // Only test mutating methods
+            let is_mutating = match method {
+                AllowedMethod::Post(_)
+                | AllowedMethod::Put(_)
+                | AllowedMethod::Delete => true,
+                AllowedMethod::Get
+                | AllowedMethod::GetNonexistent
+                | AllowedMethod::GetUnimplemented
+                | AllowedMethod::GetVolatile
+                | AllowedMethod::GetWebsocket => false,
+            };
+            if !is_mutating {
+                continue;
+            }
+
+            let before = fetch_log(client, t_start, None).await.items.len();
+
+            // Make authenticated request as unprivileged user. This will fail
+            // authz but should still create an audit log entry if the endpoint
+            // has audit logging. Using unprivileged avoids actually modifying
+            // resources (e.g., removing our own permissions via fleet policy).
+            let http_method = method.http_method().clone();
+            let body = method.body().cloned();
+
+            // Replace {id} placeholders with a valid UUID so path parsing
+            // succeeds and the request reaches the handler. The actual UUID
+            // doesn't matter since we're testing as unprivileged and will fail
+            // authz anyway - we just need the request to reach the handler.
+            let url = endpoint
+                .url
+                .replace("{id}", "00000000-0000-0000-0000-000000000000");
+
+            let result = NexusRequest::new(
+                RequestBuilder::new(client, http_method.clone(), &url)
+                    .body(body.as_ref())
+                    .expect_status(None), // accept any status
+            )
+            .authn_as(AuthnMode::UnprivilegedUser)
+            .execute()
+            .await;
+
+            if result.is_err() {
+                // Request itself failed (connection error, etc), skip
+                continue;
+            }
+
+            let after = fetch_log(client, t_start, None).await.items.len();
+
+            if after <= before {
+                // Find the operation info from the OpenAPI spec
+                let method_str = http_method.to_string().to_uppercase();
+                let url_path = endpoint.url.split('?').next().unwrap();
+
+                let (op_id, path_template) = spec_operations
+                    .iter()
+                    .find(|((m, regex), _)| {
+                        *m == method_str
+                            && regex::Regex::new(regex)
+                                .unwrap()
+                                .is_match(url_path)
+                    })
+                    .map(|(_, (op_id, path))| (op_id.clone(), path.clone()))
+                    .unwrap_or_else(|| {
+                        (String::from("unknown"), url_path.to_string())
+                    });
+
+                missing_audit
+                    .insert(op_id, (method_str.to_lowercase(), path_template));
+            }
+        }
+    }
+
+    let mut output =
+        String::from("Mutating endpoints without audit logging:\n");
+    for (op_id, (method, path)) in &missing_audit {
+        output.push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
+    }
+
+    // Print a helpful message when there are new uncovered endpoints
+    let expected_path = "tests/output/uncovered-audit-log-endpoints.txt";
+    let expected = std::fs::read_to_string(expected_path).unwrap_or_default();
+    let expected_ops: std::collections::HashSet<&str> = expected
+        .lines()
+        .skip(1) // skip the header line
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    let unexpected_uncovered: Vec<_> = missing_audit
+        .keys()
+        .filter(|op| !expected_ops.contains(op.as_str()))
+        .collect();
+    if !unexpected_uncovered.is_empty() {
+        eprintln!();
+        eprintln!(
+            "======================================================================="
+        );
+        eprintln!("ENDPOINTS MISSING AUDIT LOGGING:");
+        for op in &unexpected_uncovered {
+            eprintln!("  - {}", op);
+        }
+        eprintln!();
+        eprintln!(
+            "To add audit logging, wrap your handler function in `audit_and_time`."
+        );
+        eprintln!(
+            "See http_entrypoints.rs for examples and context.rs for documentation."
+        );
+        eprintln!();
+        eprintln!(
+            "If the endpoint is read-only despite using POST (like the timeseries"
+        );
+        eprintln!(
+            "query endpoints), rerun the test with EXPECTORATE=overwrite to update"
+        );
+        eprintln!("the list of uncovered endpoints.");
+        eprintln!(
+            "======================================================================="
+        );
+        eprintln!();
+    }
+
+    assert_contents(expected_path, &output);
 }
 
 fn verify_entry(
