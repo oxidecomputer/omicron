@@ -1,0 +1,3 @@
+Mutating endpoints without audit logging:
+system_timeseries_query                      (post   "/v1/system/timeseries/query")
+timeseries_query                             (post   "/v1/timeseries/query")
