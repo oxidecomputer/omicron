@@ -428,7 +428,6 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
 
     let t_start = Utc::now();
 
-    let mut tested = 0;
     let mut missing_audit: BTreeMap<String, (String, String)> = BTreeMap::new();
 
     for endpoint in &*VERIFY_ENDPOINTS {
@@ -502,11 +501,8 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
                 missing_audit
                     .insert(op_id, (method_str.to_lowercase(), path_template));
             }
-            tested += 1;
         }
     }
-
-    println!("Tested {} mutating endpoints", tested);
 
     let mut output =
         String::from("Mutating endpoints without audit logging:\n");
@@ -514,10 +510,49 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
         output.push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
     }
 
-    // If you're adding audit logging to an endpoint, remove it from this file.
-    // If you're adding a new endpoint, add audit logging or add it to this file
-    // with justification.
-    assert_contents("tests/output/uncovered-audit-log-endpoints.txt", &output);
+    // Print a helpful message when there are new uncovered endpoints
+    let expected_path = "tests/output/uncovered-audit-log-endpoints.txt";
+    let expected = std::fs::read_to_string(expected_path).unwrap_or_default();
+    let expected_ops: std::collections::HashSet<&str> = expected
+        .lines()
+        .skip(1) // skip the header line
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    let unexpected_uncovered: Vec<_> = missing_audit
+        .keys()
+        .filter(|op| !expected_ops.contains(op.as_str()))
+        .collect();
+    if !unexpected_uncovered.is_empty() {
+        eprintln!();
+        eprintln!(
+            "======================================================================="
+        );
+        eprintln!("ENDPOINTS MISSING AUDIT LOGGING:");
+        for op in &unexpected_uncovered {
+            eprintln!("  - {}", op);
+        }
+        eprintln!();
+        eprintln!(
+            "To add audit logging, wrap your handler function in `audit_and_time`."
+        );
+        eprintln!(
+            "See http_entrypoints.rs for examples and context.rs for documentation."
+        );
+        eprintln!();
+        eprintln!(
+            "If the endpoint is read-only despite using POST (like the timeseries"
+        );
+        eprintln!(
+            "query endpoints), rerun the test with EXPECTORATE=overwrite to update"
+        );
+        eprintln!("the list of uncovered endpoints.");
+        eprintln!(
+            "======================================================================="
+        );
+        eprintln!();
+    }
+
+    assert_contents(expected_path, &output);
 }
 
 fn verify_entry(
