@@ -182,6 +182,12 @@ pub struct MulticastGroupByIpPath {
     pub address: IpAddr,
 }
 
+impl From<MulticastGroupByIpPath> for params::MulticastGroupPath {
+    fn from(old: MulticastGroupByIpPath) -> Self {
+        Self { multicast_group: old.address.into() }
+    }
+}
+
 impl From<MulticastGroupCreate> for InternalMulticastGroupCreate {
     fn from(old: MulticastGroupCreate) -> Self {
         // Note: `source_ips` is ignored because it's per-member in new version,
