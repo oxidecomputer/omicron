@@ -262,25 +262,47 @@ pub fn allocation_query(
 
     let mut builder = QueryBuilder::new();
 
-    builder.sql(
-    // Find all old regions associated with a particular volume
-"WITH
+    builder
+        .sql(
+            // Find all old regions associated with a particular volume
+            "WITH
   old_regions AS (
-    SELECT ").sql(AllColumnsOfRegion::with_prefix("region")).sql("
-    FROM region WHERE (region.volume_id = ").param().sql(")),")
-    .bind::<sql_types::Uuid, _>(*volume_id.as_untyped_uuid())
-
-    // Calculates the old size being used by zpools under consideration as targets for region
-    // allocation.
-    .sql("
+    SELECT ",
+        )
+        .sql(AllColumnsOfRegion::with_prefix("region"))
+        .sql(
+            "
+    FROM region WHERE (region.volume_id = ",
+        )
+        .param()
+        .sql(")),")
+        .bind::<sql_types::Uuid, _>(*volume_id.as_untyped_uuid())
+        // Calculates the old size being used by zpools under consideration as
+        // targets for region allocation.
+        //
+        // Account for the local storage dataset rendezvous tables not having been
+        // created yet (or for the integration tests, where blueprint execution is
+        // currently disabled) by performing a LEFT JOIN on pool_id and a coalesce
+        // for the size_used column.
+        .sql(
+            "
   old_zpool_usage AS (
     SELECT
       crucible_dataset.pool_id,
-      sum(crucible_dataset.size_used) AS size_used
-    FROM crucible_dataset
+      (
+       sum(crucible_dataset.size_used) +
+       sum(coalesce(rendezvous_local_storage_dataset.size_used, 0))
+      ) AS size_used
+    FROM
+      crucible_dataset LEFT JOIN rendezvous_local_storage_dataset
+      ON
+        crucible_dataset.pool_id = rendezvous_local_storage_dataset.pool_id AND
+        rendezvous_local_storage_dataset.time_tombstoned is NULL
     WHERE
-      ((crucible_dataset.size_used IS NOT NULL) AND (crucible_dataset.time_deleted IS NULL))
-    GROUP BY crucible_dataset.pool_id),");
+      crucible_dataset.size_used IS NOT NULL AND
+      crucible_dataset.time_deleted IS NULL
+    GROUP BY crucible_dataset.pool_id),",
+        );
 
     if let Some(snapshot_id) = snapshot_id {
         // Any zpool already have this volume's existing regions, or host the
