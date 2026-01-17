@@ -43,6 +43,9 @@ mod v2026010300;
 mod v2026010500;
 mod v2026011501;
 
+#[cfg(test)]
+mod test_utils;
+
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
     // YYYYMMDDNN. Here, NN is a two-digit number starting at 00 for a
@@ -1300,10 +1303,12 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         floating_params: TypedBody<v2025121200::FloatingIpCreate>,
     ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
-        Self::floating_ip_create(
+        let floating_params =
+            floating_params.map(v2026010300::FloatingIpCreate::from);
+        Self::v2026010300_floating_ip_create(
             rqctx,
             query_params,
-            floating_params.map(Into::into),
+            floating_params,
         )
         .await
     }
@@ -1322,8 +1327,14 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         floating_params: TypedBody<v2026010300::FloatingIpCreate>,
     ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
-        let floating_params = floating_params.try_map(TryInto::try_into)?;
-        Self::floating_ip_create(rqctx, query_params, floating_params).await
+        let floating_params =
+            floating_params.try_map(v2026011501::FloatingIpCreate::try_from)?;
+        Self::v2026011501_floating_ip_create(
+            rqctx,
+            query_params,
+            floating_params,
+        )
+        .await
     }
 
     /// Create floating IP
