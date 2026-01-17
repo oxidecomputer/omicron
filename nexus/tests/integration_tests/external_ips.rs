@@ -235,7 +235,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
             name: fip_name.parse().unwrap(),
             description: String::from("a floating ip"),
         },
-        address_selector: params::AddressSelector::Auto {
+        address_allocator: params::AddressAllocator::Auto {
             pool_selector: params::PoolSelector::Explicit {
                 pool: NameOrId::Name("other-pool".parse().unwrap()),
             },
@@ -354,7 +354,7 @@ async fn test_floating_ip_create_non_admin(
             name: "root-beer".parse().unwrap(),
             description: String::from("a floating ip"),
         },
-        address_selector: params::AddressSelector::Auto {
+        address_allocator: params::AddressAllocator::Auto {
             pool_selector: params::PoolSelector::Auto { ip_version: None },
         },
     };
@@ -371,7 +371,7 @@ async fn test_floating_ip_create_non_admin(
             name: "another-soda".parse().unwrap(),
             description: String::from("a floating ip"),
         },
-        address_selector: params::AddressSelector::Auto {
+        address_allocator: params::AddressAllocator::Auto {
             pool_selector: params::PoolSelector::Explicit {
                 pool: NameOrId::Name("other-pool".parse().unwrap()),
             },
@@ -390,7 +390,7 @@ async fn test_floating_ip_create_non_admin(
             name: "secret-third-soda".parse().unwrap(),
             description: String::from("a floating ip"),
         },
-        address_selector: params::AddressSelector::Auto {
+        address_allocator: params::AddressAllocator::Auto {
             pool_selector: params::PoolSelector::Explicit {
                 pool: NameOrId::Name("unlinked-pool".parse().unwrap()),
             },
@@ -445,7 +445,7 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
             name: fip_name.parse().unwrap(),
             description: String::from("a floating ip"),
         },
-        address_selector: params::AddressSelector::Auto {
+        address_allocator: params::AddressAllocator::Auto {
             pool_selector: params::PoolSelector::Explicit {
                 pool: NameOrId::Name("external-silo-pool".parse().unwrap()),
             },
@@ -505,7 +505,7 @@ async fn test_floating_ip_create_ip_in_use(
                 name: FIP_NAMES[1].parse().unwrap(),
                 description: "another fip".into(),
             },
-            address_selector: params::AddressSelector::Explicit {
+            address_allocator: params::AddressAllocator::Explicit {
                 ip: contested_ip,
                 pool: Some(v4_pool.identity.name.clone().into()),
             },
@@ -555,7 +555,7 @@ async fn test_floating_ip_create_name_in_use(
                 name: contested_name.parse().unwrap(),
                 description: "another fip".into(),
             },
-            address_selector: params::AddressSelector::Auto {
+            address_allocator: params::AddressAllocator::Auto {
                 pool_selector: params::PoolSelector::Explicit {
                     pool: v4_pool.identity.name.clone().into(),
                 },
@@ -1428,7 +1428,7 @@ async fn test_floating_ip_ip_version_conflict(
             name: "should-fail".parse().unwrap(),
             description: "this should fail".to_string(),
         },
-        address_selector: params::AddressSelector::Auto {
+        address_allocator: params::AddressAllocator::Auto {
             pool_selector: params::PoolSelector::Auto { ip_version: None },
         },
     };
@@ -1448,7 +1448,7 @@ async fn test_floating_ip_ip_version_conflict(
             name: "fip-v4".parse().unwrap(),
             description: "IPv4 floating IP".to_string(),
         },
-        address_selector: params::AddressSelector::Auto {
+        address_allocator: params::AddressAllocator::Auto {
             pool_selector: params::PoolSelector::Auto {
                 ip_version: Some(views::IpVersion::V4),
             },
@@ -1463,7 +1463,7 @@ async fn test_floating_ip_ip_version_conflict(
             name: "fip-v6".parse().unwrap(),
             description: "IPv6 floating IP".to_string(),
         },
-        address_selector: params::AddressSelector::Auto {
+        address_allocator: params::AddressAllocator::Auto {
             pool_selector: params::PoolSelector::Auto {
                 ip_version: Some(views::IpVersion::V6),
             },

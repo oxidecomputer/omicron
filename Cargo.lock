@@ -6948,9 +6948,11 @@ dependencies = [
  "oximeter-types 0.1.0",
  "oxnet",
  "oxql-types",
+ "proptest",
  "schemars 0.8.22",
  "scim2-rs",
  "serde",
+ "test-strategy",
  "tufaceous-artifact",
  "uuid",
 ]
