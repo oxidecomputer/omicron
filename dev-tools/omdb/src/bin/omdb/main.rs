@@ -42,7 +42,6 @@ use clap::Parser;
 use clap::Subcommand;
 use futures::StreamExt;
 use internal_dns_types::names::ServiceName;
-use omicron_common::address::Ipv6Subnet;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tokio::net::TcpSocket;
@@ -249,34 +248,25 @@ impl Omdb {
                 })
             }
             None => {
-                // In principle, we should look at /etc/resolv.conf to find the
-                // DNS servers.  In practice, this usually isn't populated
-                // today.  See oxidecomputer/omicron#2122.
-                //
-                // However, the address selected below should work for most
-                // existing Omicron deployments today.  That's because while the
-                // base subnet is in principle configurable in config-rss.toml,
-                // it's very uncommon to change it from the default value used
-                // here.
-                //
-                // Yet another option would be to find a local IP address that
-                // looks like it's probably on the underlay network and use that
-                // to find the subnet to use.  But again, this is unlikely to be
-                // wrong and it's easy to override.
-                let subnet =
-                    Ipv6Subnet::new("fd00:1122:3344:0100::".parse().unwrap());
-                eprintln!("note: using DNS server for subnet {}", subnet.net());
+                // We now populate the internal DNS servers in /etc/resolv.conf
+                // within the switch zone (the primary location for running
+                // omdb). Notify the user that we're going to attempt DNS
+                // resolution via the default system path. This will be wrong if
+                // the rack is not set up yet (although omdb is useless at that
+                // point anyway) or if we're running somewhere where
+                // /etc/resolv.conf does not point to our internal DNS servers
+                // (a non-switch zone without DNS configured, a development
+                // system, etc.).
+                eprintln!(
+                    "note: using DNS from system config \
+                     (typically /etc/resolv.conf)"
+                );
                 eprintln!(
                     "note: (if this is not right, use --dns-server \
                     to specify an alternate DNS server)",
                 );
-                internal_dns_resolver::Resolver::new_from_subnet(log, subnet)
-                    .with_context(|| {
-                        format!(
-                            "creating DNS resolver for subnet {}",
-                            subnet.net()
-                        )
-                    })
+                internal_dns_resolver::Resolver::new_from_system_conf(log)
+                    .context("creating DNS resolver from system config")
             }
         }
     }

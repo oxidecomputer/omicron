@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::running_zone::RunningZone;
+use crate::zone::SVCADM;
 use crate::zone::SVCCFG;
 
 #[derive(thiserror::Error, Debug)]
@@ -16,7 +17,7 @@ pub enum Error {
 }
 
 pub trait Service {
-    fn service_name(&self) -> String;
+    fn service_name(&self) -> &str;
     fn smf_name(&self) -> String;
 }
 
@@ -241,6 +242,16 @@ impl<'t> SmfHelper<'t> {
                     "Refresh SMF manifest {}",
                     self.default_smf_name
                 ),
+                err,
+            })?;
+        Ok(())
+    }
+
+    pub fn enable(&self) -> Result<(), Error> {
+        self.running_zone
+            .run_cmd(&[SVCADM, "enable", &self.smf_name])
+            .map_err(|err| Error::ZoneCommand {
+                intent: format!("Enable SMF service {}", self.default_smf_name),
                 err,
             })?;
         Ok(())
