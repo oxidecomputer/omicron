@@ -23,6 +23,7 @@ mod demo_saga;
 mod device_auth;
 mod disks;
 mod external_ips;
+mod external_subnets;
 mod images;
 mod initialization;
 mod instances;

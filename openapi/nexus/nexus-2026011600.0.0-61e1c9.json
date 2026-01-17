@@ -23690,7 +23690,7 @@
         ]
       },
       "PoolSelector": {
-        "description": "Specify which IP pool to allocate from.",
+        "description": "Specify which IP or external subnet pool to allocate from.",
         "oneOf": [
           {
             "description": "Use the specified pool by name or ID.",
@@ -29522,6 +29522,13 @@
       "description": "Experimental, unstable interfaces, primarily for use by Oxide personnel",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/experimental"
+      }
+    },
+    {
+      "name": "external-subnets",
+      "description": "External subnets that can be attached to instances.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/external-subnets"
       }
     },
     {

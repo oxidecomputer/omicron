@@ -2800,6 +2800,362 @@
         }
       }
     },
+    "/v1/external-subnets": {
+      "get": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "List external subnets in a project",
+        "operationId": "external_subnet_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnetResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Create an external subnet",
+        "operationId": "external_subnet_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalSubnetCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/external-subnets/{external_subnet}": {
+      "get": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Fetch an external subnet",
+        "operationId": "external_subnet_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_subnet",
+            "description": "Name or ID of the external subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Update an external subnet",
+        "operationId": "external_subnet_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_subnet",
+            "description": "Name or ID of the external subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalSubnetUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Delete an external subnet",
+        "operationId": "external_subnet_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_subnet",
+            "description": "Name or ID of the external subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/external-subnets/{external_subnet}/attach": {
+      "post": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Attach an external subnet to an instance",
+        "description": "Begins an asynchronous attach operation. Returns the subnet with `instance_id` set to the target instance. The attach completes asynchronously; poll the subnet to check completion.",
+        "operationId": "external_subnet_attach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_subnet",
+            "description": "Name or ID of the external subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalSubnetAttach"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/external-subnets/{external_subnet}/detach": {
+      "post": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Detach an external subnet from an instance",
+        "description": "Begins an asynchronous detach operation. Returns the subnet with `instance_id` cleared. The detach completes asynchronously.",
+        "operationId": "external_subnet_detach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_subnet",
+            "description": "Name or ID of the external subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/floating-ips": {
       "get": {
         "tags": [
@@ -19688,6 +20044,232 @@
           "items"
         ]
       },
+      "ExternalSubnet": {
+        "description": "An external subnet allocated from a subnet pool",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "instance_id": {
+            "nullable": true,
+            "description": "The instance this subnet is attached to, if any",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "project_id": {
+            "description": "The project this subnet belongs to",
+            "type": "string",
+            "format": "uuid"
+          },
+          "subnet": {
+            "description": "The allocated subnet CIDR",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "subnet_pool_id": {
+            "description": "The subnet pool this was allocated from",
+            "type": "string",
+            "format": "uuid"
+          },
+          "subnet_pool_member_id": {
+            "description": "The subnet pool member this subnet corresponds to",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "project_id",
+          "subnet",
+          "subnet_pool_id",
+          "subnet_pool_member_id",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "ExternalSubnetAllocator": {
+        "description": "Specify how to allocate an external subnet.",
+        "oneOf": [
+          {
+            "description": "Reserve a specific subnet.",
+            "type": "object",
+            "properties": {
+              "pool": {
+                "nullable": true,
+                "description": "The pool containing this subnet. If not specified, the default subnet pool for the subnet's IP version is used.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NameOrId"
+                  }
+                ]
+              },
+              "subnet": {
+                "description": "The subnet CIDR to reserve. Must be available in the pool.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/IpNet"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "subnet",
+              "type"
+            ]
+          },
+          {
+            "description": "Automatically allocate a subnet with the specified prefix length.",
+            "type": "object",
+            "properties": {
+              "pool_selector": {
+                "description": "Pool selection.\n\nIf omitted, this field uses the silo's default pool. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified in the pool selector.",
+                "default": {
+                  "ip_version": null,
+                  "type": "auto"
+                },
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PoolSelector"
+                  }
+                ]
+              },
+              "prefix_len": {
+                "description": "The prefix length for the allocated subnet (e.g., 24 for a /24).",
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "auto"
+                ]
+              }
+            },
+            "required": [
+              "prefix_len",
+              "type"
+            ]
+          }
+        ]
+      },
+      "ExternalSubnetAttach": {
+        "description": "Attach an external subnet to an instance",
+        "type": "object",
+        "properties": {
+          "instance": {
+            "description": "Name or ID of the instance to attach to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "instance"
+        ]
+      },
+      "ExternalSubnetCreate": {
+        "description": "Create an external subnet",
+        "type": "object",
+        "properties": {
+          "allocator": {
+            "description": "Subnet allocation method.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExternalSubnetAllocator"
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "allocator",
+          "description",
+          "name"
+        ]
+      },
+      "ExternalSubnetResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalSubnet"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ExternalSubnetUpdate": {
+        "description": "Update an external subnet",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
       "FailureDomain": {
         "description": "Describes the scope of affinity for the purposes of co-location.",
         "oneOf": [
@@ -24301,7 +24883,7 @@
         ]
       },
       "PoolSelector": {
-        "description": "Specify which IP pool to allocate from.",
+        "description": "Specify which IP or external subnet pool to allocate from.",
         "oneOf": [
           {
             "description": "Use the specified pool by name or ID.",
@@ -30508,6 +31090,13 @@
       "description": "Experimental, unstable interfaces, primarily for use by Oxide personnel",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/experimental"
+      }
+    },
+    {
+      "name": "external-subnets",
+      "description": "External subnets that can be attached to instances.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/external-subnets"
       }
     },
     {

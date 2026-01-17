@@ -71,6 +71,16 @@ support_bundle_update                    PUT      /experimental/v1/system/suppor
 support_bundle_view                      GET      /experimental/v1/system/support-bundles/{bundle_id}
 timeseries_query                         POST     /v1/timeseries/query
 
+API operations found with tag "external-subnets"
+OPERATION ID                             METHOD   URL PATH
+external_subnet_attach                   POST     /v1/external-subnets/{external_subnet}/attach
+external_subnet_create                   POST     /v1/external-subnets
+external_subnet_delete                   DELETE   /v1/external-subnets/{external_subnet}
+external_subnet_detach                   POST     /v1/external-subnets/{external_subnet}/detach
+external_subnet_list                     GET      /v1/external-subnets
+external_subnet_update                   PUT      /v1/external-subnets/{external_subnet}
+external_subnet_view                     GET      /v1/external-subnets/{external_subnet}
+
 API operations found with tag "floating-ips"
 OPERATION ID                             METHOD   URL PATH
 floating_ip_attach                       POST     /v1/floating-ips/{floating_ip}/attach

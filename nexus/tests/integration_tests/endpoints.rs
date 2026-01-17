@@ -1142,6 +1142,55 @@ pub static DEMO_SUBNET_POOL_SILO_UPDATE: LazyLock<
 pub static DEMO_SUBNET_POOL_UTILIZATION_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/utilization", *DEMO_SUBNET_POOL_URL));
 
+// External Subnets (project-scoped)
+pub static DEMO_EXTERNAL_SUBNETS_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/external-subnets?project={}", *DEMO_PROJECT_NAME)
+});
+pub static DEMO_EXTERNAL_SUBNET_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-external-subnet".parse().unwrap());
+pub static DEMO_EXTERNAL_SUBNET_CREATE: LazyLock<params::ExternalSubnetCreate> =
+    LazyLock::new(|| params::ExternalSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_EXTERNAL_SUBNET_NAME.clone(),
+            description: String::from("an external subnet"),
+        },
+        allocator: params::ExternalSubnetAllocator::Auto {
+            prefix_len: 24,
+            pool_selector: params::PoolSelector::default(),
+        },
+    });
+pub static DEMO_EXTERNAL_SUBNET_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/external-subnets/{}?project={}",
+        *DEMO_EXTERNAL_SUBNET_NAME, *DEMO_PROJECT_NAME
+    )
+});
+pub static DEMO_EXTERNAL_SUBNET_UPDATE: LazyLock<params::ExternalSubnetUpdate> =
+    LazyLock::new(|| params::ExternalSubnetUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some(String::from("an updated external subnet")),
+        },
+    });
+pub static DEMO_EXTERNAL_SUBNET_ATTACH_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/external-subnets/{}/attach?project={}",
+            *DEMO_EXTERNAL_SUBNET_NAME, *DEMO_PROJECT_NAME
+        )
+    });
+pub static DEMO_EXTERNAL_SUBNET_ATTACH: LazyLock<params::ExternalSubnetAttach> =
+    LazyLock::new(|| params::ExternalSubnetAttach {
+        instance: DEMO_INSTANCE_NAME.clone().into(),
+    });
+pub static DEMO_EXTERNAL_SUBNET_DETACH_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/external-subnets/{}/detach?project={}",
+            *DEMO_EXTERNAL_SUBNET_NAME, *DEMO_PROJECT_NAME
+        )
+    });
+
 // Snapshots
 pub static DEMO_SNAPSHOT_NAME: LazyLock<Name> =
     LazyLock::new(|| "demo-snapshot".parse().unwrap());
@@ -1819,6 +1868,50 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetUnimplemented],
+            },
+            /* External Subnets (project-scoped) */
+            // TODO(#9453): These are stub endpoints. Use GetUnimplemented
+            // since privileged GET requests will return 500 not 200.
+            VerifyEndpoint {
+                url: &DEMO_EXTERNAL_SUBNETS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_EXTERNAL_SUBNET_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_UPDATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_EXTERNAL_SUBNET_ATTACH_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_ATTACH).unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_EXTERNAL_SUBNET_DETACH_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&()).unwrap(),
+                )],
             },
             /* Silos */
             VerifyEndpoint {

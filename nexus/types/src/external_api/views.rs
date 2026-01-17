@@ -509,6 +509,25 @@ pub struct SubnetPoolUtilization {
     pub capacity: f64,
 }
 
+// EXTERNAL SUBNETS
+
+/// An external subnet allocated from a subnet pool
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnet {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The allocated subnet CIDR
+    pub subnet: IpNet,
+    /// The project this subnet belongs to
+    pub project_id: Uuid,
+    /// The subnet pool this was allocated from
+    pub subnet_pool_id: Uuid,
+    /// The subnet pool member this subnet corresponds to
+    pub subnet_pool_member_id: Uuid,
+    /// The instance this subnet is attached to, if any
+    pub instance_id: Option<Uuid>,
+}
+
 // INSTANCE EXTERNAL IP ADDRESSES
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
