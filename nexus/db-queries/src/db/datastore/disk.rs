@@ -302,6 +302,9 @@ impl Into<api::external::Disk> for Disk {
 }
 
 impl DataStore {
+    /// Return a `datastore::Disk` given a disk's UUID. Will perform a
+    /// LookupPath in order to retrive the `model::Disk`, then call
+    /// `disk_get_with_model`.
     pub async fn disk_get(
         &self,
         opctx: &OpContext,
@@ -309,6 +312,21 @@ impl DataStore {
     ) -> LookupResult<Disk> {
         let (.., disk) =
             LookupPath::new(opctx, self).disk_id(disk_id).fetch().await?;
+
+        self.disk_get_with_model(opctx, disk).await
+    }
+
+    /// Return a `datastore::Disk` given a `model::Disk`
+    ///
+    /// Prefer to use `disk_get` instead: this version of the function bypasses
+    /// the LookupPath induced permissions check and is (currently) only called
+    /// from omdb.
+    pub async fn disk_get_with_model(
+        &self,
+        opctx: &OpContext,
+        disk: model::Disk,
+    ) -> LookupResult<Disk> {
+        let disk_id = disk.id();
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
