@@ -7832,7 +7832,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Retrieve the latest ongoing rack cluster membership change",
+        "summary": "Retrieve the latest rack cluster membership change",
         "operationId": "rack_membership_config_latest",
         "parameters": [
           {

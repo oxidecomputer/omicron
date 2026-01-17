@@ -718,8 +718,8 @@ impl From<TrustQuorumConfig> for RackMembershipChange {
             .members
             .iter()
             .filter_map(|(id, data)| match data.state {
-                TrustQuorumMemberState::Unacked => Some(id.clone()),
-                TrustQuorumMemberState::Prepared => Some(id.clone()),
+                TrustQuorumMemberState::Unacked
+                | TrustQuorumMemberState::Prepared => Some(id.clone()),
                 TrustQuorumMemberState::Committed => None,
             })
             .collect();

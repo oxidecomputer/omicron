@@ -15,6 +15,7 @@ use nexus_types::trust_quorum::{
     TrustQuorumConfig as NexusTrustQuorumConfig, TrustQuorumMemberState,
 };
 use omicron_uuid_kinds::RackUuid;
+use parallel_task_set::ParallelTaskSet;
 use rand::seq::SliceRandom;
 use serde_json::json;
 use sled_agent_client::types::{
@@ -73,8 +74,7 @@ impl TrustQuorumManager {
         );
 
         // For each rack, do the work
-        let mut workers = JoinSet::new();
-        let mut config_by_task_id = BTreeMap::new();
+        let mut workers = ParallelTaskSet::new();
         for (rack_id, epoch) in epochs_by_rack_id {
             let log = log.clone();
             let opctx = opctx.child(BTreeMap::from([
@@ -82,48 +82,33 @@ impl TrustQuorumManager {
                 ("epoch".into(), epoch.to_string()),
             ]));
             let datastore = self.datastore.clone();
-            let handle = workers.spawn(async move {
-                drive_reconfiguration(log, opctx, datastore, rack_id, epoch)
-                    .await
-            });
-            config_by_task_id.insert(handle.id(), (rack_id, epoch));
+            workers
+                .spawn(async move {
+                    let res = drive_reconfiguration(
+                        log, opctx, datastore, rack_id, epoch,
+                    )
+                    .await;
+                    (rack_id, epoch, res)
+                })
+                .await;
         }
 
         let mut statuses = vec![];
         let mut errors = vec![];
-        while let Some(res) = workers.join_next_with_id().await {
+        while let Some((rack_id, epoch, res)) = workers.join_next().await {
+            // Propagate panics: we don't cancel the worker tasks, so this
+            // can only fail if the task itself already panicked.
             match res {
-                Ok((task_id, res)) => {
-                    // Safety: We fill in the map directly above
-                    let (rack_id, epoch) = config_by_task_id
-                        .remove(&task_id)
-                        .expect("task id exists");
-                    match res {
-                        Ok(status) => {
-                            let status_string =
-                                status.to_display(rack_id, epoch);
-                            info!(log, "{status_string}");
-                            statuses.push(status_string);
-                        }
-                        Err(err) => {
-                            let msg = format!(
-                                "Reconfiguration worker error for \
-                                rack_id {rack_id}, epoch {epoch}: {}",
-                                InlineErrorChain::new(&*err)
-                            );
-                            error!(log, "{msg}");
-                            errors.push(msg);
-                        }
-                    }
+                Ok(status) => {
+                    let status_string = status.to_display(rack_id, epoch);
+                    info!(log, "{status_string}");
+                    statuses.push(status_string);
                 }
                 Err(err) => {
-                    // Safety: We fill in the map directly above
-                    let (rack_id, epoch) = config_by_task_id
-                        .remove(&err.id())
-                        .expect("task id exists");
                     let msg = format!(
                         "Reconfiguration worker error for \
-                        rack_id {rack_id}, epoch {epoch}: {err}"
+                                rack_id {rack_id}, epoch {epoch}: {}",
+                        InlineErrorChain::new(&*err)
                     );
                     error!(log, "{msg}");
                     errors.push(msg);
@@ -400,7 +385,6 @@ async fn commit(
 
     let ops_per_client = ops.len() / clients.len();
     let num_clients = clients.len();
-    let mut client_destinations_by_worker_task_id = BTreeMap::new();
     for (i, (client_dest, client)) in clients.into_iter().enumerate() {
         let config = config.clone();
         let client_ops = if i + 1 == num_clients {
@@ -413,39 +397,18 @@ async fn commit(
             ops.drain(..ops_per_client).collect()
         };
         let client_dest2 = client_dest.clone();
-        let handle = workers.spawn(async move {
+        workers.spawn(async move {
             run_commit_ops(client_dest2, client, client_ops, config).await
         });
-        client_destinations_by_worker_task_id.insert(handle.id(), client_dest);
     }
 
     let mut acked = BTreeSet::new();
     let mut client_results = Vec::with_capacity(num_clients);
     while let Some(res) = workers.join_next().await {
-        match res {
-            Ok(r) => {
-                // Collect all acks so we can update the DB
-                acked.extend(r.acked.clone());
-                client_results.push(r);
-            }
-            Err(err) => {
-                match client_destinations_by_worker_task_id.get(&err.id()) {
-                    Some(dest) => {
-                        error!(
-                            log,
-                            "Client worker for destination {dest} failed: {err}"
-                        );
-                    }
-                    None => {
-                        // This should never happen as we insert in the map above
-                        error!(
-                            log,
-                            "Client worker failed, but destination unknown: {err}"
-                        );
-                    }
-                }
-            }
-        }
+        let r = res.expect("worker task didn't panic");
+        // Collect all acks so we can update the DB
+        acked.extend(r.acked.clone());
+        client_results.push(r);
     }
 
     if !acked.is_empty() {

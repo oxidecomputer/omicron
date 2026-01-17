@@ -1499,7 +1499,7 @@ mod test {
                             backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
                         },
                         trust_quorum: TrustQuorumConfig {
-                            period_secs: Duration::from_secs(50),
+                            period_secs: Duration::from_secs(60),
                         },
                     },
                     multicast: MulticastConfig { enabled: false },
