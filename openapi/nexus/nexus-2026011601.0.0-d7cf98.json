@@ -16214,6 +16214,12 @@
               }
             ]
           },
+          "credential_id": {
+            "nullable": true,
+            "description": "ID of the credential used for authentication. Null for unauthenticated requests. The value of `auth_method` indicates what kind of credential it is (access token, session, or SCIM token).",
+            "type": "string",
+            "format": "uuid"
+          },
           "id": {
             "description": "Unique identifier for the audit log entry",
             "type": "string",

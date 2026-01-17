@@ -462,7 +462,7 @@ impl authn::external::token::TokenContext for ServerContext {
         &self,
         token: String,
     ) -> Result<
-        (authn::Actor, Option<chrono::DateTime<chrono::Utc>>),
+        (authn::Actor, Option<chrono::DateTime<chrono::Utc>>, Uuid),
         authn::Reason,
     > {
         let opctx = self.nexus.opctx_external_authn();
@@ -506,7 +506,7 @@ impl authn::external::scim::ScimTokenContext for ServerContext {
     async fn scim_token_actor(
         &self,
         token: String,
-    ) -> Result<authn::Actor, authn::Reason> {
+    ) -> Result<(authn::Actor, Uuid), authn::Reason> {
         let opctx = self.nexus.opctx_external_authn();
         self.nexus.scim_token_actor(opctx, token).await
     }

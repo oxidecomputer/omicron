@@ -92,7 +92,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         token: String,
-    ) -> Result<Actor, Reason> {
+    ) -> Result<(Actor, Uuid), Reason> {
         let Some(bearer_token) = self
             .datastore()
             .scim_lookup_token_by_bearer(opctx, token.clone())
@@ -137,7 +137,8 @@ impl super::Nexus {
             });
         }
 
-        Ok(Actor::Scim { silo_id: bearer_token.silo_id })
+        let token_id = bearer_token.id;
+        Ok((Actor::Scim { silo_id: bearer_token.silo_id }, token_id))
     }
 
     /// For an authenticataed Actor::Scim, return a scim2_rs::Provider
