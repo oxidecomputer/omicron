@@ -12,6 +12,7 @@ use crate::authn;
 use async_trait::async_trait;
 use headers::HeaderMapExt;
 use headers::authorization::{Authorization, Bearer};
+use uuid::Uuid;
 
 // This scheme is intended only for SCIM provisioning clients.
 //
@@ -66,9 +67,10 @@ where
             Ok(None) => SchemeResult::NotRequested,
             Ok(Some(token)) => match ctx.scim_token_actor(token).await {
                 Err(error) => SchemeResult::Failed(error),
-                Ok(actor) => SchemeResult::Authenticated(Details {
+                Ok((actor, token_id)) => SchemeResult::Authenticated(Details {
                     actor,
                     device_token_expiration: None,
+                    credential_id: Some(token_id),
                 }),
             },
         }
@@ -93,10 +95,11 @@ fn parse_token(
 }
 
 /// A context that can look up a Actor::Scim from a token.
+/// Returns the actor and the SCIM token ID.
 #[async_trait]
 pub trait ScimTokenContext {
     async fn scim_token_actor(
         &self,
         token: String,
-    ) -> Result<authn::Actor, Reason>;
+    ) -> Result<(authn::Actor, Uuid), Reason>;
 }

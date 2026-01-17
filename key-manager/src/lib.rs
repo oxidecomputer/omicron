@@ -306,18 +306,23 @@ pub enum SecretRetrieverError {
 
     #[error("Bootstore error: {0}")]
     Bootstore(String),
+
+    #[error("Trust quorum error: {0}")]
+    TrustQuorum(String),
 }
 
 /// A mechanism for retrieving a secrets to use as input key material to HKDF-
 /// Extract.
 #[async_trait]
-pub trait SecretRetriever {
+pub trait SecretRetriever: Send + Sync + 'static {
     /// Return the latest secret
     ////
     /// This is useful when a new entity is being encrypted and there is no need
     /// for a reconfiguration. When an entity is already encrypted, and needs to
     /// be decrypted, the user should instead call the [`SecretRetriever::get`].
-    async fn get_latest(&self) -> Result<VersionedIkm, SecretRetrieverError>;
+    async fn get_latest(
+        &mut self,
+    ) -> Result<VersionedIkm, SecretRetrieverError>;
 
     /// Get the secret for the given epoch
     ///
@@ -331,7 +336,7 @@ pub trait SecretRetriever {
     /// Return an error if its not possible to recover the old secret given the
     /// latest secret.
     async fn get(
-        &self,
+        &mut self,
         epoch: u64,
     ) -> Result<SecretState, SecretRetrieverError>;
 }
@@ -363,7 +368,7 @@ mod tests {
     #[async_trait]
     impl SecretRetriever for TestSecretRetriever {
         async fn get_latest(
-            &self,
+            &mut self,
         ) -> Result<VersionedIkm, SecretRetrieverError> {
             let salt = [0u8; 32];
             let (epoch, bytes) = self.ikms.last_key_value().unwrap();
@@ -371,7 +376,7 @@ mod tests {
         }
 
         async fn get(
-            &self,
+            &mut self,
             epoch: u64,
         ) -> Result<SecretState, SecretRetrieverError> {
             let salt = [0u8; 32];

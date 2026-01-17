@@ -1921,6 +1921,11 @@ pub struct AuditLogEntry {
     /// token). Null for unauthenticated requests like login attempts.
     pub auth_method: Option<AuthMethod>,
 
+    /// ID of the credential used for authentication. Null for unauthenticated
+    /// requests. The value of `auth_method` indicates what kind of credential
+    /// it is (access token, session, or SCIM token).
+    pub credential_id: Option<Uuid>,
+
     // Fields that are optional because they get filled in after the action completes
     /// Time operation completed
     pub time_completed: DateTime<Utc>,

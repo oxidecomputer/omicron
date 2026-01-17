@@ -8893,6 +8893,7 @@ dependencies = [
  "repo-depot-client",
  "reqwest",
  "schemars 0.8.22",
+ "secrecy 0.10.3",
  "serde",
  "serde_human_bytes",
  "serde_json",

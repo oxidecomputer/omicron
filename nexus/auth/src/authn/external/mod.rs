@@ -237,6 +237,7 @@ mod test {
                 OK => SchemeResult::Authenticated(authn::Details {
                     actor: self.actor,
                     device_token_expiration: None,
+                    credential_id: None,
                 }),
                 FAIL => SchemeResult::Failed(Reason::BadCredentials {
                     actor: self.actor,

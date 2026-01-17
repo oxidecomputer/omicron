@@ -112,6 +112,7 @@ where
                         SchemeResult::Authenticated(Details {
                             actor,
                             device_token_expiration: None,
+                            credential_id: None, // spoof auth has no real credential
                         })
                     }
                 }
