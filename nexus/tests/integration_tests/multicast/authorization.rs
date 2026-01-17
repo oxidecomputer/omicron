@@ -4,7 +4,7 @@
 
 //! Authorization tests for multicast groups.
 //!
-//! Groups are fleet-scoped. Any authenticated user can list and read them.
+//! Groups are fleet-scoped. Authenticated silo users can list and read them.
 //! Member operations require modify permission on the instance being added.
 //!
 //! Pool linking controls access: a silo can only use pools linked to it.
@@ -16,7 +16,7 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::test_params::UserPassword;
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_instance, create_local_user,
-    create_project, grant_iam, link_ip_pool, object_get,
+    create_project, grant_iam, link_ip_pool, object_get, object_put_upsert,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -331,15 +331,15 @@ async fn test_authenticated_users_can_read_multicast_groups(
     assert_eq!(read_group.identity.name, group.identity.name);
 
     // Regular silo user can also LIST multicast groups
-    let list_groups: Vec<MulticastGroup> = NexusRequest::iter_collection_authn(
-        client,
-        "/v1/multicast-groups",
-        "",
-        None,
-    )
-    .await
-    .expect("Silo user should be able to list multicast groups")
-    .all_items;
+    let list_response: dropshot::ResultsPage<MulticastGroup> =
+        NexusRequest::object_get(client, "/v1/multicast-groups")
+            .authn_as(AuthnMode::SiloUser(reader.id))
+            .execute()
+            .await
+            .expect("Silo user should be able to list multicast groups")
+            .parsed_body()
+            .unwrap();
+    let list_groups = list_response.items;
 
     assert!(
         list_groups.iter().any(|g| g.identity.id == group.identity.id),
@@ -390,8 +390,12 @@ async fn test_cross_project_instance_attachment_allowed(
     let join_url1 = "/v1/instances/instance1/multicast-groups/cross-project-group?project=project1";
     let join_params =
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
-    put_upsert::<_, MulticastGroupMember>(client, join_url1, &join_params)
-        .await;
+    object_put_upsert::<_, MulticastGroupMember>(
+        client,
+        join_url1,
+        &join_params,
+    )
+    .await;
 
     // Fetch the implicitly created group
     let group: MulticastGroup =
@@ -402,8 +406,12 @@ async fn test_cross_project_instance_attachment_allowed(
         "/v1/instances/instance2/multicast-groups/{}?project=project2",
         group.identity.name
     );
-    put_upsert::<_, MulticastGroupMember>(client, &join_url2, &join_params)
-        .await;
+    object_put_upsert::<_, MulticastGroupMember>(
+        client,
+        &join_url2,
+        &join_params,
+    )
+    .await;
 
     // Verify both instances are members of the same group
     let members =

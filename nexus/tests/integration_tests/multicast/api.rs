@@ -30,6 +30,7 @@ use nexus_test_utils::http_testing::{
 };
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_instance, create_project, object_create,
+    object_put_upsert,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -158,7 +159,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
 
     // This should succeed idempotently
-    put_upsert::<_, MulticastGroupMember>(
+    object_put_upsert::<_, MulticastGroupMember>(
         client,
         &duplicate_join_url,
         &duplicate_join_params,
@@ -209,7 +210,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     // Join using UUIDs (no project parameter)
     let join_url_uuid =
         format!("/v1/instances/{instance_uuid}/multicast-groups/{group_uuid}");
-    let member_uuid: MulticastGroupMember = put_upsert(
+    let member_uuid: MulticastGroupMember = object_put_upsert(
         client,
         &join_url_uuid,
         &InstanceMulticastGroupJoin::default(),
@@ -431,7 +432,7 @@ async fn test_join_by_ip_ssm_with_sources(cptestctx: &ControlPlaneTestContext) {
     };
 
     let member: MulticastGroupMember =
-        put_upsert(client, &join_url, &join_body).await;
+        object_put_upsert(client, &join_url, &join_body).await;
 
     assert_eq!(
         member.multicast_ip.to_string(),
@@ -561,7 +562,7 @@ async fn test_join_existing_ssm_group_without_sources_fails(
         ip_version: None,
     };
     let member_1: MulticastGroupMember =
-        put_upsert(client, &join_url_1, &join_body_1).await;
+        object_put_upsert(client, &join_url_1, &join_body_1).await;
 
     let group_id = member_1.multicast_group_id;
     let group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
@@ -789,9 +790,12 @@ async fn test_join_by_ip_existing_group(cptestctx: &ControlPlaneTestContext) {
     let join_url_1 = format!(
         "/v1/instances/existing-inst-1/multicast-groups/{explicit_ip}?project={project_name}"
     );
-    let member1: MulticastGroupMember =
-        put_upsert(client, &join_url_1, &InstanceMulticastGroupJoin::default())
-            .await;
+    let member1: MulticastGroupMember = object_put_upsert(
+        client,
+        &join_url_1,
+        &InstanceMulticastGroupJoin::default(),
+    )
+    .await;
 
     wait_for_group_active(client, &expected_group_name).await;
 
@@ -799,9 +803,12 @@ async fn test_join_by_ip_existing_group(cptestctx: &ControlPlaneTestContext) {
     let join_url_2 = format!(
         "/v1/instances/existing-inst-2/multicast-groups/{explicit_ip}?project={project_name}"
     );
-    let member2: MulticastGroupMember =
-        put_upsert(client, &join_url_2, &InstanceMulticastGroupJoin::default())
-            .await;
+    let member2: MulticastGroupMember = object_put_upsert(
+        client,
+        &join_url_2,
+        &InstanceMulticastGroupJoin::default(),
+    )
+    .await;
 
     // Both members should have the same group and IP
     assert_eq!(member1.multicast_group_id, member2.multicast_group_id);
@@ -864,8 +871,12 @@ async fn test_join_by_ip_different_sources_succeeds(
         source_ips: Some(vec![source1]),
         ip_version: None,
     };
-    put_upsert::<_, MulticastGroupMember>(client, &join_url_1, &join_body_1)
-        .await;
+    object_put_upsert::<_, MulticastGroupMember>(
+        client,
+        &join_url_1,
+        &join_body_1,
+    )
+    .await;
 
     wait_for_group_active(client, &expected_group_name).await;
 
@@ -877,8 +888,12 @@ async fn test_join_by_ip_different_sources_succeeds(
         source_ips: Some(vec![source2]),
         ip_version: None,
     };
-    put_upsert::<_, MulticastGroupMember>(client, &join_url_2, &join_body_2)
-        .await;
+    object_put_upsert::<_, MulticastGroupMember>(
+        client,
+        &join_url_2,
+        &join_body_2,
+    )
+    .await;
 
     // Verify group source_ips is union of both members' sources
     let group: MulticastGroup = object_get(
@@ -945,7 +960,7 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
         "/v1/instances/{}/multicast-groups/{explicit_ip}?project={project_name}",
         instance1.identity.name
     );
-    put_upsert::<_, MulticastGroupMember>(
+    object_put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url1,
         &InstanceMulticastGroupJoin::default(),
@@ -976,8 +991,12 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
         source_ips: Some(vec![source1, source2]),
         ip_version: None,
     };
-    put_upsert::<_, MulticastGroupMember>(client, &join_url2, &join_body_2)
-        .await;
+    object_put_upsert::<_, MulticastGroupMember>(
+        client,
+        &join_url2,
+        &join_body_2,
+    )
+    .await;
 
     // Verify group source_ips is union of all member sources
     let group: MulticastGroup = object_get(
@@ -1078,7 +1097,7 @@ async fn test_explicit_ip_bypasses_ssm_asm_selection(
     };
 
     let member: MulticastGroupMember =
-        put_upsert(client, &join_url, &join_body).await;
+        object_put_upsert(client, &join_url, &join_body).await;
 
     // Verify member has the source IP
     assert_eq!(member.source_ips, vec![source_ip]);

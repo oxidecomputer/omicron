@@ -16,7 +16,7 @@ use nexus_types::external_api::views::{IpVersion, MulticastGroupMember};
 use std::net::IpAddr;
 
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pools, create_project,
+    create_default_ip_pools, create_project, object_put_upsert,
 };
 
 use super::*;
@@ -64,7 +64,7 @@ async fn test_ssm_to_asm_fallback_with_sources(
         instance.identity.id
     );
 
-    let member: MulticastGroupMember = put_upsert(
+    let member: MulticastGroupMember = object_put_upsert(
         client,
         &join_url,
         &InstanceMulticastGroupJoin {
@@ -142,7 +142,7 @@ async fn test_ssm_pool_preferred_with_sources(
         instance.identity.id
     );
 
-    put_upsert::<_, MulticastGroupMember>(
+    object_put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url,
         &InstanceMulticastGroupJoin {
@@ -213,7 +213,7 @@ async fn test_asm_pool_used_without_sources(
         instance.identity.id
     );
 
-    put_upsert::<_, MulticastGroupMember>(
+    object_put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url,
         &InstanceMulticastGroupJoin { source_ips: None, ip_version: None },
@@ -310,7 +310,7 @@ async fn test_ip_version_disambiguation(cptestctx: &ControlPlaneTestContext) {
         instance.identity.id
     );
 
-    let v4_member: MulticastGroupMember = put_upsert(
+    let v4_member: MulticastGroupMember = object_put_upsert(
         client,
         &v4_join_url,
         &InstanceMulticastGroupJoin {
@@ -347,7 +347,7 @@ async fn test_ip_version_disambiguation(cptestctx: &ControlPlaneTestContext) {
         instance.identity.id
     );
 
-    let v6_member: MulticastGroupMember = put_upsert(
+    let v6_member: MulticastGroupMember = object_put_upsert(
         client,
         &v6_join_url,
         &InstanceMulticastGroupJoin {
