@@ -6210,7 +6210,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         body: TypedBody<params::TimeseriesQuery>,
     ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        // Not audited: this is a read-only query that uses POST only because
+        // the query is too large to fit in a URL.
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let body_params = body.into_inner();
             let query = body_params.query;
             let include_summaries = body_params.include_summaries;
@@ -6234,8 +6240,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     })
                 })
                 .map_err(HttpError::from)
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn timeseries_query(
@@ -6243,7 +6253,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::ProjectSelector>,
         body: TypedBody<params::TimeseriesQuery>,
     ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        // Not audited: this is a read-only query that uses POST only because
+        // the query is too large to fit in a URL.
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let project_selector = query_params.into_inner();
             let body_params = body.into_inner();
             let query = body_params.query;
@@ -6270,8 +6286,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     })
                 })
                 .map_err(HttpError::from)
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     // Updates
