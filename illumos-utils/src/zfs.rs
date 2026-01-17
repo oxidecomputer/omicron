@@ -1577,7 +1577,6 @@ impl Zfs {
         args.push(params.name.to_string());
 
         cmd.args(&args);
-
         // The command to create a dataset is not idempotent and will fail with
         // "dataset already exists" if the volume is created already. Eat this
         // and return Ok instead.
@@ -1672,7 +1671,7 @@ impl Zfs {
                 )
             })?;
 
-            let mut buf = [0u8; 64];
+            let mut buf = [0u8; 4096];
             rustix::io::read(fd, &mut buf).map_err(|e| {
                 EnsureDatasetVolumeError::from_raw_zvol_read(
                     params.name.to_string(),

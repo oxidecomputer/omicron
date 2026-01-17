@@ -519,8 +519,8 @@ dependencies = [
 
 [[package]]
 name = "attest-data"
-version = "0.4.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=4b408edc1d00f108ddf635415d783e6f12fe9641#4b408edc1d00f108ddf635415d783e6f12fe9641"
+version = "0.5.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64#10952e8d9599b735b85d480af3560a11700e5b64"
 dependencies = [
  "const-oid",
  "der",
@@ -539,7 +539,7 @@ dependencies = [
 [[package]]
 name = "attest-data"
 version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64#10952e8d9599b735b85d480af3560a11700e5b64"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be#173a5d19ee354cc8f0bc00d4e477923f8d2dc4be"
 dependencies = [
  "const-oid",
  "der",
@@ -561,7 +561,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64#10952e8d9599b735b85d480af3560a11700e5b64"
 dependencies = [
  "anyhow",
- "attest-data 0.5.0",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64)",
  "clap",
  "hex",
  "hubpack",
@@ -1736,7 +1736,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1745,7 +1745,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2699,11 +2699,12 @@ dependencies = [
 
 [[package]]
 name = "dice-mfg-msgs"
-version = "0.2.1"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=4b408edc1d00f108ddf635415d783e6f12fe9641#4b408edc1d00f108ddf635415d783e6f12fe9641"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be#173a5d19ee354cc8f0bc00d4e477923f8d2dc4be"
 dependencies = [
  "const-oid",
  "corncobs",
+ "dice-util-barcode",
  "hubpack",
  "serde",
  "serde-big-array",
@@ -2713,16 +2714,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "dice-util-barcode"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be#173a5d19ee354cc8f0bc00d4e477923f8d2dc4be"
+dependencies = [
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "dice-verifier"
 version = "0.3.0-pre0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=4b408edc1d00f108ddf635415d783e6f12fe9641#4b408edc1d00f108ddf635415d783e6f12fe9641"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be#173a5d19ee354cc8f0bc00d4e477923f8d2dc4be"
 dependencies = [
- "attest-data 0.4.0",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be)",
  "const-oid",
  "ed25519-dalek",
  "env_logger",
  "hubpack",
- "libipcc",
+ "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=dbaad520e1f5ae32c10db16ce176f9c24de95652)",
  "log",
  "p384",
  "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
@@ -3431,7 +3440,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cea14ef9355e3beab063703aa9dab15afd25f0667c341310c1e5274bb1d0da18"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5542,7 +5551,7 @@ name = "ipcc"
 version = "0.1.0"
 dependencies = [
  "ciborium",
- "libipcc",
+ "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=524eb8f125003dff50b9703900c6b323f00f9e1b)",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -5679,7 +5688,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5937,13 +5946,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "libipcc"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/ipcc-rs?rev=dbaad520e1f5ae32c10db16ce176f9c24de95652#dbaad520e1f5ae32c10db16ce176f9c24de95652"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "libloading"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6175,9 +6194,9 @@ checksum = "9374ef4228402d4b7e403e5838cb880d9ee663314b0a900d5a6aabf0c213552e"
 
 [[package]]
 name = "log"
-version = "0.4.27"
+version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
+checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 dependencies = [
  "value-bag",
 ]
@@ -12046,7 +12065,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.1",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -12756,9 +12775,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.14.0"
+version = "3.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2c45cd61fefa9db6f254525d46e392b852e0e61d9a1fd36e5bd183450a556d5"
+checksum = "4fa237f2807440d238e0364a218270b98f767a00d3dada77b1c53ae88940e2e7"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -12768,8 +12787,7 @@ dependencies = [
  "schemars 0.8.22",
  "schemars 0.9.0",
  "schemars 1.0.4",
- "serde",
- "serde_derive",
+ "serde_core",
  "serde_json",
  "serde_with_macros",
  "time",
@@ -12777,11 +12795,11 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.14.0"
+version = "3.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de90945e6565ce0d9a25098082ed4ee4002e047cb59892c318d66821e14bb30f"
+checksum = "52a8e3ca0ca629121f70ab50f95249e5a6f925cc0f6ffe8256c45b728875706c"
 dependencies = [
- "darling 0.20.10",
+ "darling 0.21.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -13631,10 +13649,10 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=1b01d737447c6c72380a5fe51ebb1dd0f111de1f#1b01d737447c6c72380a5fe51ebb1dd0f111de1f"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=4bbea2b09962653697880514374a965bf3567c87#4bbea2b09962653697880514374a965bf3567c87"
 dependencies = [
  "anyhow",
- "attest-data 0.4.0",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be)",
  "camino",
  "cfg-if",
  "clap",
@@ -13642,7 +13660,7 @@ dependencies = [
  "dice-verifier",
  "ed25519-dalek",
  "hubpack",
- "libipcc",
+ "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=524eb8f125003dff50b9703900c6b323f00f9e1b)",
  "pem-rfc7468",
  "rustls 0.23.19",
  "secrecy 0.8.0",
@@ -13664,7 +13682,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls-test-utils"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=1b01d737447c6c72380a5fe51ebb1dd0f111de1f#1b01d737447c6c72380a5fe51ebb1dd0f111de1f"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=4bbea2b09962653697880514374a965bf3567c87#4bbea2b09962653697880514374a965bf3567c87"
 dependencies = [
  "camino",
  "pki-playground",
@@ -14188,15 +14206,15 @@ checksum = "42a4d50cdb458045afc8131fd91b64904da29548bcb63c7236e0844936c13078"
 
 [[package]]
 name = "tempfile"
-version = "3.20.0"
+version = "3.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8a64e3985349f2441a1a9ef0b853f869006c3855f2cda6862a94d26ebb9d6a1"
+checksum = "2d31c77bdf42a745371d260a26ca7163f1e0924b64afa0b688e61b5a9fa02f16"
 dependencies = [
  "fastrand",
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -15908,9 +15926,9 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "value-bag"
-version = "1.9.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a84c137d37ab0142f0f2ddfe332651fdbf252e7b7dbb4e67b6c1f1b2e925101"
+checksum = "7ba6f5989077681266825251a52748b8c1d8a4ad098cc37e440103d0ea717fc0"
 
 [[package]]
 name = "vcpkg"
@@ -16479,7 +16497,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
