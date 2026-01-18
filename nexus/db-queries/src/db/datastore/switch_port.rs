@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::BTreeMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use super::DataStore;
 use crate::context::OpContext;
@@ -51,7 +51,7 @@ pub struct BgpPeerConfig {
     pub port_settings_id: Uuid,
     pub bgp_config_id: Uuid,
     pub interface_name: Name,
-    pub addr: IpNetwork,
+    pub addr: Option<IpNetwork>,
     pub hold_time: SqlU32,
     pub idle_hold_time: SqlU32,
     pub delay_open: SqlU32,
@@ -74,7 +74,7 @@ impl Into<external::BgpPeer> for BgpPeerConfig {
         external::BgpPeer {
             bgp_config: self.bgp_config_id.into(),
             interface_name: self.interface_name.into(),
-            addr: self.addr.ip(),
+            addr: self.addr.map(|a| a.ip()),
             hold_time: self.hold_time.into(),
             idle_hold_time: self.idle_hold_time.into(),
             delay_open: self.delay_open.into(),
@@ -606,12 +606,18 @@ impl DataStore {
                         .await?;
 
                 for p in peers.iter() {
+                    // For unnumbered peers (addr is None), use the sentinel value
+                    // (UNSPECIFIED address) for lookups since that's how they're stored.
+                    let lookup_addr: IpNetwork = p.addr.unwrap_or_else(|| {
+                        IpNetwork::from(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+                    });
+
                     let allowed_import: ImportExportPolicy = if p.allow_import_list_active {
                         let db_list: Vec<SwitchPortBgpPeerConfigAllowImport> =
                             allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import
                                 .filter(allow_import_dsl::port_settings_id.eq(id))
                                 .filter(allow_import_dsl::interface_name.eq(p.interface_name.clone()))
-                                .filter(allow_import_dsl::addr.eq(p.addr))
+                                .filter(allow_import_dsl::addr.eq(lookup_addr))
                                 .select(SwitchPortBgpPeerConfigAllowImport::as_select())
                                 .load_async::<SwitchPortBgpPeerConfigAllowImport>(&conn)
                                 .await?;
@@ -630,7 +636,7 @@ impl DataStore {
                             allow_export_dsl::switch_port_settings_bgp_peer_config_allow_export
                                 .filter(allow_export_dsl::port_settings_id.eq(id))
                                 .filter(allow_export_dsl::interface_name.eq(p.interface_name.clone()))
-                                .filter(allow_export_dsl::addr.eq(p.addr))
+                                .filter(allow_export_dsl::addr.eq(lookup_addr))
                                 .select(SwitchPortBgpPeerConfigAllowExport::as_select())
                                 .load_async::<SwitchPortBgpPeerConfigAllowExport>(&conn)
                                 .await?;
@@ -648,7 +654,7 @@ impl DataStore {
                         bgp_communities_dsl::switch_port_settings_bgp_peer_config_communities
                             .filter(bgp_communities_dsl::port_settings_id.eq(id))
                             .filter(bgp_communities_dsl::interface_name.eq(p.interface_name.clone()))
-                            .filter(bgp_communities_dsl::addr.eq(p.addr))
+                            .filter(bgp_communities_dsl::addr.eq(lookup_addr))
                             .select(SwitchPortBgpPeerConfigCommunity::as_select())
                             .load_async::<SwitchPortBgpPeerConfigCommunity>(&conn)
                             .await?;
@@ -1395,7 +1401,11 @@ async fn do_switch_port_settings_create(
     let mut bgp_peer_config = Vec::new();
     for peer_config in &params.bgp_peers {
         for p in &peer_config.peers {
-            peer_by_addr.insert(p.addr, &p);
+            // Track peers for policy lookup. For unnumbered peers (addr is None),
+            // use UNSPECIFIED as the sentinel value.
+            let lookup_addr =
+                p.addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+            peer_by_addr.insert(lookup_addr, &p);
             use nexus_db_schema::schema::bgp_config;
             let bgp_config_id = match &p.bgp_config {
                 NameOrId::Id(id) => bgp_config::table
@@ -1429,6 +1439,12 @@ async fn do_switch_port_settings_create(
                 }
             };
 
+            // For unnumbered peers (addr is None), use UNSPECIFIED as a sentinel
+            // value in the communities/import/export tables since addr is part
+            // of the primary key.
+            let db_addr: IpNetwork =
+                p.addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)).into();
+
             if let ImportExportPolicy::Allow(list) = &p.allowed_import {
                 let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigAllowImport> = list
@@ -1437,7 +1453,7 @@ async fn do_switch_port_settings_create(
                     .map(|x| SwitchPortBgpPeerConfigAllowImport {
                         port_settings_id: id,
                         interface_name: peer_config.link_name.clone().into(),
-                        addr: p.addr.into(),
+                        addr: db_addr,
                         prefix: x.into(),
                     })
                     .collect();
@@ -1456,7 +1472,7 @@ async fn do_switch_port_settings_create(
                     .map(|x| SwitchPortBgpPeerConfigAllowExport {
                         port_settings_id: id,
                         interface_name: peer_config.link_name.clone().into(),
-                        addr: p.addr.into(),
+                        addr: db_addr,
                         prefix: x.into(),
                     })
                     .collect();
@@ -1476,7 +1492,7 @@ async fn do_switch_port_settings_create(
                     .map(|x| SwitchPortBgpPeerConfigCommunity {
                         port_settings_id: id,
                         interface_name: peer_config.link_name.clone().into(),
-                        addr: p.addr.into(),
+                        addr: db_addr,
                         community: x.into(),
                     })
                     .collect();
@@ -1504,6 +1520,24 @@ async fn do_switch_port_settings_create(
             .await?;
 
     for p in db_bgp_peers.into_iter() {
+        // Lookup policies and communities for peers. For unnumbered peers (addr
+        // is None), use UNSPECIFIED as the lookup key.
+        let lookup_addr =
+            p.addr.map(|a| a.ip()).unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        let (allowed_import, allowed_export, communities) = (
+            peer_by_addr
+                .get(&lookup_addr)
+                .map(|x| x.allowed_import.clone())
+                .unwrap_or(ImportExportPolicy::NoFiltering),
+            peer_by_addr
+                .get(&lookup_addr)
+                .map(|x| x.allowed_export.clone())
+                .unwrap_or(ImportExportPolicy::NoFiltering),
+            peer_by_addr
+                .get(&lookup_addr)
+                .map(|x| x.communities.clone())
+                .unwrap_or(Vec::new()),
+        );
         let view = BgpPeerConfig {
             port_settings_id: p.port_settings_id,
             bgp_config_id: p.bgp_config_id,
@@ -1521,21 +1555,9 @@ async fn do_switch_port_settings_create(
             local_pref: p.local_pref,
             enforce_first_as: p.enforce_first_as,
             vlan_id: p.vlan_id,
-            allowed_import: peer_by_addr
-                .get(&p.addr.ip())
-                .map(|x| x.allowed_import.clone())
-                .unwrap_or(ImportExportPolicy::NoFiltering)
-                .clone(),
-            allowed_export: peer_by_addr
-                .get(&p.addr.ip())
-                .map(|x| x.allowed_export.clone())
-                .unwrap_or(ImportExportPolicy::NoFiltering)
-                .clone(),
-            communities: peer_by_addr
-                .get(&p.addr.ip())
-                .map(|x| x.communities.clone())
-                .unwrap_or(Vec::new())
-                .clone(),
+            allowed_import,
+            allowed_export,
+            communities,
         };
         result.bgp_peers.push(view);
     }
@@ -1916,7 +1938,9 @@ mod test {
                         "test-bgp-config".parse().unwrap(),
                     ),
                     interface_name: "qsfp0".parse().unwrap(),
-                    addr: "192.168.1.1".parse().unwrap(),
+                    addr: Some(
+                        "192.168.1.1".parse::<std::net::IpAddr>().unwrap(),
+                    ),
                     hold_time: 0,
                     idle_hold_time: 0,
                     delay_open: 0,
@@ -2150,7 +2174,7 @@ mod test {
                     }
                 }
 
-                assert_eq!(db_peer.addr.ip(), peer.addr);
+                assert_eq!(db_peer.addr.map(|a| a.ip()), peer.addr);
                 assert_eq!(*db_peer.hold_time, peer.hold_time);
                 assert_eq!(*db_peer.idle_hold_time, peer.idle_hold_time);
                 assert_eq!(*db_peer.delay_open, peer.delay_open);

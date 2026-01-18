@@ -3244,8 +3244,10 @@ pub struct BgpPeer {
     /// could be vlan47 to refer to a VLAN interface.
     pub interface_name: Name,
 
-    /// The address of the host to peer with.
-    pub addr: IpAddr,
+    /// The address of the host to peer with. If not provided, this is an
+    /// unnumbered BGP session that will be established over the interface
+    /// specified by `interface_name`.
+    pub addr: Option<IpAddr>,
 
     /// How long to hold peer connections between keepalives (seconds).
     pub hold_time: u32,

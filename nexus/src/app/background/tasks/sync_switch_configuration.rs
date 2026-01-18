@@ -33,7 +33,7 @@ use mg_admin_client::types::{
     DeleteStaticRoute6Request, ImportExportPolicy4 as MgImportExportPolicy4,
     ImportExportPolicy6 as MgImportExportPolicy6, Ipv4UnicastConfig,
     Ipv6UnicastConfig, JitterRange, ShaperSource, StaticRoute4,
-    StaticRoute4List, StaticRoute6, StaticRoute6List,
+    StaticRoute4List, StaticRoute6, StaticRoute6List, UnnumberedBgpPeerConfig,
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -558,6 +558,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                     // desired peer configurations for a given switch port
                     let mut peers: HashMap<String, Vec<BgpPeerConfig>> = HashMap::new();
+                    let mut unnumbered_peers: HashMap<String, Vec<UnnumberedBgpPeerConfig>> = HashMap::new();
 
                     for peer in &settings.bgp_peers {
                         let bgp_config_id = peer.bgp_config_id;
@@ -655,213 +656,272 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         let ttl = peer.min_ttl.map(|x| x.0);
 
-                        //TODO consider awaiting in parallel and joining
-                        let communities = match self.datastore.communities_for_peer(
-                            opctx,
-                            peer.port_settings_id,
-                            &peer.interface_name.to_string(),
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get communities for peer";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                return json!({
-                                    "error":
-                                        format!(
-                                            "failed to get port settings for peer {:?}: {}",
-                                            peer,
-                                            DisplayErrorChain::new(&e)
+                        // Determine if this is a numbered or unnumbered peer
+                        // (None or unspecified address = unnumbered)
+                        let is_numbered = peer.addr
+                            .map(|a| !a.ip().is_unspecified())
+                            .unwrap_or(false);
+                        if is_numbered {
+                            let addr = peer.addr.unwrap();
+                            // Numbered peer - identified by address
+                            //TODO consider awaiting in parallel and joining
+                            let communities = match self.datastore.communities_for_peer(
+                                opctx,
+                                peer.port_settings_id,
+                                &peer.interface_name.to_string(),
+                                Some(addr),
+                            ).await {
+                                Ok(cs) => cs,
+                                Err(e) => {
+                                    error!(log,
+                                        "failed to get communities for peer";
+                                        "peer" => ?peer,
+                                        "error" => %DisplayErrorChain::new(&e)
+                                    );
+                                    return json!({
+                                        "error":
+                                            format!(
+                                                "failed to get port settings for peer {:?}: {}",
+                                                peer,
+                                                DisplayErrorChain::new(&e)
+                                            )
+                                    });
+                                }
+                            };
+
+                            let allow_import = match self.datastore.allow_import_for_peer(
+                                opctx,
+                                peer.port_settings_id,
+                                &peer.interface_name.to_string(),
+                                Some(addr),
+                            ).await {
+                                Ok(cs) => cs,
+                                Err(e) => {
+                                    error!(log,
+                                        "failed to get peer allowed imports";
+                                        "peer" => ?peer,
+                                        "error" => %DisplayErrorChain::new(&e)
+                                    );
+                                    return json!({
+                                        "error":
+                                            format!(
+                                                "failed to get allowed imports peer {:?}: {}",
+                                                peer,
+                                                DisplayErrorChain::new(&e)
+                                            )
+                                    });
+                                }
+                            };
+
+                            let import_policy4 = match &allow_import {
+                                Some(list) => {
+                                    MgImportExportPolicy4::Allow(list
+                                        .clone()
+                                        .into_iter()
+                                        .filter_map(|x|
+                                            match x.prefix {
+                                                IpNetwork::V4(p) =>  Some(
+                                                    Prefix4{
+                                                        length: p.prefix(),
+                                                        value: p.ip(),
+                                                    }
+                                                ),
+                                                IpNetwork::V6(_) =>  None,
+                                            }
                                         )
-                                });
-                            }
-                        };
+                                        .collect()
+                                    )
+                                }
+                                None => MgImportExportPolicy4::NoFiltering,
+                            };
 
-                        let allow_import = match self.datastore.allow_import_for_peer(
-                            opctx,
-                            peer.port_settings_id,
-                            &peer.interface_name.to_string(),
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed imports";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                return json!({
-                                    "error":
-                                        format!(
-                                            "failed to get allowed imports peer {:?}: {}",
-                                            peer,
-                                            DisplayErrorChain::new(&e)
+                            let import_policy6 = match &allow_import {
+                                Some(list) => {
+                                    MgImportExportPolicy6::Allow(list
+                                        .clone()
+                                        .into_iter()
+                                        .filter_map(|x|
+                                            match x.prefix {
+                                                IpNetwork::V6(p) =>  Some(
+                                                    Prefix6{
+                                                        length: p.prefix(),
+                                                        value: p.ip(),
+                                                    }
+                                                ),
+                                                IpNetwork::V4(_) =>  None,
+                                            }
                                         )
-                                });
-                            }
-                        };
-
-                        let import_policy4 = match &allow_import {
-                            Some(list) => {
-                                MgImportExportPolicy4::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V4(p) =>  Some(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V6(_) =>  None,
-                                        }
+                                        .collect()
                                     )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy4::NoFiltering,
-                        };
+                                }
+                                None => MgImportExportPolicy6::NoFiltering,
+                            };
 
-                        let import_policy6 = match &allow_import {
-                            Some(list) => {
-                                MgImportExportPolicy6::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V6(p) =>  Some(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V4(_) =>  None,
-                                        }
-                                    )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy6::NoFiltering,
-                        };
+                            let allow_export = match self.datastore.allow_export_for_peer(
+                                opctx,
+                                peer.port_settings_id,
+                                &peer.interface_name.to_string(),
+                                Some(addr),
+                            ).await {
+                                Ok(cs) => cs,
+                                Err(e) => {
+                                    error!(log,
+                                        "failed to get peer allowed exportss";
+                                        "peer" => ?peer,
+                                        "error" => %DisplayErrorChain::new(&e),
+                                    );
+                                    return json!({
+                                        "error":
+                                            format!(
+                                                "failed to get allowed exports peer {:?}: {}",
+                                                peer,
+                                                DisplayErrorChain::new(&e)
+                                            )
+                                    });
+                                }
+                            };
 
-                        let allow_export = match self.datastore.allow_export_for_peer(
-                            opctx,
-                            peer.port_settings_id,
-                            &peer.interface_name.to_string(),
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed exportss";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e),
-                                );
-                                return json!({
-                                    "error":
-                                        format!(
-                                            "failed to get allowed exports peer {:?}: {}",
-                                            peer,
-                                            DisplayErrorChain::new(&e)
+                            let export_policy4 = match &allow_export {
+                                Some(list) => {
+                                    MgImportExportPolicy4::Allow(list
+                                        .clone()
+                                        .into_iter()
+                                        .filter_map(|x|
+                                            match x.prefix {
+                                                IpNetwork::V4(p) =>  Some(
+                                                    Prefix4{
+                                                        length: p.prefix(),
+                                                        value: p.ip(),
+                                                    }
+                                                ),
+                                                IpNetwork::V6(_) => None,
+                                            }
                                         )
-                                });
-                            }
-                        };
-
-                        let export_policy4 = match &allow_export {
-                            Some(list) => {
-                                MgImportExportPolicy4::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V4(p) =>  Some(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V6(_) => None,
-                                        }
+                                        .collect()
                                     )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy4::NoFiltering,
-                        };
+                                }
+                                None => MgImportExportPolicy4::NoFiltering,
+                            };
 
-                        let export_policy6 = match &allow_export {
-                            Some(list) => {
-                                MgImportExportPolicy6::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V6(p) =>  Some(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V4(_) => None,
-                                        }
+                            let export_policy6 = match &allow_export {
+                                Some(list) => {
+                                    MgImportExportPolicy6::Allow(list
+                                        .clone()
+                                        .into_iter()
+                                        .filter_map(|x|
+                                            match x.prefix {
+                                                IpNetwork::V6(p) =>  Some(
+                                                    Prefix6{
+                                                        length: p.prefix(),
+                                                        value: p.ip(),
+                                                    }
+                                                ),
+                                                IpNetwork::V4(_) => None,
+                                            }
+                                        )
+                                        .collect()
                                     )
-                                    .collect()
-                                )
+                                }
+                                None => MgImportExportPolicy6::NoFiltering,
+                            };
+
+                            // now that the peer passes the above validations, add it to the list for configuration
+                            let peer_config = BgpPeerConfig {
+                                name: format!("{}", addr.ip()),
+                                host: format!("{}:179", addr.ip()),
+                                hold_time: peer.hold_time.0.into(),
+                                idle_hold_time: peer.idle_hold_time.0.into(),
+                                delay_open: peer.delay_open.0.into(),
+                                connect_retry: peer.connect_retry.0.into(),
+                                keepalive: peer.keepalive.0.into(),
+                                resolution: BGP_SESSION_RESOLUTION,
+                                passive: false,
+                                remote_asn: peer.remote_asn.as_ref().map(|x| x.0),
+                                min_ttl: ttl,
+                                md5_auth_key: peer.md5_auth_key.clone(),
+                                multi_exit_discriminator: peer.multi_exit_discriminator.as_ref().map(|x| x.0),
+                                local_pref: peer.local_pref.as_ref().map(|x| x.0),
+                                enforce_first_as: peer.enforce_first_as,
+                                communities: communities.into_iter().map(|c| c.community.0).collect(),
+                                ipv4_unicast: Some(Ipv4UnicastConfig{
+                                    nexthop: None,
+                                    import_policy: import_policy4,
+                                    export_policy: export_policy4,
+                                }),
+                                ipv6_unicast: Some(Ipv6UnicastConfig{
+                                    nexthop: None,
+                                    import_policy: import_policy6,
+                                    export_policy: export_policy6,
+                                }),
+                                vlan_id: peer.vlan_id.map(|x| x.0),
+                                //TODO plumb these out to the external API
+                                connect_retry_jitter: Some(JitterRange {
+                                    max: 1.0,
+                                    min: 0.75,
+                                }),
+                                deterministic_collision_resolution: false,
+                                idle_hold_jitter: None,
+                            };
+
+                            // update the stored vec if it exists, create a new on if it doesn't exist
+                            match peers.entry(port.port_name.clone().to_string()) {
+                                Entry::Occupied(mut occupied_entry) => {
+                                    occupied_entry.get_mut().push(peer_config);
+                                },
+                                Entry::Vacant(vacant_entry) => {
+                                    vacant_entry.insert(vec![peer_config]);
+                                },
                             }
-                            None => MgImportExportPolicy6::NoFiltering,
-                        };
+                        } else {
+                            // Unnumbered peer - identified by interface
+                            // For unnumbered peers, we use NoFiltering policies as the
+                            // communities/import/export tables are keyed by address
+                            let peer_config = UnnumberedBgpPeerConfig {
+                                name: format!("unnumbered-{}", peer.interface_name),
+                                interface: peer.interface_name.to_string(),
+                                hold_time: peer.hold_time.0.into(),
+                                idle_hold_time: peer.idle_hold_time.0.into(),
+                                delay_open: peer.delay_open.0.into(),
+                                connect_retry: peer.connect_retry.0.into(),
+                                keepalive: peer.keepalive.0.into(),
+                                resolution: BGP_SESSION_RESOLUTION,
+                                passive: false,
+                                remote_asn: peer.remote_asn.as_ref().map(|x| x.0),
+                                min_ttl: ttl,
+                                md5_auth_key: peer.md5_auth_key.clone(),
+                                multi_exit_discriminator: peer.multi_exit_discriminator.as_ref().map(|x| x.0),
+                                local_pref: peer.local_pref.as_ref().map(|x| x.0),
+                                enforce_first_as: peer.enforce_first_as,
+                                communities: Vec::new(),
+                                ipv4_unicast: Some(Ipv4UnicastConfig{
+                                    nexthop: None,
+                                    import_policy: MgImportExportPolicy4::NoFiltering,
+                                    export_policy: MgImportExportPolicy4::NoFiltering,
+                                }),
+                                ipv6_unicast: Some(Ipv6UnicastConfig{
+                                    nexthop: None,
+                                    import_policy: MgImportExportPolicy6::NoFiltering,
+                                    export_policy: MgImportExportPolicy6::NoFiltering,
+                                }),
+                                vlan_id: peer.vlan_id.map(|x| x.0),
+                                connect_retry_jitter: Some(JitterRange {
+                                    max: 1.0,
+                                    min: 0.75,
+                                }),
+                                deterministic_collision_resolution: false,
+                                idle_hold_jitter: None,
+                                router_lifetime: 1800,  // Default to 30 minutes
+                            };
 
-                        // now that the peer passes the above validations, add it to the list for configuration
-                        let peer_config = BgpPeerConfig {
-                            name: format!("{}", peer.addr.ip()),
-                            host: format!("{}:179", peer.addr.ip()),
-                            hold_time: peer.hold_time.0.into(),
-                            idle_hold_time: peer.idle_hold_time.0.into(),
-                            delay_open: peer.delay_open.0.into(),
-                            connect_retry: peer.connect_retry.0.into(),
-                            keepalive: peer.keepalive.0.into(),
-                            resolution: BGP_SESSION_RESOLUTION,
-                            passive: false,
-                            remote_asn: peer.remote_asn.as_ref().map(|x| x.0),
-                            min_ttl: ttl,
-                            md5_auth_key: peer.md5_auth_key.clone(),
-                            multi_exit_discriminator: peer.multi_exit_discriminator.as_ref().map(|x| x.0),
-                            local_pref: peer.local_pref.as_ref().map(|x| x.0),
-                            enforce_first_as: peer.enforce_first_as,
-                            communities: communities.into_iter().map(|c| c.community.0).collect(),
-                            ipv4_unicast: Some(Ipv4UnicastConfig{
-                                nexthop: None,
-                                import_policy: import_policy4,
-                                export_policy: export_policy4,
-                            }),
-                            ipv6_unicast: Some(Ipv6UnicastConfig{
-                                nexthop: None,
-                                import_policy: import_policy6,
-                                export_policy: export_policy6,
-                            }),
-                            vlan_id: peer.vlan_id.map(|x| x.0),
-                            //TODO plumb these out to the external API
-                            connect_retry_jitter: Some(JitterRange {
-                                max: 1.0,
-                                min: 0.75,
-                            }),
-                            deterministic_collision_resolution: false,
-                            idle_hold_jitter: None,
-                        };
-
-                        // update the stored vec if it exists, create a new on if it doesn't exist
-                        match peers.entry(port.port_name.clone().to_string()) {
-                            Entry::Occupied(mut occupied_entry) => {
-                                occupied_entry.get_mut().push(peer_config);
-                            },
-                            Entry::Vacant(vacant_entry) => {
-                                vacant_entry.insert(vec![peer_config]);
-                            },
+                            // update the stored vec if it exists, create a new on if it doesn't exist
+                            match unnumbered_peers.entry(port.port_name.clone().to_string()) {
+                                Entry::Occupied(mut occupied_entry) => {
+                                    occupied_entry.get_mut().push(peer_config);
+                                },
+                                Entry::Vacant(vacant_entry) => {
+                                    vacant_entry.insert(vec![peer_config]);
+                                },
+                            }
                         }
                     }
 
@@ -892,12 +952,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             let config = occupied_entry.get_mut();
                             // peers are the only per-port part of the config.
                             config.peers.extend(peers);
+                            config.unnumbered_peers.extend(unnumbered_peers);
                         }
                         Entry::Vacant(vacant_entry) => {
                             vacant_entry.insert(
                                 ApplyRequest {
                                     asn: *request_bgp_config.asn,
                                     peers,
+                                    unnumbered_peers,
                                     originate: request_prefixes.clone(),
                                     checker: request_bgp_config.checker.as_ref().map(|code| CheckerSource{
                                         asn: *request_bgp_config.asn,
@@ -1057,9 +1119,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .unwrap_or(false),
                         bgp_peers: peer_configs.into_iter()
                             // filter maps are cool
-                            .filter_map(|c| match c.addr.ip() {
-                                IpAddr::V4(addr) => Some((c, addr)),
-                                IpAddr::V6(_) => None,
+                            // For unnumbered peers (addr is None), use UNSPECIFIED
+                            // For IPv6 peers, skip (not supported in this context)
+                            .filter_map(|c| match c.addr {
+                                None => Some((c, Ipv4Addr::UNSPECIFIED)),
+                                Some(addr) => match addr.ip() {
+                                    IpAddr::V4(v4) => Some((c, v4)),
+                                    IpAddr::V6(_) => None,
+                                },
                             })
                             .map(|(c, addr)| {
                                 SledBgpPeerConfig {
@@ -1126,13 +1193,20 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     ;
 
                     for peer in port_config.bgp_peers.iter_mut() {
+                        // For unnumbered peers (addr is UNSPECIFIED), pass None
+                        let peer_addr_for_lookup = if peer.addr.is_unspecified() {
+                            None
+                        } else {
+                            Some(IpNetwork::from(IpAddr::from(peer.addr)))
+                        };
+
                         peer.communities = match self
                             .datastore
                             .communities_for_peer(
                                 opctx,
                                 port.port_settings_id.unwrap(),
                                 PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                                IpNetwork::from(IpAddr::from(peer.addr))
+                                peer_addr_for_lookup,
                             ).await {
                                 Ok(cs) => cs.iter().map(|c| c.community.0).collect(),
                                 Err(e) => {
@@ -1150,7 +1224,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             opctx,
                             port.port_settings_id.unwrap(),
                             PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            IpNetwork::from(IpAddr::from(peer.addr)),
+                            peer_addr_for_lookup,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -1174,7 +1248,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             opctx,
                             port.port_settings_id.unwrap(),
                             PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            IpNetwork::from(IpAddr::from(peer.addr)),
+                            peer_addr_for_lookup,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {

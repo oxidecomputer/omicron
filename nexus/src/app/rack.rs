@@ -615,7 +615,11 @@ impl super::Nexus {
                         format!("as{}", r.asn).parse().unwrap(),
                     ),
                     interface_name: link_name.clone(),
-                    addr: r.addr.into(),
+                    addr: if r.addr.is_unspecified() {
+                        None
+                    } else {
+                        Some(std::net::IpAddr::V4(r.addr))
+                    },
                     hold_time: r.hold_time() as u32,
                     idle_hold_time: r.idle_hold_time() as u32,
                     delay_open: r.delay_open() as u32,

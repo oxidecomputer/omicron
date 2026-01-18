@@ -91,7 +91,9 @@ pub struct BgpPeerConfig {
     pub asn: u32,
     /// Switch port the peer is reachable on.
     pub port: String,
-    /// Address of the peer.
+    /// Address of the peer. Use `Ipv4Addr::UNSPECIFIED` to indicate an
+    /// unnumbered BGP session established over the interface specified by
+    /// `port`.
     pub addr: Ipv4Addr,
     /// How long to keep a session alive without a keepalive in seconds.
     /// Defaults to 6.

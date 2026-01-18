@@ -39,6 +39,7 @@ mod v2025120300;
 mod v2025121200;
 mod v2025122300;
 mod v2026010100;
+mod v2026010300;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -68,6 +69,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026011700, BGP_UNNUMBERED_PEERS),
     (2026010300, DUAL_STACK_NICS),
     (2026010100, SILO_PROJECT_IP_VERSION_AND_POOL_TYPE),
     (2025122300, IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS),
@@ -2417,11 +2419,37 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<LoopbackAddress>>, HttpError>;
 
+    /// Create switch port settings (old version with required BgpPeer.addr)
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn v2026010300_networking_switch_port_settings_create(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<v2026010300::SwitchPortSettingsCreate>,
+    ) -> Result<HttpResponseCreated<v2026010300::SwitchPortSettings>, HttpError>
+    {
+        match Self::networking_switch_port_settings_create(
+            rqctx,
+            new_settings.map(Into::into),
+        )
+        .await
+        {
+            Ok(HttpResponseCreated(result)) => {
+                Ok(HttpResponseCreated(result.try_into()?))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Create switch port settings
     #[endpoint {
         method = POST,
         path = "/v1/system/networking/switch-port-settings",
         tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
@@ -2455,11 +2483,34 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// Get information about switch port (old version with required BgpPeer.addr)
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn v2026010300_networking_switch_port_settings_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<v2026010300::SwitchPortSettings>, HttpError>
+    {
+        match Self::networking_switch_port_settings_view(rqctx, path_params)
+            .await
+        {
+            Ok(HttpResponseOk(result)) => {
+                Ok(HttpResponseOk(result.try_into()?))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Get information about switch port
     #[endpoint {
         method = GET,
         path = "/v1/system/networking/switch-port-settings/{port}",
         tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
