@@ -712,13 +712,16 @@ fn rss_config_text<'a>(
         ),
         (
             "Rack subnet address (IPv6 /56): ",
-            rack_network_config.as_ref().map_or("(will be chosen randomly)".into(), |c| {
-                match c.rack_subnet_address {
-                    Some(v) => v.to_string(),
-                    None => "(chosen randomly)".to_string(),
-                }
-                .into()
-            }),
+            rack_network_config.as_ref().map_or(
+                "(will be chosen randomly)".into(),
+                |c| {
+                    match c.rack_subnet_address {
+                        Some(v) => v.to_string(),
+                        None => "(chosen randomly)".to_string(),
+                    }
+                    .into()
+                },
+            ),
         ),
         (
             "Infrastructure first IP: ",
