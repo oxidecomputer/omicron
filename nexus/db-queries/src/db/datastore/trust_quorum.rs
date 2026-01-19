@@ -21,6 +21,7 @@ use nexus_db_model::DbTypedUuid;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
+use nexus_types::trust_quorum::IsLrtqUpgrade;
 use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
 use nexus_types::trust_quorum::{
     TrustQuorumConfig, TrustQuorumConfigState, TrustQuorumMemberData,
@@ -435,10 +436,17 @@ impl DataStore {
         )
         .await?;
 
-        // Ensure that epochs are sequential
+        // Ensure that epochs are sequential or this is the inital attempt at an
+        // LRTQ upgrade.
+        //
+        // In the latter case the proposed epoch will be 2, as LRTQ has an epoch
+        // of 1 that is encoded as a ZFS dataset property.
         let latest_epoch = latest_config.as_ref().map(|c| c.epoch);
         bail_unless!(
-            latest_epoch == proposed.epoch.previous(),
+            latest_epoch == proposed.epoch.previous()
+                || (latest_epoch.is_none()
+                    && proposed.is_lrtq_upgrade == IsLrtqUpgrade::Yes
+                    && proposed.epoch == Epoch(2)),
             "Epochs for trust quorum configurations must be sequential. \
             Current epoch = {:?}, Proposed Epoch = {:?}",
             latest_epoch,
@@ -1537,7 +1545,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Last committed epoch is incoreect (should be 1)
+        // Last committed epoch is incorect (should be 1)
         let bad_config = ProposedTrustQuorumConfig {
             rack_id,
             epoch: Epoch(2),
@@ -1593,6 +1601,48 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_tq_insert_initial_lrtq_upgrade() {
+        let logctx = test_setup_log("test_tq_update_prepare_and_commit");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let rack_id = RackUuid::new_v4();
+        let members: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
+
+        // Propse a an LRTQ upgrade and successfully insert it
+        let config = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(2),
+            is_lrtq_upgrade: IsLrtqUpgrade::Yes,
+            members: members.clone(),
+        };
+
+        // Insert should succeed
+        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
+
+        // Read the config back and check that it's preparing for LRTQ upgrade
+        // with no acks.
+        let read_config = datastore
+            .tq_get_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        // The read config should be preparing
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(
+            read_config.state,
+            TrustQuorumConfigState::PreparingLrtqUpgrade
+        );
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert!(read_config.members.iter().all(|(_, info)| {
+            info.state == TrustQuorumMemberState::Unacked
+        }));
     }
 
     #[tokio::test]

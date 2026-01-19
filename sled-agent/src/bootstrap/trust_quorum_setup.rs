@@ -7,6 +7,7 @@
 
 use super::config::TRUST_QUORUM_PORT;
 use super::server::StartError;
+use crate::bootstrap::bootstore_setup::bootstore_fsm_state_paths;
 use camino::Utf8PathBuf;
 use sled_hardware_types::BaseboardId;
 use sled_storage::dataset::CLUSTER_DATASET;
@@ -17,15 +18,15 @@ const TRUST_QUORUM_STATE_FILE: &str = "trust-quorum-state.json";
 const TRUST_QUORUM_NETWORK_CONFIG_FILE: &str =
     "trust-quorum-network-config.json";
 
-/// Certain active bits, such as running trust quorum initialization as a result of RSS,
-/// should remain disabled until the full integration is complete.
+/// Certain active bits, such as running trust quorum initialization as a result
+/// of RSS, should remain disabled until the full integration is complete.
 ///
 /// This is a constant, since we expect to remove the gating all at once,
 /// and because it's hard to manage features with full a4x2 and racklette
 /// deployments. The flag can be changed for local a4x2 builds during iniitial
 /// testing.
-//pub const TRUST_QUORUM_INTEGRATION_ENABLED: bool = false;
-pub const TRUST_QUORUM_INTEGRATION_ENABLED: bool = true;
+pub const TRUST_QUORUM_INTEGRATION_ENABLED: bool = false;
+//pub const TRUST_QUORUM_INTEGRATION_ENABLED: bool = true;
 
 pub fn new_trust_quorum_config(
     cluster_dataset_paths: &[Utf8PathBuf],
@@ -49,6 +50,7 @@ pub fn new_trust_quorum_config(
             cluster_dataset_paths,
             TRUST_QUORUM_NETWORK_CONFIG_FILE,
         )?,
+        lrtq_ledger_paths: bootstore_fsm_state_paths(cluster_dataset_paths)?,
         sprockets: sprockets_config,
     })
 }

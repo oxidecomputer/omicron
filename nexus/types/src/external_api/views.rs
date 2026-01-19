@@ -33,7 +33,6 @@ use std::fmt;
 use std::net::IpAddr;
 use std::sync::LazyLock;
 use strum::{EnumIter, IntoEnumIterator};
-use trust_quorum_types::types::Epoch;
 use tufaceous_artifact::ArtifactHash;
 use url::Url;
 use uuid::Uuid;

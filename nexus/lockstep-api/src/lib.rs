@@ -52,6 +52,7 @@ use omicron_uuid_kinds::*;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use trust_quorum_types::types::Epoch;
 use uuid::Uuid;
 
 const RACK_INITIALIZATION_REQUEST_MAX_BYTES: usize = 10 * 1024 * 1024;
@@ -564,15 +565,30 @@ pub trait NexusLockstepApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<QuiesceStatus>, HttpError>;
 
-    /// Retrieve the latest ongoing rack cluster membership change
+    /// Retrieve the trust quorum configuration for the given epoch, or latest
+    // if no epoch is given
     #[endpoint {
         method = GET,
-        path = "/trust-quorum/{rack_id}/config/latest",
+        path = "/trust-quorum/{rack_id}/config",
     }]
-    async fn trust_quorum_get_latest_config(
+    async fn trust_quorum_get_config(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackMembershipConfigPathParams>,
+        query_params: Query<TrustQuorumEpochQueryParam>,
+    ) -> Result<HttpResponseOk<TrustQuorumConfig>, HttpError>;
+
+    /// Initiate an LRTQ upgrade
+    ///
+    /// Return the epoch of the proposed configuration, so it can be polled
+    /// asynchronously.
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/{rack_id}/lrtq-upgrade"
+    }]
+    async fn trust_quorum_lrtq_upgrade(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<RackPathParam>,
-    ) -> Result<HttpResponseOk<Option<TrustQuorumConfig>>, HttpError>;
+    ) -> Result<HttpResponseOk<Epoch>, HttpError>;
 }
 
 /// Path parameters for Rack requests.
@@ -620,4 +636,9 @@ pub struct SledId {
 #[derive(Deserialize, JsonSchema)]
 pub struct VersionPathParam {
     pub version: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct TrustQuorumEpochQueryParam {
+    pub epoch: Option<Epoch>,
 }
