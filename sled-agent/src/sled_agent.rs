@@ -1251,7 +1251,7 @@ impl SledAgent {
             .inner
             .config_reconciler
             .available_datasets_rx()
-            .all_mounted_local_storage_datasets()
+            .all_mounted_local_storage_unencrypted_datasets()
             .into_iter()
             .any(|path_in_pool| match path_in_pool.pool {
                 ZpoolOrRamdisk::Zpool(zpool_name) => {
@@ -1263,8 +1263,10 @@ impl SledAgent {
         if !present {
             // We cannot create a child dataset of the local storage dataset if
             // it's not present! Return a 503.
-            let error =
-                format!("local storage dataset for pool {zpool_id} missing!");
+            let error = format!(
+                "local storage unencrypted dataset for pool {zpool_id} \
+                missing!"
+            );
             return Err(HttpError::for_unavail(Some(error.clone()), error));
         }
 
@@ -1283,9 +1285,8 @@ impl SledAgent {
             ),
             can_mount: CanMount::Off,
             zoned: false,
-            // encryption details not required, will inherit from parent
-            // "oxp_UUID/crypt/local_storage", which inherits from
-            // "oxp_UUID/crypt"
+            // Disks backed by unencrypted local storage are _not_ encrypted at
+            // rest.
             encryption_details: None,
             size_details: Some(SizeDetails {
                 quota: Some(dataset_size),
@@ -1319,7 +1320,7 @@ impl SledAgent {
             .inner
             .config_reconciler
             .available_datasets_rx()
-            .all_mounted_local_storage_datasets()
+            .all_mounted_local_storage_unencrypted_datasets()
             .into_iter()
             .any(|path_in_pool| match path_in_pool.pool {
                 ZpoolOrRamdisk::Zpool(zpool_name) => {
@@ -1331,8 +1332,10 @@ impl SledAgent {
         if !present {
             // We cannot destroy a child dataset of the local storage dataset if
             // it's not present! Return a 503.
-            let error =
-                format!("local storage dataset for pool {zpool_id} missing!");
+            let error = format!(
+                "local storage unencrypted dataset for pool {zpool_id} \
+                missing!"
+            );
             return Err(HttpError::for_unavail(Some(error.clone()), error));
         }
 

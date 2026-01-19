@@ -41,11 +41,11 @@ declare_saga_actions! {
         + sdd_account_space
         - sdd_account_space_undo
     }
-    DEALLOCATE_LOCAL_STORAGE -> "deallocate_local_storage" {
-        + sdd_deallocate_local_storage
-    }
     DELETE_LOCAL_STORAGE -> "delete_local_storage" {
         + sdd_delete_local_storage
+    }
+    DEALLOCATE_LOCAL_STORAGE -> "deallocate_local_storage" {
+        + sdd_deallocate_local_storage
     }
 }
 
@@ -104,8 +104,12 @@ impl NexusSaga for SagaDiskDelete {
             }
 
             datastore::Disk::LocalStorage(_) => {
-                builder.append(deallocate_local_storage_action());
+                // Attempt deleting the local storage before removing the
+                // database record. If the delete does not succeed, at least the
+                // user can re-request the deletion.
+
                 builder.append(delete_local_storage_action());
+                builder.append(deallocate_local_storage_action());
             }
         }
 
@@ -196,37 +200,6 @@ async fn sdd_account_space_undo(
     Ok(())
 }
 
-async fn sdd_deallocate_local_storage(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let datastore::Disk::LocalStorage(disk) = params.disk else {
-        unreachable!(
-            "check during `make_saga_dag` should have ensured disk type is \
-            local storage"
-        );
-    };
-
-    let Some(allocation) = disk.local_storage_dataset_allocation else {
-        // Nothing to do!
-        return Ok(());
-    };
-
-    osagactx
-        .datastore()
-        .delete_local_storage_dataset_allocation(&opctx, allocation.id())
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(())
-}
-
 async fn sdd_delete_local_storage(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -237,6 +210,8 @@ async fn sdd_delete_local_storage(
         &params.serialized_authn,
     );
 
+    let disk_id = params.disk.id();
+
     let datastore::Disk::LocalStorage(disk) = params.disk else {
         unreachable!(
             "check during `make_saga_dag` should have ensured disk type is \
@@ -244,7 +219,18 @@ async fn sdd_delete_local_storage(
         );
     };
 
-    let Some(allocation) = disk.local_storage_dataset_allocation else {
+    // If all disks backed by local storage have not been deleted before the PR
+    // to change to using the unencrypted dataset, bail out here, as this will
+    // require manual deletion.
+
+    if disk.local_storage_dataset_allocation.is_some() {
+        return Err(ActionError::action_failed(format!(
+            "disk {disk_id} is backed by the encrypted local storage dataset",
+        )));
+    }
+
+    let Some(allocation) = disk.local_storage_unencrypted_dataset_allocation
+    else {
         // Nothing to do!
         return Ok(());
     };
@@ -286,6 +272,38 @@ async fn sdd_delete_local_storage(
                 InlineErrorChain::new(&e)
             ))
         })?;
+
+    Ok(())
+}
+
+async fn sdd_deallocate_local_storage(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let datastore::Disk::LocalStorage(disk) = params.disk else {
+        unreachable!(
+            "check during `make_saga_dag` should have ensured disk type is \
+            local storage"
+        );
+    };
+
+    osagactx
+        .datastore()
+        .delete_local_storage_dataset_allocations(
+            &opctx,
+            disk.local_storage_dataset_allocation
+                .map(|allocation| allocation.id()),
+            disk.local_storage_unencrypted_dataset_allocation
+                .map(|allocation| allocation.id()),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
 
     Ok(())
 }

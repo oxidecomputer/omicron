@@ -1436,8 +1436,9 @@ impl super::Nexus {
                 Disk::LocalStorage(local_storage_disk) => local_storage_disk,
             };
 
-            let Some(local_storage_dataset_allocation) =
-                &local_storage_disk.local_storage_dataset_allocation
+            let Some(local_storage_unencrypted_dataset_allocation) =
+                &local_storage_disk
+                    .local_storage_unencrypted_dataset_allocation
             else {
                 return Err(Error::internal_error(&format!(
                     "local storage disk {} allocation is None!",
@@ -1447,8 +1448,9 @@ impl super::Nexus {
             };
 
             delegated_zvols.push(DelegatedZvol::LocalStorage {
-                zpool_id: local_storage_dataset_allocation.pool_id(),
-                dataset_id: local_storage_dataset_allocation.id(),
+                zpool_id: local_storage_unencrypted_dataset_allocation
+                    .pool_id(),
+                dataset_id: local_storage_unencrypted_dataset_allocation.id(),
             });
         }
 

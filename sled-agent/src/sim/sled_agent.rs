@@ -239,13 +239,15 @@ impl SledAgent {
             // pool name.
             let dataset = path.strip_prefix("/dev/zvol/rdsk/oxp_").unwrap();
 
-            // what remains is: UUID/crypt/local_storage/UUID/vol
+            // what remains is: UUID/local_storage_unencrypted/UUID/vol
             let parts: Vec<&str> = dataset.split("/").collect();
             let zpool_id: ZpoolUuid = parts[0].parse().unwrap();
-            let dataset_id: DatasetUuid = parts[3].parse().unwrap();
+            let dataset_id: DatasetUuid = parts[2].parse().unwrap();
 
             // This panics if this dataset was not already created
-            self.storage.lock().get_local_storage_dataset(zpool_id, dataset_id);
+            self.storage
+                .lock()
+                .get_local_storage_unencrypted_dataset(zpool_id, dataset_id);
         }
 
         for (id, _disk) in vmm_spec.crucible_backends() {
@@ -1114,9 +1116,9 @@ impl SledAgent {
         dataset_id: DatasetUuid,
         request: LocalStorageDatasetEnsureRequest,
     ) {
-        self.storage
-            .lock()
-            .ensure_local_storage_dataset(zpool_id, dataset_id, request);
+        self.storage.lock().ensure_local_storage_unencrypted_dataset(
+            zpool_id, dataset_id, request,
+        );
     }
 }
 

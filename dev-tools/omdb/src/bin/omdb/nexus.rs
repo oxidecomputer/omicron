@@ -53,6 +53,7 @@ use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
+use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
@@ -1526,29 +1527,38 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
                 status.inventory_collection_id
             );
 
-            print_datasets_rendezvous_stats(
-                &status.stats.debug_dataset,
-                "debug_dataset",
-            );
+            let BlueprintRendezvousStats {
+                debug_dataset,
+                crucible_dataset,
+                local_storage_dataset,
+                local_storage_unencrypted_dataset,
+            } = status.stats;
+
+            print_datasets_rendezvous_stats(&debug_dataset, "debug_dataset");
 
             // crucible datasets have a different number of rendezvous stats
             println!("    crucible_dataset rendezvous counts:");
             println!(
                 "        num_inserted:         {}",
-                status.stats.crucible_dataset.num_inserted
+                crucible_dataset.num_inserted
             );
             println!(
                 "        num_already_exist:    {}",
-                status.stats.crucible_dataset.num_already_exist
+                crucible_dataset.num_already_exist
             );
             println!(
                 "        num_not_in_inventory: {}",
-                status.stats.crucible_dataset.num_not_in_inventory
+                crucible_dataset.num_not_in_inventory
             );
 
             print_datasets_rendezvous_stats(
-                &status.stats.local_storage_dataset,
+                &local_storage_dataset,
                 "local_storage_dataset",
+            );
+
+            print_datasets_rendezvous_stats(
+                &local_storage_unencrypted_dataset,
+                "local_storage_unencrypted_dataset",
             );
         }
     }

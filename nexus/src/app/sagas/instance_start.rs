@@ -623,15 +623,25 @@ async fn sis_ensure_local_storage(
         disk,
         disk_type_local_storage: _,
         local_storage_dataset_allocation,
+        local_storage_unencrypted_dataset_allocation,
     } = &local_storage_records[which];
 
     // Make sure this was a complete allocation.
 
-    let Some(local_storage_dataset_allocation) =
-        local_storage_dataset_allocation
+    if local_storage_dataset_allocation.is_some() {
+        // No longer supporting creating encrypted zvols for local storage, but
+        // this field has been left in pending an investigation of how we're
+        // going to support encryption at rest.
+        return Err(ActionError::action_failed(format!(
+            "local storage record {which} has a encrypted allocation!",
+        )));
+    }
+
+    let Some(local_storage_unencrypted_dataset_allocation) =
+        local_storage_unencrypted_dataset_allocation
     else {
         return Err(ActionError::action_failed(format!(
-            "local storage record {which} has a None allocation!",
+            "local storage record {which} has a None unencrypted allocation!",
         )));
     };
 
@@ -646,10 +656,11 @@ async fn sis_ensure_local_storage(
         )));
     }
 
-    let dataset_id = local_storage_dataset_allocation.id();
-    let pool_id = local_storage_dataset_allocation.pool_id();
-    let sled_id = local_storage_dataset_allocation.sled_id();
-    let dataset_size = local_storage_dataset_allocation.dataset_size.into();
+    let dataset_id = local_storage_unencrypted_dataset_allocation.id();
+    let pool_id = local_storage_unencrypted_dataset_allocation.pool_id();
+    let sled_id = local_storage_unencrypted_dataset_allocation.sled_id();
+    let dataset_size =
+        local_storage_unencrypted_dataset_allocation.dataset_size.into();
     let volume_size = disk.size.into();
 
     // Get a sled agent client

@@ -396,14 +396,30 @@ impl Plan {
                     sled_info.request.datasets.insert(config.id, config);
                 }
 
-                // LocalStorage isn't in the U2_EXPECTED_DATASETS list, add it
-                // here. We expect Nexus to take over after RSS and not need to
-                // make any changes to the resulting current target blueprint.
-                // The `rss_blueprint_is_blippy_clean` test will fail if this
-                // isn't true, and removing this will cause that to fail.
+                // Both types of LocalStorage are not in the
+                // U2_EXPECTED_DATASETS list, add them here. We expect Nexus to
+                // take over after RSS and not need to make any changes to the
+                // resulting current target blueprint - note the
+                // `rss_blueprint_is_blippy_clean` test will fail if this isn't
+                // true.
+
                 let config = DatasetConfig {
                     id: DatasetUuid::new_v4(),
                     name: DatasetName::new(*zpool, DatasetKind::LocalStorage),
+                    inner: SharedDatasetConfig {
+                        compression: CompressionAlgorithm::Off,
+                        quota: None,
+                        reservation: None,
+                    },
+                };
+                sled_info.request.datasets.insert(config.id, config);
+
+                let config = DatasetConfig {
+                    id: DatasetUuid::new_v4(),
+                    name: DatasetName::new(
+                        *zpool,
+                        DatasetKind::LocalStorageUnencrypted,
+                    ),
                     inner: SharedDatasetConfig {
                         compression: CompressionAlgorithm::Off,
                         quota: None,
@@ -1573,7 +1589,16 @@ mod tests {
             + COCKROACHDB_REDUNDANCY
             + SINGLE_NODE_CLICKHOUSE_REDUNDANCY
             + dns_ips.len()
-            + DISK_COUNT * 4; // (Debug, Root, Local Storage, Crucible)
+            // From ActiveSledEditor::ensure_disk, the following datasets are
+            // added for each disk:
+            //
+            // - debug
+            // - zone root
+            // - encrypted local storage
+            // - unencrypted local storage
+            // - crucible
+            + DISK_COUNT * 5;
+
         assert_eq!(
             sled_config.datasets.len(),
             expected_dataset_count,

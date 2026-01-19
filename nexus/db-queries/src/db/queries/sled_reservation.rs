@@ -24,9 +24,9 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct LocalStorageAllocation {
     pub disk_id: Uuid,
-    pub local_storage_dataset_allocation_id: DatasetUuid,
+    pub local_storage_unencrypted_dataset_allocation_id: DatasetUuid,
     pub required_dataset_size: i64,
-    pub local_storage_dataset_id: DatasetUuid,
+    pub local_storage_unencrypted_dataset_id: DatasetUuid,
     pub pool_id: ZpoolUuid,
     pub sled_id: SledUuid,
 }
@@ -424,14 +424,16 @@ pub fn sled_insert_resource_query(
 
                 // First, make sure that the additional usage fits in the zpool
 
-                // Add up crucible and local dataset usage, plus the altered
-                // local_storage_dataset_allocation records
+                // Add up crucible and local storage datasets usage, plus the
+                // soon-to-be-inserted
+                // local_storage_unencrypted_dataset_allocation records
 
                 query
                     .sql(
                         "((SELECT \
                             SUM(crucible_dataset.size_used +
-                              rendezvous_local_storage_dataset.size_used + ",
+                              COALESCE(rendezvous_local_storage_dataset.size_used, 0) +
+                              COALESCE(rendezvous_local_storage_unencrypted_dataset.size_used, 0) + ",
                     )
                     .param()
                     .bind::<sql_types::BigInt, _>(
@@ -442,16 +444,20 @@ pub fn sled_insert_resource_query(
                               )
                            FROM
                              crucible_dataset
-                           JOIN
+                           LEFT JOIN
                              rendezvous_local_storage_dataset
                            ON
                              crucible_dataset.pool_id = \
-                               rendezvous_local_storage_dataset.pool_id
+                               rendezvous_local_storage_dataset.pool_id AND
+                               rendezvous_local_storage_dataset.time_tombstoned is NULL
+                           LEFT JOIN
+                             rendezvous_local_storage_unencrypted_dataset
+                           ON
+                             crucible_dataset.pool_id = \
+                               rendezvous_local_storage_unencrypted_dataset.pool_id AND
+                               rendezvous_local_storage_unencrypted_dataset.time_tombstoned is NULL
                            WHERE
-                             (crucible_dataset.size_used IS NOT NULL) AND
-                             (crucible_dataset.time_deleted IS NULL) AND
-                             (rendezvous_local_storage_dataset.time_tombstoned \
-                               IS NULL) AND
+                             crucible_dataset.time_deleted IS NULL AND
                              (crucible_dataset.pool_id = ",
                     )
                     .param()
@@ -525,13 +531,15 @@ pub fn sled_insert_resource_query(
                         "(SELECT \
                              time_tombstoned IS NULL AND no_provision IS FALSE
                            FROM
-                             rendezvous_local_storage_dataset
+                             rendezvous_local_storage_unencrypted_dataset
                            WHERE
-                             rendezvous_local_storage_dataset.id = ",
+                             rendezvous_local_storage_unencrypted_dataset.id = ",
                     )
                     .param()
                     .bind::<sql_types::Uuid, _>(
-                        allocation.local_storage_dataset_id.into_untyped_uuid(),
+                        allocation
+                            .local_storage_unencrypted_dataset_id
+                            .into_untyped_uuid(),
                     );
 
                 query.sql(")");
@@ -563,7 +571,7 @@ pub fn sled_insert_resource_query(
             //     UPDATE
             //       disk_type_local_storage
             //     SET
-            //       local_storage_dataset_allocation_id = CASE disk_id
+            //       local_storage_unencrypted_dataset_allocation_id = CASE disk_id
             //         WHEN $9 THEN $10
             //         WHEN $11 THEN $12
             //       END
@@ -580,14 +588,14 @@ pub fn sled_insert_resource_query(
                       UPDATE \
                         disk_type_local_storage \
                       SET
-                        local_storage_dataset_allocation_id = CASE disk_id
+                        local_storage_unencrypted_dataset_allocation_id = CASE disk_id
                 ",
             );
 
             for allocation in allocations {
                 let LocalStorageAllocation {
                     disk_id,
-                    local_storage_dataset_allocation_id,
+                    local_storage_unencrypted_dataset_allocation_id,
                     ..
                 } = allocation;
 
@@ -598,7 +606,8 @@ pub fn sled_insert_resource_query(
                     .sql(" THEN ")
                     .param()
                     .bind::<sql_types::Uuid, _>(
-                        local_storage_dataset_allocation_id.into_untyped_uuid(),
+                        local_storage_unencrypted_dataset_allocation_id
+                            .into_untyped_uuid(),
                     )
                     .sql(" ");
             }
@@ -624,9 +633,10 @@ pub fn sled_insert_resource_query(
             // which unfortunately means that they take the form of:
             //
             //   NEW_LOCAL_STORAGE_ALLOCATION_RECORDS_{index} AS (
-            //     INSERT INTO local_storage_dataset_allocation (
-            //       id, time_created, time_deleted, local_storage_dataset_id,\
-            //       pool_id, sled_id, dataset_size
+            //     INSERT INTO local_storage_unencrypted_dataset_allocation (
+            //       id, time_created, time_deleted, \
+            //       local_storage_unencrypted_dataset_id, pool_id, sled_id, \
+            //       dataset_size
             //     )
             //     SELECT
             //       $1, $2, $3, $4, $5, $6, $7
@@ -639,8 +649,8 @@ pub fn sled_insert_resource_query(
 
             for (index, allocation) in allocations.iter().enumerate() {
                 let LocalStorageAllocation {
-                    local_storage_dataset_allocation_id,
-                    local_storage_dataset_id,
+                    local_storage_unencrypted_dataset_allocation_id,
+                    local_storage_unencrypted_dataset_id,
                     pool_id,
                     sled_id,
                     required_dataset_size,
@@ -657,15 +667,16 @@ pub fn sled_insert_resource_query(
 
                 query.sql(
                     " AS (
-                    INSERT INTO local_storage_dataset_allocation
+                    INSERT INTO local_storage_unencrypted_dataset_allocation
                         (id, time_created, time_deleted, \
-                         local_storage_dataset_id, pool_id, sled_id, \
-                         dataset_size)
+                         local_storage_unencrypted_dataset_id, pool_id, \
+                         sled_id, dataset_size)
                     SELECT ",
                 );
 
                 query.param().bind::<sql_types::Uuid, _>(
-                    local_storage_dataset_allocation_id.into_untyped_uuid(),
+                    local_storage_unencrypted_dataset_allocation_id
+                        .into_untyped_uuid(),
                 );
                 query.sql(",");
 
@@ -673,7 +684,7 @@ pub fn sled_insert_resource_query(
                 query.sql("NULL,");
 
                 query.param().bind::<sql_types::Uuid, _>(
-                    local_storage_dataset_id.into_untyped_uuid(),
+                    local_storage_unencrypted_dataset_id.into_untyped_uuid(),
                 );
                 query.sql(",");
 
@@ -695,13 +706,13 @@ pub fn sled_insert_resource_query(
                 query.sql(" RETURNING *),");
             }
 
-            // Update the rendezvous_local_storage_dataset table's size_used
-            // column in a similar manner to how `disk_type_local_storage` is
-            // updated, using the CASE pattern:
+            // Update the rendezvous_local_storage_unencrypted dataset table's
+            // size_used column in a similar manner to how
+            // `disk_type_local_storage` is updated, using the CASE pattern:
             //
             //   UPDATE_RENDEZVOUS_TABLES AS (
             //     UPDATE
-            //       rendezvous_local_storage_dataset
+            //       rendezvous_local_storage_unencrypted_dataset
             //     SET
             //       size_used = size_used + CASE pool_id
             //         WHEN $1 THEN $2
@@ -716,7 +727,7 @@ pub fn sled_insert_resource_query(
 
             query.sql(
                 "UPDATE_RENDEZVOUS_TABLES as (
-                   UPDATE rendezvous_local_storage_dataset
+                   UPDATE rendezvous_local_storage_unencrypted_dataset
                    SET size_used = size_used + CASE pool_id
                    ",
             );
@@ -901,17 +912,21 @@ mod test {
                 allocations: nonempty![
                     LocalStorageAllocation {
                         disk_id: Uuid::nil(),
-                        local_storage_dataset_allocation_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_allocation_id:
+                            DatasetUuid::nil(),
                         required_dataset_size: 64 * 1024 * 1024 * 1024,
-                        local_storage_dataset_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_id: DatasetUuid::nil(
+                        ),
                         pool_id: ZpoolUuid::nil(),
                         sled_id: SledUuid::nil(),
                     },
                     LocalStorageAllocation {
                         disk_id: Uuid::nil(),
-                        local_storage_dataset_allocation_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_allocation_id:
+                            DatasetUuid::nil(),
                         required_dataset_size: 128 * 1024 * 1024 * 1024,
-                        local_storage_dataset_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_id: DatasetUuid::nil(
+                        ),
                         pool_id: ZpoolUuid::nil(),
                         sled_id: SledUuid::nil(),
                     }
@@ -966,9 +981,10 @@ mod test {
             &LocalStorageAllocationRequired::Yes {
                 allocations: nonempty![LocalStorageAllocation {
                     disk_id: Uuid::nil(),
-                    local_storage_dataset_allocation_id: DatasetUuid::nil(),
+                    local_storage_unencrypted_dataset_allocation_id:
+                        DatasetUuid::nil(),
                     required_dataset_size: 128 * 1024 * 1024 * 1024,
-                    local_storage_dataset_id: DatasetUuid::nil(),
+                    local_storage_unencrypted_dataset_id: DatasetUuid::nil(),
                     pool_id: ZpoolUuid::nil(),
                     sled_id: SledUuid::nil(),
                 }],
@@ -986,17 +1002,21 @@ mod test {
                 allocations: nonempty![
                     LocalStorageAllocation {
                         disk_id: Uuid::nil(),
-                        local_storage_dataset_allocation_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_allocation_id:
+                            DatasetUuid::nil(),
                         required_dataset_size: 128 * 1024 * 1024 * 1024,
-                        local_storage_dataset_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_id: DatasetUuid::nil(
+                        ),
                         pool_id: ZpoolUuid::nil(),
                         sled_id: SledUuid::nil(),
                     },
                     LocalStorageAllocation {
                         disk_id: Uuid::nil(),
-                        local_storage_dataset_allocation_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_allocation_id:
+                            DatasetUuid::nil(),
                         required_dataset_size: 256 * 1024 * 1024 * 1024,
-                        local_storage_dataset_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_id: DatasetUuid::nil(
+                        ),
                         pool_id: ZpoolUuid::nil(),
                         sled_id: SledUuid::nil(),
                     },

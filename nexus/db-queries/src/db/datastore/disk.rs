@@ -26,6 +26,7 @@ use crate::db::model::DiskTypeCrucibleUpdate;
 use crate::db::model::DiskTypeLocalStorage;
 use crate::db::model::Instance;
 use crate::db::model::LocalStorageDatasetAllocation;
+use crate::db::model::LocalStorageUnencryptedDatasetAllocation;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::VirtualProvisioningResource;
@@ -173,7 +174,17 @@ impl CrucibleDisk {
 pub struct LocalStorageDisk {
     pub disk: model::Disk,
     pub disk_type_local_storage: DiskTypeLocalStorage,
+
+    /// If there is an allocation in the encrypted local storage dataset, this
+    /// will be Some. There should only be one allocation type per
+    /// LocalStorageDisk.
     pub local_storage_dataset_allocation: Option<LocalStorageDatasetAllocation>,
+
+    /// If there is an allocation in the unencrypted local storage dataset, this
+    /// will be Some. There should only be one allocation type per
+    /// LocalStorageDisk.
+    pub local_storage_unencrypted_dataset_allocation:
+        Option<LocalStorageUnencryptedDatasetAllocation>,
 }
 
 impl LocalStorageDisk {
@@ -186,6 +197,7 @@ impl LocalStorageDisk {
             disk,
             disk_type_local_storage,
             local_storage_dataset_allocation: None,
+            local_storage_unencrypted_dataset_allocation: None,
         }
     }
 
@@ -231,30 +243,62 @@ impl LocalStorageDisk {
 
     /// Return the full path to the local storage zvol's device
     pub fn zvol_path(&self) -> Result<String, Error> {
-        let Some(local_storage_dataset_allocation) =
-            &self.local_storage_dataset_allocation
-        else {
-            return Err(Error::internal_error(&format!(
-                "LocalStorageDisk {} not allocated!",
-                self.id(),
-            )));
-        };
+        match (
+            &self.local_storage_dataset_allocation,
+            &self.local_storage_unencrypted_dataset_allocation,
+        ) {
+            (Some(_), Some(_)) => {
+                return Err(Error::internal_error(&format!(
+                    "LocalStorageDisk {} has multiple allocations!",
+                    self.id(),
+                )));
+            }
 
-        let pool_id = local_storage_dataset_allocation.pool_id();
-        let dataset_id = local_storage_dataset_allocation.id();
+            (Some(encrypted_allocation), None) => {
+                let pool_id = encrypted_allocation.pool_id();
+                let dataset_id = encrypted_allocation.id();
 
-        let zpool_name = ZpoolName::External(pool_id);
+                let zpool_name = ZpoolName::External(pool_id);
 
-        let path = [
-            // Each zvol's path to the device starts with this
-            String::from("/dev/zvol/rdsk"),
-            // All local storage datasets have the same path template, and will
-            // all be called "vol" for now.
-            format!("{zpool_name}/crypt/local_storage/{dataset_id}/vol"),
-        ]
-        .join("/");
+                let path = [
+                    // Each zvol's path to the device starts with this
+                    String::from("/dev/zvol/rdsk"),
+                    // All local storage datasets have the same path template,
+                    // and will all be called "vol" for now.
+                    format!("{zpool_name}/crypt/local_storage"),
+                    format!("{dataset_id}/vol"),
+                ]
+                .join("/");
 
-        Ok(path)
+                Ok(path)
+            }
+
+            (None, Some(unencrypted_allocation)) => {
+                let pool_id = unencrypted_allocation.pool_id();
+                let dataset_id = unencrypted_allocation.id();
+
+                let zpool_name = ZpoolName::External(pool_id);
+
+                let path = [
+                    // Each zvol's path to the device starts with this
+                    String::from("/dev/zvol/rdsk"),
+                    // All local storage datasets have the same path template,
+                    // and will all be called "vol" for now.
+                    format!("{zpool_name}/local_storage_unencrypted"),
+                    format!("{dataset_id}/vol"),
+                ]
+                .join("/");
+
+                Ok(path)
+            }
+
+            (None, None) => {
+                return Err(Error::internal_error(&format!(
+                    "LocalStorageDisk {} not allocated!",
+                    self.id(),
+                )));
+            }
+        }
     }
 }
 
@@ -282,6 +326,7 @@ impl Into<api::external::Disk> for Disk {
                 disk,
                 disk_type_local_storage: _,
                 local_storage_dataset_allocation: _,
+                local_storage_unencrypted_dataset_allocation: _,
             }) => {
                 // XXX can we remove this?
                 let device_path = format!("/mnt/{}", disk.name().as_str());
@@ -302,6 +347,70 @@ impl Into<api::external::Disk> for Disk {
 }
 
 impl DataStore {
+    async fn fill_in_local_storage_disk(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        disk: model::Disk,
+        disk_type_local_storage: DiskTypeLocalStorage,
+    ) -> LookupResult<LocalStorageDisk> {
+        let disk_id = disk.id();
+
+        let local_storage_dataset_allocation = if let Some(allocation_id) =
+            disk_type_local_storage.local_storage_dataset_allocation_id()
+        {
+            use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
+
+            let allocation = dsl::local_storage_dataset_allocation
+                .filter(dsl::id.eq(to_db_typed_uuid(allocation_id)))
+                .select(LocalStorageDatasetAllocation::as_select())
+                .first_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(format!(
+                            "local storage disk {disk_id} missing encrypted \
+                            allocation {allocation_id}"
+                        ))
+                })?;
+
+            Some(allocation)
+        } else {
+            None
+        };
+
+        let local_storage_unencrypted_dataset_allocation = if let Some(
+            allocation_id,
+        ) =
+            disk_type_local_storage
+                .local_storage_unencrypted_dataset_allocation_id()
+        {
+            use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+            let allocation = dsl::local_storage_unencrypted_dataset_allocation
+                .filter(dsl::id.eq(to_db_typed_uuid(allocation_id)))
+                .select(LocalStorageUnencryptedDatasetAllocation::as_select())
+                .first_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(format!(
+                            "local storage disk {disk_id} missing unencrypted \
+                            allocation {allocation_id}"
+                        ))
+                })?;
+
+            Some(allocation)
+        } else {
+            None
+        };
+
+        Ok(LocalStorageDisk {
+            disk,
+            disk_type_local_storage,
+            local_storage_dataset_allocation,
+            local_storage_unencrypted_dataset_allocation,
+        })
+    }
+
     pub async fn disk_get(
         &self,
         opctx: &OpContext,
@@ -347,37 +456,14 @@ impl DataStore {
                             ))
                     })?;
 
-                let local_storage_dataset_allocation = if let Some(
-                    allocation_id,
-                ) =
-                    disk_type_local_storage
-                        .local_storage_dataset_allocation_id()
-                {
-                    use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
-
-                    let allocation = dsl::local_storage_dataset_allocation
-                        .filter(dsl::id.eq(to_db_typed_uuid(allocation_id)))
-                        .select(LocalStorageDatasetAllocation::as_select())
-                        .first_async(&*conn)
-                        .await
-                        .map_err(|e| {
-                            public_error_from_diesel(e, ErrorHandler::Server)
-                                .internal_context(format!(
-                                    "local storage disk {disk_id} missing \
-                                    allocation {allocation_id}"
-                                ))
-                        })?;
-
-                    Some(allocation)
-                } else {
-                    None
-                };
-
-                Disk::LocalStorage(LocalStorageDisk {
+                let local_storage_disk = Self::fill_in_local_storage_disk(
+                    &conn,
                     disk,
                     disk_type_local_storage,
-                    local_storage_dataset_allocation,
-                })
+                )
+                .await?;
+
+                Disk::LocalStorage(local_storage_disk)
             }
         };
 
@@ -467,41 +553,14 @@ impl DataStore {
                 }
 
                 (disk, None, Some(disk_type_local_storage)) => {
-                    let local_storage_dataset_allocation = if let Some(
-                        allocation_id,
-                    ) =
-                        disk_type_local_storage
-                            .local_storage_dataset_allocation_id()
-                    {
-                        use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
-
-                        let allocation = dsl::local_storage_dataset_allocation
-                            .filter(dsl::id.eq(to_db_typed_uuid(allocation_id)))
-                            .select(LocalStorageDatasetAllocation::as_select())
-                            .first_async(conn)
-                            .await
-                            .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                                .internal_context(format!(
-                                    "local storage disk {} missing \
-                                    allocation {allocation_id}",
-                                    disk.id(),
-                                ))
-                            })?;
-
-                        Some(allocation)
-                    } else {
-                        None
-                    };
-
-                    list.push(Disk::LocalStorage(LocalStorageDisk {
+                    let local_storage_disk = Self::fill_in_local_storage_disk(
+                        &conn,
                         disk,
                         disk_type_local_storage,
-                        local_storage_dataset_allocation,
-                    }));
+                    )
+                    .await?;
+
+                    list.push(Disk::LocalStorage(local_storage_disk));
                 }
 
                 (disk, _, _) => {
@@ -618,6 +677,7 @@ impl DataStore {
                 disk,
                 disk_type_local_storage,
                 local_storage_dataset_allocation,
+                local_storage_unencrypted_dataset_allocation,
             }) => {
                 if local_storage_dataset_allocation.is_some() {
                     // This allocation is currently only performed during
@@ -626,8 +686,22 @@ impl DataStore {
                         internal_message: format!(
                             "local storage dataset allocation is only \
                             performed during instance allocation, but {} is \
-                            being created with an allocation when it should \
-                            be None",
+                            being created with an encrypted allocation when it \
+                            should be None",
+                            disk.id()
+                        ),
+                    }));
+                }
+
+                if local_storage_unencrypted_dataset_allocation.is_some() {
+                    // This allocation is currently only performed during
+                    // instance allocation, return an error here.
+                    return Err(err.bail(Error::InternalError {
+                        internal_message: format!(
+                            "local storage dataset allocation is only \
+                            performed during instance allocation, but {} is \
+                            being created with an unencrypted allocation when \
+                            it should be None",
                             disk.id()
                         ),
                     }));

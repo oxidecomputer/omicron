@@ -12,7 +12,9 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::DbConnection;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model::LocalStorageDatasetAllocation;
+use crate::db::model::LocalStorageUnencryptedDatasetAllocation;
 use crate::db::model::RendezvousLocalStorageDataset;
+use crate::db::model::RendezvousLocalStorageUnencryptedDataset;
 use crate::db::model::Zpool;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
@@ -76,8 +78,7 @@ impl DataStore {
 
     /// List one page of local storage datasets
     ///
-    /// This fetches all debug datasets, including those that have been
-    /// tombstoned.
+    /// This fetches all datasets, including those that have been tombstoned.
     async fn local_storage_dataset_list(
         &self,
         opctx: &OpContext,
@@ -217,22 +218,118 @@ impl DataStore {
         Ok(())
     }
 
-    /// Mark the local storage dataset allocation as deleted, and re-compute the
-    /// appropriate local storage dataset size_used column.
-    pub async fn delete_local_storage_dataset_allocation(
+    pub(super) async fn delete_local_storage_unencrypted_dataset_allocation_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        local_storage_unencrypted_dataset_allocation_id: DatasetUuid,
+    ) -> Result<(), diesel::result::Error> {
+        use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+        // If this is deleted already, then return Ok - this function should be
+        // idempotent, it is called from a saga node.
+
+        let id =
+            to_db_typed_uuid(local_storage_unencrypted_dataset_allocation_id);
+
+        let allocation = dsl::local_storage_unencrypted_dataset_allocation
+            .filter(dsl::id.eq(id))
+            .select(LocalStorageUnencryptedDatasetAllocation::as_select())
+            .get_result_async(conn)
+            .await?;
+
+        if allocation.time_deleted.is_some() {
+            return Ok(());
+        }
+
+        // Set the time_deleted
+
+        diesel::update(dsl::local_storage_unencrypted_dataset_allocation)
+            .filter(dsl::id.eq(id))
+            .set(dsl::time_deleted.eq(Utc::now()))
+            .execute_async(conn)
+            .await?;
+
+        // Recompute the associated local storage dataset's size_used
+
+        let dataset_id: DatasetUuid =
+            allocation.local_storage_unencrypted_dataset_id();
+
+        use nexus_db_schema::schema::rendezvous_local_storage_unencrypted_dataset::dsl as dataset_dsl;
+
+        diesel::update(
+            dataset_dsl::rendezvous_local_storage_unencrypted_dataset,
+        )
+        .filter(dataset_dsl::id.eq(to_db_typed_uuid(dataset_id)))
+        .set(
+            dataset_dsl::size_used.eq(coalesce(
+                dsl::local_storage_unencrypted_dataset_allocation
+                    .filter(
+                        dsl::local_storage_unencrypted_dataset_id
+                            .eq(to_db_typed_uuid(dataset_id)),
+                    )
+                    .filter(dsl::time_deleted.is_null())
+                    .select(diesel::dsl::sum(dsl::dataset_size))
+                    .single_value(),
+                0,
+            )),
+        )
+        .execute_async(conn)
+        .await?;
+
+        Ok(())
+    }
+
+    pub(super) async fn delete_local_storage_dataset_allocations_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        local_storage_dataset_allocation_id: Option<DatasetUuid>,
+        local_storage_unencrypted_dataset_allocation_id: Option<DatasetUuid>,
+    ) -> Result<(), diesel::result::Error> {
+        if let Some(local_storage_dataset_allocation_id) =
+            local_storage_dataset_allocation_id
+        {
+            Self::delete_local_storage_dataset_allocation_in_txn(
+                conn,
+                local_storage_dataset_allocation_id,
+            )
+            .await?;
+        }
+
+        if let Some(local_storage_unencrypted_dataset_allocation_id) =
+            local_storage_unencrypted_dataset_allocation_id
+        {
+            Self::delete_local_storage_unencrypted_dataset_allocation_in_txn(
+                conn,
+                local_storage_unencrypted_dataset_allocation_id,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Mark the local storage dataset allocations as deleted, and re-compute
+    /// the appropriate dataset size_used columns.
+    pub async fn delete_local_storage_dataset_allocations(
         &self,
         opctx: &OpContext,
-        local_storage_dataset_allocation_id: DatasetUuid,
+        local_storage_dataset_allocation_id: Option<DatasetUuid>,
+        local_storage_unencrypted_dataset_allocation_id: Option<DatasetUuid>,
     ) -> Result<(), Error> {
+        if local_storage_dataset_allocation_id.is_none()
+            && local_storage_unencrypted_dataset_allocation_id.is_none()
+        {
+            return Ok(());
+        }
+
         let conn = self.pool_connection_authorized(opctx).await?;
 
         self.transaction_retry_wrapper(
-            "delete_local_storage_dataset_allocation",
+            "delete_local_storage_dataset_allocations",
         )
         .transaction(&conn, |conn| async move {
-            Self::delete_local_storage_dataset_allocation_in_txn(
+            Self::delete_local_storage_dataset_allocations_in_txn(
                 &conn,
                 local_storage_dataset_allocation_id,
+                local_storage_unencrypted_dataset_allocation_id,
             )
             .await
         })
@@ -240,5 +337,134 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
+    }
+
+    /// List all LocalStorageUnencrypted datasets, making as many queries as
+    /// needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn local_storage_unencrypted_dataset_list_all_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<RendezvousLocalStorageUnencryptedDataset> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.check_complex_operations_allowed()?;
+
+        let mut all_datasets = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .local_storage_unencrypted_dataset_list(
+                    opctx,
+                    &p.current_pagparams(),
+                )
+                .await?;
+            paginator = p.found_batch(
+                &batch,
+                &|d: &nexus_db_model::RendezvousLocalStorageUnencryptedDataset| {
+                    d.id().into_untyped_uuid()
+                },
+            );
+            all_datasets.extend(batch);
+        }
+
+        Ok(all_datasets)
+    }
+
+    /// List one page of unencrypted local storage datasets
+    ///
+    /// This fetches all datasets, including those that have been tombstoned.
+    async fn local_storage_unencrypted_dataset_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<RendezvousLocalStorageUnencryptedDataset> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        use nexus_db_schema::schema::rendezvous_local_storage_unencrypted_dataset::dsl;
+
+        paginated(
+            dsl::rendezvous_local_storage_unencrypted_dataset,
+            dsl::id,
+            pagparams,
+        )
+        .select(RendezvousLocalStorageUnencryptedDataset::as_select())
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Stores a new dataset in the database, but only if a dataset with the
+    /// given `id` does not already exist
+    ///
+    /// Does not update existing rows. If a dataset with the given ID already
+    /// exists, returns `Ok(None)`.
+    pub async fn local_storage_unencrypted_dataset_insert_if_not_exists(
+        &self,
+        opctx: &OpContext,
+        dataset: RendezvousLocalStorageUnencryptedDataset,
+    ) -> CreateResult<Option<RendezvousLocalStorageUnencryptedDataset>> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::rendezvous_local_storage_unencrypted_dataset::dsl;
+
+        let zpool_id = dataset.pool_id;
+        Zpool::insert_resource(
+            zpool_id,
+            diesel::insert_into(
+                dsl::rendezvous_local_storage_unencrypted_dataset,
+            )
+            .values(dataset)
+            .on_conflict(dsl::id)
+            .do_nothing(),
+        )
+        .insert_and_get_optional_result_async(
+            &*self.pool_connection_unauthorized().await?,
+        )
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Zpool,
+                lookup_type: LookupType::by_id(zpool_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            }
+        })
+    }
+
+    /// Tombstone an unencrypted local storage dataset, if it isn't already
+    pub async fn local_storage_unencrypted_dataset_tombstone(
+        &self,
+        opctx: &OpContext,
+        dataset_id: DatasetUuid,
+        blueprint_id_when_tombstoned: BlueprintUuid,
+    ) -> Result<bool, Error> {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::rendezvous_local_storage_unencrypted_dataset::dsl;
+
+        diesel::update(dsl::rendezvous_local_storage_unencrypted_dataset)
+            .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
+            .filter(dsl::time_tombstoned.is_null())
+            .set((
+                dsl::time_tombstoned.eq(Utc::now()),
+                dsl::blueprint_id_when_tombstoned
+                    .eq(to_db_typed_uuid(blueprint_id_when_tombstoned)),
+            ))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|rows_modified| match rows_modified {
+                0 => false,
+                1 => true,
+                n => unreachable!(
+                    "update restricted to 1 row return {n} rows modified"
+                ),
+            })
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

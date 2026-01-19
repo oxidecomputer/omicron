@@ -806,8 +806,17 @@ pub enum DatasetKind {
     // Other datasets
     Debug,
 
-    /// Used for local storage disk types, contains volumes delegated to VMMs
+    /// Used for non-raw zvol backed local storage disk types, contains volumes
+    /// delegated to VMMs.
+    ///
+    // Note: this should be unused by all extant local storage disks but has
+    // been left in pending investigation into how we're going to do encryption
+    // at rest for these disk types.
     LocalStorage,
+
+    /// Used for local storage disk types, contains volumes delegated to VMMs,
+    /// and is **not** encrypted at rest.
+    LocalStorageUnencrypted,
 }
 
 impl Serialize for DatasetKind {
@@ -853,11 +862,15 @@ impl JsonSchema for DatasetKind {
 impl DatasetKind {
     pub fn dataset_should_be_encrypted(&self) -> bool {
         match self {
-            // We encrypt all datasets except Crucible.
-            //
-            // Crucible already performs encryption internally, and we
-            // avoid double-encryption.
+            // Crucible already performs encryption internally, so avoid
+            // double-encryption.
             DatasetKind::Crucible => false,
+
+            // Disks backed by local storage will use raw zvols, which are not
+            // encrypted at rest.
+            DatasetKind::LocalStorageUnencrypted => false,
+
+            // By default, encrypt all datasets.
             _ => true,
         }
     }
@@ -874,9 +887,11 @@ impl DatasetKind {
             Cockroach | Crucible | Clickhouse | ClickhouseKeeper
             | ClickhouseServer | ExternalDns | InternalDns => true,
 
-            TransientZoneRoot | TransientZone { .. } | Debug | LocalStorage => {
-                false
-            }
+            TransientZoneRoot
+            | TransientZone { .. }
+            | Debug
+            | LocalStorage
+            | LocalStorageUnencrypted => false,
         }
     }
 
@@ -915,6 +930,7 @@ impl fmt::Display for DatasetKind {
             }
             Debug => "debug",
             LocalStorage => "local_storage",
+            LocalStorageUnencrypted => "local_storage_unencrypted",
         };
         write!(f, "{}", s)
     }
@@ -942,6 +958,7 @@ impl FromStr for DatasetKind {
             "zone" => TransientZoneRoot,
             "debug" => Debug,
             "local_storage" => LocalStorage,
+            "local_storage_unencrypted" => LocalStorageUnencrypted,
             other => {
                 if let Some(name) = other.strip_prefix("zone/") {
                     TransientZone { name: name.to_string() }
@@ -980,8 +997,8 @@ pub struct SledIdentifiers {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DelegatedZvol {
-    /// Delegate a slice of the local storage dataset present on this pool into
-    /// the zone.
+    /// Delegate a slice of the unencrypted local storage dataset present on
+    /// this pool into the zone.
     LocalStorage { zpool_id: ExternalZpoolUuid, dataset_id: DatasetUuid },
 }
 
@@ -990,10 +1007,11 @@ impl DelegatedZvol {
     pub fn parent_dataset_name(&self) -> String {
         match &self {
             DelegatedZvol::LocalStorage { zpool_id, dataset_id } => {
-                // The local storage dataset is the parent for an allocation
+                // The unencrypted local storage dataset is the parent for an
+                // allocation
                 let local_storage_parent = DatasetName::new(
                     ZpoolName::External(*zpool_id),
-                    DatasetKind::LocalStorage,
+                    DatasetKind::LocalStorageUnencrypted,
                 );
 
                 format!("{}/{}", local_storage_parent.full_name(), dataset_id)
@@ -1103,6 +1121,7 @@ mod tests {
             DatasetKind::TransientZone { name: String::from("myzone") },
             DatasetKind::Debug,
             DatasetKind::LocalStorage,
+            DatasetKind::LocalStorageUnencrypted,
         ];
 
         assert_eq!(kinds.len(), DatasetKind::COUNT);
@@ -1146,8 +1165,8 @@ mod tests {
             delegated_zvol.zvol_device(),
             [
                 String::from("/dev/zvol/rdsk"),
-                String::from("oxp_cb832c2e-fa94-4911-89a9-895ac8b1e8f3/crypt"),
-                String::from("local_storage"),
+                String::from("oxp_cb832c2e-fa94-4911-89a9-895ac8b1e8f3"),
+                String::from("local_storage_unencrypted"),
                 String::from("2bbf0908-21da-4bc3-882b-1a1e715c54bd/vol"),
             ]
             .join("/"),

@@ -503,11 +503,14 @@ impl AvailableDatasetsReceiver {
         }
     }
 
-    pub fn all_mounted_local_storage_datasets(&self) -> Vec<PathInPool> {
+    pub fn all_mounted_local_storage_unencrypted_datasets(
+        &self,
+    ) -> Vec<PathInPool> {
         match &self.inner {
-            AvailableDatasetsReceiverInner::Real(receiver) => {
-                receiver.borrow().all_mounted_local_storage_datasets().collect()
-            }
+            AvailableDatasetsReceiverInner::Real(receiver) => receiver
+                .borrow()
+                .all_mounted_local_storage_unencrypted_datasets()
+                .collect(),
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
                 vec![PathInPool {

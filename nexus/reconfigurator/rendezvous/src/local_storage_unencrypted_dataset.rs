@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Recording Local storage datasets in their rendezvous table
+//! Recording unencrypted Local storage datasets in their rendezvous table
 
 use anyhow::Context;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::model::RendezvousLocalStorageDataset;
+use nexus_db_queries::db::model::RendezvousLocalStorageUnencryptedDataset;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
@@ -18,7 +18,7 @@ use slog::info;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-pub(crate) async fn reconcile_local_storage_datasets(
+pub(crate) async fn reconcile_local_storage_unencrypted_datasets(
     opctx: &OpContext,
     datastore: &DataStore,
     blueprint_id: BlueprintUuid,
@@ -33,9 +33,9 @@ pub(crate) async fn reconcile_local_storage_datasets(
     // below would still be correct, but it would issue a bunch of do-nothing
     // queries for every individual dataset in `blueprint_datasets`.
     let existing_datasets = datastore
-        .local_storage_dataset_list_all_batched(opctx)
+        .local_storage_unencrypted_dataset_list_all_batched(opctx)
         .await
-        .context("failed to list all local storage datasets")?
+        .context("failed to list all unencrypted local storage datasets")?
         .into_iter()
         .map(|dataset| (dataset.id(), dataset))
         .collect::<BTreeMap<DatasetUuid, _>>();
@@ -45,8 +45,8 @@ pub(crate) async fn reconcile_local_storage_datasets(
     for bp_dataset in blueprint_datasets {
         // Filter down to LocalStorage datasets...
         let dataset = match (&bp_dataset.kind, bp_dataset.address) {
-            (DatasetKind::LocalStorage, None) => {
-                RendezvousLocalStorageDataset::new(
+            (DatasetKind::LocalStorageUnencrypted, None) => {
+                RendezvousLocalStorageUnencryptedDataset::new(
                     bp_dataset.id,
                     bp_dataset.pool.id(),
                     blueprint_id,
@@ -72,7 +72,9 @@ pub(crate) async fn reconcile_local_storage_datasets(
                 }
 
                 let did_insert = datastore
-                    .local_storage_dataset_insert_if_not_exists(opctx, dataset)
+                    .local_storage_unencrypted_dataset_insert_if_not_exists(
+                        opctx, dataset,
+                    )
                     .await
                     .with_context(|| {
                         format!(
@@ -87,7 +89,8 @@ pub(crate) async fn reconcile_local_storage_datasets(
 
                     info!(
                         opctx.log,
-                        "inserted LocalStorage dataset record in database";
+                        "inserted LocalStorageUnencrypted dataset record in \
+                        database";
                         "action" => "insert",
                         "id" => %id,
                     );
@@ -112,7 +115,7 @@ pub(crate) async fn reconcile_local_storage_datasets(
                     stats.num_already_tombstoned += 1;
                 } else {
                     if datastore
-                        .local_storage_dataset_tombstone(
+                        .local_storage_unencrypted_dataset_tombstone(
                             opctx,
                             dataset.id(),
                             blueprint_id,
@@ -128,7 +131,8 @@ pub(crate) async fn reconcile_local_storage_datasets(
                         stats.num_tombstoned += 1;
                         info!(
                             opctx.log,
-                            "tombstoned expunged local storage dataset";
+                            "tombstoned expunged unencrypted local storage \
+                            dataset";
                             "dataset_id" => %dataset.id(),
                         );
                     } else {
@@ -144,7 +148,7 @@ pub(crate) async fn reconcile_local_storage_datasets(
 
     info!(
         opctx.log,
-        "all LocalStorage datasets reconciled";
+        "all LocalStorageUnencrypted datasets reconciled";
         &stats,
     );
 
@@ -189,7 +193,7 @@ mod tests {
 
         // Clean up from any previous proptest cases
         {
-            use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl;
+            use nexus_db_schema::schema::rendezvous_local_storage_unencrypted_dataset::dsl;
             use nexus_db_schema::schema::sled::dsl as sled_dsl;
             use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -201,9 +205,11 @@ mod tests {
                     diesel::delete(zpool_dsl::zpool)
                         .execute_async(&conn)
                         .await?;
-                    diesel::delete(dsl::rendezvous_local_storage_dataset)
-                        .execute_async(&conn)
-                        .await?;
+                    diesel::delete(
+                        dsl::rendezvous_local_storage_unencrypted_dataset,
+                    )
+                    .execute_async(&conn)
+                    .await?;
                     Ok::<_, diesel::result::Error>(())
                 })
                 .await
@@ -259,7 +265,7 @@ mod tests {
                 disposition: prep.disposition.into(),
                 id: dataset_id,
                 pool: ZpoolName::new_external(zpool_id),
-                kind: DatasetKind::LocalStorage,
+                kind: DatasetKind::LocalStorageUnencrypted,
                 address: None,
                 quota: None,
                 reservation: None,
@@ -272,9 +278,9 @@ mod tests {
 
             if prep.in_database {
                 datastore
-                    .local_storage_dataset_insert_if_not_exists(
+                    .local_storage_unencrypted_dataset_insert_if_not_exists(
                         opctx,
-                        RendezvousLocalStorageDataset::new(
+                        RendezvousLocalStorageUnencryptedDataset::new(
                             d.id,
                             d.pool.id(),
                             blueprint_id,
@@ -324,7 +330,7 @@ mod tests {
                     &prep,
                 ).await;
 
-                let result_stats = reconcile_local_storage_datasets(
+                let result_stats = reconcile_local_storage_unencrypted_datasets(
                     opctx,
                     datastore,
                     blueprint_id,
@@ -335,7 +341,7 @@ mod tests {
                 .expect("reconciled local storage dataset");
 
                  let datastore_datasets = datastore
-                    .local_storage_dataset_list_all_batched(opctx)
+                    .local_storage_unencrypted_dataset_list_all_batched(opctx)
                     .await
                     .unwrap()
                     .into_iter()
