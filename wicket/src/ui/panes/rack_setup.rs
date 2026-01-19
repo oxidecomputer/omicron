@@ -715,7 +715,7 @@ fn rss_config_text<'a>(
             rack_network_config.as_ref().map_or("".into(), |c| {
                 match c.rack_subnet_address {
                     Some(v) => v.to_string(),
-                    None => "".to_string(),
+                    None => "(will be chosen randomly)".to_string(),
                 }
                 .into()
             }),
