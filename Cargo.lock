@@ -7056,6 +7056,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
+ "trust-quorum-types",
  "uuid",
 ]
 
@@ -8645,6 +8646,7 @@ dependencies = [
  "tabled 0.15.0",
  "textwrap 0.16.2",
  "tokio",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "unicode-width 0.1.14",
  "update-engine",

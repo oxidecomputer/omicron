@@ -1389,10 +1389,56 @@
         }
       }
     },
-    "/trust-quorum/{rack_id}/config/latest": {
+    "/trust-quorum/{rack_id}/config": {
       "get": {
-        "summary": "Retrieve the latest ongoing rack cluster membership change",
-        "operationId": "trust_quorum_get_latest_config",
+        "summary": "Retrieve the trust quorum configuration for the given epoch, or latest",
+        "operationId": "trust_quorum_get_config",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "epoch",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustQuorumConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/trust-quorum/{rack_id}/lrtq-upgrade": {
+      "post": {
+        "summary": "Initiate an LRTQ upgrade",
+        "description": "Return the epoch of the proposed configuration, so it can be polled asynchronously.",
+        "operationId": "trust_quorum_lrtq_upgrade",
         "parameters": [
           {
             "in": "path",
@@ -1410,7 +1456,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrustQuorumConfig"
+                  "title": "uint64",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
                 }
               }
             }
