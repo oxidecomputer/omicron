@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! A serializable Option<Result> that plays nicely with OpenAPI lints.
+//! A serializable `Option<Result>` that plays nicely with OpenAPI lints.
 
 use crate::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
@@ -92,7 +92,7 @@ where
     }
 }
 
-/// Deserialize a `SnakeCaseOptionResult` into an Option<Result>.
+/// Deserialize a `SnakeCaseOptionResult` into an `Option<Result>`.
 pub fn deserialize<'de, D, T, E>(
     deserializer: D,
 ) -> Result<Option<Result<T, E>>, D::Error>
