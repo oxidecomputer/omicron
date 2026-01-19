@@ -121,7 +121,7 @@ scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.27", features = ["serde"] }
 serde = { version = "1.0.228", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.228", features = ["alloc", "rc"] }
-serde_json = { version = "1.0.145", features = ["alloc", "raw_value", "unbounded_depth"] }
+serde_json = { version = "1.0.149", features = ["alloc", "raw_value", "unbounded_depth"] }
 serde_with = { version = "3.14.0", features = ["hex", "schemars_0_8"] }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
@@ -263,7 +263,7 @@ scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.27", features = ["serde"] }
 serde = { version = "1.0.228", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.228", features = ["alloc", "rc"] }
-serde_json = { version = "1.0.145", features = ["alloc", "raw_value", "unbounded_depth"] }
+serde_json = { version = "1.0.149", features = ["alloc", "raw_value", "unbounded_depth"] }
 serde_with = { version = "3.14.0", features = ["hex", "schemars_0_8"] }
 serde_with_macros = { version = "3.14.0", default-features = false, features = ["schemars_0_8"] }
 sha1 = { version = "0.10.6", features = ["oid"] }
