@@ -736,8 +736,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "21fbf39f63b25567b25aeadf0d9a73a01c842512"
-source.sha256 = "5fdf1716837b30cad74815d853339694233bdd57ed660890d6dc3dec5b9faa5d"
+source.commit = "0d884859047afe70864f79c93fb450f1996f09e3"
+source.sha256 = "fc1eb50d2f92d612567c13a784c43124f0ca4d39fe2d9a00738b962c7c72d0cf"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -763,8 +763,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "21fbf39f63b25567b25aeadf0d9a73a01c842512"
-source.sha256 = "4c2169695baa344cf031b7445246a32debaa53fc8a0bb8ad0e5ca51d2a6d1acb"
+source.commit = "0d884859047afe70864f79c93fb450f1996f09e3"
+source.sha256 = "fc1b90912facef3f463e96a9953a63f4114bfe5c2cf7d247695a07a61aaeac09"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -783,8 +783,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "21fbf39f63b25567b25aeadf0d9a73a01c842512"
-source.sha256 = "2ba8711482b4f96ada44ee5b1ac5543a693d5d7b62ae502357d019d95677e55b"
+source.commit = "0d884859047afe70864f79c93fb450f1996f09e3"
+source.sha256 = "459bdbbdfba4098dccd136912cdb5c3ef16ad57b8f6e1e11558aed353df904a4"
 output.type = "zone"
 output.intermediate_only = true
 
