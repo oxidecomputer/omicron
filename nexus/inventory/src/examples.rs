@@ -38,6 +38,15 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_resolvable_files_examples::BOOT_PATHS;
+use sled_agent_resolvable_files_examples::NON_BOOT_2_PATHS;
+use sled_agent_resolvable_files_examples::NON_BOOT_2_UUID;
+use sled_agent_resolvable_files_examples::NON_BOOT_3_PATHS;
+use sled_agent_resolvable_files_examples::NON_BOOT_3_UUID;
+use sled_agent_resolvable_files_examples::NON_BOOT_PATHS;
+use sled_agent_resolvable_files_examples::NON_BOOT_UUID;
+use sled_agent_resolvable_files_examples::WriteInstallDatasetContext;
+use sled_agent_resolvable_files_examples::dataset_missing_error;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
@@ -57,29 +66,20 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::ReconciledSingleMeasurement;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
-use sled_agent_types::zone_images::MeasurementManifestStatus;
-use sled_agent_types::zone_images::MupdateOverrideNonBootInfo;
-use sled_agent_types::zone_images::MupdateOverrideNonBootMismatch;
-use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
-use sled_agent_types::zone_images::MupdateOverrideReadError;
-use sled_agent_types::zone_images::MupdateOverrideStatus;
-use sled_agent_types::zone_images::ResolverStatus;
-use sled_agent_types::zone_images::ZoneManifestNonBootInfo;
-use sled_agent_types::zone_images::ZoneManifestNonBootMismatch;
-use sled_agent_types::zone_images::ZoneManifestNonBootResult;
-use sled_agent_types::zone_images::ZoneManifestReadError;
-use sled_agent_types::zone_images::ZoneManifestStatus;
+use sled_agent_types::resolvable_files::MeasurementManifestStatus;
+use sled_agent_types::resolvable_files::MupdateOverrideNonBootInfo;
+use sled_agent_types::resolvable_files::MupdateOverrideNonBootMismatch;
+use sled_agent_types::resolvable_files::MupdateOverrideNonBootResult;
+use sled_agent_types::resolvable_files::MupdateOverrideReadError;
+use sled_agent_types::resolvable_files::MupdateOverrideStatus;
+use sled_agent_types::resolvable_files::OmicronManifestNonBootInfo;
+use sled_agent_types::resolvable_files::OmicronManifestNonBootMismatch;
+use sled_agent_types::resolvable_files::OmicronManifestNonBootResult;
+use sled_agent_types::resolvable_files::OmicronManifestReadError;
+use sled_agent_types::resolvable_files::ResolverStatus;
+use sled_agent_types::resolvable_files::ZoneManifestStatus;
 use sled_agent_types_versions::v4::inventory::OmicronZonesConfig as OmicronZonesConfigV4;
 use sled_agent_types_versions::v10::inventory::OmicronZonesConfig as OmicronZonesConfigV10;
-use sled_agent_zone_images_examples::BOOT_PATHS;
-use sled_agent_zone_images_examples::NON_BOOT_2_PATHS;
-use sled_agent_zone_images_examples::NON_BOOT_2_UUID;
-use sled_agent_zone_images_examples::NON_BOOT_3_PATHS;
-use sled_agent_zone_images_examples::NON_BOOT_3_UUID;
-use sled_agent_zone_images_examples::NON_BOOT_PATHS;
-use sled_agent_zone_images_examples::NON_BOOT_UUID;
-use sled_agent_zone_images_examples::WriteInstallDatasetContext;
-use sled_agent_zone_images_examples::dataset_missing_error;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -865,14 +865,14 @@ pub fn file_source_resolver(
             }
             OmicronFileSourceResolverExampleKind::Error => {
                 // Use the invalid context to generate an error.
-                let zm_result = Err(ZoneManifestReadError::InstallMetadata(
+                let zm_result = Err(OmicronManifestReadError::InstallMetadata(
                     dataset_missing_error(
                         &dir_path.join(&BOOT_PATHS.install_dataset),
                     ),
                 ));
                 // Use the invalid context to generate an error.
                 let measurement_m_result =
-                    Err(ZoneManifestReadError::InstallMetadata(
+                    Err(OmicronManifestReadError::InstallMetadata(
                         dataset_missing_error(
                             &dir_path.join(&BOOT_PATHS.install_dataset),
                         ),
@@ -895,7 +895,7 @@ pub fn file_source_resolver(
             boot_disk_result: measurement_m_result,
             non_boot_disk_metadata: id_ord_map! {
                 // Non-boot disk metadata that matches.
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir_path.join(&NON_BOOT_PATHS.install_dataset),
                     path: dir_path.join(&NON_BOOT_PATHS.measurements_json),
@@ -903,19 +903,19 @@ pub fn file_source_resolver(
                     // can't be Matches. We choose to punt on this issue because
                     // the conversion to the inventory type squishes down
                     // errors into a string.
-                    result: ZoneManifestNonBootResult::Matches(
+                    result: OmicronManifestNonBootResult::Matches(
                         cx.expected_result(
                             &dir_path.join(&NON_BOOT_PATHS.install_dataset)
                         )
                     ),
                 },
                 // Non-boot disk mismatch (zones different + errors).
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_2_UUID,
                     dataset_dir: dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
                     path: dir_path.join(&NON_BOOT_2_PATHS.measurements_json),
-                    result: ZoneManifestNonBootResult::Mismatch(
-                        ZoneManifestNonBootMismatch::ValueMismatch {
+                    result: OmicronManifestNonBootResult::Mismatch(
+                        OmicronManifestNonBootMismatch::ValueMismatch {
                             non_boot_disk_result: invalid_cx.expected_result(
                                 &dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
                             ),
@@ -923,11 +923,11 @@ pub fn file_source_resolver(
                     ),
                 },
                 // Non-boot disk mismatch (error reading zone manifest).
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_3_UUID,
                     dataset_dir: dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
                     path: dir_path.join(&NON_BOOT_3_PATHS.measurements_json),
-                    result: ZoneManifestNonBootResult::ReadError(
+                    result: OmicronManifestNonBootResult::ReadError(
                         dataset_missing_error(
                             &dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
                         ).into(),
@@ -941,7 +941,7 @@ pub fn file_source_resolver(
             boot_disk_result: boot_zm_result,
             non_boot_disk_metadata: id_ord_map! {
                 // Non-boot disk metadata that matches.
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir_path.join(&NON_BOOT_PATHS.install_dataset),
                     path: dir_path.join(&NON_BOOT_PATHS.zones_json),
@@ -949,19 +949,19 @@ pub fn file_source_resolver(
                     // can't be Matches. We choose to punt on this issue because
                     // the conversion to the inventory type squishes down
                     // errors into a string.
-                    result: ZoneManifestNonBootResult::Matches(
+                    result: OmicronManifestNonBootResult::Matches(
                         cx.expected_result(
                             &dir_path.join(&NON_BOOT_PATHS.install_dataset)
                         )
                     ),
                 },
                 // Non-boot disk mismatch (zones different + errors).
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_2_UUID,
                     dataset_dir: dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
                     path: dir_path.join(&NON_BOOT_2_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Mismatch(
-                        ZoneManifestNonBootMismatch::ValueMismatch {
+                    result: OmicronManifestNonBootResult::Mismatch(
+                        OmicronManifestNonBootMismatch::ValueMismatch {
                             non_boot_disk_result: invalid_cx.expected_result(
                                 &dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
                             ),
@@ -969,11 +969,11 @@ pub fn file_source_resolver(
                     ),
                 },
                 // Non-boot disk mismatch (error reading zone manifest).
-                ZoneManifestNonBootInfo {
+                OmicronManifestNonBootInfo {
                     zpool_id: NON_BOOT_3_UUID,
                     dataset_dir: dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
                     path: dir_path.join(&NON_BOOT_3_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::ReadError(
+                    result: OmicronManifestNonBootResult::ReadError(
                         dataset_missing_error(
                             &dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
                         ).into(),

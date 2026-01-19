@@ -139,8 +139,8 @@ members = [
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
-    "sled-agent/zone-images",
-    "sled-agent/zone-images-examples",
+    "sled-agent/resolvable-files",
+    "sled-agent/resolvable-files-examples",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -311,8 +311,8 @@ default-members = [
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
-    "sled-agent/zone-images",
-    "sled-agent/zone-images-examples",
+    "sled-agent/resolvable-files",
+    "sled-agent/resolvable-files-examples",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -678,10 +678,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "2dc643742f82d2e072a1281dab23ba2bfdcee440" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "ff31c527515d65886e599fc07eb41240aeb767c6" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "ff31c527515d65886e599fc07eb41240aeb767c6" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "ff31c527515d65886e599fc07eb41240aeb767c6" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "ff31c527515d65886e599fc07eb41240aeb767c6" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -747,8 +747,8 @@ sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-types-versions = { path = "sled-agent/types/versions" }
-sled-agent-zone-images = { path = "sled-agent/zone-images" }
-sled-agent-zone-images-examples = { path = "sled-agent/zone-images-examples" }
+sled-agent-resolvable-files = { path = "sled-agent/resolvable-files" }
+sled-agent-resolvable-files-examples = { path = "sled-agent/resolvable-files-examples" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }

@@ -86,71 +86,30 @@ WITH
         required_instances
         JOIN sled_resource_vmm ON sled_resource_vmm.instance_id = required_instances.instance_id
     ),
-  updated_local_storage_disk_records
-    AS (
-      UPDATE
-        disk_type_local_storage
-      SET
-        local_storage_dataset_allocation_id = CASE disk_id WHEN $9 THEN $10 WHEN $11 THEN $12 END
-      WHERE
-        disk_id IN ($13, $14)
-      RETURNING
-        *
-    ),
-  new_local_storage_allocation_records
-    AS (
-      INSERT
-      INTO
-        local_storage_dataset_allocation
-      VALUES
-        ($15, now(), NULL, $16, $17, $18, $19), ($20, now(), NULL, $21, $22, $23, $24)
-      RETURNING
-        *
-    ),
-  update_rendezvous_tables
-    AS (
-      UPDATE
-        rendezvous_local_storage_dataset
-      SET
-        size_used = size_used + new_records.dataset_size
-      FROM
-        new_local_storage_allocation_records AS new_records
-      WHERE
-        new_records.local_storage_dataset_id = rendezvous_local_storage_dataset.id
-        AND rendezvous_local_storage_dataset.time_tombstoned IS NULL
-      RETURNING
-        *
-    ),
   insert_valid
     AS (
       SELECT
         1
       WHERE
         EXISTS(SELECT 1 FROM sled_has_space)
-        AND NOT (EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = $25))
+        AND NOT (EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = $9))
         AND (
-            EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = $26)
+            EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = $10)
             OR NOT EXISTS(SELECT 1 FROM required_sleds)
           )
         AND (
             (
               SELECT
-                sum(
-                  crucible_dataset.size_used
-                  + rendezvous_local_storage_dataset.size_used
-                  + new_records.dataset_size
-                )
+                sum(crucible_dataset.size_used + rendezvous_local_storage_dataset.size_used + $11)
               FROM
                 crucible_dataset
                 JOIN rendezvous_local_storage_dataset ON
                     crucible_dataset.pool_id = rendezvous_local_storage_dataset.pool_id
-                JOIN new_local_storage_allocation_records AS new_records ON
-                    crucible_dataset.pool_id = new_records.pool_id
               WHERE
                 (crucible_dataset.size_used IS NOT NULL)
                 AND (crucible_dataset.time_deleted IS NULL)
                 AND (rendezvous_local_storage_dataset.time_tombstoned IS NULL)
-                AND crucible_dataset.pool_id = $27
+                AND crucible_dataset.pool_id = $12
               GROUP BY
                 crucible_dataset.pool_id
             )
@@ -161,13 +120,13 @@ WITH
                   FROM
                     inv_zpool
                   WHERE
-                    inv_zpool.id = $28
+                    inv_zpool.id = $13
                   ORDER BY
                     inv_zpool.time_collected DESC
                   LIMIT
                     1
                 )
-                - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $29)
+                - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $14)
               )
             AND (
                 SELECT
@@ -180,7 +139,7 @@ WITH
                   JOIN sled ON zpool.sled_id = sled.id
                   JOIN physical_disk ON zpool.physical_disk_id = physical_disk.id
                 WHERE
-                  zpool.id = $30
+                  zpool.id = $15
               )
             AND (
                 SELECT
@@ -188,26 +147,20 @@ WITH
                 FROM
                   rendezvous_local_storage_dataset
                 WHERE
-                  rendezvous_local_storage_dataset.id = $31
+                  rendezvous_local_storage_dataset.id = $16
               )
             AND (
                 SELECT
-                  sum(
-                    crucible_dataset.size_used
-                    + rendezvous_local_storage_dataset.size_used
-                    + new_records.dataset_size
-                  )
+                  sum(crucible_dataset.size_used + rendezvous_local_storage_dataset.size_used + $17)
                 FROM
                   crucible_dataset
                   JOIN rendezvous_local_storage_dataset ON
                       crucible_dataset.pool_id = rendezvous_local_storage_dataset.pool_id
-                  JOIN new_local_storage_allocation_records AS new_records ON
-                      crucible_dataset.pool_id = new_records.pool_id
                 WHERE
                   (crucible_dataset.size_used IS NOT NULL)
                   AND (crucible_dataset.time_deleted IS NULL)
                   AND (rendezvous_local_storage_dataset.time_tombstoned IS NULL)
-                  AND crucible_dataset.pool_id = $32
+                  AND crucible_dataset.pool_id = $18
                 GROUP BY
                   crucible_dataset.pool_id
               )
@@ -218,13 +171,13 @@ WITH
                     FROM
                       inv_zpool
                     WHERE
-                      inv_zpool.id = $33
+                      inv_zpool.id = $19
                     ORDER BY
                       inv_zpool.time_collected DESC
                     LIMIT
                       1
                   )
-                  - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $34)
+                  - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $20)
                 )
             AND (
                 SELECT
@@ -237,7 +190,7 @@ WITH
                   JOIN sled ON zpool.sled_id = sled.id
                   JOIN physical_disk ON zpool.physical_disk_id = physical_disk.id
                 WHERE
-                  zpool.id = $35
+                  zpool.id = $21
               )
             AND (
                 SELECT
@@ -245,14 +198,62 @@ WITH
                 FROM
                   rendezvous_local_storage_dataset
                 WHERE
-                  rendezvous_local_storage_dataset.id = $36
+                  rendezvous_local_storage_dataset.id = $22
               )
           )
+    ),
+  updated_local_storage_disk_records
+    AS (
+      UPDATE
+        disk_type_local_storage
+      SET
+        local_storage_dataset_allocation_id = CASE disk_id WHEN $23 THEN $24 WHEN $25 THEN $26 END
+      WHERE
+        disk_id IN ($27, $28) AND EXISTS(SELECT 1 FROM insert_valid)
+      RETURNING
+        *
+    ),
+  new_local_storage_allocation_records_0
+    AS (
+      INSERT
+      INTO
+        local_storage_dataset_allocation
+          (id, time_created, time_deleted, local_storage_dataset_id, pool_id, sled_id, dataset_size)
+      SELECT
+        $29, now(), NULL, $30, $31, $32, $33
+      WHERE
+        EXISTS(SELECT 1 FROM insert_valid)
+      RETURNING
+        *
+    ),
+  new_local_storage_allocation_records_1
+    AS (
+      INSERT
+      INTO
+        local_storage_dataset_allocation
+          (id, time_created, time_deleted, local_storage_dataset_id, pool_id, sled_id, dataset_size)
+      SELECT
+        $34, now(), NULL, $35, $36, $37, $38
+      WHERE
+        EXISTS(SELECT 1 FROM insert_valid)
+      RETURNING
+        *
+    ),
+  update_rendezvous_tables
+    AS (
+      UPDATE
+        rendezvous_local_storage_dataset
+      SET
+        size_used = size_used + CASE pool_id WHEN $39 THEN $40 WHEN $41 THEN $42 END
+      WHERE
+        pool_id IN ($43, $44) AND time_tombstoned IS NULL AND EXISTS(SELECT 1 FROM insert_valid)
+      RETURNING
+        *
     )
 INSERT
 INTO
   sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id)
 SELECT
-  $37, $38, $39, $40, $41, $42
+  $45, $46, $47, $48, $49, $50
 WHERE
   EXISTS(SELECT 1 FROM insert_valid)

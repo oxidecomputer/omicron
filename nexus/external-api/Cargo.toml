@@ -31,3 +31,7 @@ scim2-rs.workspace = true
 serde.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+test-strategy.workspace = true
