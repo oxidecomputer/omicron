@@ -209,12 +209,20 @@ pub struct PathInPool {
     pub path: Utf8PathBuf,
 }
 
+/// Associates a zpool with the health state it is in.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct ZpoolState {
+    pub zpool: String,
+    pub state: ZpoolHealth,
+}
+
 /// Lists unhealthy zpools, parsing errors if any, and the time the health check
 /// for zpools ran.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct UnhealthyZpoolsResult {
-    pub zpools: Vec<String>,
+    pub zpools: Vec<ZpoolState>,
     pub errors: Vec<String>,
     pub time_of_status: DateTime<Utc>,
 }
@@ -248,27 +256,32 @@ impl UnhealthyZpoolsResult {
                 // Only attempt to parse a zpool that is in a non-functional
                 // state.
                 match ZpoolHealth::from_str(state_str) {
-                    Ok(ZpoolHealth::Faulted)
-                    | Ok(ZpoolHealth::Degraded)
-                    | Ok(ZpoolHealth::Offline)
-                    | Ok(ZpoolHealth::Removed)
-                    | Ok(ZpoolHealth::Unavailable) => {
-                        if let Some(name) = pool.next() {
-                            zpools.push(name.to_string());
-                        } else {
-                            errors.push(format!(
-                                "Unexpected output line: {line}"
-                            ));
-                            error!(
-                                log,
-                                "unable to parse; output line missing zpool name";
-                                "line" => line,
-                            );
-                            continue;
+                    Ok(state) => match state {
+                        ZpoolHealth::Faulted
+                        | ZpoolHealth::Degraded
+                        | ZpoolHealth::Offline
+                        | ZpoolHealth::Removed
+                        | ZpoolHealth::Unavailable => {
+                            if let Some(name) = pool.next() {
+                                zpools.push(ZpoolState {
+                                    zpool: name.to_string(),
+                                    state,
+                                });
+                            } else {
+                                errors.push(format!(
+                                    "Unexpected output line: {line}"
+                                ));
+                                error!(
+                                    log,
+                                    "unable to parse; output line missing zpool name";
+                                    "line" => line,
+                                );
+                                continue;
+                            }
                         }
-                    }
-                    // Pool is in a healthy state, skip it.
-                    Ok(ZpoolHealth::Online) => {}
+                        // Pool is in a healthy state, skip it.
+                        ZpoolHealth::Online => {}
+                    },
                     Err(e) => {
                         errors.push(format!("{e}"));
                         info!(
@@ -477,7 +490,16 @@ ONLINE  rpool
         // We want to make sure we only have two unhealthy pools
         assert_eq!(
             result.zpools,
-            vec!["fakepool1".to_string(), "fakepool2".to_string()]
+            vec![
+                ZpoolState {
+                    zpool: "fakepool1".to_string(),
+                    state: ZpoolHealth::Faulted,
+                },
+                ZpoolState {
+                    zpool: "fakepool2".to_string(),
+                    state: ZpoolHealth::Unavailable,
+                },
+            ]
         );
         assert_eq!(result.errors.len(), 0);
     }
@@ -519,7 +541,13 @@ ONLINE  rpool
         let log = log();
         let result = UnhealthyZpoolsResult::parse(&log, output.as_bytes());
 
-        assert_eq!(result.zpools, vec!["fakepool2".to_string()]);
+        assert_eq!(
+            result.zpools,
+            vec![ZpoolState {
+                zpool: "fakepool2".to_string(),
+                state: ZpoolHealth::Faulted,
+            },]
+        );
         assert_eq!(
             result.errors,
             vec![
