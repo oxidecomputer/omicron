@@ -5571,6 +5571,8 @@
         "type": "object",
         "properties": {
           "smf_services_in_maintenance": {
+            "nullable": true,
+            "default": null,
             "x-rust-type": {
               "crate": "std",
               "parameters": [
@@ -5650,10 +5652,7 @@
               }
             ]
           }
-        },
-        "required": [
-          "smf_services_in_maintenance"
-        ]
+        }
       },
       "HostIdentifier": {
         "description": "A `HostIdentifier` represents either an IP host or network (v4 or v6), or an entire VPC (identified by its VNI). It is used in firewall rule host filters.",

@@ -19,7 +19,7 @@ pub struct HealthMonitorHandle {
     // the failure to execute the command, which is a
     // `illumos_utils::ExecutionError` and this error cannot be cloned.
     pub smf_services_in_maintenance_rx:
-        watch::Receiver<Result<SvcsInMaintenanceResult, String>>,
+        watch::Receiver<Option<Result<SvcsInMaintenanceResult, String>>>,
     pub unhealthy_zpools_rx:
         watch::Receiver<Option<Result<UnhealthyZpoolsResult, String>>>,
 }
@@ -28,8 +28,7 @@ impl HealthMonitorHandle {
     /// Returns a `HealthMonitorHandle` that doesn't monitor health and always
     /// reports no problems
     pub fn stub() -> Self {
-        let (_tx, smf_services_in_maintenance_rx) =
-            watch::channel(Ok(SvcsInMaintenanceResult::new()));
+        let (_tx, smf_services_in_maintenance_rx) = watch::channel(None);
         let (_tx, unhealthy_zpools_rx) = watch::channel(None);
         Self { smf_services_in_maintenance_rx, unhealthy_zpools_rx }
     }
@@ -39,7 +38,7 @@ impl HealthMonitorHandle {
         info!(log, "Starting SMF service health poller");
 
         let (smf_services_in_maintenance_tx, smf_services_in_maintenance_rx) =
-            watch::channel(Ok(SvcsInMaintenanceResult::new()));
+            watch::channel(None);
 
         let zpool_log = log.clone();
         tokio::spawn(async move {

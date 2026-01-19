@@ -8,7 +8,6 @@ use std::net::{IpAddr, Ipv6Addr};
 
 use camino::Utf8PathBuf;
 use iddqd::IdOrdMap;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
 use indent_write::fmt::IndentWriter;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -470,16 +469,11 @@ impl ConfigReconcilerInventory {
 
 impl HealthMonitorInventory {
     pub fn new() -> Self {
-        Self {
-            smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
-            unhealthy_zpools: None,
-        }
+        Self { smf_services_in_maintenance: None, unhealthy_zpools: None }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.smf_services_in_maintenance
-            .as_ref()
-            .is_ok_and(|svcs| svcs.is_empty())
+        self.smf_services_in_maintenance.is_none()
             && self.unhealthy_zpools.is_none()
     }
 }

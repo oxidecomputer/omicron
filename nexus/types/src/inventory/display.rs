@@ -913,30 +913,33 @@ fn display_sleds(
         if !health_monitor.is_empty() {
             writeln!(indented, "HEALTH MONITOR")?;
             let mut indent2 = IndentWriter::new("  ", &mut indented);
-            match &health_monitor.smf_services_in_maintenance {
-                Ok(svcs) => {
-                    if !svcs.is_empty() {
-                        if let Some(time_of_status) = &svcs.time_of_status {
-                            writeln!(
-                                indent2,
-                                "SMF services in maintenance at {}:",
-                                time_of_status.to_rfc3339_opts(
-                                    SecondsFormat::Millis,
-                                    /* use_z */ true,
-                                )
-                            )?;
-                        }
-                        let mut indent3 = IndentWriter::new("  ", &mut indent2);
-                        for svc in &svcs.services {
-                            writeln!(indent3, "{svc}")?;
+            if let Some(svcs) = &health_monitor.smf_services_in_maintenance {
+                match svcs {
+                    Ok(svcs) => {
+                        if !svcs.is_empty() {
+                            if let Some(time_of_status) = &svcs.time_of_status {
+                                writeln!(
+                                    indent2,
+                                    "SMF services in maintenance at {}:",
+                                    time_of_status.to_rfc3339_opts(
+                                        SecondsFormat::Millis,
+                                        /* use_z */ true,
+                                    )
+                                )?;
+                            }
+                            let mut indent3 =
+                                IndentWriter::new("  ", &mut indent2);
+                            for svc in &svcs.services {
+                                writeln!(indent3, "{svc}")?;
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    writeln!(
-                        indent2,
-                        "failed to retrieve SMF services in maintenance: {e}"
-                    )?;
+                    Err(e) => {
+                        writeln!(
+                            indent2,
+                            "failed to retrieve SMF services in maintenance: {e}"
+                        )?;
+                    }
                 }
             }
         }

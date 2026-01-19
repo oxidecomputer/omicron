@@ -3,8 +3,6 @@ use illumos_utils::zpool::UnhealthyZpoolsResult;
 use omicron_common::api::external::ByteCount;
 use omicron_common::snake_case_option_result;
 use omicron_common::snake_case_option_result::SnakeCaseOptionResult;
-use omicron_common::snake_case_result;
-use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -88,11 +86,12 @@ impl From<Inventory> for v14::inventory::Inventory {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct HealthMonitorInventory {
-    #[serde(with = "snake_case_result")]
+    #[serde(default, with = "snake_case_option_result")]
     #[schemars(
-        schema_with = "SnakeCaseResult::<SvcsInMaintenanceResult, String>::json_schema"
+        schema_with = "SnakeCaseOptionResult::<SvcsInMaintenanceResult, String>::json_schema"
     )]
-    pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
+    pub smf_services_in_maintenance:
+        Option<Result<SvcsInMaintenanceResult, String>>,
     #[serde(default, with = "snake_case_option_result")]
     #[schemars(
         schema_with = "SnakeCaseOptionResult::<UnhealthyZpoolsResult, String>::json_schema"
@@ -106,6 +105,10 @@ impl From<HealthMonitorInventory> for v12::inventory::HealthMonitorInventory {
             smf_services_in_maintenance,
             unhealthy_zpools: _,
         } = value;
+        let smf_services_in_maintenance = match smf_services_in_maintenance {
+            Some(svcs_result) => svcs_result,
+            None => Ok(SvcsInMaintenanceResult::new()),
+        };
         Self { smf_services_in_maintenance }
     }
 }

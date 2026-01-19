@@ -17,7 +17,7 @@ use tokio::time::interval;
 pub(crate) async fn poll_smf_services_in_maintenance(
     log: Logger,
     smf_services_in_maintenance_tx: watch::Sender<
-        Result<SvcsInMaintenanceResult, String>,
+        Option<Result<SvcsInMaintenanceResult, String>>,
     >,
 ) {
     // We poll every minute to verify the health of all services. This interval
@@ -37,10 +37,10 @@ pub(crate) async fn poll_smf_services_in_maintenance(
             // means we can safely use `send_modify` instead of
             // `send_if_modified()`.
             Err(e) => smf_services_in_maintenance_tx.send_modify(|status| {
-                *status = Err(e.to_string());
+                *status = Some(Err(e.to_string()));
             }),
             Ok(svcs) => smf_services_in_maintenance_tx.send_modify(|status| {
-                *status = Ok(svcs);
+                *status = Some(Ok(svcs));
             }),
         };
     }
