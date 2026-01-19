@@ -611,6 +611,9 @@ mod tests {
                 .is_empty(),
             "Should be no external subnet pools after deleting all"
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -684,6 +687,9 @@ mod tests {
             .delete_subnet_pool(opctx, &authz_pool, &db_pool)
             .await
             .expect("able to delete subnet pool after deleting all members");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -751,6 +757,9 @@ mod tests {
             )
             .as_str()
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -919,6 +928,9 @@ mod tests {
         else {
             panic!("Expected ObjectNotFound, found {err:#?}");
         };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -976,10 +988,13 @@ mod tests {
         else {
             panic!("Expected NotFound, found {err:#?}");
         };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     struct Context {
-        _logctx: LogContext,
+        logctx: LogContext,
         db: TestDatabase,
         db_pool: SubnetPool,
         authz_pool: authz::SubnetPool,
@@ -1077,7 +1092,7 @@ mod tests {
             .unwrap();
 
         Context {
-            _logctx: logctx,
+            logctx,
             db,
             db_pool,
             authz_pool,
@@ -1135,6 +1150,9 @@ mod tests {
             External Subnets allocated from the pool. Delete the \
             subnets first, and try again.",
         );
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1217,6 +1235,9 @@ mod tests {
                 .await
                 .expect("able to delete external subnet");
         }
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1256,6 +1277,9 @@ mod tests {
             "The requested IP subnet is not contained in any \
             Subnet Pool available in the current Silo."
         );
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1332,6 +1356,9 @@ mod tests {
             "Cannot delete external subnet while it is attached \
             to an instance. Detach it and try again."
         );
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1375,6 +1402,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(oxnet::IpNet::from(subnet.subnet), expected_subnet);
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1416,6 +1446,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(oxnet::IpNet::from(subnet.subnet), expected_subnet);
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1455,6 +1488,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(oxnet::IpNet::from(subnet.subnet), expected_subnet);
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1513,6 +1549,9 @@ mod tests {
             message.external_message(),
             "The requested IP subnet overlaps with an existing External Subnet"
         );
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1548,6 +1587,9 @@ mod tests {
             message.external_message(),
             NO_LINKED_POOL_CONTAINS_SUBNET_ERR_MSG,
         );
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1717,6 +1759,9 @@ mod tests {
                 context.db_pool.name(),
             ),
         );
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1788,6 +1833,9 @@ mod tests {
             message.external_message(),
             MULTIPLE_LINKED_DEFAULT_POOLS_ERR_MSG,
         );
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1837,6 +1885,9 @@ mod tests {
             panic!("Expected InvalidRequest, found {err:#?}");
         };
         assert_eq!(message.external_message(), NO_LINKED_DEFAULT_POOL_ERR_MSG,);
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1910,6 +1961,9 @@ mod tests {
             .await
             .expect("able to insert subnet using default pool");
         assert_eq!(subnet.subnet, subnets[1].subnet);
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1986,5 +2040,8 @@ mod tests {
             .await
             .expect("able to insert subnet using default pool");
         assert_eq!(subnet.subnet, context.members[1].subnet);
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 }
