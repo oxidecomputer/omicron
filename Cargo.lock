@@ -6952,6 +6952,7 @@ dependencies = [
  "schemars 0.8.22",
  "scim2-rs",
  "serde",
+ "serde_json",
  "test-strategy",
  "tufaceous-artifact",
  "uuid",

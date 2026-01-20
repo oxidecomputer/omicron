@@ -396,15 +396,18 @@ pub async fn create_floating_ip(
                 description: String::from("a floating ip"),
             },
             address_allocator: match (ip, parent_pool_name) {
-                (Some(ip), pool) => params::AddressAllocator::Explicit {
-                    ip,
-                    pool: pool.map(|v| NameOrId::Name(v.parse().unwrap())),
-                },
-                (None, Some(pool)) => params::AddressAllocator::Auto {
-                    pool_selector: params::PoolSelector::Explicit {
-                        pool: NameOrId::Name(pool.parse().unwrap()),
+                (Some(ip), pool) => params::AddressAllocator::Explicit(
+                    params::ExplicitAllocation {
+                        ip: Some(ip),
+                        pool: pool.map(|v| NameOrId::Name(v.parse().unwrap())),
                     },
-                },
+                ),
+                (None, Some(pool)) => params::AddressAllocator::Explicit(
+                    params::ExplicitAllocation {
+                        ip: None,
+                        pool: Some(NameOrId::Name(pool.parse().unwrap())),
+                    },
+                ),
                 (None, None) => params::AddressAllocator::Auto {
                     pool_selector: params::PoolSelector::Auto {
                         ip_version: None,

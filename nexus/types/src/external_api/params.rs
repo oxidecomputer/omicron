@@ -1474,18 +1474,45 @@ pub struct IpPoolSiloUpdate {
 
 // Floating IPs
 
+/// Explicit allocation parameters. At least one of `ip` or `pool` must be set.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(try_from = "ExplicitAllocationShadow")]
+pub struct ExplicitAllocation {
+    /// The IP address to reserve. If not specified, an address will be
+    /// automatically allocated from the specified pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip: Option<IpAddr>,
+    /// The pool to allocate from. Required if `ip` is not specified.
+    /// If `ip` is specified, this constrains which pool it must belong to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<NameOrId>,
+}
+
+#[derive(Deserialize)]
+struct ExplicitAllocationShadow {
+    #[serde(default)]
+    ip: Option<IpAddr>,
+    #[serde(default)]
+    pool: Option<NameOrId>,
+}
+
+impl TryFrom<ExplicitAllocationShadow> for ExplicitAllocation {
+    type Error = &'static str;
+
+    fn try_from(shadow: ExplicitAllocationShadow) -> Result<Self, Self::Error> {
+        if shadow.ip.is_none() && shadow.pool.is_none() {
+            return Err("at least one of `ip` or `pool` must be specified");
+        }
+        Ok(ExplicitAllocation { ip: shadow.ip, pool: shadow.pool })
+    }
+}
+
 /// Specify how to allocate a floating IP address.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AddressAllocator {
-    /// Reserve a specific IP address.
-    Explicit {
-        /// The IP address to reserve. Must be available in the pool.
-        ip: IpAddr,
-        /// The pool containing this address. If not specified, the default
-        /// pool for the address's IP version is used.
-        pool: Option<NameOrId>,
-    },
+    /// Reserve a specific IP address, or allocate from a specific pool.
+    Explicit(ExplicitAllocation),
     /// Automatically allocate an IP address from a specified pool.
     Auto {
         /// Pool selection.
@@ -4086,5 +4113,61 @@ mod tests {
         let result: Result<MulticastGroupUpdate, _> =
             serde_json::from_str(json);
         assert!(result.is_err(), "Should reject reserved VLAN ID 1");
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_with_pool_only() {
+        // Pool-only explicit allocation should work (issue #9680 case 1)
+        let json = r#"{"type": "explicit", "pool": "my-pool"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "pool-only explicit should be valid");
+        let allocator = result.unwrap();
+        match allocator {
+            AddressAllocator::Explicit(explicit) => {
+                assert!(explicit.ip.is_none());
+                assert!(explicit.pool.is_some());
+            }
+            _ => panic!("Expected Explicit variant"),
+        }
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_with_ip_only() {
+        let json = r#"{"type": "explicit", "ip": "10.0.0.1"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "ip-only explicit should be valid");
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_with_both() {
+        let json =
+            r#"{"type": "explicit", "ip": "10.0.0.1", "pool": "my-pool"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "ip and pool explicit should be valid");
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_with_neither() {
+        let json = r#"{"type": "explicit"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(
+            result.is_err(),
+            "explicit with neither ip nor pool should fail"
+        );
+    }
+
+    #[test]
+    fn test_address_allocator_auto_rejects_unknown_fields() {
+        // Auto with pool field should be rejected (issue #9680 case 2)
+        let json = r#"{"type": "auto", "pool": "my-pool"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "auto with pool field should be rejected");
+    }
+
+    #[test]
+    fn test_address_allocator_auto_valid() {
+        let json = r#"{"type": "auto", "pool_selector": {"type": "explicit", "pool": "my-pool"}}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "auto with pool_selector should be valid");
     }
 }

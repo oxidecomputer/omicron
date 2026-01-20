@@ -118,8 +118,8 @@ impl super::Nexus {
 
         // Destructure address_allocator enum to get pool, ip, and ip_version
         let (pool, ip, ip_version) = match address_allocator {
-            params::AddressAllocator::Explicit { ip, pool } => {
-                (pool, Some(ip), None)
+            params::AddressAllocator::Explicit(explicit) => {
+                (explicit.pool, explicit.ip, None)
             }
             params::AddressAllocator::Auto { pool_selector } => {
                 match pool_selector {

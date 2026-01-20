@@ -505,10 +505,12 @@ async fn test_floating_ip_create_ip_in_use(
                 name: FIP_NAMES[1].parse().unwrap(),
                 description: "another fip".into(),
             },
-            address_allocator: params::AddressAllocator::Explicit {
-                ip: contested_ip,
-                pool: Some(v4_pool.identity.name.clone().into()),
-            },
+            address_allocator: params::AddressAllocator::Explicit(
+                params::ExplicitAllocation {
+                    ip: Some(contested_ip),
+                    pool: Some(v4_pool.identity.name.clone().into()),
+                },
+            ),
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )

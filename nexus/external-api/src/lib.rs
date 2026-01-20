@@ -42,6 +42,7 @@ mod v2026010100;
 mod v2026010300;
 mod v2026010500;
 mod v2026011501;
+mod v2026011600;
 
 #[cfg(test)]
 mod test_utils;
@@ -74,6 +75,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026012000, ADDRESS_ALLOCATOR_OPTIONAL_IP),
     (2026011600, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
     (2026011501, AUDIT_LOG_CREDENTIAL_ID),
     (2026011500, AUDIT_LOG_AUTH_METHOD_ENUM),
@@ -1350,7 +1352,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         floating_params: TypedBody<v2026011501::FloatingIpCreate>,
     ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
-        Self::floating_ip_create(
+        Self::v2026011600_floating_ip_create(
             rqctx,
             query_params,
             floating_params.map(Into::into),
@@ -1360,10 +1362,34 @@ pub trait NexusExternalApi {
 
     /// Create floating IP
     #[endpoint {
+        operation_id = "floating_ip_create",
         method = POST,
         path = "/v1/floating-ips",
         tags = ["floating-ips"],
-        versions = VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR..,
+        versions = VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR..VERSION_ADDRESS_ALLOCATOR_OPTIONAL_IP,
+    }]
+    async fn v2026011600_floating_ip_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        floating_params: TypedBody<v2026011600::FloatingIpCreate>,
+    ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
+        Self::floating_ip_create(
+            rqctx,
+            query_params,
+            floating_params.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create a floating IP
+    ///
+    /// A specific IP address can be requested, or an IP can be auto-allocated
+    /// from a specified pool.
+    #[endpoint {
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_ADDRESS_ALLOCATOR_OPTIONAL_IP..,
     }]
     async fn floating_ip_create(
         rqctx: RequestContext<Self::Context>,
