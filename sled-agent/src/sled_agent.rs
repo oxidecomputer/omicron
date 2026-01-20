@@ -1304,7 +1304,9 @@ impl SledAgent {
             name: &delegated_zvol.volume_name(),
             size: volume_size,
             raw: true,
-            volblocksize: None,
+            // Set the volblocksize (read: the allocation size for the zvol,
+            // _not_ the actual block size!) to 128k
+            volblocksize: Some(131072),
         })
         .await
         .map_err(|e| {
