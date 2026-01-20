@@ -1742,7 +1742,7 @@ table! {
         sled_id -> Uuid,
         id -> Uuid,
         svcs_cmd_error -> Nullable<Text>,
-        // TODO-K: This will change to not nullable with omicron#9615
+        // TODO-K: This might change to not nullable with omicron#9615
         time_of_status -> Nullable<Timestamptz>,
     }
 }

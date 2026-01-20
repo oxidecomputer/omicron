@@ -1078,7 +1078,7 @@ pub struct InvSvcInMaintenance2 {
     pub sled_id: DbTypedUuid<SledKind>,
     pub id: DbTypedUuid<SvcInMaintenanceKind>,
     pub svcs_cmd_error: Option<String>,
-    // TODO-K: This will change to not nullable with omicron#9615
+    // TODO-K: This might change to not nullable with omicron#9615
     pub time_of_status: Option<DateTime<Utc>>,
 }
 
@@ -1143,7 +1143,7 @@ impl InvSvcInMaintenanceService {
 pub struct InvSvcInMaintenanceError {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    // TODO-K: Change the UUID kind
+    // TODO-K: Change the UUID kind?
     pub id: DbTypedUuid<SvcInMaintenanceKind>,
     pub error_message: String,
 }
