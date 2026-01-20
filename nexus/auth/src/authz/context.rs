@@ -169,7 +169,7 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
         opctx: &OpContext,
         authn: &authn::Context,
         roleset: &mut RoleSet,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
+    ) -> impl Future<Output = Result<(), Error>>;
 
     /// Invoked on authz failure to determine the final authz result
     ///

@@ -90,6 +90,12 @@ impl AuthorizedResource for NoParent {
 pub trait ApiResource:
     std::fmt::Debug + oso::ToPolar + Send + Sync + 'static
 {
+    /// If roles can be assigned to this resource, return this object as a
+    /// [`ApiResourceWithRoles`]
+    ///
+    /// If roles cannot be assigned to this resource, returns `None`.
+    fn as_resource_with_roles(&self) -> Option<&dyn ApiResourceWithRoles>;
+
     fn resource_type(&self) -> ResourceType;
     fn lookup_type(&self) -> &LookupType;
 
@@ -98,12 +104,6 @@ pub trait ApiResource:
     fn not_found(&self) -> Error {
         self.lookup_type().clone().into_not_found(self.resource_type())
     }
-
-    /// If roles can be assigned to this resource, return this object as a
-    /// [`ApiResourceWithRoles`]
-    ///
-    /// If roles cannot be assigned to this resource, returns `None`.
-    fn as_resource_with_roles(&self) -> Option<&dyn ApiResourceWithRoles>;
 }
 
 /// Extension of [`ApiResource`] for resources that have a parent in the hierarchy.
@@ -232,6 +232,10 @@ impl oso::PolarClass for Fleet {
 }
 
 impl ApiResource for Fleet {
+    fn as_resource_with_roles(&self) -> Option<&dyn ApiResourceWithRoles> {
+        Some(self)
+    }
+
     fn resource_type(&self) -> ResourceType {
         ResourceType::Fleet
     }
@@ -243,10 +247,6 @@ impl ApiResource for Fleet {
     fn not_found(&self) -> Error {
         // The Fleet is always visible.
         Error::Forbidden
-    }
-
-    fn as_resource_with_roles(&self) -> Option<&dyn ApiResourceWithRoles> {
-        Some(self)
     }
 }
 
