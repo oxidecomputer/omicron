@@ -1653,7 +1653,8 @@ impl Zfs {
                 )
             })?;
 
-            let mut buf = [0u8; 64];
+            // Raw zvols error for arbitrarily sized reads, so read the first 4k
+            let mut buf = [0u8; 4096];
             rustix::io::read(fd, &mut buf).map_err(|e| {
                 EnsureDatasetVolumeError::from_raw_zvol_read(
                     params.name.to_string(),
