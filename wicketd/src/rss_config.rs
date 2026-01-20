@@ -717,7 +717,8 @@ pub fn validate_rack_subnet(
     // Do not allow addresses more specific than /56
     if rack_subnet_address.octets()[7..].iter().any(|x| *x != 0x00) {
         return Err("rack subnet address is /56, \
-                   but a more specific prefix was provided".into());
+                   but a more specific prefix was provided"
+            .into());
     };
 
     Ipv6Net::new(rack_subnet_address, 56).map_err(|e| e.to_string())
