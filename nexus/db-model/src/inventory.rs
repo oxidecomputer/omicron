@@ -35,11 +35,11 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
+    inv_health_monitor_svc_in_maintenance,
     inv_health_monitor_svc_in_maintenance_error,
     inv_health_monitor_svc_in_maintenance_service,
-    inv_health_monitor_svc_in_maintenance2, inv_host_phase_1_active_slot,
-    inv_host_phase_1_flash_hash, inv_internal_dns,
-    inv_last_reconciliation_dataset_result,
+    inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
+    inv_internal_dns, inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result, inv_last_reconciliation_measurements,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_measurement_manifest_non_boot,
@@ -1025,8 +1025,8 @@ impl_enum_type!(
 );
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = inv_health_monitor_svc_in_maintenance2)]
-pub struct InvSvcInMaintenance2 {
+#[diesel(table_name = inv_health_monitor_svc_in_maintenance)]
+pub struct InvSvcInMaintenance {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub id: DbTypedUuid<SvcInMaintenanceKind>,
@@ -1035,7 +1035,7 @@ pub struct InvSvcInMaintenance2 {
     pub time_of_status: Option<DateTime<Utc>>,
 }
 
-impl InvSvcInMaintenance2 {
+impl InvSvcInMaintenance {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,

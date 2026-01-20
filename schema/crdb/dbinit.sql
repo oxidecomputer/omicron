@@ -4060,8 +4060,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
--- TODO-K: rename table
-CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance2 (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,

@@ -1722,7 +1722,7 @@ table! {
 }
 
 table! {
-    inv_health_monitor_svc_in_maintenance2 (inv_collection_id, sled_id, id) {
+    inv_health_monitor_svc_in_maintenance (inv_collection_id, sled_id, id) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
         id -> Uuid,

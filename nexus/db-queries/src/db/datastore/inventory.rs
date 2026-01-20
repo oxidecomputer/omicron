@@ -64,7 +64,7 @@ use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledBootPartition;
 use nexus_db_model::InvSledConfigReconciler;
-use nexus_db_model::InvSvcInMaintenance2;
+use nexus_db_model::InvSvcInMaintenance;
 use nexus_db_model::InvSvcInMaintenanceError;
 use nexus_db_model::InvSvcInMaintenanceService;
 use nexus_db_model::InvZpool;
@@ -217,13 +217,13 @@ impl DataStore {
 
         // Pull services in maintenance result out of all sled agents
         // TODO-K: change the variable name to svcs_in_maintenance
-        let svcs_in_maintenance2: Vec<_> = collection
+        let svcs_in_maintenance: Vec<_> = collection
             .sled_agents
             .iter()
             .flat_map(|sled_agent| {
                 match &sled_agent.health_monitor.smf_services_in_maintenance {
                     Ok(svcs) => {
-                        vec![InvSvcInMaintenance2::new(
+                        vec![InvSvcInMaintenance::new(
                             collection_id,
                             sled_agent.sled_id,
                             None,
@@ -231,7 +231,7 @@ impl DataStore {
                         )]
                     }
                     Err(e) => {
-                        vec![InvSvcInMaintenance2::new(
+                        vec![InvSvcInMaintenance::new(
                             collection_id,
                             sled_agent.sled_id,
                             Some(e.to_string()),
@@ -1594,17 +1594,17 @@ impl DataStore {
 
             // Insert rows for all the SMF services in maintenance results we found
             {
-                use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance2::dsl;
+                use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
 
                 let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
-                let mut svcs_in_maintenance = svcs_in_maintenance2.into_iter();
+                let mut svcs_in_maintenance = svcs_in_maintenance.into_iter();
                 loop {
                     let some_svcs_in_maintenance =
                         svcs_in_maintenance.by_ref().take(batch_size).collect::<Vec<_>>();
                     if some_svcs_in_maintenance.is_empty() {
                         break;
                     }
-                    let _ = diesel::insert_into(dsl::inv_health_monitor_svc_in_maintenance2)
+                    let _ = diesel::insert_into(dsl::inv_health_monitor_svc_in_maintenance)
                         .values(some_svcs_in_maintenance)
                         .execute_async(&conn)
                         .await?;
@@ -2428,8 +2428,8 @@ impl DataStore {
 
                     // Remove rows associated with the health monitor
                     let nhealth_monitor_svc_in_maintenance = {
-                        use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance2::dsl;
-                        diesel::delete(dsl::inv_health_monitor_svc_in_maintenance2.filter(
+                        use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
+                        diesel::delete(dsl::inv_health_monitor_svc_in_maintenance.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -3044,22 +3044,22 @@ impl DataStore {
 
         // Mapping of "Sled ID" -> "The result of SMF services in maintenance
         // reported by that sled"
-        let mut svcs_in_maintenance2_by_sled = {
-            use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance2::dsl;
+        let mut svcs_in_maintenance_by_sled = {
+            use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance::dsl;
 
-            let mut svcs = BTreeMap::<Uuid, Vec<InvSvcInMaintenance2>>::new();
+            let mut svcs = BTreeMap::<Uuid, Vec<InvSvcInMaintenance>>::new();
             let mut paginator = Paginator::new(
                 batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let batch: Vec<InvSvcInMaintenance2> = paginated_multicolumn(
-                    dsl::inv_health_monitor_svc_in_maintenance2,
+                let batch: Vec<InvSvcInMaintenance> = paginated_multicolumn(
+                    dsl::inv_health_monitor_svc_in_maintenance,
                     (dsl::sled_id, dsl::id),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvSvcInMaintenance2::as_select())
+                .select(InvSvcInMaintenance::as_select())
                 .load_async(&*conn)
                 .await
                 .map_err(|e| {
@@ -4536,44 +4536,7 @@ impl DataStore {
             // Convert all health checks into a full `HealthMonitorInventory`
             let mut health_monitor = HealthMonitorInventory::new();
 
-            //            // TODO-K: Update here
-            //            let svcs_in_maintenance = svcs_in_maintenance_by_sled
-            //                .remove(&sled_id.into_untyped_uuid())
-            //                .map(|rows| {
-            //                    // Get metadata from the first row. All rows from the same
-            //                    // collection and sled will share time_of_status,
-            //                    // svcs_cmd_error and error_messages.
-            //                    let first_row =
-            //                        rows.first().expect("rows should not be empty");
-            //
-            //                    // Check if the svcs command itself failed first. If so, we
-            //                    // can safely assume no services in maintenance have been
-            //                    // reported and return an error.
-            //                    if let Some(e) = &first_row.svcs_cmd_error {
-            //                        return Err(e.clone());
-            //                    }
-            //
-            //                    // Convert database rows to service in maintenance entries.
-            //                    // All rows should have both zone and FMRI populated or none
-            //                    // at all. Nevertheless, we'll handle the case of a
-            //                    // partially populated row.
-            //                    let services: Vec<SvcInMaintenance> = rows
-            //                        .iter()
-            //                        .filter(|svc| svc.fmri.is_some() || svc.zone.is_some())
-            //                        .map(|svc| SvcInMaintenance {
-            //                            fmri: svc.fmri.clone().unwrap_or_default(),
-            //                            zone: svc.zone.clone().unwrap_or_default(),
-            //                        })
-            //                        .collect();
-            //
-            //                    Ok(SvcsInMaintenanceResult {
-            //                        services,
-            //                        errors: first_row.error_messages.clone(),
-            //                        time_of_status: first_row.time_of_status,
-            //                    })
-            //                });
-
-            let svcs_in_maintenance2 = svcs_in_maintenance2_by_sled
+            let svcs_in_maintenance = svcs_in_maintenance_by_sled
                 .remove(&sled_id.into_untyped_uuid())
                 .map(|rows| {
                     // There should only be one row per collection per sled
@@ -4584,6 +4547,13 @@ impl DataStore {
                                     fetched"
                         )
                     })?;
+
+                    // Check if the svcs command itself failed first. If so, we
+                    // can safely assume no services in maintenance have been
+                    // reported and return an error.
+                    if let Some(e) = &first_row.svcs_cmd_error {
+                        return Err(e.clone());
+                    }
 
                     // Collect all services from svcs_in_maintenance_services_by_sled
                     // for this sled.
@@ -4615,7 +4585,7 @@ impl DataStore {
                     })
                 });
 
-            if let Some(svcs) = svcs_in_maintenance2 {
+            if let Some(svcs) = svcs_in_maintenance {
                 health_monitor.smf_services_in_maintenance = svcs
             };
 
