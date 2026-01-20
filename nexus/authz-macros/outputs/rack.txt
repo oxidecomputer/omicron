@@ -60,9 +60,6 @@ impl oso::PolarClass for Rack {
     }
 }
 impl ApiResource for Rack {
-    fn parent(&self) -> Option<&dyn AuthorizedResource> {
-        Some(&self.parent)
-    }
     fn resource_type(&self) -> ResourceType {
         ResourceType::Rack
     }
@@ -71,5 +68,11 @@ impl ApiResource for Rack {
     }
     fn as_resource_with_roles(&self) -> Option<&dyn ApiResourceWithRoles> {
         None
+    }
+}
+impl ApiResourceWithParent for Rack {
+    type Parent = Fleet;
+    fn parent(&self) -> Option<&Fleet> {
+        Some(&self.parent)
     }
 }

@@ -8,10 +8,10 @@
 use super::coverage::Coverage;
 use crate::db;
 use crate::db::datastore::SiloUserApiOnly;
-use authz::ApiResource;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_auth::authz;
+use nexus_auth::authz::ApiResource;
 use nexus_auth::authz::ApiResourceWithRolesType;
 use nexus_auth::authz::AuthorizedResource;
 use nexus_auth::context::OpContext;
@@ -69,7 +69,10 @@ impl<'a> ResourceBuilder<'a> {
 
     /// Register a new resource for later testing, with no associated users or
     /// role assignments
-    pub fn new_resource<T: DynAuthorizedResource>(&mut self, resource: T) {
+    pub fn new_resource<T>(&mut self, resource: T)
+    where
+        T: DynAuthorizedResource + AuthorizedResource,
+    {
         self.coverage.covered(&resource);
         self.resources.push(Arc::new(resource));
     }
@@ -79,8 +82,8 @@ impl<'a> ResourceBuilder<'a> {
     pub async fn new_resource_with_users<T>(&mut self, resource: T)
     where
         T: DynAuthorizedResource
-            + ApiResourceWithRolesType
             + AuthorizedResource
+            + ApiResourceWithRolesType
             + Clone,
         T::AllowedRoles: IntoEnumIterator,
     {
@@ -179,7 +182,7 @@ impl ResourceSet {
 /// all of them.  (We could also change `authorize()` to be dynamically-
 /// dispatched.  This would be a much more sprawling change.  And it's not clear
 /// that our use case has much application outside of a test like this.)
-pub trait DynAuthorizedResource: AuthorizedResource + std::fmt::Debug {
+pub trait DynAuthorizedResource: std::fmt::Debug + Send + Sync {
     fn do_authorize<'a, 'b>(
         &'a self,
         opctx: &'b OpContext,

@@ -28,7 +28,7 @@ impl Coverage {
 
     /// Record that the Polar class associated with `covered` is covered by the
     /// test
-    pub fn covered(&mut self, covered: &dyn AuthorizedResource) {
+    pub fn covered<R: AuthorizedResource>(&mut self, covered: &R) {
         self.covered_class(covered.polar_class())
     }
 
