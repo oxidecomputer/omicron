@@ -40,15 +40,11 @@ WITH
         AND m.time_deleted IS NULL
         AND $3 BETWEEN m.min_prefix_length AND m.max_prefix_length
     ),
-  gaps
+  gaps_between_subnets
     AS (
       SELECT
         subnet_pool_id,
         subnet_pool_member_id,
-        member_start,
-        member_end,
-        min_prefix_length,
-        max_prefix_length,
         CASE WHEN subnet_start IS NULL THEN member_start ELSE subnet_end + 1 END AS gap_start,
         CASE
         WHEN next_subnet_start IS NULL THEN member_end
@@ -58,6 +54,25 @@ WITH
       FROM
         existing_external_subnets
     ),
+  gaps_before_first_subnet
+    AS (
+      SELECT
+        DISTINCT ON (m.id)
+        m.subnet_pool_id,
+        m.id AS subnet_pool_member_id,
+        m.first_address AS gap_start,
+        e.first_address - 1 AS gap_end
+      FROM
+        subnet_pool_member AS m
+        JOIN external_subnet AS e ON e.subnet_pool_member_id = m.id AND e.time_deleted IS NULL
+      WHERE
+        m.subnet_pool_id = (SELECT id FROM pool_id)
+        AND m.time_deleted IS NULL
+        AND $4 BETWEEN m.min_prefix_length AND m.max_prefix_length
+      ORDER BY
+        m.id, e.first_address
+    ),
+  gaps AS (SELECT * FROM gaps_between_subnets UNION ALL SELECT * FROM gaps_before_first_subnet),
   candidate_subnets
     AS (
       SELECT
@@ -66,9 +81,9 @@ WITH
         gap_start,
         gap_end,
         CASE
-        WHEN set_masklen(gap_start, $4) & netmask(set_masklen(gap_start, $5)) >= gap_start
-        THEN set_masklen(gap_start, $6)
-        ELSE set_masklen(broadcast(set_masklen(gap_start, $7)) + 1, $8)
+        WHEN set_masklen(gap_start, $5) & netmask(set_masklen(gap_start, $6)) = gap_start
+        THEN set_masklen(gap_start, $7)
+        ELSE set_masklen(broadcast(set_masklen(gap_start, $8)) + 1, $9)
         END
           AS candidate_subnet
       FROM
@@ -83,7 +98,9 @@ WITH
       FROM
         candidate_subnets
       WHERE
-        candidate_subnet & netmask(candidate_subnet) <= gap_end
+        candidate_subnet & netmask(candidate_subnet) >= gap_start
+        AND set_masklen(broadcast(candidate_subnet), IF("family"(candidate_subnet) = 4, 32, 128))
+          <= gap_end
       ORDER BY
         candidate_subnet
       LIMIT
@@ -94,7 +111,7 @@ WITH
       SELECT
         CAST(
           IF(
-            EXISTS(SELECT 1 FROM project WHERE id = $9 AND time_deleted IS NULL LIMIT 1),
+            EXISTS(SELECT 1 FROM project WHERE id = $10 AND time_deleted IS NULL LIMIT 1),
             'true',
             'project-deleted'
           )
@@ -106,7 +123,7 @@ WITH
       SELECT
         CAST(
           IF(
-            EXISTS(SELECT 1 FROM silo WHERE id = $10 AND time_deleted IS NULL LIMIT 1),
+            EXISTS(SELECT 1 FROM silo WHERE id = $11 AND time_deleted IS NULL LIMIT 1),
             'true',
             'silo-deleted'
           )
@@ -156,16 +173,16 @@ WITH
             instance_id
           )
       SELECT
-        $11 AS id,
-        $12 AS name,
-        $13 AS description,
-        $14 AS time_created,
-        $15 AS time_modified,
+        $12 AS id,
+        $13 AS name,
+        $14 AS description,
+        $15 AS time_created,
+        $16 AS time_modified,
         NULL::TIMESTAMPTZ AS time_deleted,
         subnet_pool_id,
         subnet_pool_member_id,
-        $16 AS silo_id,
-        $17 AS project_id,
+        $17 AS silo_id,
+        $18 AS project_id,
         subnet AS subnet,
         'detached' AS attach_state,
         NULL AS instance_id

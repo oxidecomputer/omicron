@@ -291,6 +291,55 @@ pub fn unlink_subnet_pool_from_silo_query(
 }
 
 /// Query to insert an External Subnet.
+///
+/// # Notes
+///
+/// This query is pretty complicated. First, we support creating a subnet in a
+/// few different ways, such as by an explicit IP subnet, automatically from a
+/// specific pool, or automatically from a pool linked to the current Silo.
+///
+/// The first of those is relatively straightfoward: select a constant, and
+/// insert it into the table conditional on it not overlapping with an existing
+/// row.
+///
+/// The latter are subtle and complex. In all the cases, we first find a pool
+/// linked to the current Silo. Here, "find" could mean look it up by ID and
+/// check that it's linked, if we're given an explicit pool to take a subnet
+/// from.
+///
+/// Next, we have to find gaps in the subnet pool members from that pool. To do
+/// that, we create rows that have existing subnets along with the start of the
+/// _next_ subnet, grouped by pool member (i.e., don't span members, even if
+/// they're contiguous). Then we compute the gaps as:
+///
+/// - The start of the member, if there are no subnets or the first one doesn't
+///   start at the member start.
+/// - The space between any subnets.
+/// - The end of the last subnet to the end of the member.
+///
+/// Finally, filter that to those who can fit the requested subnet. All the
+/// automatic-allocation versions require a prefix, so we know immediately
+/// whether the gaps will fit.
+///
+/// The last tricky bit is that we have to "snap" all the gaps to be aligned to
+/// the prefix boundary. We do this by using functions to compute the network
+/// address (which CockroachDB unfortunately lacks), or the broadcast address.
+/// To find the _next_ such gap, we can take the broadcast address, _add one_,
+/// and then mask it to the requested prefix.
+///
+/// As said above, this is all pretty complicated. We have a lot of tests for
+/// the behavior, checking that we never overlap with existing subnets, or that
+/// we fail in predictable and helpful ways when the automatic allocations fail.
+/// We also check that we fill the first gap that fits the subnet, and that we
+/// skip gaps that are too small to fit the requested prefix.
+///
+/// We also have a big, though `#[ignored]`, stress test, which does a bunch of
+/// random allocations, of all the supported kinds, or deletions, and ensures
+/// our invariants are still upheld.
+///
+/// The expectorated SQL files, such as
+/// `nexus/db-queries/tests/output/insert_external_subnet_from_explicit_pool.sql`
+/// will be very helpful to actually inspect and understand the query.
 pub fn insert_external_subnet_query(
     silo_id: &Uuid,
     project_id: &Uuid,
@@ -301,6 +350,9 @@ pub fn insert_external_subnet_query(
     builder.sql("WITH ");
     match subnet_selector {
         ExternalSubnetSelector::Explicit { subnet } => {
+            // In this case, we're given the IP subnet. We need to find the
+            // Subnet Pool and Subnet Pool Member containing it (if any), ensure
+            // they're linked to the current Silo, and then return those values.
             push_cte_to_select_pool_from_explicit_subnet(
                 &mut builder,
                 *silo_id,
@@ -311,6 +363,10 @@ pub fn insert_external_subnet_query(
             pool: PoolSelector::Explicit { pool },
             prefix,
         } => {
+            // We're given the pool itself. Select it as a constant, ensure it's
+            // actually linked to the current Silo, and then push the CTE that
+            // does the automatic allocation of the next subnet from the members
+            // of that pool which can fit the requested prefix.
             push_cte_to_select_pool_id(&mut builder, pool);
             builder.sql(", ");
             push_cte_to_ensure_pool_is_linked_to_silo(&mut builder, silo_id);
@@ -321,6 +377,13 @@ pub fn insert_external_subnet_query(
             pool: PoolSelector::Auto { ip_version },
             prefix,
         } => {
+            // THis is the same as the above, but we're taking the pool by
+            // looking up the default pool linked to the current silo for the
+            // current version.
+            //
+            // This will fail if the version is not specified, and there are
+            // both default IPv4 and IPv6 subnet pools for the silo, rather than
+            // attempting to pick one.
             push_cte_to_select_default_pool_by_version(
                 &mut builder,
                 silo_id,
@@ -464,6 +527,8 @@ fn push_cte_to_select_pool_from_explicit_subnet(
         .sql("') AS BOOL))");
 }
 
+// Add a CTE that fails with a bool-parse error if the Project we're trying to
+// create the External Subnet in is deleted.
 fn push_cte_to_check_for_deleted_project(
     builder: &mut QueryBuilder,
     project_id: &Uuid,
@@ -488,6 +553,8 @@ fn push_cte_to_check_for_deleted_project(
         .sql("') AS BOOL))");
 }
 
+// Add a CTE that fails with a bool-parse error if the Silo we're trying to
+// create the External Subnet in is deleted.
 fn push_cte_to_check_for_deleted_silo(
     builder: &mut QueryBuilder,
     silo_id: &Uuid,
@@ -512,6 +579,8 @@ fn push_cte_to_check_for_deleted_silo(
         .sql("') AS BOOL))");
 }
 
+// Add a CTE that updates the generation Subnet Pool that contains the candidate
+// External Subnet we'll insert.
 fn push_cte_to_update_subnet_pool_rcgen(builder: &mut QueryBuilder) {
     builder.sql(
         "updated_pool AS (\
@@ -526,6 +595,8 @@ fn push_cte_to_update_subnet_pool_rcgen(builder: &mut QueryBuilder) {
     );
 }
 
+// Add a CTE that updates the generation Subnet Pool Member that contains the
+// candidate External Subnet we'll insert.
 fn push_cte_to_update_subnet_pool_member_rcgen(builder: &mut QueryBuilder) {
     builder.sql(
         "updated_pool_member AS (\
@@ -540,6 +611,8 @@ fn push_cte_to_update_subnet_pool_member_rcgen(builder: &mut QueryBuilder) {
     );
 }
 
+// This is the "last" CTE, which inserts in the `external_subnet` table all the
+// records we've selected in earlier CTEs.
 fn push_cte_to_insert_actual_ip_subnet(
     builder: &mut QueryBuilder,
     silo_id: &Uuid,
@@ -548,7 +621,7 @@ fn push_cte_to_insert_actual_ip_subnet(
 ) {
     builder
         .sql(
-            " new_record AS (\
+            "new_record AS (\
         INSERT INTO external_subnet (\
             id, \
             name, \
@@ -615,34 +688,6 @@ fn push_cte_to_insert_actual_ip_subnet(
         );
 }
 
-/// Delete an External Subnet by ID, failing if there is an instance attached.
-pub fn delete_external_subnet_query(subnet_id: &Uuid) -> TypedSqlQuery<()> {
-    let mut builder = QueryBuilder::new();
-    builder
-        .sql(
-            "WITH no_instance_attached AS MATERIALIZED (\
-        SELECT CAST(IF(instance_id IS NULL, 'true', '",
-        )
-        .sql(INSTANCE_STILL_ATTACHED_SENTINEL)
-        .sql(
-            "') AS BOOL) \
-            FROM external_subnet \
-            WHERE id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(*subnet_id)
-        .sql(
-            " AND time_deleted IS NULL) \
-            UPDATE external_subnet \
-            SET time_deleted = NOW() \
-            WHERE id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(*subnet_id)
-        .sql(" AND time_deleted IS NULL RETURNING 1");
-    builder.query()
-}
-
 // Push a CTE that either returns the pool ID directly, or looks the pool up by
 // name and returns its ID.
 fn push_cte_to_select_pool_id(builder: &mut QueryBuilder, pool: &NameOrId) {
@@ -664,6 +709,8 @@ fn push_cte_to_select_pool_id(builder: &mut QueryBuilder, pool: &NameOrId) {
     }
 }
 
+// Push a CTE that fails with a bool-parse error if the current Pool is not
+// linked to the current Silo.
 fn push_cte_to_ensure_pool_is_linked_to_silo(
     builder: &mut QueryBuilder,
     silo_id: &Uuid,
@@ -726,11 +773,22 @@ fn push_cte_to_select_default_pool_by_version(
         .sql("' END AS BOOL))");
 }
 
+// Push a CTE to automatically select the next subnet from a pool with the
+// provided prefix length.
 fn push_cte_to_select_next_subnet_from_pool(
     builder: &mut QueryBuilder,
     prefix: u8,
 ) {
     let prefix = i32::from(prefix);
+
+    // In this first CTE, we're joining the external subnets to the members of
+    // the pool we selected in an earlier CTE.
+    //
+    // The important bit here is that we're also using `LEAD()` to get the start
+    // of the next subnet _after_ the current one. This helps compute the gaps,
+    // which we do below. Crucially, we're doing that window partitioned by the
+    // member ID. That means we never cross member boundaries, only looking at
+    // gaps wholly contained within each member.
     builder
         .sql(
             "existing_external_subnets AS (\
@@ -757,16 +815,36 @@ fn push_cte_to_select_next_subnet_from_pool(
         )
         .param()
         .bind::<sql_types::Integer, _>(prefix)
-        .sql(
-            " BETWEEN m.min_prefix_length AND m.max_prefix_length), \
-    gaps AS (\
+        .sql(" BETWEEN m.min_prefix_length AND m.max_prefix_length), ");
+
+    // This CTE computes the gaps _between_ all the subnets.
+    //
+    // We use the existing subnets from the previous CTE, and generate either
+    //
+    // - The full member, if it's empty
+    // - In between every existing subnet, and
+    // - From the end of the last subnet to the end of the member.
+    //
+    // Specifically, the gap start is:
+    //
+    // - the last address in the subnet + 1, if there is a subnet
+    // - the start of the member, if there is no subnet.
+    //
+    // The gap end is:
+    //
+    // - The next subnet start - 1, if there is a next subnet.
+    // - The member end, if there is no next subnet.
+    //
+    // The careful reader will note that in that first case, the gap end may be
+    // _less_ than the gap start. That's intentional. When the existing subnets
+    // are back-to-back, without any space, we get a negative "gap", which we
+    // filter out in the next CTE. But this works as you'd expect if there is a
+    // non-empty space between the subnets.
+    builder.sql(
+        "gaps_between_subnets AS (\
         SELECT \
             subnet_pool_id, \
             subnet_pool_member_id, \
-            member_start, \
-            member_end, \
-            min_prefix_length, \
-            max_prefix_length, \
             CASE \
                 WHEN subnet_start IS NULL THEN member_start \
                 ELSE subnet_end + 1 \
@@ -775,8 +853,76 @@ fn push_cte_to_select_next_subnet_from_pool(
                 WHEN next_subnet_start IS NULL THEN member_end \
                 ELSE next_subnet_start - 1 \
             END AS gap_end \
-        FROM existing_external_subnets\
-    ), candidate_subnets AS (\
+        FROM existing_external_subnets), ",
+    );
+
+    // CTE to generate any gap _before_ the first subnet in a member.
+    //
+    // The `LEAD()` window function lets us generate all the gaps trailing an
+    // existing subnet, and the above CASE statement handles when there are no
+    // subnets at all. But so far we haven't generated gaps _preceding_ the
+    // first subnet, i.e., from the member start to just before the first subnet
+    // start.
+    //
+    // These have to be their own CTE. The left join used to match subnets with
+    // the next subnet start by definition produces one row per subnet in a
+    // member, with the next subnet start attached as a new column. We can't use
+    // that to generate a row that has no corresponding subnet already. We need
+    // another one, and then to union the two into all the gaps.
+    builder
+        .sql(
+            "gaps_before_first_subnet AS (\
+        SELECT DISTINCT ON (m.id) \
+            m.subnet_pool_id, \
+            m.id AS subnet_pool_member_id, \
+            m.first_address AS gap_start, \
+            e.first_address - 1 AS gap_end \
+        FROM subnet_pool_member AS m \
+        JOIN external_subnet AS e \
+            ON e.subnet_pool_member_id = m.id \
+            AND e.time_deleted IS NULL \
+        WHERE m.subnet_pool_id = (SELECT id FROM pool_id) \
+            AND m.time_deleted IS NULL \
+            AND ",
+        )
+        .param()
+        .bind::<sql_types::Integer, _>(prefix)
+        .sql(
+            " BETWEEN m.min_prefix_length AND m.max_prefix_length \
+            ORDER BY m.id, e.first_address), ",
+        );
+
+    // Union the two sets of gaps.
+    builder.sql(
+        "gaps AS (\
+        SELECT * FROM gaps_between_subnets \
+        UNION ALL \
+        SELECT * FROM gaps_before_first_subnet\
+    ), ",
+    );
+
+    // This CTE generates candidate subnets.
+    //
+    // This is probably the most subtle CTE in this query. The critical part is
+    // that we need to align all the gaps we're considering to the prefix in the
+    // request. This is made annoyingly-verbose by CockroachDB's lack of a
+    // `network()` function for computing the network address of a subnet.
+    // Instead, we use `ip & netmask(ip)` to emulate that.
+    //
+    // For every gap, we compute the subnet as either:
+    //
+    // - the start of the gap, if the network address of the gap is aligned to
+    //   the requested prefix, or
+    // - the start of the _next_ prefix-aligned subnet after that. This works by
+    //   taking `network(broadcast(gap_start) + 1)`, though we emulate the
+    //   `network()` function as before.
+    //
+    // In all cases, we filter out candidates where the gap is empty, which
+    // could be generated by the previous CTE in the case of back-to-back
+    // subnets.
+    builder
+        .sql(
+            "candidate_subnets AS (\
         SELECT \
             subnet_pool_id, \
             subnet_pool_member_id, \
@@ -790,7 +936,7 @@ fn push_cte_to_select_next_subnet_from_pool(
         .sql(") & netmask(set_masklen(gap_start, ")
         .param()
         .bind::<sql_types::Integer, _>(prefix)
-        .sql(")) >= gap_start THEN set_masklen(gap_start, ")
+        .sql(")) = gap_start THEN set_masklen(gap_start, ")
         .param()
         .bind::<sql_types::Integer, _>(prefix)
         .sql(") ELSE set_masklen(broadcast(set_masklen(gap_start, ")
@@ -803,17 +949,34 @@ fn push_cte_to_select_next_subnet_from_pool(
             ") END AS candidate_subnet \
             FROM gaps \
             WHERE gap_start < gap_end\
-        ), subnet_pool_and_member AS (\
+        ), ",
+        );
+
+    // In this final CTE, we filter the candidate subnets to only those which
+    // actually _fit_ in the gap. At the end, we have to compare the broadcast
+    // of the candidate subnet _as an address_ (/128 or /32) to the gap end. Not
+    // doing so means we're comparing a true subnet (say, /64) with a true
+    // address, and CockroachDB always sorts the former before the latter. For
+    // example `SELECT 'fd00:1::/56'::INET < 'fd00::'::INET` returns true, which
+    // is a little counterintuitive, probably wrong, and definitely different
+    // from what PostgreSQL does. But that means we'd always return true in
+    // the last filtering clause, since all subnets sort before any IP address.
+    builder.sql(
+        "subnet_pool_and_member AS (\
             SELECT \
                 subnet_pool_id, \
                 subnet_pool_member_id, \
                 candidate_subnet AS subnet \
             FROM candidate_subnets \
-            WHERE candidate_subnet & netmask(candidate_subnet) <= gap_end \
+            WHERE candidate_subnet & netmask(candidate_subnet) >= gap_start \
+              AND set_masklen( \
+                    broadcast(candidate_subnet), \
+                    IF(family(candidate_subnet) = 4, 32, 128) \
+                ) <= gap_end \
             ORDER BY candidate_subnet \
             LIMIT 1\
         )",
-        );
+    );
 }
 
 /// Decode the errors emitted by `insert_external_subnet_query()`.
@@ -827,7 +990,7 @@ pub fn decode_insert_external_subnet_error(
         DieselError::DatabaseError(DatabaseErrorKind::Unknown, info) => {
             let msg = info.message();
             if is_bool_parse_error(msg, SUBNET_OVERLAPS_EXISTING_SENTINEL) {
-                Error::invalid_request(SUNBET_OVERLAPS_EXISTING_ERR_MSG)
+                Error::invalid_request(SUBNET_OVERLAPS_EXISTING_ERR_MSG)
             } else if is_bool_parse_error(
                 msg,
                 NO_LINKED_POOL_CONTAINS_REQUESTED_SUBNET_SENTINEL,
@@ -948,6 +1111,34 @@ fn is_bool_parse_error(message: &str, sentinel: &str) -> bool {
     message == expected
 }
 
+/// Delete an External Subnet by ID, failing if there is an instance attached.
+pub fn delete_external_subnet_query(subnet_id: &Uuid) -> TypedSqlQuery<()> {
+    let mut builder = QueryBuilder::new();
+    builder
+        .sql(
+            "WITH no_instance_attached AS MATERIALIZED (\
+        SELECT CAST(IF(instance_id IS NULL, 'true', '",
+        )
+        .sql(INSTANCE_STILL_ATTACHED_SENTINEL)
+        .sql(
+            "') AS BOOL) \
+            FROM external_subnet \
+            WHERE id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(*subnet_id)
+        .sql(
+            " AND time_deleted IS NULL) \
+            UPDATE external_subnet \
+            SET time_deleted = NOW() \
+            WHERE id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(*subnet_id)
+        .sql(" AND time_deleted IS NULL RETURNING 1");
+    builder.query()
+}
+
 /// Decode the erros emitted by `delete_external_subnet_query()`.
 pub fn decode_delete_external_subnet_error(e: DieselError) -> Error {
     match e {
@@ -975,7 +1166,7 @@ The requested IP subnet is not contained in \
 // Error sentinel emitted when requesting an explicit subnet, and it overlaps
 // an existing subnet that's already allocated.
 const SUBNET_OVERLAPS_EXISTING_SENTINEL: &str = "overlap-existing";
-pub const SUNBET_OVERLAPS_EXISTING_ERR_MSG: &'static str =
+pub const SUBNET_OVERLAPS_EXISTING_ERR_MSG: &'static str =
     "The requested IP subnet overlaps with an existing External Subnet";
 
 // Error sentinel emitted when we try to insert a subnet into a project that

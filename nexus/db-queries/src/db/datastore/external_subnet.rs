@@ -489,6 +489,7 @@ mod tests {
     use crate::db::queries::external_subnet::MULTIPLE_LINKED_DEFAULT_POOLS_ERR_MSG;
     use crate::db::queries::external_subnet::NO_LINKED_DEFAULT_POOL_ERR_MSG;
     use crate::db::queries::external_subnet::NO_LINKED_POOL_CONTAINS_SUBNET_ERR_MSG;
+    use crate::db::queries::external_subnet::SUBNET_OVERLAPS_EXISTING_ERR_MSG;
     use async_bb8_diesel::AsyncRunQueryDsl as _;
     use chrono::Utc;
     use diesel::ExpressionMethods as _;
@@ -516,12 +517,26 @@ mod tests {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::LookupType;
+    use omicron_common::api::external::Name as ExternalName;
     use omicron_common::api::external::NameOrId;
     use omicron_common::api::external::ResourceType;
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::ExternalSubnetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use oxnet::IpNet;
+    use oxnet::Ipv6Net;
+    use rand::Rng;
+    use rand::distr::Distribution;
+    use rand::distr::StandardUniform;
+    use rand::distr::Uniform;
+    use rand::rng;
+    use rand::rngs::ThreadRng;
+    use rand::seq::IteratorRandom as _;
+    use std::collections::BTreeMap;
+    use std::net::Ipv6Addr;
+    use strum::EnumCount;
+    use strum::FromRepr;
 
     #[tokio::test]
     async fn basic_subnet_pool_crud() {
@@ -872,6 +887,9 @@ mod tests {
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, false)
             .await
             .expect("able to link second non-defult pool to silo");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1547,7 +1565,7 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            "The requested IP subnet overlaps with an existing External Subnet"
+            SUBNET_OVERLAPS_EXISTING_ERR_MSG,
         );
 
         context.db.terminate().await;
@@ -1891,16 +1909,92 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_subnet_allocation_takes_smallest_gap() {
+    async fn external_subnet_allocation_takes_smallest_gap_at_member_start() {
         let context = setup_external_subnet_test(
-            "external_subnet_allocation_takes_smallest_gap",
+            "external_subnet_allocation_takes_smallest_gap_at_member_start",
+        )
+        .await;
+
+        // Allocate 2 /56s.
+        let mut subnets = Vec::with_capacity(2);
+        let prefix = 56;
+        for i in 0..subnets.capacity() {
+            let subnet = context
+                .db
+                .datastore()
+                .create_external_subnet(
+                    context.db.opctx(),
+                    &DEFAULT_SILO_ID,
+                    &context.authz_project,
+                    ExternalSubnetCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: format!("sub{i}").parse().unwrap(),
+                            description: String::new(),
+                        },
+                        subnet: ExternalSubnetSelector::Auto {
+                            pool: PoolSelector::Auto { ip_version: None },
+                            prefix,
+                        },
+                    },
+                )
+                .await
+                .expect("able to insert subnet using default pool");
+            subnets.push(subnet);
+        }
+
+        // Free the first one.
+        context
+            .db
+            .datastore()
+            .delete_external_subnet(
+                context.db.opctx(),
+                &authz::ExternalSubnet::new(
+                    context.authz_project.clone(),
+                    subnets[0].id(),
+                    LookupType::ById(subnets[0].id().into_untyped_uuid()),
+                ),
+            )
+            .await
+            .expect("able to delete external subnet we just made");
+
+        // And allocate it again.
+        let subnet = context
+            .db
+            .datastore()
+            .create_external_subnet(
+                context.db.opctx(),
+                &DEFAULT_SILO_ID,
+                &context.authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "sub".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    subnet: ExternalSubnetSelector::Auto {
+                        pool: PoolSelector::Auto { ip_version: None },
+                        prefix,
+                    },
+                },
+            )
+            .await
+            .expect("able to insert subnet using default pool");
+        assert_eq!(subnet.subnet, subnets[0].subnet);
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn external_subnet_allocation_takes_smallest_gap_in_member_middle() {
+        let context = setup_external_subnet_test(
+            "external_subnet_allocation_takes_smallest_gap_in_member_middle",
         )
         .await;
 
         // Allocate 3 /56s.
         let mut subnets = Vec::with_capacity(3);
         let prefix = 56;
-        for i in 0..3 {
+        for i in 0..subnets.capacity() {
             let subnet = context
                 .db
                 .datastore()
@@ -1967,9 +2061,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_subnet_allocation_skips_too_small_gaps() {
+    async fn external_subnet_allocation_skips_too_small_gaps_in_member_middle()
+    {
         let context = setup_external_subnet_test(
-            "external_subnet_allocation_skips_too_small_gaps",
+            "external_subnet_allocation_skips_too_small_gaps_in_member_middle",
         )
         .await;
 
@@ -2041,6 +2136,504 @@ mod tests {
             .expect("able to insert subnet using default pool");
         assert_eq!(subnet.subnet, context.members[1].subnet);
 
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn external_subnet_allocation_skips_too_small_gaps_at_member_start() {
+        let context = setup_external_subnet_test(
+            "external_subnet_allocation_skips_too_small_gaps_at_member_start",
+        )
+        .await;
+
+        // Allocate 2 /56s.
+        let mut minis = Vec::with_capacity(2);
+        let prefix = 56;
+        for i in 0..minis.capacity() {
+            let subnet = context
+                .db
+                .datastore()
+                .create_external_subnet(
+                    context.db.opctx(),
+                    &DEFAULT_SILO_ID,
+                    &context.authz_project,
+                    ExternalSubnetCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: format!("sub{i}").parse().unwrap(),
+                            description: String::new(),
+                        },
+                        subnet: ExternalSubnetSelector::Auto {
+                            pool: PoolSelector::Auto { ip_version: None },
+                            prefix,
+                        },
+                    },
+                )
+                .await
+                .expect("able to insert subnet using default pool");
+            println!("{}", subnet.subnet);
+            minis.push(subnet);
+        }
+
+        // Free the first one.
+        context
+            .db
+            .datastore()
+            .delete_external_subnet(
+                context.db.opctx(),
+                &authz::ExternalSubnet::new(
+                    context.authz_project.clone(),
+                    minis[0].id(),
+                    LookupType::ById(minis[0].id().into_untyped_uuid()),
+                ),
+            )
+            .await
+            .expect("able to delete external subnet we just made");
+
+        // Now if we try to take a /48, which won't fit in the gap we just made,
+        // it should come from the next pool member. That's the next place we
+        // have a prefix-aligned /48.
+        let subnet = context
+            .db
+            .datastore()
+            .create_external_subnet(
+                context.db.opctx(),
+                &DEFAULT_SILO_ID,
+                &context.authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "sub".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    subnet: ExternalSubnetSelector::Auto {
+                        pool: PoolSelector::Auto { ip_version: None },
+                        prefix: 48,
+                    },
+                },
+            )
+            .await
+            .expect("able to insert subnet using default pool");
+        assert_eq!(subnet.subnet, context.members[1].subnet);
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn external_subnet_allocation_skips_too_small_prefix_aligned_gap() {
+        let context = setup_external_subnet_test(
+            "external_subnet_allocation_skips_too_small_prefix_aligned_gap",
+        )
+        .await;
+
+        // Allocate 4 /57s.
+        let mut minis = Vec::with_capacity(4);
+        let prefix = 57;
+        for i in 0..minis.capacity() {
+            let subnet = context
+                .db
+                .datastore()
+                .create_external_subnet(
+                    context.db.opctx(),
+                    &DEFAULT_SILO_ID,
+                    &context.authz_project,
+                    ExternalSubnetCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: format!("sub{i}").parse().unwrap(),
+                            description: String::new(),
+                        },
+                        subnet: ExternalSubnetSelector::Auto {
+                            pool: PoolSelector::Auto { ip_version: None },
+                            prefix,
+                        },
+                    },
+                )
+                .await
+                .expect("able to insert subnet using default pool");
+            println!("{}", subnet.subnet);
+            minis.push(subnet);
+        }
+
+        // Free the third one.
+        context
+            .db
+            .datastore()
+            .delete_external_subnet(
+                context.db.opctx(),
+                &authz::ExternalSubnet::new(
+                    context.authz_project.clone(),
+                    minis[0].id(),
+                    LookupType::ById(minis[0].id().into_untyped_uuid()),
+                ),
+            )
+            .await
+            .expect("able to delete external subnet we just made");
+
+        // Now, if we try to take a /56, we should take the one after the last
+        // mini. The issue here is that the gap we just freed is aligned to a
+        // /56 boundary, but it's not big enough or our /56, since it's just a
+        // /57.
+        let subnet = context
+            .db
+            .datastore()
+            .create_external_subnet(
+                context.db.opctx(),
+                &DEFAULT_SILO_ID,
+                &context.authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "sub".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    subnet: ExternalSubnetSelector::Auto {
+                        pool: PoolSelector::Auto { ip_version: None },
+                        prefix: 56,
+                    },
+                },
+            )
+            .await
+            .expect("able to insert subnet using default pool");
+
+        let IpNet::V6(last_mini) = IpNet::from(minis.last().unwrap().subnet)
+        else {
+            unreachable!("We're using IPv6 here");
+        };
+        let next_start = Ipv6Addr::from(u128::from(last_mini.last_addr()) + 1);
+        let expected_subnet = Ipv6Net::new(next_start, 56).unwrap();
+        assert_eq!(subnet.subnet, expected_subnet.into());
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
+    }
+
+    #[derive(Debug, EnumCount, FromRepr)]
+    enum AllocationKind {
+        ExplicitInvalidSubnet,
+        ExplicitValidSubnet,
+        ExplicitPool,
+        AutoVersion,
+        AutoDefaultPool,
+    }
+
+    impl Distribution<AllocationKind> for StandardUniform {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> AllocationKind {
+            //AllocationKind::from_repr(rng.random_range(0..AllocationKind::COUNT)).unwrap()
+            AllocationKind::from_repr(rng.random_range(0..2)).unwrap()
+        }
+    }
+
+    fn random_network_in(
+        rng: &mut ThreadRng,
+        net: Ipv6Net,
+        prefix: u8,
+    ) -> Ipv6Net {
+        assert!(prefix >= net.width());
+        assert!(prefix <= 128);
+        let base = u128::from(net.first_addr());
+        let rand_bits = prefix - net.width();
+        let rand_addr = rng.random::<u128>() & ((1u128 << rand_bits) - 1);
+        let rand_part = rand_addr << (128 - prefix);
+        let addr = Ipv6Addr::from(base | rand_part);
+        Ipv6Net::new(addr, prefix).unwrap()
+    }
+
+    fn random_member_subnet(
+        member: &SubnetPoolMember,
+        rng: &mut ThreadRng,
+    ) -> IpNet {
+        let min: u8 = member.min_prefix_length().into();
+        let max: u8 = member.max_prefix_length().into();
+        let prefix = rng.random_range(min..=max);
+
+        // Create a completely random address, mask it to the chosen prefix
+        // length, and set the first bits to that of the member.
+        let nexus_db_model::IpNet::V6(net) = member.subnet else {
+            unreachable!("This test only uses IPv6 addresses");
+        };
+        let net: Ipv6Net = net.into();
+        let subnet = random_network_in(rng, net, prefix);
+        assert!(subnet.is_network_address());
+        subnet.into()
+    }
+
+    fn random_network(rng: &mut ThreadRng, prefix: u8) -> IpNet {
+        assert!(prefix <= 128);
+        let base: u128 = rng.random();
+        let netmask = if prefix == 0 { 0 } else { (!0u128) << (128 - prefix) };
+        Ipv6Net::new(Ipv6Addr::from(base & netmask), prefix).unwrap().into()
+    }
+
+    fn random_selector(
+        context: &Context,
+    ) -> Option<(AllocationKind, ExternalName, ExternalSubnetSelector)> {
+        let mut rng = rng();
+        let prefix: u8 = rng.random_range(0..=64);
+        let kind: AllocationKind = rng.random();
+        let selector = match kind {
+            AllocationKind::ExplicitInvalidSubnet => {
+                // Pick a completely random subnet. We're pretty likely to
+                // be outside all the members, but retry until that's true. Make
+                // sure we don't loop forever though.
+                let mut i = 0;
+                let subnet = loop {
+                    let net = random_network(&mut rng, prefix);
+                    if context.members.iter().all(|member| {
+                        let subnet = IpNet::from(member.subnet);
+                        !subnet.overlaps(&net)
+                    }) {
+                        break net;
+                    }
+                    i += 1;
+                    if i > 100 {
+                        println!("failed to find non-overlapping subnet");
+                        return None;
+                    }
+                };
+                ExternalSubnetSelector::Explicit { subnet }
+            }
+            AllocationKind::ExplicitValidSubnet => {
+                // Pick each member uniformly, generate a random subnet
+                // within it.
+                let member = context.members.iter().choose(&mut rng).unwrap();
+                let subnet = random_member_subnet(member, &mut rng);
+                ExternalSubnetSelector::Explicit { subnet }
+            }
+            AllocationKind::ExplicitPool => ExternalSubnetSelector::Auto {
+                pool: PoolSelector::Explicit {
+                    pool: NameOrId::Id(
+                        context.db_pool.id().into_untyped_uuid(),
+                    ),
+                },
+                prefix,
+            },
+            AllocationKind::AutoVersion => ExternalSubnetSelector::Auto {
+                pool: PoolSelector::Auto { ip_version: Some(IpVersion::V6) },
+                prefix,
+            },
+            AllocationKind::AutoDefaultPool => ExternalSubnetSelector::Auto {
+                pool: PoolSelector::Auto { ip_version: None },
+                prefix,
+            },
+        };
+        Some((kind, random_name(&mut rng), selector))
+    }
+
+    fn random_name(rng: &mut ThreadRng) -> ExternalName {
+        let dist = Uniform::new('a', 'z').unwrap();
+        rng.sample_iter(dist).take(16).collect::<String>().parse().unwrap()
+    }
+
+    async fn free_random_subnet(
+        context: &Context,
+        allocated_subnets: &mut BTreeMap<Ipv6Net, ExternalSubnetUuid>,
+    ) {
+        // Free a random subnet.
+        let Some((addrs, key)) = allocated_subnets
+            .iter()
+            .choose(&mut rand::rng())
+            .map(|(a, k)| (*a, *k))
+        else {
+            return;
+        };
+        println!("action=free addrs={addrs} key={key}");
+        context
+            .db
+            .datastore()
+            .delete_external_subnet(
+                context.db.opctx(),
+                &authz::ExternalSubnet::new(
+                    context.authz_project.clone(),
+                    key,
+                    LookupType::by_id(key),
+                ),
+            )
+            .await
+            .expect("able to delete existing external subnet");
+        let _ = allocated_subnets.remove(&addrs).unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn stress_test_external_subnet_allocation() {
+        let context = setup_external_subnet_test(
+            "stress_test_external_subnet_allocation",
+        )
+        .await;
+        const FREE_PROB: f64 = 0.25;
+        const N_ACTIONS: usize = 1_000;
+        let mut allocated_subnets =
+            BTreeMap::<Ipv6Net, ExternalSubnetUuid>::new();
+        for _ in 0..N_ACTIONS {
+            if rand::random_bool(FREE_PROB) {
+                free_random_subnet(&context, &mut allocated_subnets).await;
+            } else {
+                // Perform a random allocation
+                let Some((kind, subnet_name, selector)) =
+                    random_selector(&context)
+                else {
+                    free_random_subnet(&context, &mut allocated_subnets).await;
+                    continue;
+                };
+                let result = context
+                    .db
+                    .datastore()
+                    .create_external_subnet(
+                        context.db.opctx(),
+                        &DEFAULT_SILO_ID,
+                        &context.authz_project,
+                        ExternalSubnetCreate {
+                            identity: IdentityMetadataCreateParams {
+                                name: subnet_name,
+                                description: String::new(),
+                            },
+                            subnet: selector.clone(),
+                        },
+                    )
+                    .await;
+                println!(
+                    "action={kind:?} selector={selector:?} result={result:?}"
+                );
+                match kind {
+                    AllocationKind::ExplicitInvalidSubnet => {
+                        let Err(Error::InvalidRequest { message }) = &result
+                        else {
+                            panic!(
+                                "Expected an error trying to insert an invalid \
+                                subnet explicitly, selector={selector:#?}, \
+                                result={result:#?}",
+                            );
+                        };
+                        assert_eq!(
+                            message.external_message(),
+                            NO_LINKED_POOL_CONTAINS_SUBNET_ERR_MSG
+                        );
+                    }
+                    AllocationKind::ExplicitValidSubnet => {
+                        // If the subnet we asked for overlaps with any of the ones
+                        // we've already inserted, this should fail. Otherwise it
+                        // should either succeed or fail. Exhaustion is not a
+                        // separate error message here, because we're not
+                        // automatically allocated a subnet.
+                        let ExternalSubnetSelector::Explicit {
+                            subnet: requested_subnet,
+                        } = &selector
+                        else {
+                            unreachable!();
+                        };
+                        let IpNet::V6(requested_v6_net) = requested_subnet
+                        else {
+                            unreachable!();
+                        };
+                        let overlapping =
+                            allocated_subnets.iter().find(|(subnet, _key)| {
+                                subnet.overlaps(requested_v6_net)
+                            });
+                        if let Some((subnet, _key)) = overlapping {
+                            let Err(Error::InvalidRequest { message }) =
+                                &result
+                            else {
+                                panic!(
+                                    "Expected InvalidRequest when inserting an \
+                                    explicit subnet that overlaps with one we've
+                                    already allocated, selector={selector:#?}, \
+                                    allocated_subnet={subnet}, result={result:#?}"
+                                );
+                            };
+                            assert_eq!(
+                                message.external_message(),
+                                SUBNET_OVERLAPS_EXISTING_ERR_MSG,
+                            );
+                        } else {
+                            let Ok(external_subnet) = &result else {
+                                panic!(
+                                    "Expected to succeed inserting an explicit \
+                                    subnet that doesn't overlap with any we've \
+                                    already inserted, selector={selector:#?}, \
+                                    result={result:#?}",
+                                );
+                            };
+                            let IpNet::V6(subnet) =
+                                IpNet::from(external_subnet.subnet)
+                            else {
+                                unreachable!();
+                            };
+                            allocated_subnets
+                                .insert(subnet, external_subnet.id());
+                        }
+                    }
+                    AllocationKind::ExplicitPool
+                    | AllocationKind::AutoVersion
+                    | AllocationKind::AutoDefaultPool => {
+                        // We either succeeded, or get an exhaustion error. We
+                        // should definitely not get errors about overlap, since
+                        // we're picking the subnet.
+                        match result {
+                            Ok(subnet) => {
+                                let IpNet::V6(net) = subnet.subnet.into()
+                                else {
+                                    unreachable!();
+                                };
+                                if let Some((overlapping, _)) =
+                                    allocated_subnets.iter().find(
+                                        |(subnet, _key)| subnet.overlaps(&net),
+                                    )
+                                {
+                                    panic!(
+                                        "Automatically created subnet overlaps an \
+                                        existing, existing={}, new={}",
+                                        overlapping, net,
+                                    );
+                                }
+                                // Insert the new one.
+                                allocated_subnets.insert(net, subnet.id());
+                            }
+                            Err(Error::InvalidRequest { message }) => {
+                                let expected_message = match kind {
+                                    AllocationKind::ExplicitInvalidSubnet
+                                    | AllocationKind::ExplicitValidSubnet => {
+                                        unreachable!()
+                                    }
+                                    AllocationKind::ExplicitPool => {
+                                        format!(
+                                            "All subnets are used in the \
+                                            Subnet Pool with ID '{}'",
+                                            context.authz_pool.id(),
+                                        )
+                                    }
+                                    AllocationKind::AutoVersion => {
+                                        String::from(
+                                            "All subnets are used in the \
+                                            default IPv6 Subnet Pool for \
+                                            the current Silo",
+                                        )
+                                    }
+                                    AllocationKind::AutoDefaultPool => {
+                                        String::from(
+                                            "All subnets are used in the \
+                                            default Subnet Pool for \
+                                            the current Silo",
+                                        )
+                                    }
+                                };
+                                assert_eq!(
+                                    message.external_message(),
+                                    expected_message,
+                                    "Expected an error message about \
+                                    pool exhaustion"
+                                );
+                            }
+                            Err(other) => {
+                                panic!(
+                                    "Expected to succeed or fail with an \
+                                    InvalidRequest and an error message \
+                                    about pool exhaustion,found: {other:#?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
         context.db.terminate().await;
         context.logctx.cleanup_successful();
     }
