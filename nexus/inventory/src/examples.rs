@@ -685,7 +685,7 @@ pub fn representative() -> Representative {
                             fmri: "svc:/site/fake-service:default".to_string(),
                             zone: "global".to_string(),
                         }],
-                        errors: vec![],
+                        errors: vec!["an unimportant error".to_string()],
                         time_of_status: Some(
                             "2026-01-01T00:00:00Z".parse().unwrap(),
                         ),
