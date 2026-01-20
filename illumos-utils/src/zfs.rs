@@ -1669,13 +1669,16 @@ impl Zfs {
     pub async fn delete_dataset_volume(
         params: DatasetVolumeDeleteArgs<'_>,
     ) -> Result<(), DeleteDatasetVolumeError> {
-        if params.raw {
-            // Open the raw zvol and check if it is still initializing. We can't
-            // delete it if it is, so stop the initialization before deleting.
-            let path = format!("/dev/zvol/rdsk/{}", params.name);
+        let rdsk_path = format!("/dev/zvol/rdsk/{}", params.name);
 
+        // Open the raw zvol and check if it is still initializing. We can't
+        // delete it if it is, so stop the initialization before deleting.
+        //
+        // If the /dev/zvol/rdsk/... path is missing then skip this step, as the
+        // zvol is probably gone.
+        if params.raw && Utf8Path::new(&rdsk_path).exists() {
             let fd = rustix::fs::open(
-                path,
+                rdsk_path,
                 rustix::fs::OFlags::WRONLY,
                 rustix::fs::Mode::empty(),
             )
