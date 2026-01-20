@@ -62,11 +62,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Project, identified by its owned name
-    pub fn project_name_owned<'b, 'c>(self, name: Name) -> Project<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+    pub fn project_name_owned(self, name: Name) -> Project<'a> {
         match self
             .opctx
             .authn
@@ -202,14 +198,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type DeviceAuthRequest, identified by its `user_code`
-    pub fn device_auth_request<'b, 'c>(
-        self,
-        user_code: &'b str,
-    ) -> DeviceAuthRequest<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+    pub fn device_auth_request(self, user_code: &str) -> DeviceAuthRequest<'a> {
         DeviceAuthRequest::PrimaryKey(
             Root { lookup_root: self },
             user_code.to_string(),
@@ -239,11 +228,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Silo, identified by its owned name
-    pub fn silo_name_owned<'b, 'c>(self, name: Name) -> Silo<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+    pub fn silo_name_owned(self, name: Name) -> Silo<'a> {
         Silo::OwnedName(Root { lookup_root: self }, name)
     }
 
@@ -255,7 +240,7 @@ impl<'a> LookupPath<'a> {
     /// Select a resource of type SiloUser that matches an authenticated Actor
     pub fn silo_user_actor(
         self,
-        actor: &'a authn::Actor,
+        actor: &authn::Actor,
     ) -> Result<SiloUser<'a>, Error> {
         match actor {
             authn::Actor::SiloUser { silo_user_id, .. } => Ok(
@@ -395,10 +380,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type UserBuiltin, identified by its `id`
-    pub fn user_builtin_id<'b>(self, id: BuiltInUserUuid) -> UserBuiltin<'b>
-    where
-        'a: 'b,
-    {
+    pub fn user_builtin_id(self, id: BuiltInUserUuid) -> UserBuiltin<'a> {
         UserBuiltin::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -412,10 +394,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Certificate, identified by its id
-    pub fn certificate_id<'b>(self, id: Uuid) -> Certificate<'b>
-    where
-        'a: 'b,
-    {
+    pub fn certificate_id(self, id: Uuid) -> Certificate<'a> {
         Certificate::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -444,11 +423,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Certificate, identified by its owned name
-    pub fn certificate_name_owned<'b, 'c>(self, name: Name) -> Certificate<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+    pub fn certificate_name_owned(self, name: Name) -> Certificate<'a> {
         match self
             .opctx
             .authn
@@ -468,23 +443,11 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type SamlIdentityProvider, identified by its id
-    pub fn saml_identity_provider_id<'b>(
-        self,
-        id: Uuid,
-    ) -> SamlIdentityProvider<'b>
-    where
-        'a: 'b,
-    {
+    pub fn saml_identity_provider_id(self, id: Uuid) -> SamlIdentityProvider<'a> {
         SamlIdentityProvider::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    pub fn alert_receiver_id<'b>(
-        self,
-        id: AlertReceiverUuid,
-    ) -> AlertReceiver<'b>
-    where
-        'a: 'b,
-    {
+    pub fn alert_receiver_id(self, id: AlertReceiverUuid) -> AlertReceiver<'a> {
         AlertReceiver::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -501,45 +464,23 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type [`AlertReceiver`], identified by its owned name
-    pub fn alert_receiver_name_owned<'b, 'c>(
-        self,
-        name: Name,
-    ) -> AlertReceiver<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+    pub fn alert_receiver_name_owned(self, name: Name) -> AlertReceiver<'a> {
         AlertReceiver::OwnedName(Root { lookup_root: self }, name)
     }
 
     /// Select a resource of type [`WebhookSecret`], identified by its UUID.
-    pub fn webhook_secret_id<'b>(
-        self,
-        id: WebhookSecretUuid,
-    ) -> WebhookSecret<'b>
-    where
-        'a: 'b,
-    {
+    pub fn webhook_secret_id(self, id: WebhookSecretUuid) -> WebhookSecret<'a> {
         WebhookSecret::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type [`Alert`], identified by its UUID.
-    pub fn alert_id<'b>(self, id: AlertUuid) -> Alert<'b>
-    where
-        'a: 'b,
-    {
+    pub fn alert_id(self, id: AlertUuid) -> Alert<'a> {
         Alert::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type [`ScimClientBearerToken`], identified by its
     /// UUID.
-    pub fn scim_client_bearer_token_id<'b>(
-        self,
-        id: Uuid,
-    ) -> ScimClientBearerToken<'b>
-    where
-        'a: 'b,
-    {
+    pub fn scim_client_bearer_token_id(self, id: Uuid) -> ScimClientBearerToken<'a> {
         ScimClientBearerToken::PrimaryKey(Root { lookup_root: self }, id)
     }
 }
