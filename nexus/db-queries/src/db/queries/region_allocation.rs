@@ -852,6 +852,210 @@ mod test {
         size_used: i64,
     }
 
+    /// Configuration for a U.2 disk, produced by U2Builder.
+    struct U2BuilderConfig {
+        control_plane_storage_buffer_gib: u32,
+        inventory_total_size_gib: u32,
+        /// None = no local storage dataset, Some(n) = local storage with n GiB used
+        local_storage_size_used_gib: Option<u32>,
+    }
+
+    /// Builder for configuring a single U.2 disk.
+    ///
+    /// Defaults:
+    /// - control_plane_storage_buffer: 250 GiB
+    /// - inventory_total_size: 1024 GiB
+    /// - local storage: None (no local storage dataset)
+    struct U2Builder {
+        control_plane_storage_buffer_gib: u32,
+        inventory_total_size_gib: u32,
+        local_storage_size_used_gib: Option<u32>,
+    }
+
+    impl U2Builder {
+        fn new() -> Self {
+            Self {
+                control_plane_storage_buffer_gib: 250,
+                inventory_total_size_gib: 1024,
+                local_storage_size_used_gib: None,
+            }
+        }
+
+        fn control_plane_storage_buffer_gib(mut self, gib: u32) -> Self {
+            self.control_plane_storage_buffer_gib = gib;
+            self
+        }
+
+        fn inventory_total_size_gib(mut self, gib: u32) -> Self {
+            self.inventory_total_size_gib = gib;
+            self
+        }
+
+        /// Configure this U.2 to have a local storage dataset with the
+        /// specified amount used.
+        fn local_storage_size_used_gib(mut self, gib: u32) -> Self {
+            self.local_storage_size_used_gib = Some(gib);
+            self
+        }
+
+        fn build(self) -> U2BuilderConfig {
+            U2BuilderConfig {
+                control_plane_storage_buffer_gib: self
+                    .control_plane_storage_buffer_gib,
+                inventory_total_size_gib: self.inventory_total_size_gib,
+                local_storage_size_used_gib: self.local_storage_size_used_gib,
+            }
+        }
+    }
+
+    /// Builder for configuring a single sled with its U.2 disks.
+    struct SledBuilder {
+        u2s: Vec<U2BuilderConfig>,
+    }
+
+    impl SledBuilder {
+        fn new() -> Self {
+            Self { u2s: Vec::new() }
+        }
+
+        /// Add a U.2 disk to this sled.
+        fn add_u2(mut self, u2: U2Builder) -> Self {
+            self.u2s.push(u2.build());
+            self
+        }
+    }
+
+    /// Builder for constructing `RegionAllocationTest` configurations.
+    ///
+    /// Auto-generates:
+    /// - Sled IDs, serials, disk IDs, dataset IDs
+    /// - Crucible dataset addresses based on sled/disk indices
+    struct RegionAllocationTestBuilder {
+        sleds: Vec<SledBuilder>,
+    }
+
+    impl RegionAllocationTestBuilder {
+        fn new() -> Self {
+            Self { sleds: Vec::new() }
+        }
+
+        /// Add a sled with its U.2 configuration.
+        fn add_sled(mut self, sled: SledBuilder) -> Self {
+            self.sleds.push(sled);
+            self
+        }
+
+        fn build(self) -> RegionAllocationTest {
+            let sleds = self
+                .sleds
+                .into_iter()
+                .enumerate()
+                .map(|(sled_idx, sled_builder)| {
+                    let u2s = sled_builder
+                        .u2s
+                        .into_iter()
+                        .enumerate()
+                        .map(|(u2_idx, u2_config)| {
+                            // Generate address based on sled/disk indices:
+                            // [fd00:1122:3344:{sled+1}{disk+1}1::1]:12345
+                            let addr_str = format!(
+                                "[fd00:1122:3344:{}{:02}1::1]:12345",
+                                sled_idx + 1,
+                                u2_idx + 1
+                            );
+
+                            let local_storage_dataset =
+                                u2_config.local_storage_size_used_gib.map(
+                                    |gib| {
+                                        RegionAllocationTestSledLocalStorageDataset {
+                                        id: DatasetUuid::new_v4(),
+                                        size_used: i64::from(
+                                            external::ByteCount::from_gibibytes_u32(
+                                                gib,
+                                            ),
+                                        ),
+                                    }
+                                    },
+                                );
+
+                            RegionAllocationTestSledU2 {
+                                physical_disk_id: PhysicalDiskUuid::new_v4(),
+                                physical_disk_serial: format!(
+                                    "phys{}_{}",
+                                    sled_idx, u2_idx
+                                ),
+                                zpool_id: ZpoolUuid::new_v4(),
+                                control_plane_storage_buffer:
+                                    external::ByteCount::from_gibibytes_u32(
+                                        u2_config.control_plane_storage_buffer_gib,
+                                    ),
+                                inventory_total_size:
+                                    external::ByteCount::from_gibibytes_u32(
+                                        u2_config.inventory_total_size_gib,
+                                    ),
+                                crucible_dataset_id: DatasetUuid::new_v4(),
+                                crucible_dataset_addr: addr_str.parse().unwrap(),
+                                local_storage_dataset,
+                            }
+                        })
+                        .collect();
+
+                    RegionAllocationTestSled {
+                        sled_id: SledUuid::new_v4(),
+                        sled_serial: format!("sled_{}", sled_idx),
+                        u2s,
+                    }
+                })
+                .collect();
+
+            RegionAllocationTest { sleds }
+        }
+    }
+
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    /// Calculate the raw disk size in bytes from region parameters.
+    /// This is the size WITHOUT the reservation overhead.
+    fn disk_size_from_region_params(
+        block_size: u64,
+        blocks_per_extent: u64,
+        extent_count: u64,
+    ) -> u64 {
+        block_size * blocks_per_extent * extent_count
+    }
+
+    /// Calculate the disk size WITH the reservation overhead.
+    /// This mirrors the production calculation in `Region::reserved_size()`.
+    ///
+    /// Note: This function explicitly matches on `RegionReservationPercent`
+    /// to ensure tests fail to compile if new variants are added.
+    fn disk_size_with_reservation(disk_size_without_reservation: u64) -> u64 {
+        // Use the same reservation percent as allocation_query()
+        let reservation_percent = RegionReservationPercent::TwentyFive;
+
+        let overhead = match reservation_percent {
+            RegionReservationPercent::TwentyFive => {
+                disk_size_without_reservation / 4
+            } // If new variants are added, this match will fail to compile,
+              // forcing the test author to update this function.
+        };
+
+        disk_size_without_reservation + overhead
+    }
+
+    /// Calculate available space on a zpool given its configuration.
+    /// All parameters are in GiB for clarity.
+    fn available_space_gib(
+        inventory_total_size_gib: u32,
+        control_plane_storage_buffer_gib: u32,
+        local_storage_used_gib: u32,
+    ) -> u64 {
+        let available_gib = inventory_total_size_gib
+            - control_plane_storage_buffer_gib
+            - local_storage_used_gib;
+        u64::from(available_gib) * GIB
+    }
+
     async fn setup_region_allocation_test(
         opctx: &OpContext,
         datastore: &DataStore,
@@ -1007,105 +1211,73 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let config = RegionAllocationTest {
-            sleds: vec![
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_0"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys0"),
+        // U2 configuration
+        let inventory_total_size_gib: u32 = 1024;
+        let control_plane_storage_buffer_gib: u32 = 250;
+        let local_storage_used_gib: u32 = 0;
 
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:101::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(0),
-                                ),
-                            },
-                        ),
-                    }],
-                },
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_1"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys1"),
-
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:201::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(0),
-                                ),
-                            },
-                        ),
-                    }],
-                },
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_2"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys2"),
-
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:301::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(0),
-                                ),
-                            },
-                        ),
-                    }],
-                },
-            ],
-        };
+        let config = RegionAllocationTestBuilder::new()
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(local_storage_used_gib),
+                ),
+            )
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(local_storage_used_gib),
+                ),
+            )
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(local_storage_used_gib),
+                ),
+            )
+            .build();
 
         setup_region_allocation_test(&opctx, datastore, &config).await;
 
-        // Disk size is 480 GiB
-        // Reserved size is 600 GiB
-        //
-        // Available space for each zpool is is 1024 - 250 = 774 GiB, so there's
-        // room for the reserved size on all sleds.
+        // Region parameters
+        let block_size: u64 = 512;
+        let blocks_per_extent: u64 = 131072;
+        let extent_count: u64 = 7680;
+
+        // Calculate sizes
+        let disk_size_without_reservation = disk_size_from_region_params(
+            block_size,
+            blocks_per_extent,
+            extent_count,
+        );
+        let reserved_size =
+            disk_size_with_reservation(disk_size_without_reservation);
+        let available_space = available_space_gib(
+            inventory_total_size_gib,
+            control_plane_storage_buffer_gib,
+            local_storage_used_gib,
+        );
+
+        // Verify test setup: this test expects allocation to SUCCEED
+        assert!(
+            reserved_size <= available_space,
+            "Test setup error: reserved_size ({} GiB) should fit in available_space ({} GiB)",
+            reserved_size / GIB,
+            available_space / GIB,
+        );
+
         datastore
             .arbitrary_region_allocate(
                 opctx,
@@ -1113,9 +1285,9 @@ mod test {
                     volume_id: VolumeUuid::new_v4(),
                 },
                 RegionAllocationParameters::FromRaw {
-                    block_size: 512,
-                    blocks_per_extent: 131072,
-                    extent_count: 7680,
+                    block_size,
+                    blocks_per_extent,
+                    extent_count,
                 },
                 &RegionAllocationStrategy::RandomWithDistinctSleds {
                     seed: None,
@@ -1123,7 +1295,7 @@ mod test {
                 3, // num_regions_required
             )
             .await
-            .unwrap();
+            .expect("allocation should succeed: reserved size fits in available space");
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1138,84 +1310,69 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let config = RegionAllocationTest {
-            sleds: vec![
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_0"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys0"),
+        // U2 configuration
+        let inventory_total_size_gib: u32 = 1024;
+        let control_plane_storage_buffer_gib: u32 = 250;
 
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:101::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: None,
-                    }],
-                },
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_1"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys1"),
-
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:201::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: None,
-                    }],
-                },
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_2"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys2"),
-
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:301::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: None,
-                    }],
-                },
-            ],
-        };
+        let config = RegionAllocationTestBuilder::new()
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib),
+                ),
+            )
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib),
+                ),
+            )
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib),
+                ),
+            )
+            .build();
 
         setup_region_allocation_test(&opctx, datastore, &config).await;
 
-        // Disk size is 480 GiB
-        // Reserved size is 600 GiB
-        //
-        // Available space for each zpool is is 1024 - 250 = 774 GiB, so there's
-        // room for the reserved size on all sleds.
+        // Region parameters
+        let block_size: u64 = 512;
+        let blocks_per_extent: u64 = 131072;
+        let extent_count: u64 = 7680;
+
+        // Calculate sizes (no local storage, so 0 for that parameter)
+        let disk_size_without_reservation = disk_size_from_region_params(
+            block_size,
+            blocks_per_extent,
+            extent_count,
+        );
+        let reserved_size =
+            disk_size_with_reservation(disk_size_without_reservation);
+        let available_space = available_space_gib(
+            inventory_total_size_gib,
+            control_plane_storage_buffer_gib,
+            0, // no local storage dataset
+        );
+
+        // Verify test setup: this test expects allocation to SUCCEED
+        assert!(
+            reserved_size <= available_space,
+            "Test setup error: reserved_size ({} GiB) should fit in available_space ({} GiB)",
+            reserved_size / GIB,
+            available_space / GIB,
+        );
+
         datastore
             .arbitrary_region_allocate(
                 opctx,
@@ -1223,9 +1380,9 @@ mod test {
                     volume_id: VolumeUuid::new_v4(),
                 },
                 RegionAllocationParameters::FromRaw {
-                    block_size: 512,
-                    blocks_per_extent: 131072,
-                    extent_count: 7680,
+                    block_size,
+                    blocks_per_extent,
+                    extent_count,
                 },
                 &RegionAllocationStrategy::RandomWithDistinctSleds {
                     seed: None,
@@ -1233,13 +1390,17 @@ mod test {
                 3, // num_regions_required
             )
             .await
-            .unwrap();
+            .expect(
+                "allocation should succeed without local storage dataset row",
+            );
 
         db.terminate().await;
         logctx.cleanup_successful();
     }
 
-    /// Ensure the control plane storage buffer is respected
+    /// Ensure the control plane storage buffer is respected.
+    /// This test also verifies that the reservation overhead is applied,
+    /// because the raw disk size would fit, but the reserved size does not.
     #[tokio::test]
     async fn region_allocation_fail_control_plane_storage_buffer() {
         let logctx = dev::test_setup_log(
@@ -1248,119 +1409,91 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let config = RegionAllocationTest {
-            sleds: vec![
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_0"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys0"),
+        // U2 configuration
+        let inventory_total_size_gib: u32 = 1024;
+        let control_plane_storage_buffer_gib: u32 = 250;
+        let local_storage_used_gib: u32 = 0;
 
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:101::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(0),
-                                ),
-                            },
-                        ),
-                    }],
-                },
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_1"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys1"),
-
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:201::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(0),
-                                ),
-                            },
-                        ),
-                    }],
-                },
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_2"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys2"),
-
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:301::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(0),
-                                ),
-                            },
-                        ),
-                    }],
-                },
-            ],
-        };
+        let config = RegionAllocationTestBuilder::new()
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(local_storage_used_gib),
+                ),
+            )
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(local_storage_used_gib),
+                ),
+            )
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(local_storage_used_gib),
+                ),
+            )
+            .build();
 
         setup_region_allocation_test(&opctx, datastore, &config).await;
 
-        // Disk size is 640 GiB
-        // Reserved size is 800 GiB
-        //
-        // Available space for each zpool is is 1024 - 250 = 774 GiB, so with
-        // the control plane storage buffer there's not enough room for the
-        // reserved size on any sled.
-        //
-        // Note this is also a test that the 25% overhead is applied, as 640 GiB
-        // would fit!
-        datastore
+        // Region parameters
+        let block_size: u64 = 512;
+        let blocks_per_extent: u64 = 131072;
+        let extent_count: u64 = 10240;
+
+        // Calculate sizes
+        let disk_size_without_reservation = disk_size_from_region_params(
+            block_size,
+            blocks_per_extent,
+            extent_count,
+        );
+        let reserved_size =
+            disk_size_with_reservation(disk_size_without_reservation);
+        let available_space = available_space_gib(
+            inventory_total_size_gib,
+            control_plane_storage_buffer_gib,
+            local_storage_used_gib,
+        );
+
+        // Verify test setup: disk without reservation fits, but with
+        // reservation does NOT
+        assert!(
+            disk_size_without_reservation <= available_space,
+            "Test setup error: disk_size_without_reservation ({} GiB) should fit \
+             (this tests that reservation overhead matters)",
+            disk_size_without_reservation / GIB,
+        );
+        assert!(
+            reserved_size > available_space,
+            "Test setup error: reserved_size ({} GiB) should NOT fit in \
+             available_space ({} GiB)",
+            reserved_size / GIB,
+            available_space / GIB,
+        );
+
+        let err = datastore
             .arbitrary_region_allocate(
                 opctx,
                 RegionAllocationFor::DiskVolume {
                     volume_id: VolumeUuid::new_v4(),
                 },
                 RegionAllocationParameters::FromRaw {
-                    block_size: 512,
-                    blocks_per_extent: 131072,
-                    extent_count: 10240,
+                    block_size,
+                    blocks_per_extent,
+                    extent_count,
                 },
                 &RegionAllocationStrategy::RandomWithDistinctSleds {
                     seed: None,
@@ -1368,7 +1501,18 @@ mod test {
                 3, // num_regions_required
             )
             .await
-            .unwrap_err();
+            .expect_err(
+                "allocation should fail: reserved size exceeds available space",
+            );
+
+        assert!(
+            matches!(
+                &err,
+                external::Error::InsufficientCapacity { message }
+                    if message.external_message() == "Not enough storage"
+            ),
+            "expected InsufficientCapacity with 'Not enough storage', got: {err:?}"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1382,118 +1526,106 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let config = RegionAllocationTest {
-            sleds: vec![
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_0"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys0"),
+        // U2 configuration
+        let inventory_total_size_gib: u32 = 1024;
+        let control_plane_storage_buffer_gib: u32 = 250;
+        // Sled 0 has local storage consuming 500 GiB, sleds 1 and 2 have 0
+        let local_storage_used_gib_sled0: u32 = 500;
+        let local_storage_used_gib_other: u32 = 0;
 
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:101::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(
-                                        500,
-                                    ),
-                                ),
-                            },
+        let config = RegionAllocationTestBuilder::new()
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(
+                            local_storage_used_gib_sled0,
                         ),
-                    }],
-                },
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_1"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys1"),
-
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:201::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(0),
-                                ),
-                            },
+                ),
+            )
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(
+                            local_storage_used_gib_other,
                         ),
-                    }],
-                },
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_2"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys2"),
-
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:301::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(0),
-                                ),
-                            },
+                ),
+            )
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(
+                            local_storage_used_gib_other,
                         ),
-                    }],
-                },
-            ],
-        };
+                ),
+            )
+            .build();
 
         setup_region_allocation_test(&opctx, datastore, &config).await;
 
-        // Disk size is 300 GiB
-        // Reserved size is 375 GiB
-        //
-        // Available space for each zpool is is 1024 - 250 = 774 GiB, but one of
-        // the sleds has 500 GiB consumed by local storage, bringing the
-        // available space down to 274 GiB.
-        datastore
+        // Region parameters
+        let block_size: u64 = 512;
+        let blocks_per_extent: u64 = 131072;
+        let extent_count: u64 = 4800;
+
+        // Calculate sizes
+        let disk_size_without_reservation = disk_size_from_region_params(
+            block_size,
+            blocks_per_extent,
+            extent_count,
+        );
+        let reserved_size =
+            disk_size_with_reservation(disk_size_without_reservation);
+        let available_space_sled0 = available_space_gib(
+            inventory_total_size_gib,
+            control_plane_storage_buffer_gib,
+            local_storage_used_gib_sled0,
+        );
+        let available_space_other = available_space_gib(
+            inventory_total_size_gib,
+            control_plane_storage_buffer_gib,
+            local_storage_used_gib_other,
+        );
+
+        // Verify test setup: reserved_size does NOT fit on sled 0 but DOES fit
+        // on sleds 1 and 2
+        assert!(
+            reserved_size > available_space_sled0,
+            "Test setup error: reserved_size ({} GiB) should NOT fit on sled 0 \
+             (available: {} GiB)",
+            reserved_size / GIB,
+            available_space_sled0 / GIB,
+        );
+        assert!(
+            reserved_size <= available_space_other,
+            "Test setup error: reserved_size ({} GiB) should fit on sleds 1 and 2 \
+             (available: {} GiB)",
+            reserved_size / GIB,
+            available_space_other / GIB,
+        );
+
+        // Allocation with 3 regions should FAIL (only 2 sleds have enough space)
+        let err = datastore
             .arbitrary_region_allocate(
                 opctx,
                 RegionAllocationFor::DiskVolume {
                     volume_id: VolumeUuid::new_v4(),
                 },
                 RegionAllocationParameters::FromRaw {
-                    block_size: 512,
-                    blocks_per_extent: 131072,
-                    extent_count: 4800,
+                    block_size,
+                    blocks_per_extent,
+                    extent_count,
                 },
                 &RegionAllocationStrategy::RandomWithDistinctSleds {
                     seed: None,
@@ -1501,9 +1633,20 @@ mod test {
                 3, // num_regions_required
             )
             .await
-            .unwrap_err();
+            .expect_err(
+                "allocation should fail: only 2 sleds have enough space for 3 regions",
+            );
 
-        // If num_regions_required is 2, then the allocation should succeed
+        assert!(
+            matches!(
+                &err,
+                external::Error::InsufficientCapacity { message }
+                    if message.external_message() == "Not enough storage"
+            ),
+            "expected InsufficientCapacity with 'Not enough storage', got: {err:?}"
+        );
+
+        // Allocation with 2 regions should SUCCEED
         datastore
             .arbitrary_region_allocate(
                 opctx,
@@ -1511,9 +1654,9 @@ mod test {
                     volume_id: VolumeUuid::new_v4(),
                 },
                 RegionAllocationParameters::FromRaw {
-                    block_size: 512,
-                    blocks_per_extent: 131072,
-                    extent_count: 4800,
+                    block_size,
+                    blocks_per_extent,
+                    extent_count,
                 },
                 &RegionAllocationStrategy::RandomWithDistinctSleds {
                     seed: None,
@@ -1521,13 +1664,14 @@ mod test {
                 2, // num_regions_required
             )
             .await
-            .unwrap();
+            .expect("allocation should succeed: 2 sleds have enough space");
 
         db.terminate().await;
         logctx.cleanup_successful();
     }
 
-    /// Ensure the size_used consumed by local storage is respected EXACTLY
+    /// Ensure the size_used consumed by local storage is respected EXACTLY.
+    /// This test verifies boundary conditions: N extents fit, but N+1 don't.
     #[tokio::test]
     async fn region_allocation_barely_pass_local_storage_dataset() {
         let logctx = dev::test_setup_log(
@@ -1536,112 +1680,100 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let config = RegionAllocationTest {
-            sleds: vec![
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_0"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys0"),
+        // U2 configuration
+        let inventory_total_size_gib: u32 = 1024;
+        let control_plane_storage_buffer_gib: u32 = 250;
+        // Sled 0 has 500 GiB local storage, making it the bottleneck
+        let local_storage_used_gib_sled0: u32 = 500;
+        let local_storage_used_gib_other: u32 = 0;
 
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:101::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(
-                                        500,
-                                    ),
-                                ),
-                            },
+        let config = RegionAllocationTestBuilder::new()
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(
+                            local_storage_used_gib_sled0,
                         ),
-                    }],
-                },
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_1"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys1"),
-
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:201::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(0),
-                                ),
-                            },
+                ),
+            )
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(
+                            local_storage_used_gib_other,
                         ),
-                    }],
-                },
-                RegionAllocationTestSled {
-                    sled_id: SledUuid::new_v4(),
-                    sled_serial: String::from("sled_2"),
-                    u2s: vec![RegionAllocationTestSledU2 {
-                        physical_disk_id: PhysicalDiskUuid::new_v4(),
-                        physical_disk_serial: String::from("phys2"),
-
-                        zpool_id: ZpoolUuid::new_v4(),
-                        control_plane_storage_buffer:
-                            external::ByteCount::from_gibibytes_u32(250),
-
-                        inventory_total_size:
-                            external::ByteCount::from_gibibytes_u32(1024),
-
-                        crucible_dataset_id: DatasetUuid::new_v4(),
-                        crucible_dataset_addr: "[fd00:1122:3344:301::1]:12345"
-                            .parse()
-                            .unwrap(),
-
-                        local_storage_dataset: Some(
-                            RegionAllocationTestSledLocalStorageDataset {
-                                id: DatasetUuid::new_v4(),
-                                size_used: i64::from(
-                                    external::ByteCount::from_gibibytes_u32(0),
-                                ),
-                            },
+                ),
+            )
+            .add_sled(
+                SledBuilder::new().add_u2(
+                    U2Builder::new()
+                        .control_plane_storage_buffer_gib(
+                            control_plane_storage_buffer_gib,
+                        )
+                        .inventory_total_size_gib(inventory_total_size_gib)
+                        .local_storage_size_used_gib(
+                            local_storage_used_gib_other,
                         ),
-                    }],
-                },
-            ],
-        };
+                ),
+            )
+            .build();
 
         setup_region_allocation_test(&opctx, datastore, &config).await;
 
-        // Available space for each zpool is is 1024 - 250 = 774 GiB, but one of
-        // the sleds has 500 GiB consumed by local storage, bringing the
-        // available space down to 274 GiB. Accounting for overhead, that means
-        // the requested disk size should be 219.2 GiB to fit. With the region
-        // allocation parameters below:
-        //
-        // Disk size is 219.1875 GiB
-        // Reserved size is ~273.9844 GiB
-        //
-        // This should _just_ fit!
+        // Region parameters
+        let block_size: u64 = 512;
+        let blocks_per_extent: u64 = 131072;
+        // Test boundary: 3507 extents should fit, 3508 should not
+        let extent_count_fits: u64 = 3507;
+        let extent_count_fails: u64 = 3508;
+
+        // Calculate sizes for sled 0 (the bottleneck)
+        let available_space_sled0 = available_space_gib(
+            inventory_total_size_gib,
+            control_plane_storage_buffer_gib,
+            local_storage_used_gib_sled0,
+        );
+
+        let reserved_size_fits =
+            disk_size_with_reservation(disk_size_from_region_params(
+                block_size,
+                blocks_per_extent,
+                extent_count_fits,
+            ));
+        let reserved_size_fails =
+            disk_size_with_reservation(disk_size_from_region_params(
+                block_size,
+                blocks_per_extent,
+                extent_count_fails,
+            ));
+
+        // Verify test setup: exactly at the boundary
+        assert!(
+            reserved_size_fits <= available_space_sled0,
+            "Test setup error: extent_count={} should fit (reserved: {} bytes, \
+             available: {} bytes)",
+            extent_count_fits,
+            reserved_size_fits,
+            available_space_sled0,
+        );
+        assert!(
+            reserved_size_fails > available_space_sled0,
+            "Test setup error: extent_count={} should NOT fit (reserved: {} bytes, \
+             available: {} bytes)",
+            extent_count_fails,
+            reserved_size_fails,
+            available_space_sled0,
+        );
+
+        // Allocation with extent_count_fits should SUCCEED
         let datasets_and_regions = datastore
             .arbitrary_region_allocate(
                 opctx,
@@ -1649,9 +1781,9 @@ mod test {
                     volume_id: VolumeUuid::new_v4(),
                 },
                 RegionAllocationParameters::FromRaw {
-                    block_size: 512,
-                    blocks_per_extent: 131072,
-                    extent_count: 3507,
+                    block_size,
+                    blocks_per_extent,
+                    extent_count: extent_count_fits,
                 },
                 &RegionAllocationStrategy::RandomWithDistinctSleds {
                     seed: None,
@@ -1659,28 +1791,30 @@ mod test {
                 3, // num_regions_required
             )
             .await
-            .unwrap();
+            .expect("allocation should succeed at boundary: extent_count_fits just fits");
 
-        // One more extent should _not_ fit, so test that. Delete the regions
-        // and try again.
-
+        // Delete the regions so we can try again with one more extent
         let region_ids = datasets_and_regions
             .iter()
             .map(|(_dataset, region)| region.id())
             .collect();
 
-        datastore.regions_hard_delete(&logctx.log, region_ids).await.unwrap();
-
         datastore
+            .regions_hard_delete(&logctx.log, region_ids)
+            .await
+            .expect("region cleanup should succeed");
+
+        // Allocation with extent_count_fails should FAIL
+        let err = datastore
             .arbitrary_region_allocate(
                 opctx,
                 RegionAllocationFor::DiskVolume {
                     volume_id: VolumeUuid::new_v4(),
                 },
                 RegionAllocationParameters::FromRaw {
-                    block_size: 512,
-                    blocks_per_extent: 131072,
-                    extent_count: 3508,
+                    block_size,
+                    blocks_per_extent,
+                    extent_count: extent_count_fails,
                 },
                 &RegionAllocationStrategy::RandomWithDistinctSleds {
                     seed: None,
@@ -1688,7 +1822,18 @@ mod test {
                 3, // num_regions_required
             )
             .await
-            .unwrap_err();
+            .expect_err(
+                "allocation should fail at boundary: extent_count_fails exceeds available space",
+            );
+
+        assert!(
+            matches!(
+                &err,
+                external::Error::InsufficientCapacity { message }
+                    if message.external_message() == "Not enough storage"
+            ),
+            "expected InsufficientCapacity with 'Not enough storage', got: {err:?}"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
