@@ -443,7 +443,10 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type SamlIdentityProvider, identified by its id
-    pub fn saml_identity_provider_id(self, id: Uuid) -> SamlIdentityProvider<'a> {
+    pub fn saml_identity_provider_id(
+        self,
+        id: Uuid,
+    ) -> SamlIdentityProvider<'a> {
         SamlIdentityProvider::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -480,7 +483,10 @@ impl<'a> LookupPath<'a> {
 
     /// Select a resource of type [`ScimClientBearerToken`], identified by its
     /// UUID.
-    pub fn scim_client_bearer_token_id(self, id: Uuid) -> ScimClientBearerToken<'a> {
+    pub fn scim_client_bearer_token_id(
+        self,
+        id: Uuid,
+    ) -> ScimClientBearerToken<'a> {
         ScimClientBearerToken::PrimaryKey(Root { lookup_root: self }, id)
     }
 }
