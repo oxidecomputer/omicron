@@ -8,7 +8,7 @@ use super::{DataStore, DbConnection, IdentityCheckPolicy};
 use crate::authz;
 use crate::context::OpContext;
 
-use anyhow::{Context, bail, ensure};
+use anyhow::Context;
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use chrono::Utc;
 use diesel::prelude::*;
@@ -24,6 +24,7 @@ use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
 use omicron_common::api::external::Error;
+use omicron_common::backoff::BackoffError;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -256,6 +257,13 @@ impl ValidatedDatastoreSetupAction {
     pub fn desired_version(&self) -> &Version {
         &self.desired
     }
+
+    /// Test-only constructor to create a ValidatedDatastoreSetupAction with
+    /// any action, for testing error handling in update_schema.
+    #[cfg(test)]
+    fn new_for_test(action: DatastoreSetupAction, desired: Version) -> Self {
+        Self { action, desired }
+    }
 }
 
 impl DatastoreSetupAction {
@@ -468,26 +476,51 @@ impl DataStore {
     /// - `all_versions`: A description of all schema versions between
     /// "whatever is in the DB" and `desired_version`, instructing
     /// how to perform an update.
+    ///
+    /// Returns a [BackoffError] to indicate whether the error is transient
+    /// (e.g., database connectivity issues) or permanent (e.g., version
+    /// mismatch that requires code changes).
     pub async fn update_schema(
         &self,
         validated_action: ValidatedDatastoreSetupAction,
         all_versions: Option<&AllSchemaVersions>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), BackoffError<anyhow::Error>> {
         let action = validated_action.action();
 
         match action {
             DatastoreSetupAction::Ready => {
-                bail!("No schema update is necessary")
+                // Permanent: API misuse - caller should not request update
+                // when schema is already at desired version.
+                return Err(BackoffError::permanent(anyhow::anyhow!(
+                    "No schema update is necessary"
+                )));
             }
             DatastoreSetupAction::Update => (),
-            _ => bail!("Not ready for schema update"),
+            DatastoreSetupAction::NeedsHandoff { .. } => {
+                return Err(BackoffError::transient(anyhow::anyhow!(
+                    "Schema update requested, but handoff is needed first"
+                )));
+            }
+            DatastoreSetupAction::TryLater => {
+                return Err(BackoffError::transient(anyhow::anyhow!(
+                    "Schema update requested, but should try later"
+                )));
+            }
+            DatastoreSetupAction::Refuse => {
+                // Permanent: Nexus has been explicitly locked out of using
+                // the database, or the schema is newer than what we support.
+                return Err(BackoffError::permanent(anyhow::anyhow!(
+                    "Schema update requested, but database should not be used"
+                )));
+            }
         }
 
         let desired_version = validated_action.desired_version().clone();
         let (found_version, found_target_version) = self
             .database_schema_version()
             .await
-            .context("Cannot read database schema version")?;
+            .context("Cannot read database schema version")
+            .map_err(BackoffError::transient)?;
 
         let log = self.log.new(o!(
             "found_version" => found_version.to_string(),
@@ -513,21 +546,33 @@ impl DataStore {
                 log,
                 "Found schema version is newer than desired schema version";
             );
-            bail!(
+            // Permanent: Database was upgraded by newer software. This Nexus
+            // binary must be upgraded to work with the newer schema.
+            return Err(BackoffError::permanent(anyhow::anyhow!(
                 "Found schema version ({}) is newer than desired schema \
                 version ({})",
                 found_version,
                 desired_version,
-            )
+            )));
         }
 
+        // Permanent: Schema updates require migration files. If not configured,
+        // operator must fix the version mismatch (in tests: update dbinit.sql).
         let Some(all_versions) = all_versions else {
             error!(
                 log,
-                "Database schema version is out of date, but automatic update \
-                is disabled",
+                "Database schema version ({}) does not match expected ({}), \
+                and schema updates are not enabled. If you are running tests, \
+                ensure the version in dbinit.sql matches SCHEMA_VERSION.",
+                found_version,
+                desired_version,
             );
-            bail!("Schema is out of date but automatic update is disabled");
+            return Err(BackoffError::permanent(anyhow::anyhow!(
+                "Database schema version ({found_version}) does not match \
+                expected ({desired_version}), and schema updates are not \
+                enabled. If you modified dbinit.sql, you may need to update \
+                SCHEMA_VERSION to match.",
+            )));
         };
 
         // If we're here, we know the following:
@@ -536,16 +581,21 @@ impl DataStore {
         //   didn't when we read it moments ago).
         // - We should attempt to automatically upgrade the schema.
         info!(log, "Database schema is out of date.  Attempting upgrade.");
-        ensure!(
-            all_versions.contains_version(&found_version),
-            "Found schema version {found_version} was not found",
-        );
+        if !all_versions.contains_version(&found_version) {
+            // Permanent: DB has an unknown version.
+            // Known versions should be static, and determined at compile time.
+            return Err(BackoffError::permanent(anyhow::anyhow!(
+                "Found schema version {found_version} was not found in known versions",
+            )));
+        }
 
         // TODO: Test this?
-        ensure!(
-            all_versions.contains_version(&desired_version),
-            "Desired version {desired_version} was not found",
-        );
+        if !all_versions.contains_version(&desired_version) {
+            // Permanent: SCHEMA_VERSION not in known versions is a code bug.
+            return Err(BackoffError::permanent(anyhow::anyhow!(
+                "Desired version {desired_version} was not found in known versions",
+            )));
+        }
 
         let target_versions: Vec<&SchemaVersion> = all_versions
             .versions_range((
@@ -568,7 +618,11 @@ impl DataStore {
 
             // For the rationale here, see: StepSemverVersion::new.
             if target_version.semver().pre != semver::Prerelease::EMPTY {
-                bail!("Cannot upgrade to version which includes pre-release");
+                // Permanent: Schema version files are fixed; pre-release
+                // versions in the migration path indicate a code bug.
+                return Err(BackoffError::permanent(anyhow::anyhow!(
+                    "Cannot upgrade to version which includes pre-release"
+                )));
             }
 
             // Iterate over each individual file that comprises a schema change.
@@ -582,8 +636,11 @@ impl DataStore {
             let mut last_step_version = None;
 
             for (i, step) in target_version.upgrade_steps().enumerate() {
+                // Permanent: StepSemverVersion::new only fails if semver
+                // rejects "step.N" format, which should never happen.
                 let target_step =
-                    StepSemverVersion::new(&target_version.semver(), i)?;
+                    StepSemverVersion::new(&target_version.semver(), i)
+                        .map_err(BackoffError::permanent)?;
                 let log = log.new(o!("target_step.version" => target_step.version.to_string()));
 
                 self.apply_step_version_update(
@@ -593,7 +650,8 @@ impl DataStore {
                     &current_version,
                     &found_target_version,
                 )
-                .await?;
+                .await
+                .map_err(BackoffError::transient)?;
 
                 last_step_version = Some(target_step.clone());
             }
@@ -625,11 +683,17 @@ impl DataStore {
             // Now that the schema change has completed, set the following:
             // - db_metadata.version = new version
             // - db_metadata.target_version = NULL
-            let last_step_version = last_step_version
-                .ok_or_else(|| anyhow::anyhow!("Missing final step version"))?;
+            //
+            // Permanent: A schema version with zero upgrade steps is a code bug.
+            let last_step_version = last_step_version.ok_or_else(|| {
+                BackoffError::permanent(anyhow::anyhow!(
+                    "Missing final step version"
+                ))
+            })?;
             self.finalize_schema_update(&current_version, &last_step_version)
                 .await
-                .context("Failed to finalize schema update")?;
+                .context("Failed to finalize schema update")
+                .map_err(BackoffError::transient)?;
 
             info!(
                 log,
@@ -1252,8 +1316,139 @@ mod test {
             checked_action.desired_version()
         );
 
-        datastore.update_schema(checked_action, None).await.expect_err(
-            "Should not be able to update schema that's already up-to-date",
+        // Should return a permanent error (API misuse).
+        let err =
+            datastore.update_schema(checked_action, None).await.expect_err(
+                "Should not be able to update schema that's already up-to-date",
+            );
+        assert!(
+            matches!(err, BackoffError::Permanent(_)),
+            "Expected permanent error, got: {err:?}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Confirms that when schema version mismatches and updates are disabled,
+    // we get a permanent error (not transient), so retry loops fail fast.
+    // This is the main fix for issue #9641.
+    #[tokio::test]
+    async fn update_schema_version_mismatch_without_config_is_permanent() {
+        let logctx = dev::test_setup_log(
+            "update_schema_version_mismatch_without_config_is_permanent",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        // Set database to an older version to create a mismatch.
+        let old_version = Version::new(0, 0, 0);
+        use nexus_db_schema::schema::db_metadata::dsl;
+        diesel::update(dsl::db_metadata.filter(dsl::singleton.eq(true)))
+            .set(dsl::version.eq(old_version.to_string()))
+            .execute_async(&*conn)
+            .await
+            .expect("Failed to set version");
+
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), pool.clone());
+        let checked_action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::DontCare,
+                SCHEMA_VERSION,
+            )
+            .await
+            .expect("Failed to check schema and access");
+
+        // Should indicate an update is needed.
+        assert!(
+            matches!(checked_action.action(), DatastoreSetupAction::Update),
+            "Expected Update action, got: {:?}",
+            checked_action.action(),
+        );
+
+        // Call update_schema with None for all_versions (updates disabled).
+        // This should return a PERMANENT error, not transient.
+        let err =
+            datastore.update_schema(checked_action, None).await.expect_err(
+                "Should fail when updates disabled with version mismatch",
+            );
+
+        assert!(
+            matches!(err, BackoffError::Permanent(_)),
+            "Expected permanent error for version mismatch without config, got: {err:?}"
+        );
+
+        // Verify the error message mentions the version mismatch.
+        let err_msg = match &err {
+            BackoffError::Permanent(e) => e.to_string(),
+            _ => panic!("Expected permanent error"),
+        };
+        assert!(
+            err_msg.contains(&old_version.to_string()),
+            "Error should mention found version: {err_msg}"
+        );
+        assert!(
+            err_msg.contains(&SCHEMA_VERSION.to_string()),
+            "Error should mention expected version: {err_msg}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Verifies that calling update_schema with NeedsHandoff action returns
+    // a transient error, allowing retry loops to continue.
+    #[tokio::test]
+    async fn update_schema_needs_handoff_is_transient() {
+        let logctx =
+            dev::test_setup_log("update_schema_needs_handoff_is_transient");
+        let db = TestDatabase::new_with_raw_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+
+        let nexus_id = OmicronZoneUuid::new_v4();
+        let action = ValidatedDatastoreSetupAction::new_for_test(
+            DatastoreSetupAction::NeedsHandoff { nexus_id },
+            SCHEMA_VERSION,
+        );
+
+        let err = datastore
+            .update_schema(action, None)
+            .await
+            .expect_err("Should fail with NeedsHandoff action");
+
+        assert!(
+            matches!(err, BackoffError::Transient { .. }),
+            "NeedsHandoff should return transient error, got: {err:?}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Verifies that calling update_schema with TryLater action returns
+    // a transient error, allowing retry loops to continue.
+    #[tokio::test]
+    async fn update_schema_try_later_is_transient() {
+        let logctx =
+            dev::test_setup_log("update_schema_try_later_is_transient");
+        let db = TestDatabase::new_with_raw_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+
+        let action = ValidatedDatastoreSetupAction::new_for_test(
+            DatastoreSetupAction::TryLater,
+            SCHEMA_VERSION,
+        );
+
+        let err = datastore
+            .update_schema(action, None)
+            .await
+            .expect_err("Should fail with TryLater action");
+
+        assert!(
+            matches!(err, BackoffError::Transient { .. }),
+            "TryLater should return transient error, got: {err:?}"
         );
 
         db.terminate().await;
@@ -1505,12 +1700,20 @@ mod test {
         //
         // This isn't a normal behavior! But we're trying to test the
         // intermediate steps of a schema change here.
-        while let Err(e) = datastore
-            .update_schema(checked_action.clone(), Some(&all_versions))
-            .await
-        {
-            warn!(log, "Failed to ensure schema"; "err" => %e);
-            continue;
+        loop {
+            match datastore
+                .update_schema(checked_action.clone(), Some(&all_versions))
+                .await
+            {
+                Ok(()) => break,
+                Err(BackoffError::Permanent(e)) => {
+                    panic!("Permanent error during schema update: {e}");
+                }
+                Err(BackoffError::Transient { err: e, .. }) => {
+                    warn!(log, "Failed to ensure schema (retrying)"; "err" => %e);
+                    continue;
+                }
+            }
         }
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 

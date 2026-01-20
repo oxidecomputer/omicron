@@ -734,7 +734,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2dc643742f82d2e072a1281dab23ba2bfdcee440#2dc643742f82d2e072a1281dab23ba2bfdcee440"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ff31c527515d65886e599fc07eb41240aeb767c6#ff31c527515d65886e599fc07eb41240aeb767c6"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -744,7 +744,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2dc643742f82d2e072a1281dab23ba2bfdcee440#2dc643742f82d2e072a1281dab23ba2bfdcee440"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ff31c527515d65886e599fc07eb41240aeb767c6#ff31c527515d65886e599fc07eb41240aeb767c6"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -2481,7 +2481,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=205b3ccf75b527ac7a565285fdcc0c78f4fcee95#205b3ccf75b527ac7a565285fdcc0c78f4fcee95"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=396bb3c570be65f4e8c73ea3243f4af6561a823a#396bb3c570be65f4e8c73ea3243f4af6561a823a"
 dependencies = [
  "oxnet",
  "progenitor 0.11.2",
@@ -5129,7 +5129,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=795a1e0aeefb7a2c6fe4139779fdf66930d09b80#795a1e0aeefb7a2c6fe4139779fdf66930d09b80"
+source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
 dependencies = [
  "bitflags 2.9.4",
 ]
@@ -5781,7 +5781,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=795a1e0aeefb7a2c6fe4139779fdf66930d09b80#795a1e0aeefb7a2c6fe4139779fdf66930d09b80"
+source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -6363,7 +6363,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=205b3ccf75b527ac7a565285fdcc0c78f4fcee95#205b3ccf75b527ac7a565285fdcc0c78f4fcee95"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=396bb3c570be65f4e8c73ea3243f4af6561a823a#396bb3c570be65f4e8c73ea3243f4af6561a823a"
 dependencies = [
  "chrono",
  "colored 3.0.0",
@@ -6948,9 +6948,11 @@ dependencies = [
  "oximeter-types 0.1.0",
  "oxnet",
  "oxql-types",
+ "proptest",
  "schemars 0.8.22",
  "scim2-rs",
  "serde",
+ "test-strategy",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -7006,9 +7008,9 @@ dependencies = [
  "reqwest",
  "serde_json",
  "sled-agent-client",
+ "sled-agent-resolvable-files-examples",
  "sled-agent-types",
  "sled-agent-types-versions",
- "sled-agent-zone-images-examples",
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
@@ -8441,7 +8443,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client 0.10.0",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=2dc643742f82d2e072a1281dab23ba2bfdcee440)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=ff31c527515d65886e599fc07eb41240aeb767c6)",
  "qorb",
  "rand 0.9.2",
  "range-requests",
@@ -8879,7 +8881,7 @@ dependencies = [
  "oxnet",
  "pretty_assertions",
  "progenitor 0.10.0",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=2dc643742f82d2e072a1281dab23ba2bfdcee440)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=ff31c527515d65886e599fc07eb41240aeb767c6)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand 0.9.2",
@@ -8891,6 +8893,7 @@ dependencies = [
  "repo-depot-client",
  "reqwest",
  "schemars 0.8.22",
+ "secrecy 0.10.3",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -8901,9 +8904,9 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-health-monitor",
+ "sled-agent-resolvable-files",
  "sled-agent-types",
  "sled-agent-types-versions",
- "sled-agent-zone-images",
  "sled-diagnostics",
  "sled-hardware",
  "sled-hardware-types",
@@ -9221,10 +9224,10 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "openapi-lint"
-version = "0.4.0"
-source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#ef442ee4343e97b6d9c217d3e7533962fe7d7236"
+version = "0.5.0"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#1b65d761eae2bdd69e9801538ec9ca8a1d55ea71"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "indexmap 2.12.1",
  "lazy_static",
  "openapiv3",
@@ -9289,7 +9292,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=795a1e0aeefb7a2c6fe4139779fdf66930d09b80#795a1e0aeefb7a2c6fe4139779fdf66930d09b80"
+source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
 dependencies = [
  "bitflags 2.9.4",
  "dyn-clone",
@@ -9308,7 +9311,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=795a1e0aeefb7a2c6fe4139779fdf66930d09b80#795a1e0aeefb7a2c6fe4139779fdf66930d09b80"
+source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -9321,7 +9324,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=795a1e0aeefb7a2c6fe4139779fdf66930d09b80#795a1e0aeefb7a2c6fe4139779fdf66930d09b80"
+source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
 dependencies = [
  "libc",
  "libnet",
@@ -9423,7 +9426,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=795a1e0aeefb7a2c6fe4139779fdf66930d09b80#795a1e0aeefb7a2c6fe4139779fdf66930d09b80"
+source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -10966,7 +10969,28 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2dc643742f82d2e072a1281dab23ba2bfdcee440#2dc643742f82d2e072a1281dab23ba2bfdcee440"
+source = "git+https://github.com/oxidecomputer/propolis?rev=fae5334bcad5e864794332c6fed5e6bb9ec88831#fae5334bcad5e864794332c6fed5e6bb9ec88831"
+dependencies = [
+ "async-trait",
+ "base64 0.21.7",
+ "futures",
+ "progenitor 0.8.0",
+ "rand 0.8.5",
+ "reqwest",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "slog",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-tungstenite 0.21.0",
+ "uuid",
+]
+
+[[package]]
+name = "propolis-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ff31c527515d65886e599fc07eb41240aeb767c6#ff31c527515d65886e599fc07eb41240aeb767c6"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -10988,30 +11012,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "propolis-client"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=fae5334bcad5e864794332c6fed5e6bb9ec88831#fae5334bcad5e864794332c6fed5e6bb9ec88831"
-dependencies = [
- "async-trait",
- "base64 0.21.7",
- "futures",
- "progenitor 0.8.0",
- "rand 0.8.5",
- "reqwest",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
- "thiserror 1.0.69",
- "tokio",
- "tokio-tungstenite 0.21.0",
- "uuid",
-]
-
-[[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2dc643742f82d2e072a1281dab23ba2bfdcee440#2dc643742f82d2e072a1281dab23ba2bfdcee440"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ff31c527515d65886e599fc07eb41240aeb767c6#ff31c527515d65886e599fc07eb41240aeb767c6"
 dependencies = [
  "anyhow",
  "atty",
@@ -11055,7 +11058,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2dc643742f82d2e072a1281dab23ba2bfdcee440#2dc643742f82d2e072a1281dab23ba2bfdcee440"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ff31c527515d65886e599fc07eb41240aeb767c6#ff31c527515d65886e599fc07eb41240aeb767c6"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -11068,7 +11071,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2dc643742f82d2e072a1281dab23ba2bfdcee440#2dc643742f82d2e072a1281dab23ba2bfdcee440"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ff31c527515d65886e599fc07eb41240aeb767c6#ff31c527515d65886e599fc07eb41240aeb767c6"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -11448,7 +11451,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=205b3ccf75b527ac7a565285fdcc0c78f4fcee95#205b3ccf75b527ac7a565285fdcc0c78f4fcee95"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=396bb3c570be65f4e8c73ea3243f4af6561a823a#396bb3c570be65f4e8c73ea3243f4af6561a823a"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -11589,18 +11592,18 @@ dependencies = [
 
 [[package]]
 name = "ref-cast"
-version = "1.0.24"
+version = "1.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a0ae411dbe946a674d89546582cea4ba2bb8defac896622d6496f14c23ba5cf"
+checksum = "f354300ae66f76f1c85c5f84693f0ce81d747e2c3f21a45fef496d89c960bf7d"
 dependencies = [
  "ref-cast-impl",
 ]
 
 [[package]]
 name = "ref-cast-impl"
-version = "1.0.24"
+version = "1.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1165225c21bff1f3bbce98f5a1f889949bc902d3575308cc7b0de30b4f6d27c7"
+checksum = "b7186006dcb21920990093f30e3dea63b7d6e977bf1256be20c3563a5db070da"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -12650,23 +12653,24 @@ dependencies = [
 [[package]]
 name = "serde_human_bytes"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/serde_human_bytes?branch=main#0a09794501b6208120528c3b457d5f3a8cb17424"
+source = "git+https://github.com/oxidecomputer/serde_human_bytes?branch=main#70d3253a1acbe12a06152612ea85110acfe07317"
 dependencies = [
+ "base64 0.22.1",
  "hex",
- "serde",
+ "serde_core",
 ]
 
 [[package]]
 name = "serde_json"
-version = "1.0.145"
+version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
+checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
 dependencies = [
  "itoa",
  "memchr",
- "ryu",
  "serde",
  "serde_core",
+ "zmij",
 ]
 
 [[package]]
@@ -13012,7 +13016,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.10.0",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=2dc643742f82d2e072a1281dab23ba2bfdcee440)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=ff31c527515d65886e599fc07eb41240aeb767c6)",
  "regress",
  "reqwest",
  "schemars 0.8.22",
@@ -13055,19 +13059,21 @@ dependencies = [
  "omicron-workspace-hack",
  "proptest",
  "rand 0.9.2",
+ "regex",
  "schemars 0.8.22",
  "scopeguard",
  "serde",
  "serde_json",
  "sha2",
  "sled-agent-api",
+ "sled-agent-resolvable-files-examples",
  "sled-agent-types",
  "sled-agent-types-versions",
- "sled-agent-zone-images-examples",
  "sled-hardware",
  "sled-storage",
  "slog",
  "slog-error-chain",
+ "strum 0.27.2",
  "test-strategy",
  "thiserror 2.0.17",
  "tokio",
@@ -13096,6 +13102,51 @@ dependencies = [
  "slog-error-chain",
  "thiserror 2.0.17",
  "tokio",
+]
+
+[[package]]
+name = "sled-agent-resolvable-files"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile-ext",
+ "dropshot",
+ "expectorate",
+ "iddqd",
+ "illumos-utils",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pretty_assertions",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sled-agent-config-reconciler",
+ "sled-agent-resolvable-files-examples",
+ "sled-agent-types",
+ "sled-storage",
+ "slog",
+ "slog-error-chain",
+ "thiserror 2.0.17",
+ "tufaceous-artifact",
+]
+
+[[package]]
+name = "sled-agent-resolvable-files-examples"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile-ext",
+ "iddqd",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "serde_json",
+ "sha2",
+ "sled-agent-types",
+ "sled-storage",
+ "tufaceous-artifact",
 ]
 
 [[package]]
@@ -13156,6 +13207,7 @@ dependencies = [
  "proptest",
  "schemars 0.8.22",
  "serde",
+ "serde_human_bytes",
  "serde_json",
  "serde_with",
  "sha3",
@@ -13167,51 +13219,6 @@ dependencies = [
  "trust-quorum-types-versions",
  "tufaceous-artifact",
  "uuid",
-]
-
-[[package]]
-name = "sled-agent-zone-images"
-version = "0.1.0"
-dependencies = [
- "camino",
- "camino-tempfile-ext",
- "dropshot",
- "expectorate",
- "iddqd",
- "illumos-utils",
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "pretty_assertions",
- "rayon",
- "serde",
- "serde_json",
- "sha2",
- "sled-agent-config-reconciler",
- "sled-agent-types",
- "sled-agent-zone-images-examples",
- "sled-storage",
- "slog",
- "slog-error-chain",
- "thiserror 2.0.17",
- "tufaceous-artifact",
-]
-
-[[package]]
-name = "sled-agent-zone-images-examples"
-version = "0.1.0"
-dependencies = [
- "camino",
- "camino-tempfile-ext",
- "iddqd",
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "serde_json",
- "sha2",
- "sled-agent-types",
- "sled-storage",
- "tufaceous-artifact",
 ]
 
 [[package]]
@@ -16374,9 +16381,9 @@ dependencies = [
  "serde_json",
  "sha2",
  "sled-agent-config-reconciler",
+ "sled-agent-resolvable-files",
+ "sled-agent-resolvable-files-examples",
  "sled-agent-types",
- "sled-agent-zone-images",
- "sled-agent-zone-images-examples",
  "sled-hardware-types",
  "sled-storage",
  "slog",
@@ -17189,6 +17196,12 @@ name = "zlib-rs"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "626bd9fa9734751fc50d6060752170984d7053f5a39061f524cda68023d4db8a"
+
+[[package]]
+name = "zmij"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"
 
 [[package]]
 name = "zone"

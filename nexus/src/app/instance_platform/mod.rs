@@ -77,6 +77,7 @@ use std::collections::HashMap;
 use crate::app::instance::InstanceRegisterReason;
 use crate::cidata::InstanceCiData;
 
+use super::LOCAL_STORAGE_WORKERS;
 use crate::db::datastore::Disk;
 use nexus_db_queries::db;
 use omicron_common::api::external::Error;
@@ -279,7 +280,7 @@ impl DisksByIdBuilder {
             path,
             readonly: false,
             block_size: disk.block_size().to_bytes(),
-            workers: None,
+            workers: Some(LOCAL_STORAGE_WORKERS),
         });
 
         self.add_generic_disk(disk, backend)

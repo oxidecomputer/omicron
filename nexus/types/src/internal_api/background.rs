@@ -315,6 +315,7 @@ impl SupportBundleCollectionStep {
     ///
     /// These are used both when creating steps and when validating in tests.
     pub const STEP_BUNDLE_ID: &'static str = "bundle id";
+    pub const STEP_USER_COMMENT: &'static str = "user comment";
     pub const STEP_RECONFIGURATOR_STATE: &'static str = "reconfigurator state";
     pub const STEP_EREPORTS: &'static str = "ereports";
     pub const STEP_SLED_CUBBY_INFO: &'static str = "sled cubby info";

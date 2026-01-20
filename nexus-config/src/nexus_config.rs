@@ -6,7 +6,6 @@
 //! at deployment time.
 
 use crate::PostgresConfigWithUrl;
-use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
@@ -21,10 +20,8 @@ use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_with::DeserializeFromStr;
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
-use serde_with::SerializeDisplay;
 use serde_with::serde_as;
 use std::collections::HashMap;
 use std::fmt;
@@ -1028,45 +1025,8 @@ pub struct PackageConfig {
     pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
-/// List of supported external authn schemes
-///
-/// Note that the authn subsystem doesn't know about this type.  It allows
-/// schemes to be called whatever they want.  This is just to provide a set of
-/// allowed values for configuration.
-#[derive(
-    Clone, Copy, Debug, DeserializeFromStr, Eq, PartialEq, SerializeDisplay,
-)]
-pub enum SchemeName {
-    Spoof,
-    SessionCookie,
-    AccessToken,
-    ScimToken,
-}
-
-impl std::str::FromStr for SchemeName {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "spoof" => Ok(SchemeName::Spoof),
-            "session_cookie" => Ok(SchemeName::SessionCookie),
-            "access_token" => Ok(SchemeName::AccessToken),
-            "scim_token" => Ok(SchemeName::ScimToken),
-            _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
-        }
-    }
-}
-
-impl std::fmt::Display for SchemeName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            SchemeName::Spoof => "spoof",
-            SchemeName::SessionCookie => "session_cookie",
-            SchemeName::AccessToken => "access_token",
-            SchemeName::ScimToken => "scim",
-        })
-    }
-}
+// Re-export SchemeName from nexus-types for use in config parsing.
+pub use nexus_types::authn::SchemeName;
 
 impl WebhookDeliveratorConfig {
     const fn default_lease_timeout_secs() -> u64 {

@@ -6241,6 +6241,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
     'timeout'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.audit_log_auth_method AS ENUM (
+    'session_cookie',
+    'access_token',
+    'scim_token',
+    'spoof'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     id UUID PRIMARY KEY,
     time_started TIMESTAMPTZ NOT NULL,
@@ -6259,9 +6266,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     actor_silo_id UUID,
     -- actor kind indicating builtin user, silo user, or unauthenticated
     actor_kind omicron.public.audit_log_actor_kind NOT NULL,
-    -- The name of the authn scheme used
-    auth_method STRING(63),
-
     -- below are fields we can only fill in after the operation
 
     time_completed TIMESTAMPTZ,
@@ -6273,6 +6277,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
 
     -- result kind indicating success, error, or timeout
     result_kind omicron.public.audit_log_result_kind,
+
+    -- The name of the authn scheme used
+    auth_method omicron.public.audit_log_auth_method,
+
+    -- ID of the credential used to authenticate. Session ID, access token ID,
+    -- or SCIM token ID.
+    credential_id UUID,
 
     -- make sure time_completed and result_kind are either both null or both not
     CONSTRAINT time_completed_and_result_kind CHECK (
@@ -6315,6 +6326,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     )
 );
 
+-- Ensure credential_id is consistent with auth_method:
+-- - spoof and unauthenticated: credential_id must be NULL
+-- - session_cookie, access_token, scim_token: credential_id must be set
+-- NOT VALID because existing audit_log entries may have auth_method set but
+-- credential_id NULL (since credential_id didn't exist before this was added).
+-- NOTE: NOT VALID only works with ALTER TABLE. Inline NOT VALID in CREATE TABLE
+-- parses but is silently ignored: https://github.com/cockroachdb/cockroach/pull/53485
+ALTER TABLE omicron.public.audit_log
+ADD CONSTRAINT IF NOT EXISTS auth_method_and_credential_id_consistent CHECK (
+    (auth_method IS NULL AND credential_id IS NULL)
+    OR (auth_method = 'spoof' AND credential_id IS NULL)
+    OR (auth_method IN ('session_cookie', 'access_token', 'scim_token')
+        AND credential_id IS NOT NULL)
+) NOT VALID;
+
 -- When we query the audit log, we filter by time_completed and order by
 -- (time_completed, id). CRDB docs talk about hash-sharded indexes for
 -- sequential keys, but the PK on this table is the ID alone.
@@ -6344,12 +6370,13 @@ SELECT
     actor_id,
     actor_silo_id,
     actor_kind,
-    auth_method,
     time_completed,
     http_status_code,
     error_code,
     error_message,
-    result_kind
+    result_kind,
+    auth_method,
+    credential_id
 FROM omicron.public.audit_log
 WHERE
     time_completed IS NOT NULL
@@ -7796,7 +7823,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '221.0.0', NULL)
+    (TRUE, NOW(), NOW(), '223.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

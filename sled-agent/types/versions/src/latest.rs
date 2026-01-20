@@ -162,6 +162,8 @@ pub mod trust_quorum {
     // in the crate trust-quorum-types:
     pub use crate::v13::trust_quorum::ProxyCommitRequest;
     pub use crate::v13::trust_quorum::ProxyPrepareAndCommitRequest;
+
+    pub use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
 }
 
 pub mod zone_bundle {
