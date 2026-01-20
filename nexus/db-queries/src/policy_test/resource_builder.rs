@@ -81,7 +81,10 @@ impl<'a> ResourceBuilder<'a> {
     /// role on this resource, create a user that has that role on this resource
     pub async fn new_resource_with_users<T>(&mut self, resource: T)
     where
-        T: DynAuthorizedResource + AuthorizedResource + ApiResourceWithRolesType + Clone,
+        T: DynAuthorizedResource
+            + AuthorizedResource
+            + ApiResourceWithRolesType
+            + Clone,
         T::AllowedRoles: IntoEnumIterator,
     {
         self.new_resource(resource.clone());
