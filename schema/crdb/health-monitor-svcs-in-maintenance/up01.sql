@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance2
     svcs_cmd_error TEXT,
 
     -- time when the status was checked if applicable
+    -- TODO-K: This will change to not null with omicron#9615
     time_of_status TIMESTAMPTZ,
 
     PRIMARY KEY (inv_collection_id, sled_id, svcs_in_maintenance_id)

@@ -65,6 +65,9 @@ use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledBootPartition;
 use nexus_db_model::InvSledConfigReconciler;
 use nexus_db_model::InvSvcInMaintenance;
+use nexus_db_model::InvSvcInMaintenance2;
+use nexus_db_model::InvSvcInMaintenanceError;
+use nexus_db_model::InvSvcInMaintenanceService;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
@@ -110,6 +113,7 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::SvcInMaintenanceUuid;
 use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
@@ -259,6 +263,104 @@ impl DataStore {
                             Some(e.to_string()),
                             None,
                         )]
+                    }
+                }
+            })
+            .collect();
+
+        // TODO-K: Add a comment here and change the variable name to
+        // svcs_in_maintenance
+        let svcs_in_maintenance2: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                match &sled_agent.health_monitor.smf_services_in_maintenance {
+                    Ok(svcs) => {
+                        vec![InvSvcInMaintenance2::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            None,
+                            svcs.time_of_status,
+                        )]
+                    }
+                    Err(e) => {
+                        vec![InvSvcInMaintenance2::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            Some(e.to_string()),
+                            // TODO-K: This will change to not nullable with omicron#9615
+                            // TODO-K: I'm guessing in this case I'll set a time
+                            // at this point or something?
+                            None,
+                        )]
+                    }
+                }
+            })
+            .collect();
+
+        // TODO-K: Add a comment here
+        let svcs_in_maintenance_services: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                match &sled_agent.health_monitor.smf_services_in_maintenance {
+                    Ok(svcs) => {
+                        // TODO-K: get the ID from the other table somehow
+                        // TODO-K: Should I just use the collection ID and the
+                        // sled ID instead?
+                        let temp_id = to_db_typed_uuid(
+                            SvcInMaintenanceUuid::from_untyped_uuid(
+                                Uuid::new_v4(),
+                            ),
+                        );
+
+                        svcs.services
+                            .iter()
+                            .map(|svc| {
+                                InvSvcInMaintenanceService::new(
+                                    temp_id.into(),
+                                    svc.clone(),
+                                )
+                            })
+                            .collect()
+                    }
+                    // If there is an error we've already captured it above
+                    Err(_) => {
+                        vec![]
+                    }
+                }
+            })
+            .collect();
+
+        // TODO-K: Add a comment here
+        let svcs_in_maintenance_errors: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                match &sled_agent.health_monitor.smf_services_in_maintenance {
+                    Ok(svcs) => {
+                        // TODO-K: get the ID from the other table somehow
+                        // TODO-K: Should I just use the collection ID and the
+                        // sled ID instead?
+                        let temp_id = to_db_typed_uuid(
+                            SvcInMaintenanceUuid::from_untyped_uuid(
+                                Uuid::new_v4(),
+                            ),
+                        );
+
+                        svcs.errors
+                            .iter()
+                            .map(|e| {
+                                InvSvcInMaintenanceError::new(
+                                    temp_id.into(),
+                                    e.clone(),
+                                )
+                            })
+                            .collect()
+                    }
+                    // If there is an error we've already captured it above
+                    Err(_) => {
+                        vec![]
                     }
                 }
             })
@@ -1575,6 +1677,63 @@ impl DataStore {
                     }
                     let _ = diesel::insert_into(dsl::inv_health_monitor_svc_in_maintenance)
                         .values(some_svcs_in_maintenance)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // TODO-K: Add comment
+            {
+                use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance2::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut svcs_in_maintenance = svcs_in_maintenance2.into_iter();
+                loop {
+                    let some_svcs_in_maintenance =
+                        svcs_in_maintenance.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_svcs_in_maintenance.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_health_monitor_svc_in_maintenance2)
+                        .values(some_svcs_in_maintenance)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // TODO-K: Add comment
+            {
+                use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance_service::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut svcs_in_maintenance_services = svcs_in_maintenance_services.into_iter();
+                loop {
+                    let some_svcs_in_maintenance_services =
+                        svcs_in_maintenance_services.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_svcs_in_maintenance_services.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_health_monitor_svc_in_maintenance_service)
+                        .values(some_svcs_in_maintenance_services)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // TODO-K: Add comment
+            {
+                use nexus_db_schema::schema::inv_health_monitor_svc_in_maintenance_error::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut svcs_in_maintenance_errors = svcs_in_maintenance_errors.into_iter();
+                loop {
+                    let some_svcs_in_maintenance_errors =
+                        svcs_in_maintenance_errors.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_svcs_in_maintenance_errors.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_health_monitor_svc_in_maintenance_error)
+                        .values(some_svcs_in_maintenance_errors)
                         .execute_async(&conn)
                         .await?;
                 }

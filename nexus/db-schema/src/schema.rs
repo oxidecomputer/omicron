@@ -1721,6 +1721,7 @@ table! {
     }
 }
 
+// TODO-K: Make these table names plural? inv_health_monitor_svcs_in_maintenance
 table! {
     inv_health_monitor_svc_in_maintenance (inv_collection_id, sled_id, id) {
         inv_collection_id -> Uuid,
@@ -1741,6 +1742,7 @@ table! {
         sled_id -> Uuid,
         svcs_in_maintenance_id -> Uuid,
         svcs_cmd_error -> Nullable<Text>,
+        // TODO-K: This will change to not nullable with omicron#9615
         time_of_status -> Nullable<Timestamptz>,
     }
 }

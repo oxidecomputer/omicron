@@ -35,7 +35,10 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
-    inv_health_monitor_svc_in_maintenance, inv_host_phase_1_active_slot,
+    inv_health_monitor_svc_in_maintenance,
+    inv_health_monitor_svc_in_maintenance_error,
+    inv_health_monitor_svc_in_maintenance_service,
+    inv_health_monitor_svc_in_maintenance2, inv_host_phase_1_active_slot,
     inv_host_phase_1_flash_hash, inv_internal_dns,
     inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result, inv_last_reconciliation_measurements,
@@ -1064,6 +1067,98 @@ impl InvSvcInMaintenance {
             error_messages: svc_errors,
             svcs_cmd_error,
             time_of_status,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_health_monitor_svc_in_maintenance2)]
+pub struct InvSvcInMaintenance2 {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub svcs_in_maintenance_id: DbTypedUuid<SvcInMaintenanceKind>,
+    pub svcs_cmd_error: Option<String>,
+    // TODO-K: This will change to not nullable with omicron#9615
+    pub time_of_status: Option<DateTime<Utc>>,
+}
+
+impl InvSvcInMaintenance2 {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        svcs_cmd_error: Option<String>,
+        time_of_status: Option<DateTime<Utc>>,
+    ) -> Self {
+        // This ID is only used as a primary key, it's fine to generate it here.
+        // TODO-K: Is it?
+        let svcs_in_maintenance_id = to_db_typed_uuid(
+            SvcInMaintenanceUuid::from_untyped_uuid(Uuid::new_v4()),
+        );
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            svcs_in_maintenance_id,
+            svcs_cmd_error,
+            time_of_status,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_health_monitor_svc_in_maintenance_service)]
+pub struct InvSvcInMaintenanceService {
+    pub svcs_in_maintenance_id: DbTypedUuid<SvcInMaintenanceKind>,
+    // TODO-K: Change the UUID kind
+    pub id: DbTypedUuid<SvcInMaintenanceKind>,
+    pub fmri: String,
+    pub zone: String,
+}
+
+impl InvSvcInMaintenanceService {
+    pub fn new(
+        svcs_in_maintenance_id: SvcInMaintenanceUuid,
+        svc: SvcInMaintenance,
+    ) -> Self {
+        let SvcInMaintenance { fmri, zone } = svc;
+
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcInMaintenanceUuid::from_untyped_uuid(
+            Uuid::new_v4(),
+        ));
+
+        Self {
+            svcs_in_maintenance_id: svcs_in_maintenance_id.into(),
+            id,
+            fmri,
+            zone,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_health_monitor_svc_in_maintenance_error)]
+pub struct InvSvcInMaintenanceError {
+    pub svcs_in_maintenance_id: DbTypedUuid<SvcInMaintenanceKind>,
+    // TODO-K: Change the UUID kind
+    pub id: DbTypedUuid<SvcInMaintenanceKind>,
+    pub error_message: String,
+}
+
+impl InvSvcInMaintenanceError {
+    pub fn new(
+        svcs_in_maintenance_id: SvcInMaintenanceUuid,
+        error_message: String,
+    ) -> Self {
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcInMaintenanceUuid::from_untyped_uuid(
+            Uuid::new_v4(),
+        ));
+
+        Self {
+            svcs_in_maintenance_id: svcs_in_maintenance_id.into(),
+            id,
+            error_message,
         }
     }
 }
