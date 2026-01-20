@@ -35,7 +35,6 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
-    inv_health_monitor_svc_in_maintenance,
     inv_health_monitor_svc_in_maintenance_error,
     inv_health_monitor_svc_in_maintenance_service,
     inv_health_monitor_svc_in_maintenance2, inv_host_phase_1_active_slot,
@@ -1024,52 +1023,6 @@ impl_enum_type!(
     Running => b"running"
     Idle => b"idle"
 );
-
-// TODO-K: Update here
-#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = inv_health_monitor_svc_in_maintenance)]
-pub struct InvSvcInMaintenance {
-    pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub sled_id: DbTypedUuid<SledKind>,
-    pub id: DbTypedUuid<SvcInMaintenanceKind>,
-    pub fmri: Option<String>,
-    pub zone: Option<String>,
-    pub error_messages: Vec<String>,
-    pub svcs_cmd_error: Option<String>,
-    pub time_of_status: Option<DateTime<Utc>>,
-}
-
-impl InvSvcInMaintenance {
-    pub fn new(
-        inv_collection_id: CollectionUuid,
-        sled_id: SledUuid,
-        svc: Option<SvcInMaintenance>,
-        svc_errors: Vec<String>,
-        svcs_cmd_error: Option<String>,
-        time_of_status: Option<DateTime<Utc>>,
-    ) -> Self {
-        let (fmri, zone) = match svc {
-            Some(svc) => (Some(svc.fmri), Some(svc.zone)),
-            None => (None, None),
-        };
-
-        // This ID is only used as a primary key, it's fine to generate it here.
-        let id = to_db_typed_uuid(SvcInMaintenanceUuid::from_untyped_uuid(
-            Uuid::new_v4(),
-        ));
-
-        Self {
-            inv_collection_id: inv_collection_id.into(),
-            sled_id: sled_id.into(),
-            id,
-            fmri,
-            zone,
-            error_messages: svc_errors,
-            svcs_cmd_error,
-            time_of_status,
-        }
-    }
-}
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_health_monitor_svc_in_maintenance2)]
