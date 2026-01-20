@@ -9,7 +9,7 @@ use camino::Utf8Path;
 use ipnetwork::IpNetwork;
 use ipnetwork::IpNetworkError;
 use slog::Logger;
-use slog::info;
+use slog::{info, warn};
 use std::net::{IpAddr, Ipv6Addr};
 use tokio::process::Command;
 
@@ -19,6 +19,7 @@ use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
 use crate::zpool::PathInPool;
 use crate::{PFEXEC, execute_async};
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::backoff;
 use omicron_uuid_kinds::OmicronZoneUuid;
 
 const DLADM: &str = "/usr/sbin/dladm";
@@ -384,7 +385,105 @@ pub trait Api: Send + Sync {
         fmri: &str,
         log: Logger,
     ) -> Result<(), omicron_common::api::external::Error> {
-        crate::svc::wait_for_service(zone, fmri, log).await
+        let name = smf::PropertyName::new("restarter", "state").unwrap();
+
+        let log_notification_failure = |error, delay| {
+            warn!(
+                log,
+                "wait for service {} in zone {:?} failed: {}. retry in {:?}",
+                fmri,
+                zone,
+                error,
+                delay
+            );
+        };
+
+        // TODO(https://www.illumos.org/issues/13837): This is a hack;
+        // remove me when when fixed. Ideally, the ".synchronous()" argument
+        // to "svcadm enable" would wait for the service to be online, which
+        // would simplify all this stuff.
+        //
+        // Ideally, when "svccfg add" returns, these properties would be set,
+        // but unfortunately, they are not. This means that when we invoke
+        // "svcadm enable -s", it's possible for critical restarter
+        // properties to not exist when the command returns.
+        //
+        // We workaround this by querying for these properties in a loop.
+        //
+        backoff::retry_notify(
+            backoff::retry_policy_local(),
+            || async {
+                let mut p = smf::Properties::new();
+                let properties = {
+                    if let Some(zone) = zone { p.zone(zone) } else { &mut p }
+                };
+                if let Ok(value) = properties.lookup().run(&name, &fmri) {
+                    if value.value()
+                        == &smf::PropertyValue::Astring("online".to_string())
+                    {
+                        return Ok(());
+                    } else {
+                        // Well, okay. If the service is in a zone, it is
+                        // possible that the zone has been deleted or was never
+                        // created. In that case, it will never come up. Let's
+                        // check if the zone is actually there...
+                        if let Some(zname) = zone {
+                            match self.find(zname).await {
+                                Ok(None) => {
+                                    return Err(
+                                        backoff::BackoffError::Permanent(
+                                            "Zone does not exist",
+                                        ),
+                                    );
+                                }
+                                Ok(Some(_)) => {}
+                                Err(e) => {
+                                    warn!(
+                                        log,
+                                        "failed to check if zone still exists";
+                                        "zone" => %zname,
+                                        "error" => %e
+                                    )
+                                }
+                            }
+                        }
+
+                        // This is helpful in virtual environments where
+                        // services take a few tries to come up. To enable,
+                        // compile with RUSTFLAGS="--cfg svcadm_autoclear"
+                        #[cfg(svcadm_autoclear)]
+                        if let Some(zname) = zone {
+                            if let Err(out) =
+                                tokio::process::Command::new(crate::PFEXEC)
+                                    .env_clear()
+                                    .arg("svcadm")
+                                    .arg("-z")
+                                    .arg(zname)
+                                    .arg("clear")
+                                    .arg("*")
+                                    .output()
+                                    .await
+                            {
+                                warn!(
+                                    log,
+                                    "clearing service maintenance failed: {out}"
+                                );
+                            };
+                        }
+                    }
+                }
+                return Err(backoff::BackoffError::transient(
+                    "Property not found",
+                ));
+            },
+            log_notification_failure,
+        )
+        .await
+        .map_err(|e| {
+            omicron_common::api::external::Error::InternalError {
+                internal_message: format!("Failed to wait for service: {}", e),
+            }
+        })
     }
 
     /// Ensures a zone is halted before both uninstalling and deleting it.
