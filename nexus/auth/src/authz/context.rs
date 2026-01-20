@@ -11,13 +11,13 @@ use crate::authz::Action;
 use crate::authz::oso_generic;
 use crate::context::OpContext;
 use crate::storage::Storage;
-use futures::future::BoxFuture;
 use omicron_common::api::external::Error;
 use omicron_common::bail_unless;
 use oso::Oso;
 use oso::OsoError;
 use slog::debug;
 use std::collections::BTreeSet;
+use std::future::Future;
 use std::sync::Arc;
 
 /// Server-wide authorization context
@@ -164,12 +164,12 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
     /// That's how this works for most resources.  There are other kinds of
     /// resources (like the Database itself) that aren't stored in the database
     /// and for which a different mechanism might be used.
-    fn load_roles<'fut>(
-        &'fut self,
-        opctx: &'fut OpContext,
-        authn: &'fut authn::Context,
-        roleset: &'fut mut RoleSet,
-    ) -> BoxFuture<'fut, Result<(), Error>>;
+    fn load_roles(
+        &self,
+        opctx: &OpContext,
+        authn: &authn::Context,
+        roleset: &mut RoleSet,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Invoked on authz failure to determine the final authz result
     ///
@@ -252,13 +252,12 @@ mod test {
         #[derive(Clone, PolarClass)]
         struct UnregisteredResource;
         impl AuthorizedResource for UnregisteredResource {
-            fn load_roles<'fut>(
-                &'fut self,
-                _: &'fut OpContext,
-                _: &'fut authn::Context,
-                _: &'fut mut RoleSet,
-            ) -> futures::future::BoxFuture<'fut, Result<(), Error>>
-            {
+            async fn load_roles(
+                &self,
+                _: &OpContext,
+                _: &authn::Context,
+                _: &mut RoleSet,
+            ) -> Result<(), Error> {
                 // authorize() shouldn't get far enough to call this.
                 unimplemented!();
             }

@@ -8,7 +8,6 @@
 use super::coverage::Coverage;
 use crate::db;
 use crate::db::datastore::SiloUserApiOnly;
-use authz::ApiResource;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_auth::authz;
@@ -78,10 +77,7 @@ impl<'a> ResourceBuilder<'a> {
     /// role on this resource, create a user that has that role on this resource
     pub async fn new_resource_with_users<T>(&mut self, resource: T)
     where
-        T: DynAuthorizedResource
-            + ApiResourceWithRolesType
-            + AuthorizedResource
-            + Clone,
+        T: DynAuthorizedResource + ApiResourceWithRolesType + Clone,
         T::AllowedRoles: IntoEnumIterator,
     {
         self.new_resource(resource.clone());

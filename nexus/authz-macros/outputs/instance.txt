@@ -64,9 +64,6 @@ impl oso::PolarClass for Instance {
     }
 }
 impl ApiResource for Instance {
-    fn parent(&self) -> Option<&dyn AuthorizedResource> {
-        Some(&self.parent)
-    }
     fn resource_type(&self) -> ResourceType {
         ResourceType::Instance
     }
@@ -75,5 +72,11 @@ impl ApiResource for Instance {
     }
     fn as_resource_with_roles(&self) -> Option<&dyn ApiResourceWithRoles> {
         None
+    }
+}
+impl ApiResourceWithParent for Instance {
+    type Parent = Project;
+    fn parent(&self) -> Option<&Project> {
+        Some(&self.parent)
     }
 }
