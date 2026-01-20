@@ -445,20 +445,9 @@ impl Keypath {
 }
 
 #[derive(Debug)]
-pub enum EncryptionDetails {
-    /// Inherit the parent's encryption settings
-    Inherit,
-
-    /// Explicitly set encryption to off
-    Off,
-
-    /// Use a file based `keylocation` and configure `aes-256-gcm`
-    Aes256Gcm {
-        keypath: Keypath,
-
-        /// Used to set the `oxide:epoch` option for the dataset.
-        epoch: u64,
-    },
+pub struct EncryptionDetails {
+    pub keypath: Keypath,
+    pub epoch: u64,
 }
 
 #[derive(Debug, Default)]
@@ -737,7 +726,7 @@ pub struct DatasetEnsureArgs<'a> {
     /// root are implicitly encrypted. For existing filesystems, ensures that
     /// they are mounted (and that keys are loaded), but does not verify the
     /// input details.
-    pub encryption_details: EncryptionDetails,
+    pub encryption_details: Option<EncryptionDetails>,
 
     /// Optional properties that can be set for the dataset regarding
     /// space usage.
@@ -1259,27 +1248,19 @@ impl Zfs {
         if zoned {
             cmd.args(&["-o", "zoned=on"]);
         }
-        match encryption_details {
-            EncryptionDetails::Inherit => {}
-
-            EncryptionDetails::Off => {
-                cmd.args(&["-o", "encryption=off"]);
-            }
-
-            EncryptionDetails::Aes256Gcm { keypath, epoch } => {
-                let keyloc = format!("keylocation=file://{keypath}");
-                let epoch = format!("oxide:epoch={epoch}");
-                cmd.args(&[
-                    "-o",
-                    "encryption=aes-256-gcm",
-                    "-o",
-                    "keyformat=raw",
-                    "-o",
-                    &keyloc,
-                    "-o",
-                    &epoch,
-                ]);
-            }
+        if let Some(details) = encryption_details {
+            let keyloc = format!("keylocation=file://{}", details.keypath);
+            let epoch = format!("oxide:epoch={}", details.epoch);
+            cmd.args(&[
+                "-o",
+                "encryption=aes-256-gcm",
+                "-o",
+                "keyformat=raw",
+                "-o",
+                &keyloc,
+                "-o",
+                &epoch,
+            ]);
         }
 
         match can_mount {

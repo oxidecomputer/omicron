@@ -247,8 +247,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
                     error,
                 })?;
 
-        let encryption_details =
-            EncryptionDetails::Aes256Gcm { keypath, epoch };
+        let encryption_details = EncryptionDetails { keypath, epoch };
 
         info!(
             log,
@@ -260,7 +259,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             mountpoint: Mountpoint(mountpoint),
             can_mount: zfs::CanMount::On,
             zoned,
-            encryption_details,
+            encryption_details: Some(encryption_details),
             size_details: None,
             id: None,
             additional_options: None,
@@ -287,6 +286,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             zpool_name.dataset_mountpoint(&mount_config.root, dataset.name);
         let name = &format!("{}/{}", zpool_name, dataset.name);
 
+        let encryption_details = None;
         let size_details = Some(SizeDetails {
             quota: dataset.quota,
             reservation: None,
@@ -297,7 +297,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             mountpoint: Mountpoint(mountpoint),
             can_mount: zfs::CanMount::On,
             zoned,
-            encryption_details: EncryptionDetails::Inherit,
+            encryption_details,
             size_details,
             id: None,
             additional_options: None,

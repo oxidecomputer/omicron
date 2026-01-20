@@ -36,7 +36,6 @@ use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
 use illumos_utils::zfs::DatasetVolumeDeleteArgs;
 use illumos_utils::zfs::DatasetVolumeEnsureArgs;
-use illumos_utils::zfs::EncryptionDetails;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
@@ -1286,11 +1285,10 @@ impl SledAgent {
             ),
             can_mount: CanMount::Off,
             zoned: false,
-            // Ordinarily, we would want to inherit encryption details from the
-            // parent "oxp_UUID/crypt/local_storage" dataset, which inherits
-            // from "oxp_UUID/crypt". We're making raw zvols though, so set
-            // encryption explicitly off.
-            encryption_details: EncryptionDetails::Off,
+            // encryption details not required, will inherit from parent
+            // "oxp_UUID/crypt/local_storage", which inherits from
+            // "oxp_UUID/crypt"
+            encryption_details: None,
             size_details: Some(SizeDetails {
                 quota: Some(dataset_size),
                 reservation: Some(dataset_size),

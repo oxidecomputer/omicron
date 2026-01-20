@@ -23,8 +23,8 @@
 
 use camino::Utf8PathBuf;
 use illumos_utils::zfs::{
-    CanMount, DatasetEnsureArgs, EncryptionDetails, EnsureDatasetError,
-    GetValueError, Mountpoint, SizeDetails, Zfs,
+    CanMount, DatasetEnsureArgs, EnsureDatasetError, GetValueError, Mountpoint,
+    SizeDetails, Zfs,
 };
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::CompressionAlgorithm;
@@ -149,7 +149,7 @@ pub(crate) async fn ensure_backing_fs(
             mountpoint: mountpoint.clone(),
             can_mount: CanMount::NoAuto,
             zoned: false,
-            encryption_details: EncryptionDetails::Inherit,
+            encryption_details: None,
             size_details,
             id: None,
             additional_options: None,
