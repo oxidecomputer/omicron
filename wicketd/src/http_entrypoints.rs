@@ -261,9 +261,10 @@ impl WicketdApi for WicketdApiImpl {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
-        let sled_agent_addr = ctx.bootstrap_agent_addr().map_err(|err| {
-            HttpError::for_bad_request(None, format!("{err:#}"))
-        })?;
+        let lockstep_addr =
+            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
+                HttpError::for_bad_request(None, format!("{err:#}"))
+            })?;
 
         let request = {
             let mut config = ctx.rss_config.lock().unwrap();
@@ -275,18 +276,18 @@ impl WicketdApi for WicketdApiImpl {
         slog::info!(
             ctx.log,
             "Sending RSS initialize request to {}",
-            sled_agent_addr
+            lockstep_addr
         );
-        let client = bootstrap_agent_client::Client::new(
-            &format!("http://{}", sled_agent_addr),
-            ctx.log.new(slog::o!("component" => "bootstrap client")),
+        let client = bootstrap_agent_lockstep_client::Client::new(
+            &format!("http://{}", lockstep_addr),
+            ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
         );
 
         let init_id = client
             .rack_initialize(&request)
             .await
             .map_err(|err| {
-                use bootstrap_agent_client::Error as BaError;
+                use bootstrap_agent_lockstep_client::Error as BaError;
                 match err {
                     BaError::CommunicationError(err) => {
                         let message =
@@ -316,25 +317,22 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
         let ctx = rqctx.context();
 
-        let sled_agent_addr = ctx.bootstrap_agent_addr().map_err(|err| {
-            HttpError::for_bad_request(None, format!("{err:#}"))
-        })?;
+        let lockstep_addr =
+            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
+                HttpError::for_bad_request(None, format!("{err:#}"))
+            })?;
 
-        slog::info!(
-            ctx.log,
-            "Sending RSS reset request to {}",
-            sled_agent_addr
-        );
-        let client = bootstrap_agent_client::Client::new(
-            &format!("http://{}", sled_agent_addr),
-            ctx.log.new(slog::o!("component" => "bootstrap client")),
+        slog::info!(ctx.log, "Sending RSS reset request to {}", lockstep_addr);
+        let client = bootstrap_agent_lockstep_client::Client::new(
+            &format!("http://{}", lockstep_addr),
+            ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
         );
 
         let reset_id = client
             .rack_reset()
             .await
             .map_err(|err| {
-                use bootstrap_agent_client::Error as BaError;
+                use bootstrap_agent_lockstep_client::Error as BaError;
                 match err {
                     BaError::CommunicationError(err) => {
                         let message =

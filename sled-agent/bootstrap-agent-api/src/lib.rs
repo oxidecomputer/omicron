@@ -53,6 +53,8 @@ pub trait BootstrapAgentApi {
     ) -> Result<HttpResponseOk<Vec<Component>>, HttpError>;
 
     /// Get the current status of rack initialization or reset.
+    /// 
+    /// Deprecated. Do not use. Moved to bootstrap agent lockstep API.
     #[endpoint {
         method = GET,
         path = "/rack-initialize",
@@ -62,6 +64,8 @@ pub trait BootstrapAgentApi {
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError>;
 
     /// Initialize the rack with the provided configuration.
+    ///
+    /// Deprecated. Do not use. Moved to bootstrap agent lockstep API.
     #[endpoint {
         method = POST,
         path = "/rack-initialize",
@@ -72,6 +76,8 @@ pub trait BootstrapAgentApi {
     ) -> Result<HttpResponseOk<RackInitUuid>, HttpError>;
 
     /// Reset the rack to an unconfigured state.
+    ///
+    /// Deprecated. Do not use. Moved to bootstrap agent lockstep API.
     #[endpoint {
         method = DELETE,
         path = "/rack-initialize",

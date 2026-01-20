@@ -16,6 +16,7 @@ base64.workspace = true
 bootstore.workspace = true
 bootstrap-agent-api.workspace = true
 bootstrap-agent-client.workspace = true
+bootstrap-agent-lockstep-api.workspace = true
 bytes.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true

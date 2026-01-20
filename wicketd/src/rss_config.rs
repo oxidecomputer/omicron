@@ -9,13 +9,13 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::bail;
-use bootstrap_agent_client::types::BootstrapAddressDiscovery;
-use bootstrap_agent_client::types::Certificate;
-use bootstrap_agent_client::types::Name;
-use bootstrap_agent_client::types::PortConfigV2 as BaPortConfigV2;
-use bootstrap_agent_client::types::RackInitializeRequest;
-use bootstrap_agent_client::types::RecoverySiloConfig;
-use bootstrap_agent_client::types::UserId;
+use bootstrap_agent_lockstep_client::types::BootstrapAddressDiscovery;
+use bootstrap_agent_lockstep_client::types::Certificate;
+use bootstrap_agent_lockstep_client::types::Name;
+use bootstrap_agent_lockstep_client::types::PortConfigV2 as BaPortConfigV2;
+use bootstrap_agent_lockstep_client::types::RackInitializeRequest;
+use bootstrap_agent_lockstep_client::types::RecoverySiloConfig;
+use bootstrap_agent_lockstep_client::types::UserId;
 use display_error_chain::DisplayErrorChain;
 use omicron_certificates::CertificateError;
 use omicron_common::address;
@@ -252,7 +252,7 @@ impl CurrentRssConfig {
         // https://github.com/oxidecomputer/omicron/issues/3690
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
         let trust_quorum_peers: Option<
-            Vec<bootstrap_agent_client::types::Baseboard>,
+            Vec<bootstrap_agent_lockstep_client::types::Baseboard>,
         > = if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
             Some(
                 self.bootstrap_sleds
@@ -270,16 +270,17 @@ impl CurrentRssConfig {
         };
 
         // Convert between internal and progenitor types.
-        let user_password_hash = bootstrap_agent_client::types::NewPasswordHash(
-            recovery_silo_password_hash.to_string(),
-        );
+        let user_password_hash =
+            bootstrap_agent_lockstep_client::types::NewPasswordHash(
+                recovery_silo_password_hash.to_string(),
+            );
         let internal_services_ip_pool_ranges = self
             .internal_services_ip_pool_ranges
             .iter()
             .map(|pool| {
-                use bootstrap_agent_client::types::IpRange;
-                use bootstrap_agent_client::types::Ipv4Range;
-                use bootstrap_agent_client::types::Ipv6Range;
+                use bootstrap_agent_lockstep_client::types::IpRange;
+                use bootstrap_agent_lockstep_client::types::Ipv4Range;
+                use bootstrap_agent_lockstep_client::types::Ipv6Range;
                 match pool {
                     address::IpRange::V4(range) => IpRange::V4(Ipv4Range {
                         first: range.first,
@@ -619,8 +620,8 @@ pub(crate) enum BgpAuthKeyError {
 fn validate_rack_network_config(
     config: &UserSpecifiedRackNetworkConfig,
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
-) -> Result<bootstrap_agent_client::types::RackNetworkConfigV2> {
-    use bootstrap_agent_client::types::BgpConfig as BaBgpConfig;
+) -> Result<bootstrap_agent_lockstep_client::types::RackNetworkConfigV2> {
+    use bootstrap_agent_lockstep_client::types::BgpConfig as BaBgpConfig;
 
     // Ensure that there is at least one uplink
     if !config.has_any_uplinks() {
@@ -661,7 +662,7 @@ fn validate_rack_network_config(
 
     // TODO Add more client side checks on `rack_network_config` contents?
 
-    Ok(bootstrap_agent_client::types::RackNetworkConfigV2 {
+    Ok(bootstrap_agent_lockstep_client::types::RackNetworkConfigV2 {
         rack_subnet: RACK_SUBNET.net(),
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
@@ -695,15 +696,15 @@ fn build_port_config(
     config: &UserSpecifiedPortConfig,
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
 ) -> BaPortConfigV2 {
-    use bootstrap_agent_client::types::BgpPeerConfig as BaBgpPeerConfig;
-    use bootstrap_agent_client::types::LldpAdminStatus as BaLldpAdminStatus;
-    use bootstrap_agent_client::types::LldpPortConfig as BaLldpPortConfig;
-    use bootstrap_agent_client::types::PortFec as BaPortFec;
-    use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
-    use bootstrap_agent_client::types::RouteConfig as BaRouteConfig;
-    use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
-    use bootstrap_agent_client::types::TxEqConfig as BaTxEqConfig;
-    use bootstrap_agent_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
+    use bootstrap_agent_lockstep_client::types::BgpPeerConfig as BaBgpPeerConfig;
+    use bootstrap_agent_lockstep_client::types::LldpAdminStatus as BaLldpAdminStatus;
+    use bootstrap_agent_lockstep_client::types::LldpPortConfig as BaLldpPortConfig;
+    use bootstrap_agent_lockstep_client::types::PortFec as BaPortFec;
+    use bootstrap_agent_lockstep_client::types::PortSpeed as BaPortSpeed;
+    use bootstrap_agent_lockstep_client::types::RouteConfig as BaRouteConfig;
+    use bootstrap_agent_lockstep_client::types::SwitchLocation as BaSwitchLocation;
+    use bootstrap_agent_lockstep_client::types::TxEqConfig as BaTxEqConfig;
+    use bootstrap_agent_lockstep_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
     use omicron_common::api::internal::shared::LldpAdminStatus;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;

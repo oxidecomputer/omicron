@@ -16,6 +16,7 @@ use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_api::BootstrapAgentApi;
 use bootstrap_agent_api::Component;
 use bootstrap_agent_api::bootstrap_agent_api_mod;
+use dropshot::ClientErrorStatusCode;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, HttpResponseUpdatedNoContent,
     RequestContext, TypedBody,
@@ -36,6 +37,7 @@ use std::net::Ipv6Addr;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, oneshot};
 
+#[derive(Clone)]
 pub(crate) struct BootstrapServerContext {
     pub(crate) base_log: Logger,
     pub(crate) global_zone_bootstrap_ip: Ipv6Addr,
@@ -99,43 +101,43 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
     }
 
     async fn rack_initialization_status(
-        rqctx: RequestContext<Self::Context>,
+        _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
-        let ctx = rqctx.context();
-        let status = ctx.rss_access.operation_status();
-        Ok(HttpResponseOk(status))
+        // This endpoint has moved to the lockstep API on port 8080.
+        Err(HttpError::for_client_error(
+            None,
+            ClientErrorStatusCode::GONE,
+            "This endpoint has been permanently moved to the bootstrap agent \
+             lockstep API on port 8080"
+                .to_string(),
+        ))
     }
 
     async fn rack_initialize(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<RackInitializeRequest>,
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<RackInitializeRequest>,
     ) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
-        // Note that if we are performing rack initialization in
-        // response to an external request, we assume we are not
-        // skipping timesync.
-        const SKIP_TIMESYNC: bool = false;
-        let ctx = rqctx.context();
-        let request =
-            RackInitializeRequestParams::new(body.into_inner(), SKIP_TIMESYNC);
-        let id = ctx
-            .start_rack_initialize(request)
-            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
-        Ok(HttpResponseOk(id))
+        // This endpoint has moved to the lockstep API on port 8080.
+        Err(HttpError::for_client_error(
+            None,
+            ClientErrorStatusCode::GONE,
+            "This endpoint has been permanently moved to the bootstrap agent \
+             lockstep API on port 8080"
+                .to_string(),
+        ))
     }
 
     async fn rack_reset(
-        rqctx: RequestContext<Self::Context>,
+        _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
-        let ctx = rqctx.context();
-        let id = ctx
-            .rss_access
-            .start_reset(
-                &ctx.base_log,
-                ctx.sprockets.clone(),
-                ctx.global_zone_bootstrap_ip,
-            )
-            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
-        Ok(HttpResponseOk(id))
+        // This endpoint has moved to the lockstep API on port 8080.
+        Err(HttpError::for_client_error(
+            None,
+            ClientErrorStatusCode::GONE,
+            "This endpoint has been permanently moved to the bootstrap agent \
+             lockstep API on port 8080"
+                .to_string(),
+        ))
     }
 
     async fn sled_reset(

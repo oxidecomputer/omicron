@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, anyhow};
 use bootstrap_agent_api::*;
+use bootstrap_agent_lockstep_api::*;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use clickhouse_admin_api::*;
@@ -64,6 +65,22 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: bootstrap_agent_api_mod::stub_api_description,
             ident: "bootstrap-agent",
+            extra_validation: None,
+        },
+        ManagedApiConfig {
+            title: "Bootstrap Agent Lockstep API",
+            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            metadata: ManagedApiMetadata {
+                description: Some(
+                    "Lockstep API for rack initialization and reset",
+                ),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
+            api_description:
+                bootstrap_agent_lockstep_api_mod::stub_api_description,
+            ident: "bootstrap-agent-lockstep",
             extra_validation: None,
         },
         ManagedApiConfig {

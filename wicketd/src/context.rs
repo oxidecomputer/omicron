@@ -53,6 +53,15 @@ impl ServerContext {
         Ok(SocketAddrV6::new(ip, BOOTSTRAP_AGENT_HTTP_PORT, 0, 0))
     }
 
+    pub(crate) fn bootstrap_agent_lockstep_addr(&self) -> Result<SocketAddrV6> {
+        // Port on which the bootstrap agent lockstep API dropshot server within
+        // sled-agent is listening.
+        const BOOTSTRAP_AGENT_LOCKSTEP_PORT: u16 = 8080;
+
+        let ip = self.bootstrap_agent_ip()?;
+        Ok(SocketAddrV6::new(ip, BOOTSTRAP_AGENT_LOCKSTEP_PORT, 0, 0))
+    }
+
     fn bootstrap_agent_ip(&self) -> Result<Ipv6Addr> {
         let mut any_bootstrap_peer = None;
         for (baseboard, ip) in self.bootstrap_peers.sleds() {

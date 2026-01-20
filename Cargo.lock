@@ -1028,6 +1028,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "bootstrap-agent-lockstep-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars 0.8.22",
+ "serde",
+ "sled-hardware-types",
+]
+
+[[package]]
+name = "bootstrap-agent-lockstep-client"
+version = "0.1.0"
+dependencies = [
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "progenitor 0.10.0",
+ "regress",
+ "reqwest",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sled-hardware-types",
+ "slog",
+]
+
+[[package]]
 name = "bstr"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8181,6 +8213,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bootstrap-agent-api",
+ "bootstrap-agent-lockstep-api",
  "camino",
  "clap",
  "clickhouse-admin-api",
@@ -8814,6 +8847,7 @@ dependencies = [
  "bootstore",
  "bootstrap-agent-api",
  "bootstrap-agent-client",
+ "bootstrap-agent-lockstep-api",
  "bytes",
  "camino",
  "camino-tempfile",
@@ -16316,6 +16350,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bootstrap-agent-client",
+ "bootstrap-agent-lockstep-client",
  "buf-list",
  "bytes",
  "camino",
