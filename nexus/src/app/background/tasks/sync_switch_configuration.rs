@@ -32,8 +32,8 @@ use mg_admin_client::types::{
     BgpPeerConfig, CheckerSource, DeleteStaticRoute4Request,
     DeleteStaticRoute6Request, ImportExportPolicy4 as MgImportExportPolicy4,
     ImportExportPolicy6 as MgImportExportPolicy6, Ipv4UnicastConfig,
-    Ipv6UnicastConfig, JitterRange, ShaperSource, StaticRoute4,
-    StaticRoute4List, StaticRoute6, StaticRoute6List, UnnumberedBgpPeerConfig,
+    JitterRange, ShaperSource, StaticRoute4, StaticRoute4List, StaticRoute6,
+    StaticRoute6List, UnnumberedBgpPeerConfig,
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -735,7 +735,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 None => MgImportExportPolicy4::NoFiltering,
                             };
 
-                            let import_policy6 = match &allow_import {
+                            let _import_policy6 = match &allow_import {
                                 Some(list) => {
                                     MgImportExportPolicy6::Allow(list
                                         .clone()
@@ -803,7 +803,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 None => MgImportExportPolicy4::NoFiltering,
                             };
 
-                            let export_policy6 = match &allow_export {
+                            let _export_policy6 = match &allow_export {
                                 Some(list) => {
                                     MgImportExportPolicy6::Allow(list
                                         .clone()
@@ -848,11 +848,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     import_policy: import_policy4,
                                     export_policy: export_policy4,
                                 }),
-                                ipv6_unicast: Some(Ipv6UnicastConfig{
+                                ipv6_unicast: None, /* TODO Some(Ipv6UnicastConfig{
                                     nexthop: None,
                                     import_policy: import_policy6,
                                     export_policy: export_policy6,
-                                }),
+                                }),*/
                                 vlan_id: peer.vlan_id.map(|x| x.0),
                                 //TODO plumb these out to the external API
                                 connect_retry_jitter: Some(JitterRange {
@@ -898,11 +898,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     import_policy: MgImportExportPolicy4::NoFiltering,
                                     export_policy: MgImportExportPolicy4::NoFiltering,
                                 }),
-                                ipv6_unicast: Some(Ipv6UnicastConfig{
+                                ipv6_unicast: None, /*TODO Some(Ipv6UnicastConfig{
                                     nexthop: None,
                                     import_policy: MgImportExportPolicy6::NoFiltering,
                                     export_policy: MgImportExportPolicy6::NoFiltering,
-                                }),
+                                }),*/
                                 vlan_id: peer.vlan_id.map(|x| x.0),
                                 connect_retry_jitter: Some(JitterRange {
                                     max: 1.0,
