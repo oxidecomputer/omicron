@@ -1737,10 +1737,10 @@ table! {
 }
 
 table! {
-    inv_health_monitor_svc_in_maintenance2 (inv_collection_id, sled_id, svcs_in_maintenance_id) {
+    inv_health_monitor_svc_in_maintenance2 (inv_collection_id, sled_id, id) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
-        svcs_in_maintenance_id -> Uuid,
+        id -> Uuid,
         svcs_cmd_error -> Nullable<Text>,
         // TODO-K: This will change to not nullable with omicron#9615
         time_of_status -> Nullable<Timestamptz>,
@@ -1748,8 +1748,9 @@ table! {
 }
 
 table! {
-    inv_health_monitor_svc_in_maintenance_service (svcs_in_maintenance_id, id) {
-        svcs_in_maintenance_id -> Uuid,
+    inv_health_monitor_svc_in_maintenance_service (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
         id -> Uuid,
         fmri -> Text,
         zone -> Text,
@@ -1757,8 +1758,9 @@ table! {
 }
 
 table! {
-    inv_health_monitor_svc_in_maintenance_error (svcs_in_maintenance_id, id) {
-        svcs_in_maintenance_id -> Uuid,
+    inv_health_monitor_svc_in_maintenance_error (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
         id -> Uuid,
         error_message -> Text,
     }

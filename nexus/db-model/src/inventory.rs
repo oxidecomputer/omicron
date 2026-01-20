@@ -1076,7 +1076,7 @@ impl InvSvcInMaintenance {
 pub struct InvSvcInMaintenance2 {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub svcs_in_maintenance_id: DbTypedUuid<SvcInMaintenanceKind>,
+    pub id: DbTypedUuid<SvcInMaintenanceKind>,
     pub svcs_cmd_error: Option<String>,
     // TODO-K: This will change to not nullable with omicron#9615
     pub time_of_status: Option<DateTime<Utc>>,
@@ -1090,15 +1090,14 @@ impl InvSvcInMaintenance2 {
         time_of_status: Option<DateTime<Utc>>,
     ) -> Self {
         // This ID is only used as a primary key, it's fine to generate it here.
-        // TODO-K: Is it?
-        let svcs_in_maintenance_id = to_db_typed_uuid(
-            SvcInMaintenanceUuid::from_untyped_uuid(Uuid::new_v4()),
-        );
+        let id = to_db_typed_uuid(SvcInMaintenanceUuid::from_untyped_uuid(
+            Uuid::new_v4(),
+        ));
 
         Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            svcs_in_maintenance_id,
+            id,
             svcs_cmd_error,
             time_of_status,
         }
@@ -1108,8 +1107,9 @@ impl InvSvcInMaintenance2 {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_health_monitor_svc_in_maintenance_service)]
 pub struct InvSvcInMaintenanceService {
-    pub svcs_in_maintenance_id: DbTypedUuid<SvcInMaintenanceKind>,
-    // TODO-K: Change the UUID kind
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    // TODO-K: Change the UUID kind?
     pub id: DbTypedUuid<SvcInMaintenanceKind>,
     pub fmri: String,
     pub zone: String,
@@ -1117,7 +1117,8 @@ pub struct InvSvcInMaintenanceService {
 
 impl InvSvcInMaintenanceService {
     pub fn new(
-        svcs_in_maintenance_id: SvcInMaintenanceUuid,
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
         svc: SvcInMaintenance,
     ) -> Self {
         let SvcInMaintenance { fmri, zone } = svc;
@@ -1128,7 +1129,8 @@ impl InvSvcInMaintenanceService {
         ));
 
         Self {
-            svcs_in_maintenance_id: svcs_in_maintenance_id.into(),
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
             id,
             fmri,
             zone,
@@ -1139,7 +1141,8 @@ impl InvSvcInMaintenanceService {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_health_monitor_svc_in_maintenance_error)]
 pub struct InvSvcInMaintenanceError {
-    pub svcs_in_maintenance_id: DbTypedUuid<SvcInMaintenanceKind>,
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
     // TODO-K: Change the UUID kind
     pub id: DbTypedUuid<SvcInMaintenanceKind>,
     pub error_message: String,
@@ -1147,7 +1150,8 @@ pub struct InvSvcInMaintenanceError {
 
 impl InvSvcInMaintenanceError {
     pub fn new(
-        svcs_in_maintenance_id: SvcInMaintenanceUuid,
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
         error_message: String,
     ) -> Self {
         // This ID is only used as a primary key, it's fine to generate it here.
@@ -1156,7 +1160,8 @@ impl InvSvcInMaintenanceError {
         ));
 
         Self {
-            svcs_in_maintenance_id: svcs_in_maintenance_id.into(),
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
             id,
             error_message,
         }

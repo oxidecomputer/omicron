@@ -4103,7 +4103,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance2
     sled_id UUID NOT NULL,
 
     -- unique id for each row
-    svcs_in_maintenance_id UUID NOT NULL,
+    id UUID NOT NULL,
 
     -- error when calling the svcs command
     svcs_cmd_error TEXT,
@@ -4112,13 +4112,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance2
     -- TODO-K: This will change to not null with omicron#9615
     time_of_status TIMESTAMPTZ,
 
-    PRIMARY KEY (inv_collection_id, sled_id, svcs_in_maintenance_id)
+    PRIMARY KEY (inv_collection_id, sled_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance_service (
     -- where this observation came from
-    -- (foreign key into `inv_health_monitor_svc_in_maintenance` table)
-    svcs_in_maintenance_id UUID NOT NULL,
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about);
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
+    sled_id UUID NOT NULL,
 
     -- unique id for each row
     id UUID NOT NULL,
@@ -4129,13 +4134,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance_
     -- zone the SMF service in maintenance is located in
     zone TEXT,
 
-    PRIMARY KEY (svcs_in_maintenance_id, id)
+    PRIMARY KEY (inv_collection_id, sled_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance_error (
     -- where this observation came from
-    -- (foreign key into `inv_health_monitor_svc_in_maintenance` table)
-    svcs_in_maintenance_id UUID NOT NULL,
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about);
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
+    sled_id UUID NOT NULL,
 
     -- unique id for each row
     id UUID NOT NULL,
@@ -4143,7 +4153,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_health_monitor_svc_in_maintenance_
     -- an error message found when retrieving the SMF services in maintenance
     error_message TEXT,
 
-    PRIMARY KEY (svcs_in_maintenance_id, id)
+    PRIMARY KEY (inv_collection_id, sled_id, id)
 );
 
 -- This type name starts with "clear_" for legacy reasons. Prefer "remove" in

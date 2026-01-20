@@ -113,7 +113,6 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::SvcInMaintenanceUuid;
 use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
@@ -304,26 +303,17 @@ impl DataStore {
             .iter()
             .flat_map(|sled_agent| {
                 match &sled_agent.health_monitor.smf_services_in_maintenance {
-                    Ok(svcs) => {
-                        // TODO-K: get the ID from the other table somehow
-                        // TODO-K: Should I just use the collection ID and the
-                        // sled ID instead?
-                        let temp_id = to_db_typed_uuid(
-                            SvcInMaintenanceUuid::from_untyped_uuid(
-                                Uuid::new_v4(),
-                            ),
-                        );
-
-                        svcs.services
-                            .iter()
-                            .map(|svc| {
-                                InvSvcInMaintenanceService::new(
-                                    temp_id.into(),
-                                    svc.clone(),
-                                )
-                            })
-                            .collect()
-                    }
+                    Ok(svcs) => svcs
+                        .services
+                        .iter()
+                        .map(|svc| {
+                            InvSvcInMaintenanceService::new(
+                                collection_id,
+                                sled_agent.sled_id,
+                                svc.clone(),
+                            )
+                        })
+                        .collect(),
                     // If there is an error we've already captured it above
                     Err(_) => {
                         vec![]
@@ -338,26 +328,17 @@ impl DataStore {
             .iter()
             .flat_map(|sled_agent| {
                 match &sled_agent.health_monitor.smf_services_in_maintenance {
-                    Ok(svcs) => {
-                        // TODO-K: get the ID from the other table somehow
-                        // TODO-K: Should I just use the collection ID and the
-                        // sled ID instead?
-                        let temp_id = to_db_typed_uuid(
-                            SvcInMaintenanceUuid::from_untyped_uuid(
-                                Uuid::new_v4(),
-                            ),
-                        );
-
-                        svcs.errors
-                            .iter()
-                            .map(|e| {
-                                InvSvcInMaintenanceError::new(
-                                    temp_id.into(),
-                                    e.clone(),
-                                )
-                            })
-                            .collect()
-                    }
+                    Ok(svcs) => svcs
+                        .errors
+                        .iter()
+                        .map(|e| {
+                            InvSvcInMaintenanceError::new(
+                                collection_id,
+                                sled_agent.sled_id,
+                                e.clone(),
+                            )
+                        })
+                        .collect(),
                     // If there is an error we've already captured it above
                     Err(_) => {
                         vec![]
@@ -2522,6 +2503,8 @@ impl DataStore {
                         .await?
                     };
 
+                    // TODO-K: Delete rows in the other health tables as well
+
                     // Remove rows associated with `OmicronSledConfig`s.
                     let nomicron_sled_configs = {
                         use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
@@ -4531,6 +4514,7 @@ impl DataStore {
             // Convert all health checks into a full `HealthMonitorInventory`
             let mut health_monitor = HealthMonitorInventory::new();
 
+            // TODO-K: Update here
             let svcs_in_maintenance = svcs_in_maintenance_by_sled
                 .remove(&sled_id.into_untyped_uuid())
                 .map(|rows| {
