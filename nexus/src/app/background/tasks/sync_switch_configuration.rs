@@ -11,6 +11,7 @@ use crate::app::{
     },
     dpd_clients, switch_zone_address_mappings,
 };
+use itertools::{Either, Itertools as _};
 use oxnet::Ipv4Net;
 use slog::{Logger, o};
 
@@ -18,7 +19,8 @@ use internal_dns_resolver::Resolver;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
     AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
-    NETWORK_KEY, SwitchLinkSpeed,
+    NETWORK_KEY, SwitchLinkSpeed, SwitchPortBgpPeerConfigAllowExport,
+    SwitchPortBgpPeerConfigAllowImport,
 };
 use uuid::Uuid;
 
@@ -30,9 +32,10 @@ use futures::future::BoxFuture;
 use mg_admin_client::types::{
     AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
     BgpPeerConfig, CheckerSource, DeleteStaticRoute4Request,
-    DeleteStaticRoute6Request, ImportExportPolicy as MgImportExportPolicy,
-    ShaperSource, StaticRoute4, StaticRoute4List, StaticRoute6,
-    StaticRoute6List,
+    DeleteStaticRoute6Request, ImportExportPolicy4 as MgImportExportPolicy4,
+    ImportExportPolicy6 as MgImportExportPolicy6, Ipv4UnicastConfig,
+    Ipv6UnicastConfig, ShaperSource, StaticRoute4, StaticRoute4List,
+    StaticRoute6, StaticRoute6List,
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -48,7 +51,7 @@ use omicron_common::{
         internal::shared::ParseSwitchLocationError,
     },
 };
-use rdb_types::{Prefix as MgPrefix, Prefix4, Prefix6};
+use rdb_types::{Prefix4, Prefix6};
 use serde_json::json;
 use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
@@ -679,6 +682,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             }
                         };
 
+                        // Fetch import and export policies and split into IPv4
+                        // / IPv6 policies.
+                        //
+                        // There's no perfect way to do this until we upate the
+                        // database and Nexus API to reflect this new
+                        // IP-version-aware type.
                         let allow_import = match self.datastore.allow_import_for_peer(
                             opctx,
                             peer.port_settings_id,
@@ -702,33 +711,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 });
                             }
                         };
-
-                        let import_policy = match allow_import {
-                            Some(list) => {
-                                MgImportExportPolicy::Allow(list
-                                    .into_iter()
-                                    .map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V4(p) =>  MgPrefix::V4(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V6(p) =>  MgPrefix::V6(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            )
-                                        }
-                                    )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy::NoFiltering,
-                        };
-
                         let allow_export = match self.datastore.allow_export_for_peer(
                             opctx,
                             peer.port_settings_id,
@@ -753,31 +735,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             }
                         };
 
-                        let export_policy = match allow_export {
-                            Some(list) => {
-                                MgImportExportPolicy::Allow(list
-                                    .into_iter()
-                                    .map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V4(p) =>  MgPrefix::V4(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V6(p) =>  MgPrefix::V6(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            )
-                                        }
-                                    )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy::NoFiltering,
-                        };
+                        let (ipv4_unicast, ipv6_unicast) = build_bgp_ip_config(
+                            allow_import.as_deref(),
+                            allow_export.as_deref()
+                        );
 
                         // now that the peer passes the above validations, add it to the list for configuration
                         let peer_config = BgpPeerConfig {
@@ -797,9 +758,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             local_pref: peer.local_pref.as_ref().map(|x| x.0),
                             enforce_first_as: peer.enforce_first_as,
                             communities: communities.into_iter().map(|c| c.community.0).collect(),
-                            allow_export: export_policy,
-                            allow_import: import_policy,
+                            ipv4_unicast: Some(ipv4_unicast),
+                            ipv6_unicast: Some(ipv6_unicast),
                             vlan_id: peer.vlan_id.map(|x| x.0),
+                            // Presumably these need to come from the DB / API
+                            // eventually.
+                            connect_retry_jitter: None,
+                            // TODO(ben): is this the right default?
+                            deterministic_collision_resolution: false,
+                            idle_hold_jitter: None,
                         };
 
                         // update the stored vec if it exists, create a new on if it doesn't exist
@@ -855,6 +822,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                         asn: *request_bgp_config.asn,
                                         code: code.clone(),
                                     }),
+                                    // Presumably this needs to come from the DB
+                                    // / API eventually.
+                                    unnumbered_peers: HashMap::new(),
                                 });
                         }
                     }
@@ -874,7 +844,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         "switch_location" => ?location,
                         "config" => ?config,
                     );
-                    if let Err(e) = client.bgp_apply(config).await {
+                    if let Err(e) = client.bgp_apply_v2(config).await {
                         error!(log, "error while applying bgp configuration"; "error" => ?e);
                     }
                 }
@@ -994,10 +964,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                     let mut port_config = PortConfigV2 {
                         addresses: info.addresses.iter().map(|a|
-			    UplinkAddressConfig {
-				    address: a.address,
-				    vlan_id: a.vlan_id
-			    }).collect(),
+                            UplinkAddressConfig {
+                                address: a.address,
+                                vlan_id: a.vlan_id
+                            }).collect(),
                         autoneg: info
                             .links
                             .get(0) //TODO breakout support
@@ -1054,24 +1024,25 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .map(|l| l.speed)
                             .unwrap_or(SwitchLinkSpeed::Speed100G)
                             .into(),
-			lldp: info
-			    .link_lldp
-			    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
-			    .map(|c|  LldpPortConfig {
-				status: match c.enabled {
-				    true => LldpAdminStatus::Enabled,
-				    false=> LldpAdminStatus::Disabled,
-				},
-				port_id: c.link_name.clone().map(|p| p.to_string()),
-				port_description: c.link_description.clone(),
-				chassis_id: c.chassis_id.clone(),
-				system_name: c.system_name.clone(),
-				system_description: c.system_description.clone(),
-				management_addrs:c.management_ip.map(|a| vec![a.ip()]),
-			    }),
-			    tx_eq,
-		    }
-                    ;
+                        lldp: info
+                            .link_lldp
+                            .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                            .map(|c| {
+                                LldpPortConfig {
+                                    status: match c.enabled {
+                                        true => LldpAdminStatus::Enabled,
+                                        false => LldpAdminStatus::Disabled,
+                                    },
+                                    port_id: c.link_name.clone().map(|p| p.to_string()),
+                                    port_description: c.link_description.clone(),
+                                    chassis_id: c.chassis_id.clone(),
+                                    system_name: c.system_name.clone(),
+                                    system_description: c.system_description.clone(),
+                                    management_addrs: c.management_ip.map(|a| vec![a.ip()]),
+                                }
+                            }),
+                        tx_eq,
+                    };
 
                     for peer in port_config.bgp_peers.iter_mut() {
                         peer.communities = match self
@@ -1376,6 +1347,65 @@ impl BackgroundTask for SwitchPortSettingsManager {
         }
         .boxed()
     }
+}
+
+fn build_bgp_ip_config(
+    allow_import: Option<&[SwitchPortBgpPeerConfigAllowImport]>,
+    allow_export: Option<&[SwitchPortBgpPeerConfigAllowExport]>,
+) -> (Ipv4UnicastConfig, Ipv6UnicastConfig) {
+    let (ipv4_import, ipv6_import) = match allow_import {
+        Some(list) => {
+            let (v4, v6) =
+                list.into_iter().partition_map(|cfg| match cfg.prefix {
+                    IpNetwork::V4(v4) => Either::Left(Prefix4 {
+                        length: v4.prefix(),
+                        value: v4.ip(),
+                    }),
+                    IpNetwork::V6(v6) => Either::Right(Prefix6 {
+                        length: v6.prefix(),
+                        value: v6.ip(),
+                    }),
+                });
+            (MgImportExportPolicy4::Allow(v4), MgImportExportPolicy6::Allow(v6))
+        }
+        None => (
+            MgImportExportPolicy4::NoFiltering,
+            MgImportExportPolicy6::NoFiltering,
+        ),
+    };
+    let (ipv4_export, ipv6_export) = match allow_export {
+        Some(list) => {
+            let (v4, v6) =
+                list.into_iter().partition_map(|cfg| match cfg.prefix {
+                    IpNetwork::V4(v4) => Either::Left(Prefix4 {
+                        length: v4.prefix(),
+                        value: v4.ip(),
+                    }),
+                    IpNetwork::V6(v6) => Either::Right(Prefix6 {
+                        length: v6.prefix(),
+                        value: v6.ip(),
+                    }),
+                });
+            (MgImportExportPolicy4::Allow(v4), MgImportExportPolicy6::Allow(v6))
+        }
+        None => (
+            MgImportExportPolicy4::NoFiltering,
+            MgImportExportPolicy6::NoFiltering,
+        ),
+    };
+    // TODO(ben) Where does the nexthop come from?
+    (
+        Ipv4UnicastConfig {
+            export_policy: ipv4_export,
+            import_policy: ipv4_import,
+            nexthop: None,
+        },
+        Ipv6UnicastConfig {
+            export_policy: ipv6_export,
+            import_policy: ipv6_import,
+            nexthop: None,
+        },
+    )
 }
 
 fn hashset_eq<T>(left: Vec<T>, right: Vec<T>) -> bool

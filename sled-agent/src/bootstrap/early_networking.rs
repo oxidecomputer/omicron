@@ -14,13 +14,18 @@ use gateway_client::Client as MgsClient;
 use http::StatusCode;
 use internal_dns_resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns_types::names::ServiceName;
+use itertools::Either;
+use itertools::Itertools as _;
 use mg_admin_client::Client as MgdClient;
-use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
 use mg_admin_client::types::BgpPeerConfig as MgBgpPeerConfig;
-use mg_admin_client::types::ImportExportPolicy as MgImportExportPolicy;
+use mg_admin_client::types::ImportExportPolicy4 as MgImportExportPolicy4;
+use mg_admin_client::types::ImportExportPolicy6 as MgImportExportPolicy6;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, CheckerSource, ShaperSource,
     StaticRoute4, StaticRoute4List,
+};
+use mg_admin_client::types::{
+    BfdPeerConfig as MgBfdPeerConfig, Ipv4UnicastConfig, Ipv6UnicastConfig,
 };
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
@@ -35,7 +40,7 @@ use omicron_common::backoff::{
 };
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
-use rdb_types::{Prefix, Prefix4, Prefix6};
+use rdb_types::{Prefix4, Prefix6};
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
@@ -525,6 +530,13 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
                 }
 
+                // Build separate IPv4 / IPv6 unicast policies from the
+                // allowlists we're provided with.
+                let (ipv4_unicast, ipv6_unicast) = build_bgp_ip_config(
+                    &peer.allowed_import,
+                    &peer.allowed_export,
+                );
+
                 let bpc = MgBgpPeerConfig {
                     name: format!("{}", peer.addr),
                     host: format!("{}:179", peer.addr),
@@ -542,51 +554,15 @@ impl<'a> EarlyNetworkSetup<'a> {
                     communities: peer.communities.clone(),
                     local_pref: peer.local_pref,
                     enforce_first_as: peer.enforce_first_as,
-                    allow_export: match &peer.allowed_export {
-                        ImportExportPolicy::NoFiltering => {
-                            MgImportExportPolicy::NoFiltering
-                        }
-                        ImportExportPolicy::Allow(list) => {
-                            MgImportExportPolicy::Allow(
-                                list.clone()
-                                    .iter()
-                                    .map(|x| match x {
-                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                    })
-                                    .collect(),
-                            )
-                        }
-                    },
-                    allow_import: match &peer.allowed_import {
-                        ImportExportPolicy::NoFiltering => {
-                            MgImportExportPolicy::NoFiltering
-                        }
-                        ImportExportPolicy::Allow(list) => {
-                            MgImportExportPolicy::Allow(
-                                list.clone()
-                                    .iter()
-                                    .map(|x| match x {
-                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                    })
-                                    .collect(),
-                            )
-                        }
-                    },
+                    ipv4_unicast: Some(ipv4_unicast),
+                    ipv6_unicast: Some(ipv6_unicast),
                     vlan_id: peer.vlan_id,
+                    // TODO(ben): Presumably these will come from the `peer` as
+                    // well?
+                    connect_retry_jitter: None,
+                    // TODO(ben): Is this the right default here?
+                    deterministic_collision_resolution: false,
+                    idle_hold_jitter: None,
                 };
                 match bgp_peer_configs.get_mut(&port.port) {
                     Some(peers) => {
@@ -617,9 +593,11 @@ impl<'a> EarlyNetworkSetup<'a> {
                         .iter()
                         .map(|x| Prefix4 { length: x.width(), value: x.addr() })
                         .collect(),
+                    // TODO(ben) presumably these will also come from the input?
+                    unnumbered_peers: HashMap::new(),
                 };
 
-                if let Err(e) = mgd.bgp_apply(&request).await {
+                if let Err(e) = mgd.bgp_apply_v2(&request).await {
                     error!(
                         self.log,
                         "BGP peer configuration failed";
@@ -773,6 +751,63 @@ impl<'a> EarlyNetworkSetup<'a> {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     }
+}
+
+fn build_bgp_ip_config(
+    allowed_import: &ImportExportPolicy,
+    allowed_export: &ImportExportPolicy,
+) -> (Ipv4UnicastConfig, Ipv6UnicastConfig) {
+    let (import_policy4, import_policy6) = match allowed_import {
+        ImportExportPolicy::NoFiltering => (
+            MgImportExportPolicy4::NoFiltering,
+            MgImportExportPolicy6::NoFiltering,
+        ),
+        ImportExportPolicy::Allow(ip_nets) => {
+            let (v4, v6) = ip_nets.iter().partition_map(|net| match net {
+                IpNet::V4(v4) => {
+                    let v4 = Prefix4 { value: v4.prefix(), length: v4.width() };
+                    Either::Left(v4)
+                }
+                IpNet::V6(v6) => {
+                    let v6 = Prefix6 { value: v6.prefix(), length: v6.width() };
+                    Either::Right(v6)
+                }
+            });
+            (MgImportExportPolicy4::Allow(v4), MgImportExportPolicy6::Allow(v6))
+        }
+    };
+    let (export_policy4, export_policy6) = match allowed_export {
+        ImportExportPolicy::NoFiltering => (
+            MgImportExportPolicy4::NoFiltering,
+            MgImportExportPolicy6::NoFiltering,
+        ),
+        ImportExportPolicy::Allow(ip_nets) => {
+            let (v4, v6) = ip_nets.iter().partition_map(|net| match net {
+                IpNet::V4(v4) => {
+                    let v4 = Prefix4 { value: v4.prefix(), length: v4.width() };
+                    Either::Left(v4)
+                }
+                IpNet::V6(v6) => {
+                    let v6 = Prefix6 { value: v6.prefix(), length: v6.width() };
+                    Either::Right(v6)
+                }
+            });
+            (MgImportExportPolicy4::Allow(v4), MgImportExportPolicy6::Allow(v6))
+        }
+    };
+    // TODO(ben) where does the nexthop come from?
+    (
+        Ipv4UnicastConfig {
+            export_policy: export_policy4,
+            import_policy: import_policy4,
+            nexthop: None,
+        },
+        Ipv6UnicastConfig {
+            export_policy: export_policy6,
+            import_policy: import_policy6,
+            nexthop: None,
+        },
+    )
 }
 
 // This is derived from `retry_policy_internal_service_aggressive` with a

@@ -112,7 +112,7 @@ impl Gateway {
 }
 
 /// Convert a nexus [IpNet] to an OPTE [IpCidr].
-fn net_to_cidr(net: IpNet) -> IpCidr {
+pub fn net_to_cidr(net: IpNet) -> IpCidr {
     match net {
         IpNet::V4(net) => IpCidr::Ip4(Ipv4Cidr::new(
             net.addr().into(),
@@ -146,6 +146,12 @@ fn router_target_opte(target: &shared::RouterTarget) -> RouterTarget {
         Ip(ip) => RouterTarget::Ip((*ip).into()),
         VpcSubnet(net) => RouterTarget::VpcSubnet(net_to_cidr(*net)),
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AttachedSubnet {
+    pub cidr: IpCidr,
+    pub is_external: bool,
 }
 
 #[cfg(test)]
