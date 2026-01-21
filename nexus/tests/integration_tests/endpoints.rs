@@ -1148,12 +1148,9 @@ pub static DEMO_FLOAT_IP_CREATE: LazyLock<params::FloatingIpCreate> =
             name: DEMO_FLOAT_IP_NAME.clone(),
             description: String::from("a new IP pool"),
         },
-        address_allocator: params::AddressAllocator::Explicit(
-            params::ExplicitAllocation {
-                ip: Some(Ipv4Addr::new(10, 0, 0, 141).into()),
-                pool: None,
-            },
-        ),
+        address_allocator: params::AddressAllocator::Explicit {
+            ip: Ipv4Addr::new(10, 0, 0, 141).into(),
+        },
     });
 
 pub static DEMO_FLOAT_IP_UPDATE: LazyLock<params::FloatingIpUpdate> =

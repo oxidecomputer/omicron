@@ -75,7 +75,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2026012000, ADDRESS_ALLOCATOR_OPTIONAL_IP),
+    (2026012000, FLOATING_IP_ALLOCATOR_UPDATE),
     (2026011600, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
     (2026011501, AUDIT_LOG_CREDENTIAL_ID),
     (2026011500, AUDIT_LOG_AUTH_METHOD_ENUM),
@@ -1366,7 +1366,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/floating-ips",
         tags = ["floating-ips"],
-        versions = VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR..VERSION_ADDRESS_ALLOCATOR_OPTIONAL_IP,
+        versions = VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR..VERSION_FLOATING_IP_ALLOCATOR_UPDATE,
     }]
     async fn v2026011600_floating_ip_create(
         rqctx: RequestContext<Self::Context>,
@@ -1383,13 +1383,13 @@ pub trait NexusExternalApi {
 
     /// Create a floating IP
     ///
-    /// A specific IP address can be requested, or an IP can be auto-allocated
-    /// from a specified pool.
+    /// A specific IP address can be reserved, or an IP can be auto-allocated
+    /// from a specific pool or the silo's default pool.
     #[endpoint {
         method = POST,
         path = "/v1/floating-ips",
         tags = ["floating-ips"],
-        versions = VERSION_ADDRESS_ALLOCATOR_OPTIONAL_IP..,
+        versions = VERSION_FLOATING_IP_ALLOCATOR_UPDATE..,
     }]
     async fn floating_ip_create(
         rqctx: RequestContext<Self::Context>,

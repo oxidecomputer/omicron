@@ -3,13 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Types from API version 2026011600 (`RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR`)
-//! that changed in version 2026012000 (`ADDRESS_ALLOCATOR_OPTIONAL_IP`).
+//! that changed in version 2026012000 (`FLOATING_IP_ALLOCATOR_UPDATE`).
 //!
-//! ## Explicit Allocation Changes
+//! ## AddressAllocator Changes
 //!
-//! [`AddressAllocator::Explicit`] requires the `ip` field.
-//! `ADDRESS_ALLOCATOR_OPTIONAL_IP` makes `ip` optional, allowing allocation
-//! from a pool without specifying an IP.
+//! This version's [`AddressAllocator::Explicit`] has both `ip` and optional `pool` fields.
+//! `FLOATING_IP_ALLOCATOR_UPDATE` simplifies `Explicit` to only require `ip` (pool is
+//! inferred from the address), with pool-based allocation moving to
+//! `Auto(PoolSelector::Explicit { pool })`.
 //!
 //! Affected endpoints:
 //! - `POST /v1/floating-ips` (floating_ip_create)
@@ -59,11 +60,9 @@ impl Default for AddressAllocator {
 impl From<AddressAllocator> for params::AddressAllocator {
     fn from(value: AddressAllocator) -> Self {
         match value {
-            AddressAllocator::Explicit { ip, pool } => {
-                params::AddressAllocator::Explicit(params::ExplicitAllocation {
-                    ip: Some(ip),
-                    pool,
-                })
+            // Pool field is ignored since the IP uniquely identifies the pool
+            AddressAllocator::Explicit { ip, pool: _ } => {
+                params::AddressAllocator::Explicit { ip }
             }
             AddressAllocator::Auto { pool_selector } => {
                 params::AddressAllocator::Auto { pool_selector }
@@ -98,6 +97,7 @@ mod tests {
     use crate::test_utils::{
         identity_strategy, optional_name_or_id_strategy, pool_selector_strategy,
     };
+    use omicron_common::api::external::IpVersion;
     use proptest::prelude::*;
     use std::net::IpAddr;
     use test_strategy::proptest;
@@ -123,8 +123,7 @@ mod tests {
     }
 
     /// Verifies that conversion to params::FloatingIpCreate preserves identity
-    /// and correctly maps AddressAllocator with required ip to AddressAllocator
-    /// with optional ip.
+    /// and correctly maps AddressAllocator.
     #[proptest]
     fn floating_ip_create_converts_correctly(
         #[strategy(floating_ip_create_strategy())] expected: FloatingIpCreate,
@@ -139,84 +138,99 @@ mod tests {
         );
 
         match expected.address_allocator {
-            AddressAllocator::Explicit {
-                ip: expected_ip,
-                pool: expected_pool,
-            } => {
-                let params::AddressAllocator::Explicit(explicit) =
-                    actual.address_allocator
-                else {
-                    return Err(TestCaseError::fail(
-                        "expected Explicit variant",
-                    ));
-                };
-                prop_assert_eq!(Some(expected_ip), explicit.ip);
-                prop_assert_eq!(expected_pool, explicit.pool);
+            AddressAllocator::Explicit { ip: expected_ip, .. } => {
+                match actual.address_allocator {
+                    params::AddressAllocator::Explicit { ip } => {
+                        prop_assert_eq!(expected_ip, ip);
+                    }
+                    _ => {
+                        return Err(TestCaseError::fail(
+                            "expected Explicit variant",
+                        ));
+                    }
+                }
             }
             AddressAllocator::Auto {
                 pool_selector: expected_pool_selector,
-            } => {
-                let params::AddressAllocator::Auto {
+            } => match actual.address_allocator {
+                params::AddressAllocator::Auto {
                     pool_selector: actual_pool_selector,
-                } = actual.address_allocator
-                else {
+                } => {
+                    prop_assert_eq!(
+                        expected_pool_selector,
+                        actual_pool_selector
+                    );
+                }
+                _ => {
                     return Err(TestCaseError::fail("expected Auto variant"));
-                };
-                prop_assert_eq!(expected_pool_selector, actual_pool_selector);
-            }
+                }
+            },
         }
     }
 
-    /// Verifies that JSON serialized from this version can be deserialized into
-    /// the latest params version.
-    #[proptest]
-    fn wire_format_compatible_with_latest(
-        #[strategy(address_allocator_strategy())] allocator: AddressAllocator,
-    ) {
-        let json = serde_json::to_string(&allocator).unwrap();
-        let parsed: params::AddressAllocator =
-            serde_json::from_str(&json).unwrap();
-
-        match allocator {
-            AddressAllocator::Explicit { ip, pool } => {
-                let params::AddressAllocator::Explicit(explicit) = parsed
-                else {
-                    panic!("Expected Explicit variant");
-                };
-                assert_eq!(Some(ip), explicit.ip);
-                assert_eq!(pool, explicit.pool);
-            }
-            AddressAllocator::Auto { pool_selector } => {
-                let params::AddressAllocator::Auto { pool_selector: actual } =
-                    parsed
-                else {
-                    panic!("Expected Auto variant");
-                };
-                assert_eq!(pool_selector, actual);
-            }
-        }
-    }
-
-    /// Verifies explicit JSON wire format with required ip.
+    /// Verifies explicit JSON wire format.
     #[test]
     fn explicit_json_wire_format() {
-        let json =
-            r#"{"type": "explicit", "ip": "10.0.0.1", "pool": "my-pool"}"#;
+        let json = r#"{"type": "explicit", "ip": "10.0.0.1"}"#;
 
-        // Must parse into this version
-        let v2026011600: AddressAllocator = serde_json::from_str(json).unwrap();
-        assert!(matches!(v2026011600, AddressAllocator::Explicit { .. }));
+        let parsed: AddressAllocator = serde_json::from_str(json).unwrap();
+        match parsed {
+            AddressAllocator::Explicit { ip, .. } => {
+                let expected: IpAddr = "10.0.0.1".parse().unwrap();
+                assert_eq!(ip, expected);
+            }
+            _ => panic!("Expected Explicit variant"),
+        }
+    }
 
-        // Must also parse into latest params
-        let latest: params::AddressAllocator =
-            serde_json::from_str(json).unwrap();
-        let params::AddressAllocator::Explicit(explicit) = latest else {
-            panic!("Expected Explicit variant");
-        };
-        assert_eq!(explicit.ip, Some("10.0.0.1".parse().unwrap()));
-        assert_eq!(
-            explicit.pool,
-            Some(NameOrId::Name("my-pool".parse().unwrap()))
-        );
+    /// Verifies auto JSON wire format with explicit pool selector.
+    #[test]
+    fn auto_explicit_pool_json_wire_format() {
+        let json = r#"{"type": "auto", "pool_selector": {"type": "explicit", "pool": "my-pool"}}"#;
+
+        let parsed: AddressAllocator = serde_json::from_str(json).unwrap();
+        match parsed {
+            AddressAllocator::Auto { pool_selector } => {
+                assert!(matches!(
+                    pool_selector,
+                    params::PoolSelector::Explicit { .. }
+                ));
+            }
+            _ => panic!("Expected Auto variant"),
+        }
+    }
+
+    /// Verifies auto JSON wire format with auto pool selector.
+    #[test]
+    fn auto_auto_pool_json_wire_format() {
+        let json = r#"{"type": "auto", "pool_selector": {"type": "auto", "ip_version": "v4"}}"#;
+
+        let parsed: AddressAllocator = serde_json::from_str(json).unwrap();
+        match parsed {
+            AddressAllocator::Auto { pool_selector } => match pool_selector {
+                params::PoolSelector::Auto { ip_version } => {
+                    assert_eq!(ip_version, Some(IpVersion::V4));
+                }
+                _ => panic!("Expected Auto pool selector"),
+            },
+            _ => panic!("Expected Auto variant"),
+        }
+    }
+
+    /// Verifies auto JSON wire format with default pool selector.
+    #[test]
+    fn auto_default_json_wire_format() {
+        let json = r#"{"type": "auto"}"#;
+
+        let parsed: AddressAllocator = serde_json::from_str(json).unwrap();
+        match parsed {
+            AddressAllocator::Auto { pool_selector } => match pool_selector {
+                params::PoolSelector::Auto { ip_version } => {
+                    assert_eq!(ip_version, None);
+                }
+                _ => panic!("Expected Auto pool selector"),
+            },
+            _ => panic!("Expected Auto variant"),
+        }
     }
 }

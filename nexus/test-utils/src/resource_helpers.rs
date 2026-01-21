@@ -384,8 +384,7 @@ pub async fn create_floating_ip(
     client: &ClientTestContext,
     fip_name: &str,
     project: &str,
-    ip: Option<IpAddr>,
-    parent_pool_name: Option<&str>,
+    address_allocator: params::AddressAllocator,
 ) -> FloatingIp {
     object_create(
         client,
@@ -395,25 +394,7 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            address_allocator: match (ip, parent_pool_name) {
-                (Some(ip), pool) => params::AddressAllocator::Explicit(
-                    params::ExplicitAllocation {
-                        ip: Some(ip),
-                        pool: pool.map(|v| NameOrId::Name(v.parse().unwrap())),
-                    },
-                ),
-                (None, Some(pool)) => params::AddressAllocator::Explicit(
-                    params::ExplicitAllocation {
-                        ip: None,
-                        pool: Some(NameOrId::Name(pool.parse().unwrap())),
-                    },
-                ),
-                (None, None) => params::AddressAllocator::Auto {
-                    pool_selector: params::PoolSelector::Auto {
-                        ip_version: None,
-                    },
-                },
-            },
+            address_allocator,
         },
     )
     .await

@@ -2873,7 +2873,7 @@
           "floating-ips"
         ],
         "summary": "Create a floating IP",
-        "description": "A specific IP address can be requested, or an IP can be auto-allocated from a specified pool.",
+        "description": "A specific IP address can be reserved, or an IP can be auto-allocated from a specific pool or the silo's default pool.",
         "operationId": "floating_ip_create",
         "parameters": [
           {
@@ -14049,23 +14049,13 @@
         "description": "Specify how to allocate a floating IP address.",
         "oneOf": [
           {
-            "description": "Reserve a specific IP address, or allocate from a specific pool.",
+            "description": "Reserve a specific IP address. The pool is inferred from the address since IP pools cannot have overlapping ranges.",
             "type": "object",
             "properties": {
               "ip": {
-                "nullable": true,
-                "description": "The IP address to reserve. If not specified, an address will be automatically allocated from the specified pool.",
+                "description": "The IP address to reserve.",
                 "type": "string",
                 "format": "ip"
-              },
-              "pool": {
-                "nullable": true,
-                "description": "The pool to allocate from. Required if `ip` is not specified. If `ip` is specified, this constrains which pool it must belong to.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NameOrId"
-                  }
-                ]
               },
               "type": {
                 "type": "string",
@@ -14075,15 +14065,17 @@
               }
             },
             "required": [
+              "ip",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
-            "description": "Automatically allocate an IP address from a specified pool.",
+            "description": "Automatically allocate an IP address from a pool.",
             "type": "object",
             "properties": {
               "pool_selector": {
-                "description": "Pool selection.\n\nIf omitted, this field uses the silo's default pool. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified in the pool selector.",
+                "description": "Pool selection.\n\nIf omitted, the silo's default pool is used. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified.",
                 "default": {
                   "ip_version": null,
                   "type": "auto"
