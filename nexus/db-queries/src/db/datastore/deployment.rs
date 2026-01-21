@@ -691,6 +691,8 @@ impl DataStore {
         // ================================================================
 
         // Load sled metadata rows
+        //
+        // (sled metadata, slot A version, slot B version)
         let raw_sled_metadata: Vec<(
             BpSledMetadata,
             Option<DbArtifactVersion>,
@@ -835,7 +837,7 @@ impl DataStore {
             rows
         };
 
-        // Load physical disk rows
+        // Load all the physical disks for each sled.
         let raw_disks: Vec<BpOmicronPhysicalDisk> = {
             use nexus_db_schema::schema::bp_omicron_physical_disk::dsl;
 
@@ -866,7 +868,7 @@ impl DataStore {
             rows
         };
 
-        // Load dataset rows
+        // Load all the datasets for each sled
         let raw_datasets: Vec<BpOmicronDataset> = {
             use nexus_db_schema::schema::bp_omicron_dataset::dsl;
 
@@ -897,7 +899,7 @@ impl DataStore {
             rows
         };
 
-        // Load clickhouse cluster config
+        // Load our `ClickhouseClusterConfig` if it exists
         let raw_clickhouse_config: Option<BpClickhouseClusterConfig> = {
             use nexus_db_schema::schema::bp_clickhouse_cluster_config::dsl;
 
@@ -1026,6 +1028,7 @@ impl DataStore {
             rows
         };
 
+        // Load all pending RoT updates.
         let raw_pending_rot: Vec<BpPendingMgsUpdateRot> = {
             use nexus_db_schema::schema::bp_pending_mgs_update_rot::dsl;
 
@@ -1054,6 +1057,7 @@ impl DataStore {
             rows
         };
 
+        // Load all pending SP updates.
         let raw_pending_sp: Vec<BpPendingMgsUpdateSp> = {
             use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl;
 
@@ -1082,6 +1086,7 @@ impl DataStore {
             rows
         };
 
+        // Load all pending host_phase_1 updates.
         let raw_pending_host_phase_1: Vec<BpPendingMgsUpdateHostPhase1> = {
             #[rustfmt::skip]
             use nexus_db_schema::schema::bp_pending_mgs_update_host_phase_1::dsl;
@@ -1224,7 +1229,10 @@ impl DataStore {
             );
         }
 
-        // Build NIC map and validate no duplicates
+        // Assemble a mutable map of all the NICs found, by NIC id.  As we
+        // match these up with the corresponding zone below, we'll remove items
+        // from this set.  That way we can tell if the same NIC was used twice
+        // or not used at all.
         let mut omicron_zone_nics: BTreeMap<_, _> = BTreeMap::new();
         for n in raw_zone_nics {
             let nic_id = n.id;
@@ -1416,7 +1424,7 @@ impl DataStore {
                             )
                             .map_err(|_| {
                                 Error::internal_error(&format!(
-                                    "max server id is negative: {}",
+                                    "keeper committed log index is negative: {}",
                                     bp_config
                                         .highest_seen_keeper_leader_committed_log_index
                                 ))
