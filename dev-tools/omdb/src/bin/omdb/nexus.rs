@@ -6,6 +6,7 @@
 
 mod quiesce;
 mod reconfigurator_config;
+mod support_bundle_config;
 mod update_status;
 
 use crate::Omdb;
@@ -101,6 +102,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+use support_bundle_config::SupportBundleConfigArgs;
+use support_bundle_config::cmd_nexus_support_bundle_config;
 use support_bundle_viewer::LocalFileAccess;
 use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
@@ -160,6 +163,8 @@ enum NexusCommands {
     ReconfiguratorConfig(ReconfiguratorConfigArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
+    /// interact with support bundle auto-deletion config
+    SupportBundleConfig(SupportBundleConfigArgs),
     /// interact with sleds
     Sleds(SledsArgs),
     /// interact with support bundles
@@ -781,6 +786,10 @@ impl NexusArgs {
 
             NexusCommands::ReconfiguratorConfig(args) => {
                 cmd_nexus_reconfigurator_config(&omdb, &client, args).await
+            }
+
+            NexusCommands::SupportBundleConfig(args) => {
+                cmd_nexus_support_bundle_config(&omdb, log, args).await
             }
 
             NexusCommands::Sagas(SagasArgs { command }) => {

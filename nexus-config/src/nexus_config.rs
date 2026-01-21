@@ -27,7 +27,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::num::NonZeroU32;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -487,25 +486,8 @@ pub struct SupportBundleCollectorConfig {
     /// Default: Off
     #[serde(default)]
     pub disable: bool,
-
-    /// Target number of free debug datasets to maintain for new allocations.
-    ///
-    /// When the number of free debug datasets drops below this value, the
-    /// oldest support bundles will be automatically deleted to free up space.
-    ///
-    /// Default: None (auto-deletion disabled)
-    #[serde(default)]
-    pub target_free_datasets: Option<NonZeroU32>,
-
-    /// Minimum number of bundles to retain, even if `target_free_datasets`
-    /// would otherwise trigger deletion.
-    ///
-    /// This prevents aggressive cleanup on small systems where the number of
-    /// debug datasets is less than or equal to `target_free_datasets`.
-    ///
-    /// Default: None (no minimum, can delete all bundles)
-    #[serde(default)]
-    pub min_bundles_to_keep: Option<NonZeroU32>,
+    // NOTE: Auto-deletion configuration (target_free_percent, min_keep_percent)
+    // is now stored in the database's support_bundle_config table.
 }
 
 #[serde_as]
@@ -1387,8 +1369,6 @@ mod test {
                             SupportBundleCollectorConfig {
                                 period_secs: Duration::from_secs(30),
                                 disable: false,
-                                target_free_datasets: None,
-                                min_bundles_to_keep: None,
                             },
                         physical_disk_adoption: PhysicalDiskAdoptionConfig {
                             period_secs: Duration::from_secs(30),

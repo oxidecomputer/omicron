@@ -32,7 +32,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
-use std::num::NonZeroU32;
 use uuid::Uuid;
 
 const CANNOT_ALLOCATE_ERR_MSG: &'static str = "Current policy limits support bundle creation to 'one per external disk', and \
@@ -543,33 +542,29 @@ impl DataStore {
     /// Atomically finds and deletes support bundles to maintain free dataset buffer.
     ///
     /// This method performs a single atomic operation that:
-    /// 1. Calculates how many deletions are needed (free_datasets < target)
-    /// 2. Applies min_bundles_to_keep constraint (never delete below minimum)
-    /// 3. Finds the N oldest Active bundles
-    /// 4. Transitions them to Destroying state atomically
-    /// 5. Returns what was actually deleted
+    /// 1. Reads config from the `support_bundle_config` table
+    /// 2. Calculates thresholds based on percentage of total datasets
+    /// 3. Calculates how many deletions are needed (free_datasets < target)
+    /// 4. Applies min_keep constraint (never delete below minimum)
+    /// 5. Finds the N oldest Active bundles
+    /// 6. Transitions them to Destroying state atomically
+    /// 7. Returns what was actually deleted
     ///
     /// This prevents over-deletion when multiple Nexuses run concurrently,
     /// because the calculation and state transitions happen in a single
     /// database operation.
     ///
-    /// The `min_bundles_to_keep` parameter prevents aggressive cleanup on
-    /// small systems by ensuring we never delete bundles if doing so would
-    /// leave fewer than this many bundles.
+    /// Configuration is read from the database, ensuring all Nexus replicas
+    /// use consistent values.
     pub async fn support_bundle_auto_delete(
         &self,
         opctx: &OpContext,
-        target_free_datasets: NonZeroU32,
-        min_bundles_to_keep: Option<NonZeroU32>,
     ) -> Result<AutoDeletionResult, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let query = support_bundle_auto_delete_query(
-            target_free_datasets,
-            min_bundles_to_keep,
-        );
+        let query = support_bundle_auto_delete_query();
 
         // Return type: (total_datasets, used_datasets, active_bundles, deleted_ids)
         let result: (i64, i64, i64, Vec<Uuid>) = query
@@ -593,20 +588,81 @@ impl DataStore {
             free_datasets: total_datasets.saturating_sub(used_datasets),
         })
     }
+
+    /// Get the current support bundle auto-deletion config.
+    ///
+    /// The singleton row always exists (created by schema migration).
+    pub async fn support_bundle_config_get(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<crate::db::model::SupportBundleConfig, Error> {
+        use nexus_db_schema::schema::support_bundle_config::dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        dsl::support_bundle_config
+            .select(crate::db::model::SupportBundleConfig::as_select())
+            .first_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Set support bundle auto-deletion config.
+    ///
+    /// Values are percentages (0-100). The singleton row always exists
+    /// (created by schema migration), so this is an UPDATE operation.
+    pub async fn support_bundle_config_set(
+        &self,
+        opctx: &OpContext,
+        target_free_percent: u8,
+        min_keep_percent: u8,
+    ) -> Result<(), Error> {
+        use nexus_db_schema::schema::support_bundle_config::dsl;
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // Validate percentages are in range
+        if target_free_percent > 100 {
+            return Err(Error::invalid_request(
+                "target_free_percent must be between 0 and 100",
+            ));
+        }
+        if min_keep_percent > 100 {
+            return Err(Error::invalid_request(
+                "min_keep_percent must be between 0 and 100",
+            ));
+        }
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        diesel::update(dsl::support_bundle_config)
+            .filter(dsl::singleton.eq(true))
+            .set((
+                dsl::target_free_percent.eq(i64::from(target_free_percent)),
+                dsl::min_keep_percent.eq(i64::from(min_keep_percent)),
+                dsl::time_modified.eq(chrono::Utc::now()),
+            ))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
 }
 
 /// Builds the CTE query for atomic support bundle auto-deletion.
 ///
 /// This query atomically:
-/// 1. Counts datasets and bundles
-/// 2. Calculates how many bundles to delete (respecting min_bundles_to_keep)
-/// 3. Selects the oldest Active bundles
-/// 4. Transitions them to Destroying state
-/// 5. Returns the stats and deleted IDs
-pub fn support_bundle_auto_delete_query(
-    target_free_datasets: NonZeroU32,
-    min_bundles_to_keep: Option<NonZeroU32>,
-) -> TypedSqlQuery<(
+/// 1. Reads config from support_bundle_config table
+/// 2. Calculates thresholds based on percentage of total datasets using CEIL
+/// 3. Counts datasets and bundles
+/// 4. Calculates how many bundles to delete (respecting min_keep)
+/// 5. Selects the oldest Active bundles
+/// 6. Transitions them to Destroying state
+/// 7. Returns the stats and deleted IDs
+pub fn support_bundle_auto_delete_query() -> TypedSqlQuery<(
     diesel::sql_types::BigInt,
     diesel::sql_types::BigInt,
     diesel::sql_types::BigInt,
@@ -614,15 +670,18 @@ pub fn support_bundle_auto_delete_query(
 )> {
     use crate::db::raw_query_builder::QueryBuilder;
 
-    let min_keep = min_bundles_to_keep.map(|n| i64::from(n.get())).unwrap_or(0);
-
     let mut query = QueryBuilder::new();
 
     // Build the CTE query
-    query
-        .sql(
-            "
+    query.sql(
+        "
 WITH
+  -- Read config from database (singleton row always exists from migration)
+  config AS (
+    SELECT target_free_percent, min_keep_percent
+    FROM support_bundle_config
+    WHERE singleton = true
+  ),
   -- Count non-tombstoned datasets (uses lookup_usable_rendezvous_debug_dataset index)
   dataset_count AS (
     SELECT COUNT(*) as total
@@ -638,32 +697,32 @@ WITH
     FROM support_bundle
     WHERE state IN ('collecting', 'active', 'destroying', 'failing')
   ),
-  -- Count active bundles (for min_bundles_to_keep check)
+  -- Count active bundles (for min_keep check)
   active_count AS (
     SELECT COUNT(*) as active
     FROM support_bundle
     WHERE state = 'active'
   ),
+  -- Calculate absolute thresholds from percentages using CEIL.
+  -- CEIL ensures we always round up, so 10% of 5 datasets = 1, not 0.
+  thresholds AS (
+    SELECT
+      CEIL((SELECT total FROM dataset_count) * (SELECT target_free_percent FROM config) / 100.0)::INT8 as target_free,
+      CEIL((SELECT total FROM dataset_count) * (SELECT min_keep_percent FROM config) / 100.0)::INT8 as min_keep
+  ),
   -- Calculate how many bundles we need AND are allowed to delete.
-  -- min_bundles_to_keep is respected first (max_deletable constraint).
+  -- min_keep is respected first (max_deletable constraint).
   deletion_calc AS (
     SELECT
       (SELECT total FROM dataset_count) as total_datasets,
       (SELECT used FROM used_count) as used_datasets,
       (SELECT active FROM active_count) as active_bundles,
       GREATEST(0,
-        ",
-        )
-        .param()
-        .sql(
-            " - ((SELECT total FROM dataset_count) - (SELECT used FROM used_count))
+        (SELECT target_free FROM thresholds)
+        - ((SELECT total FROM dataset_count) - (SELECT used FROM used_count))
       ) as bundles_needed,
       GREATEST(0,
-        (SELECT active FROM active_count) - ",
-        )
-        .param()
-        .sql(
-            "
+        (SELECT active FROM active_count) - (SELECT min_keep FROM thresholds)
       ) as max_deletable
   ),
   -- Find the N oldest active bundles we're allowed to delete.
@@ -690,9 +749,7 @@ SELECT
   (SELECT active_bundles FROM deletion_calc),
   ARRAY(SELECT id FROM deleted) as deleted_ids
 ",
-        )
-        .bind::<diesel::sql_types::BigInt, _>(i64::from(target_free_datasets.get()))
-        .bind::<diesel::sql_types::BigInt, _>(min_keep);
+    );
 
     query.query()
 }
@@ -1731,14 +1788,15 @@ mod test {
         // Create 5 debug datasets (pools)
         let _test_sled = create_sled_and_zpools(&datastore, &opctx, 5).await;
 
-        // With target_free=3 and 5 datasets, no bundles, free=5 >= 3
-        // Should delete no bundles
+        // Set config: 60% target_free (CEIL(5*60/100)=3), 0% min_keep
+        // With 5 datasets, no bundles, free=5 >= 3, should delete no bundles
+        datastore
+            .support_bundle_config_set(&opctx, 60, 0)
+            .await
+            .expect("Should set config");
+
         let result = datastore
-            .support_bundle_auto_delete(
-                &opctx,
-                NonZeroU32::new(3).unwrap(),
-                None,
-            )
+            .support_bundle_auto_delete(&opctx)
             .await
             .expect("Should succeed");
 
@@ -1781,13 +1839,15 @@ mod test {
                 .expect("Should update state");
         }
 
-        // With target_free=3 and free=5 >= 3, should delete no bundles
+        // Set config: 30% target_free (CEIL(10*30/100)=3), 0% min_keep
+        // With 10 datasets, 5 bundles, free=5 >= 3, should delete no bundles
+        datastore
+            .support_bundle_config_set(&opctx, 30, 0)
+            .await
+            .expect("Should set config");
+
         let result = datastore
-            .support_bundle_auto_delete(
-                &opctx,
-                NonZeroU32::new(3).unwrap(),
-                None,
-            )
+            .support_bundle_auto_delete(&opctx)
             .await
             .expect("Should succeed");
 
@@ -1836,13 +1896,15 @@ mod test {
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
 
-        // With target_free=2 and free=0, we need to delete 2 bundles
+        // Set config: 40% target_free (CEIL(5*40/100)=2), 0% min_keep
+        // With 5 datasets, 5 bundles, free=0 < 2, need to delete 2 bundles
+        datastore
+            .support_bundle_config_set(&opctx, 40, 0)
+            .await
+            .expect("Should set config");
+
         let result = datastore
-            .support_bundle_auto_delete(
-                &opctx,
-                NonZeroU32::new(2).unwrap(),
-                None,
-            )
+            .support_bundle_auto_delete(&opctx)
             .await
             .expect("Should succeed");
 
@@ -1890,14 +1952,16 @@ mod test {
                 .expect("Should update state");
         }
 
-        // With target_free=3 and free=0, we'd want to delete 3 bundles
-        // But min_bundles_to_keep=4 means we can only delete 1 (5-4=1)
+        // Set config: 60% target_free (CEIL(5*60/100)=3), 80% min_keep (CEIL(5*80/100)=4)
+        // With free=0, we'd want to delete 3 bundles
+        // But min_keep=4 means we can only delete 1 (5-4=1)
+        datastore
+            .support_bundle_config_set(&opctx, 60, 80)
+            .await
+            .expect("Should set config");
+
         let result = datastore
-            .support_bundle_auto_delete(
-                &opctx,
-                NonZeroU32::new(3).unwrap(),
-                Some(NonZeroU32::new(4).unwrap()),
-            )
+            .support_bundle_auto_delete(&opctx)
             .await
             .expect("Should succeed");
 
@@ -1942,22 +2006,23 @@ mod test {
                 .expect("Should update state");
         }
 
-        // With target_free=5 (want all datasets free) and free=2
-        // We'd want to delete 3 bundles, but min_bundles_to_keep=5 is > 3 active
+        // Set config: 100% target_free (CEIL(5*100/100)=5), 100% min_keep (CEIL(5*100/100)=5)
+        // With free=2, we'd want to delete 3 bundles, but min_keep=5 > active=3
         // So we can't delete any
+        datastore
+            .support_bundle_config_set(&opctx, 100, 100)
+            .await
+            .expect("Should set config");
+
         let result = datastore
-            .support_bundle_auto_delete(
-                &opctx,
-                NonZeroU32::new(5).unwrap(),
-                Some(NonZeroU32::new(5).unwrap()),
-            )
+            .support_bundle_auto_delete(&opctx)
             .await
             .expect("Should succeed");
 
         assert_eq!(result.total_datasets, 5);
         assert_eq!(result.active_bundles, 3);
         assert_eq!(result.free_datasets, 2);
-        // min_bundles_to_keep (5) > active_bundles (3), so no deletion
+        // min_keep (5) > active_bundles (3), so no deletion
         assert!(result.deleted_ids.is_empty());
 
         db.terminate().await;
@@ -2012,15 +2077,17 @@ mod test {
             .await
             .expect("Should update state");
 
-        // With target_free=5 and 3 bundles (1 Active, 1 Collecting, 1 Destroying),
+        // Set config: 100% target_free (CEIL(5*100/100)=5), 0% min_keep
+        // With 3 bundles (1 Active, 1 Collecting, 1 Destroying),
         // free_datasets = 5 - 3 = 2 (ALL bundles occupy datasets, not just Active)
         // We should only delete Active bundles though
+        datastore
+            .support_bundle_config_set(&opctx, 100, 0)
+            .await
+            .expect("Should set config");
+
         let result = datastore
-            .support_bundle_auto_delete(
-                &opctx,
-                NonZeroU32::new(5).unwrap(),
-                None,
-            )
+            .support_bundle_auto_delete(&opctx)
             .await
             .expect("Should succeed");
 
@@ -2082,13 +2149,15 @@ mod test {
             assert_eq!(bundle.state, SupportBundleState::Active);
         }
 
-        // With target_free=2 and free=0, delete 2 bundles
+        // Set config: 50% target_free → CEIL(3*50/100)=2, 0% min_keep
+        datastore
+            .support_bundle_config_set(&opctx, 50, 0)
+            .await
+            .expect("Should set config");
+
+        // With target_free=2 (from 50% of 3 datasets) and free=0, delete 2 bundles
         let result = datastore
-            .support_bundle_auto_delete(
-                &opctx,
-                NonZeroU32::new(2).unwrap(),
-                None,
-            )
+            .support_bundle_auto_delete(&opctx)
             .await
             .expect("Should succeed");
 
@@ -2156,13 +2225,15 @@ mod test {
             bundle_ids.push(bundle.id);
         }
 
+        // Set config: 20% target_free → CEIL(3*20/100)=1, 0% min_keep
+        datastore
+            .support_bundle_config_set(&opctx, 20, 0)
+            .await
+            .expect("Should set config");
+
         // All 3 datasets are used, free=0
         let result = datastore
-            .support_bundle_auto_delete(
-                &opctx,
-                NonZeroU32::new(1).unwrap(),
-                None,
-            )
+            .support_bundle_auto_delete(&opctx)
             .await
             .expect("Should succeed");
 
@@ -2193,12 +2264,9 @@ mod test {
         // - Total datasets: 3
         // - Used by non-Failed bundles: 2 (Destroying + Active)
         // - Free datasets: 3 - 2 = 1
+        // Config still: 20% target_free (CEIL(3*20/100)=1), 0% min_keep
         let result = datastore
-            .support_bundle_auto_delete(
-                &opctx,
-                NonZeroU32::new(1).unwrap(),
-                None,
-            )
+            .support_bundle_auto_delete(&opctx)
             .await
             .expect("Should succeed");
 
@@ -2222,10 +2290,7 @@ mod test {
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let conn = db.pool().claim().await.unwrap();
 
-        let query = support_bundle_auto_delete_query(
-            NonZeroU32::new(3).unwrap(),
-            Some(NonZeroU32::new(5).unwrap()),
-        );
+        let query = support_bundle_auto_delete_query();
 
         let _ = query.explain_async(&conn).await.unwrap_or_else(|e| {
             panic!("Failed to explain query, is it valid SQL?\nerror: {e:#?}")
@@ -2239,10 +2304,7 @@ mod test {
     async fn expectorate_auto_delete_query() {
         use crate::db::raw_query_builder::expectorate_query_contents;
 
-        let query = support_bundle_auto_delete_query(
-            NonZeroU32::new(3).unwrap(),
-            Some(NonZeroU32::new(5).unwrap()),
-        );
+        let query = support_bundle_auto_delete_query();
         expectorate_query_contents(
             query,
             "tests/output/support_bundle_auto_delete.sql",

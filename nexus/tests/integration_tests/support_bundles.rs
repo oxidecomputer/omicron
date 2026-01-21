@@ -29,7 +29,6 @@ use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
-use std::num::NonZeroU32;
 use zip::read::ZipArchive;
 
 type ControlPlaneTestContext =
@@ -938,49 +937,46 @@ async fn test_support_bundle_delete_failed_bundle(
 // Test automatic deletion of support bundles to maintain free dataset capacity.
 //
 // This test verifies that:
-// 1. Auto-deletion kicks in when free_datasets < target_free_datasets
+// 1. Auto-deletion kicks in when free_datasets < target threshold
 // 2. The oldest bundles are marked for deletion first
-// 3. min_bundles_to_keep is respected
+// 3. min_keep percentage is respected
 //
-// Configuration: target_free_datasets=1, min_bundles_to_keep=1, 5 datasets
+// Configuration: 20% target_free (CEIL(5*20/100)=1), 20% min_keep (CEIL(5*20/100)=1), 5 datasets
 // Create 5 bundles (filling all datasets), and verify auto-deletion happens
 // when we run out of free datasets.
 #[tokio::test]
 async fn test_support_bundle_auto_deletion() {
-    // Create a test context with auto-deletion enabled:
-    // - target_free_datasets=1: try to maintain 1 free dataset
-    // - min_bundles_to_keep=1: always keep at least 1 bundle
     let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
         "test_support_bundle_auto_deletion",
     )
-    .customize_nexus_config(&|config| {
-        config
-            .pkg
-            .background_tasks
-            .support_bundle_collector
-            .target_free_datasets = Some(NonZeroU32::new(1).unwrap());
-        config
-            .pkg
-            .background_tasks
-            .support_bundle_collector
-            .min_bundles_to_keep = Some(NonZeroU32::new(1).unwrap());
-    })
     .start::<omicron_nexus::Server>()
     .await;
 
     let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    // Set auto-deletion config in the database:
+    // - target_free_percent=20: CEIL(5*20/100)=1 free dataset target
+    // - min_keep_percent=20: CEIL(5*20/100)=1 bundle minimum
+    datastore
+        .support_bundle_config_set(&opctx, 20, 20)
+        .await
+        .expect("Should be able to set config");
 
     // Create 5 zpools, giving us 5 debug datasets
     let _disk_test =
         DiskTestBuilder::new(&cptestctx).with_zpool_count(5).build().await;
 
     // Create and activate bundles one by one.
-    // With 5 datasets and target_free=1:
+    // With 5 datasets and 20% target_free (CEIL(5*20/100)=1):
     // - After bundles 1-4: free >= 1, so no auto-delete needed
     // - When creating bundle 5:
     //   - Before collection: 4 Active + 1 Collecting = 5 bundles, free = 0
     //   - Auto-delete triggers: want 1 free, have 0, delete 1 oldest
-    //   - min_keep=1, active=4, max_deletable=3, so we CAN delete
+    //   - 20% min_keep (CEIL(5*20/100)=1), active=4, max_deletable=3, so we CAN delete
     //   - Result: oldest bundle deleted, then bundle 5 gets collected
     let mut bundle_ids = Vec::new();
     for i in 0..5 {
