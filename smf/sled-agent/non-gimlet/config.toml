@@ -120,6 +120,6 @@ if_exists = "append"
 # Create your own if you need to test a multi-node system
 # See the .kdl file for use with pki-playground for generating
 [sprockets]
-resolve = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/sprockets-auth.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/sprockets-chain.pem" }
-attest = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/sprockets-attest.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/sprockets-attest-chain.pem", log = "/opt/oxide/sled-agent/pkg/sprockets-log.bin", test_corpus = [ "/opt/oxide/sled-agent/pkg/testing-measurements/corim-rot.cbor", "/opt/oxide/sled-agent/pkg/testing-measurements/corim-sp.cbor"] }
-roots = ["/opt/oxide/sled-agent/pkg/root.cert.pem"]
+resolve = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/test-sprockets-auth-1.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/test-sprockets-auth-1.certlist.pem" }
+attest = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/test-alias-1.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/test-alias-1.certlist.pem", log = "/opt/oxide/sled-agent/pkg/sprockets-log.bin", test_corpus = [ "/opt/oxide/sled-agent/pkg/testing-measurements/corim-rot.cbor", "/opt/oxide/sled-agent/pkg/testing-measurements/corim-sp.cbor"] }
+roots = ["/opt/oxide/sled-agent/pkg/test-root-a.cert.pem"]

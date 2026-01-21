@@ -302,6 +302,18 @@ async fn siu_fetch_state_and_start_real_saga(
             .instance_updater_unlock(&opctx, &authz_instance, &orig_lock)
             .await
             .map_err(ActionError::action_failed)?;
+        // If we're releasing the lock, check if we should activate the
+        // instance reincarnation background task to reincarnate this
+        // instance. A previous activation may have not been able to
+        // reincarnate this instance because we held the lock, so poking the
+        // reincarnation task here should help ensure it sees a failed instance
+        // in a timely manner.
+        //
+        // This doesn't matter a whole lot in production systems, where the task
+        // will activate periodically regardless, but it should make the tests
+        // less flakey, and hopefully also decrease the latency with which
+        // failed instances are reincarnated a bit, maybe?
+        super::reincarnate_if_needed(osagactx, &state);
     }
 
     Ok(())
