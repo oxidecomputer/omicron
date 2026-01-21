@@ -16,6 +16,8 @@ use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_types::rot::RotSlot;
 use iddqd::id_ord_map;
+use illumos_utils::svcs::SvcInMaintenance;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
@@ -581,6 +583,7 @@ pub fn representative() -> Representative {
                         has_mupdate_override: true,
                     },
                 ),
+                HealthMonitorInventory::new(),
             ),
         )
         .unwrap();
@@ -615,6 +618,7 @@ pub fn representative() -> Representative {
                         has_mupdate_override: false,
                     },
                 ),
+                HealthMonitorInventory::new(),
             ),
         )
         .unwrap();
@@ -647,13 +651,14 @@ pub fn representative() -> Representative {
                         has_mupdate_override: true,
                     },
                 ),
+                HealthMonitorInventory::new(),
             ),
         )
         .unwrap();
 
     // Finally, report a sled with unknown baseboard information.  This should
     // look the same as the PC as far as inventory is concerned but let's verify
-    // it.
+    // it. Additionally, this sled will report a few SMF services in maintenance.
     let sled_agent_id_unknown =
         "5c5b4cf9-3e13-45fd-871c-f177d6537510".parse().unwrap();
 
@@ -674,6 +679,18 @@ pub fn representative() -> Representative {
                 file_source_resolver(
                     OmicronFileSourceResolverExampleKind::Error,
                 ),
+                HealthMonitorInventory {
+                    smf_services_in_maintenance: Ok(SvcsInMaintenanceResult {
+                        services: vec![SvcInMaintenance {
+                            fmri: "svc:/site/fake-service:default".to_string(),
+                            zone: "global".to_string(),
+                        }],
+                        errors: vec!["an unimportant error".to_string()],
+                        time_of_status: Some(
+                            "2026-01-01T00:00:00Z".parse().unwrap(),
+                        ),
+                    }),
+                },
             ),
         )
         .unwrap();
@@ -1015,6 +1032,7 @@ pub fn sled_agent(
     datasets: Vec<InventoryDataset>,
     ledgered_sled_config: Option<OmicronSledConfig>,
     file_source_resolver: OmicronFileSourceResolverInventory,
+    health_monitor: HealthMonitorInventory,
 ) -> Inventory {
     // Assume the `ledgered_sled_config` was reconciled successfully.
     let last_reconciliation = ledgered_sled_config.clone().map(|config| {
@@ -1087,9 +1105,6 @@ pub fn sled_agent(
         reconciler_status,
         last_reconciliation,
         file_source_resolver,
-        // TODO-K: We'll want to have the functionality to add some services
-        // here in a future PR. This will be more useful when we add this
-        // information to the DB.
-        health_monitor: HealthMonitorInventory::new(),
+        health_monitor,
     }
 }

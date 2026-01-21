@@ -1722,6 +1722,36 @@ table! {
 }
 
 table! {
+    inv_health_monitor_svc_in_maintenance (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        svcs_cmd_error -> Nullable<Text>,
+        // TODO-K: This might change to not nullable with omicron#9615
+        time_of_status -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    inv_health_monitor_svc_in_maintenance_service (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        fmri -> Text,
+        zone -> Text,
+    }
+}
+
+table! {
+    inv_health_monitor_svc_in_maintenance_error (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        error_message -> Text,
+    }
+}
+
+table! {
     inv_sled_boot_partition (inv_collection_id, sled_id, boot_disk_slot) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,

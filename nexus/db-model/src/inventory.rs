@@ -9,6 +9,7 @@ use crate::Generation;
 use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
+use crate::to_db_typed_uuid;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -27,12 +28,16 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use iddqd::IdOrdMap;
+use illumos_utils::svcs::SvcInMaintenance;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::inv_zone_manifest_non_boot;
 use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
+    inv_health_monitor_svc_in_maintenance,
+    inv_health_monitor_svc_in_maintenance_error,
+    inv_health_monitor_svc_in_maintenance_service,
     inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
     inv_internal_dns, inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result, inv_last_reconciliation_measurements,
@@ -63,6 +68,7 @@ use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InternalZpoolKind;
 use omicron_uuid_kinds::MupdateKind;
 use omicron_uuid_kinds::MupdateOverrideKind;
@@ -72,6 +78,8 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::SvcInMaintenanceKind;
+use omicron_uuid_kinds::SvcInMaintenanceUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
@@ -1015,6 +1023,103 @@ impl_enum_type!(
     Running => b"running"
     Idle => b"idle"
 );
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_health_monitor_svc_in_maintenance)]
+pub struct InvSvcInMaintenance {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<SvcInMaintenanceKind>,
+    pub svcs_cmd_error: Option<String>,
+    // TODO-K: This might change to not nullable with omicron#9615
+    pub time_of_status: Option<DateTime<Utc>>,
+}
+
+impl InvSvcInMaintenance {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        svcs_cmd_error: Option<String>,
+        time_of_status: Option<DateTime<Utc>>,
+    ) -> Self {
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcInMaintenanceUuid::from_untyped_uuid(
+            Uuid::new_v4(),
+        ));
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            svcs_cmd_error,
+            time_of_status,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_health_monitor_svc_in_maintenance_service)]
+pub struct InvSvcInMaintenanceService {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    // TODO-K: Change the UUID kind?
+    pub id: DbTypedUuid<SvcInMaintenanceKind>,
+    pub fmri: String,
+    pub zone: String,
+}
+
+impl InvSvcInMaintenanceService {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        svc: SvcInMaintenance,
+    ) -> Self {
+        let SvcInMaintenance { fmri, zone } = svc;
+
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcInMaintenanceUuid::from_untyped_uuid(
+            Uuid::new_v4(),
+        ));
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            fmri,
+            zone,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_health_monitor_svc_in_maintenance_error)]
+pub struct InvSvcInMaintenanceError {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    // TODO-K: Change the UUID kind?
+    pub id: DbTypedUuid<SvcInMaintenanceKind>,
+    pub error_message: String,
+}
+
+impl InvSvcInMaintenanceError {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        error_message: String,
+    ) -> Self {
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcInMaintenanceUuid::from_untyped_uuid(
+            Uuid::new_v4(),
+        ));
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            error_message,
+        }
+    }
+}
 
 /// See [`sled_agent_types::inventory::ConfigReconcilerInventory`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]

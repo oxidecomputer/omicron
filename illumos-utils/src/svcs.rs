@@ -19,7 +19,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
 use slog::{error, info};
-use std::fmt::Display;
 #[cfg(target_os = "illumos")]
 use tokio::process::Command;
 
@@ -199,22 +198,14 @@ impl From<String> for SvcState {
 #[serde(rename_all = "snake_case")]
 /// Information about an SMF service that is enabled but not running
 pub struct SvcInMaintenance {
-    fmri: String,
-    zone: String,
+    pub fmri: String,
+    pub zone: String,
 }
 
 impl SvcInMaintenance {
     #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
     fn new() -> SvcInMaintenance {
         SvcInMaintenance { fmri: String::new(), zone: String::new() }
-    }
-}
-
-impl Display for SvcInMaintenance {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let SvcInMaintenance { fmri, zone } = self;
-
-        writeln!(f, "FMRI: {} zone: {}", fmri, zone)
     }
 }
 
