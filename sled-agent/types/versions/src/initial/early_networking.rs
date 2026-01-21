@@ -68,8 +68,8 @@ pub mod back_compat {
     use omicron_common::api::{
         external::SwitchLocation,
         internal::shared::{
-            BfdPeerConfig, BgpConfig, BgpPeerConfig, PortConfigV2, PortFec,
-            PortSpeed, RackNetworkConfigV2, RouteConfig, UplinkAddressConfig,
+            BfdPeerConfig, BgpConfig, BgpPeerConfig, PortConfig, PortFec,
+            PortSpeed, RackNetworkConfig, RouteConfig, UplinkAddressConfig,
         },
     };
     use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -117,22 +117,22 @@ pub mod back_compat {
     impl RackNetworkConfigV0 {
         /// Convert from `RackNetworkConfigV0` to `RackNetworkConfigV1`
         ///
-        /// We cannot use `From<RackNetworkConfigV0> for `RackNetworkConfigV2`
+        /// We cannot use `From<RackNetworkConfigV0> for `RackNetworkConfig`
         /// because the `rack_subnet` field does not exist in `RackNetworkConfigV0`
         /// and must be passed in from the `EarlyNetworkConfigV0` struct which
         /// contains the `RackNetworkConfigV0` struct.
         pub fn to_v2(
             rack_subnet: Ipv6Addr,
             v0: RackNetworkConfigV0,
-        ) -> RackNetworkConfigV2 {
-            RackNetworkConfigV2 {
+        ) -> RackNetworkConfig {
+            RackNetworkConfig {
                 rack_subnet: Ipv6Net::new(rack_subnet, 56).unwrap(),
                 infra_ip_first: v0.infra_ip_first,
                 infra_ip_last: v0.infra_ip_last,
                 ports: v0
                     .uplinks
                     .into_iter()
-                    .map(|uplink| PortConfigV2::from(uplink))
+                    .map(|uplink| PortConfig::from(uplink))
                     .collect(),
                 bgp: vec![],
                 bfd: vec![],
@@ -140,7 +140,7 @@ pub mod back_compat {
         }
     }
 
-    /// Deprecated, use PortConfigV2 instead. Cannot actually deprecate due to
+    /// Deprecated, use PortConfig instead. Cannot actually deprecate due to
     /// <https://github.com/serde-rs/serde/issues/2195>
     #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
     pub struct PortConfigV1 {
@@ -163,9 +163,9 @@ pub mod back_compat {
         pub autoneg: bool,
     }
 
-    impl From<PortConfigV1> for PortConfigV2 {
+    impl From<PortConfigV1> for PortConfig {
         fn from(v1: PortConfigV1) -> Self {
-            PortConfigV2 {
+            PortConfig {
                 routes: v1.routes.clone(),
                 addresses: v1
                     .addresses
@@ -184,7 +184,7 @@ pub mod back_compat {
         }
     }
 
-    /// Deprecated, use PortConfigV2 instead. Cannot actually deprecate due to
+    /// Deprecated, use PortConfig instead. Cannot actually deprecate due to
     /// <https://github.com/serde-rs/serde/issues/2195>
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
     pub struct UplinkConfig {
@@ -207,9 +207,9 @@ pub mod back_compat {
         pub rib_priority: Option<u8>,
     }
 
-    impl From<UplinkConfig> for PortConfigV2 {
+    impl From<UplinkConfig> for PortConfig {
         fn from(value: UplinkConfig) -> Self {
-            PortConfigV2 {
+            PortConfig {
                 routes: vec![RouteConfig {
                     destination: "0.0.0.0/0".parse().unwrap(),
                     nexthop: value.gateway_ip.into(),
@@ -255,16 +255,16 @@ pub mod back_compat {
         pub bfd: Vec<BfdPeerConfig>,
     }
 
-    impl From<RackNetworkConfigV1> for RackNetworkConfigV2 {
+    impl From<RackNetworkConfigV1> for RackNetworkConfig {
         fn from(v1: RackNetworkConfigV1) -> Self {
-            RackNetworkConfigV2 {
+            RackNetworkConfig {
                 rack_subnet: v1.rack_subnet,
                 infra_ip_first: v1.infra_ip_first,
                 infra_ip_last: v1.infra_ip_last,
                 ports: v1
                     .ports
                     .into_iter()
-                    .map(|ports| PortConfigV2::from(ports))
+                    .map(|ports| PortConfig::from(ports))
                     .collect(),
                 bgp: v1.bgp.clone(),
                 bfd: v1.bfd.clone(),
@@ -275,7 +275,7 @@ pub mod back_compat {
     // The second production version of the `EarlyNetworkConfig`.
     //
     // If this version is in the bootstore than we need to convert it to
-    // `EarlyNetworkConfigV2`.
+    // `EarlyNetworkConfig`.
     //
     // Once we do this for all customers that have initialized racks with the
     // old version we can go ahead and remove this type and its conversion code
@@ -298,7 +298,7 @@ pub mod back_compat {
     // The first production version of the `EarlyNetworkConfig`.
     //
     // If this version is in the bootstore than we need to convert it to
-    // `EarlyNetworkConfigV2`.
+    // `EarlyNetworkConfig`.
     //
     // Once we do this for all customers that have initialized racks with the
     // old version we can go ahead and remove this type and its conversion code
@@ -329,10 +329,10 @@ mod tests {
     use std::net::Ipv6Addr;
 
     use omicron_common::api::external::SwitchLocation;
-    use omicron_common::api::internal::shared::PortConfigV2;
+    use omicron_common::api::internal::shared::PortConfig;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
-    use omicron_common::api::internal::shared::RackNetworkConfigV2;
+    use omicron_common::api::internal::shared::RackNetworkConfig;
     use omicron_common::api::internal::shared::RouteConfig;
     use omicron_common::api::internal::shared::UplinkAddressConfig;
     use omicron_test_utils::dev::test_setup_log;
@@ -379,11 +379,11 @@ mod tests {
             schema_version: EarlyNetworkConfig::schema_version(),
             body: EarlyNetworkConfigBody {
                 ntp_servers: v0.ntp_servers.clone(),
-                rack_network_config: Some(RackNetworkConfigV2 {
+                rack_network_config: Some(RackNetworkConfig {
                     rack_subnet: Ipv6Net::new(v0.rack_subnet, 56).unwrap(),
                     infra_ip_first: v0_rack_network_config.infra_ip_first,
                     infra_ip_last: v0_rack_network_config.infra_ip_last,
-                    ports: vec![PortConfigV2 {
+                    ports: vec![PortConfig {
                         routes: vec![RouteConfig {
                             destination: "0.0.0.0/0".parse().unwrap(),
                             nexthop: uplink.gateway_ip.into(),
@@ -467,11 +467,11 @@ mod tests {
             schema_version: EarlyNetworkConfig::schema_version(),
             body: EarlyNetworkConfigBody {
                 ntp_servers: v1.body.ntp_servers.clone(),
-                rack_network_config: Some(RackNetworkConfigV2 {
+                rack_network_config: Some(RackNetworkConfig {
                     rack_subnet: v1_rack_network_config.rack_subnet,
                     infra_ip_first: v1_rack_network_config.infra_ip_first,
                     infra_ip_last: v1_rack_network_config.infra_ip_last,
-                    ports: vec![PortConfigV2 {
+                    ports: vec![PortConfig {
                         routes: port.routes.clone(),
                         addresses: vec![UplinkAddressConfig {
                             address: port.addresses[0],
