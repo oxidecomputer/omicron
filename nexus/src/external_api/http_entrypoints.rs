@@ -6202,7 +6202,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn rack_membership_add_sleds(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackPath>,
-        req: TypedBody<params::AddSledsRequest>,
+        req: TypedBody<params::RackMembershipAddSledsRequest>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;

@@ -106,7 +106,7 @@ impl From<UninitializedSledId> for BaseboardId {
     PartialEq,
     Eq,
 )]
-pub struct AddSledsRequest {
+pub struct RackMembershipAddSledsRequest {
     pub sled_ids: BTreeSet<BaseboardId>,
 }
 

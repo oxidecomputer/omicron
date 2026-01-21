@@ -691,12 +691,13 @@ pub enum RackMembershipChangeState {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RackMembershipStatus {
     pub rack_id: Uuid,
+    /// Version that uniquely identifies the rack membership at a given point
+    /// in time
     pub version: RackMembershipVersion,
     pub state: RackMembershipChangeState,
-    /// All members of the rack for this epoch
+    /// All members of the rack for this version
     pub members: BTreeSet<BaseboardId>,
-    /// All members that have not yet responded to learning about this
-    /// membership version
+    /// All members that have not yet confirmed this membership version
     pub unacknowledged_members: BTreeSet<BaseboardId>,
     pub time_created: DateTime<Utc>,
     pub time_committed: Option<DateTime<Utc>>,

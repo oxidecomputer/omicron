@@ -4373,11 +4373,13 @@ pub trait NexusExternalApi {
     async fn rack_membership_add_sleds(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackPath>,
-        req: TypedBody<params::AddSledsRequest>,
+        req: TypedBody<params::RackMembershipAddSledsRequest>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError>;
 
-    /// Retrieve the rack cluster membership change for the given version or the
-    /// latest version if no version is given
+    /// Retrieve the rack cluster membership status
+    ///
+    /// Returns the status for the most recent change, or a specific version if
+    /// one is specified.
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/racks/{rack_id}/membership",
