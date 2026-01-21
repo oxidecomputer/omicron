@@ -27,8 +27,6 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
 /// Specify how to allocate a floating IP address.
-///
-/// This is the old name for what is now called `AddressAllocator`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AddressSelector {
@@ -72,9 +70,6 @@ impl From<AddressSelector> for params::AddressAllocator {
 }
 
 /// Parameters for creating a new floating IP address for instances.
-///
-/// This version uses `address_selector` field instead of `address_allocator`
-/// in newer versions.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FloatingIpCreate {
     #[serde(flatten)]

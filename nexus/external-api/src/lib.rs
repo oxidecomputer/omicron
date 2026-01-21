@@ -41,6 +41,7 @@ mod v2025122300;
 mod v2026010100;
 mod v2026010300;
 mod v2026010500;
+mod v2026010800;
 mod v2026011501;
 
 #[cfg(test)]
@@ -74,6 +75,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026012100, MULTICAST_DROP_MVLAN_ADD_HAS_ANY),
     (2026011601, EXTERNAL_SUBNET_ATTACHMENT),
     (2026011600, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
     (2026011501, AUDIT_LOG_CREDENTIAL_ID),
@@ -1729,6 +1731,40 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/multicast-groups",
         tags = ["experimental"],
+        versions = VERSION_MULTICAST_DROP_MVLAN_ADD_HAS_ANY..,
+    }]
+    async fn multicast_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>;
+
+    /// List multicast groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+        operation_id = "multicast_group_list",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_MULTICAST_DROP_MVLAN_ADD_HAS_ANY,
+    }]
+    async fn v2026010800_multicast_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026010800::MulticastGroup>>,
+        HttpError,
+    > {
+        let page = Self::multicast_group_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// List multicast groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
         operation_id = "multicast_group_list",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
@@ -1747,18 +1783,6 @@ pub trait NexusExternalApi {
             Err(e) => Err(e),
         }
     }
-
-    /// List multicast groups
-    #[endpoint {
-        method = GET,
-        path = "/v1/multicast-groups",
-        tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
-    }]
-    async fn multicast_group_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>;
 
     /// Create a multicast group
     ///
@@ -1787,6 +1811,40 @@ pub trait NexusExternalApi {
 
     /// Fetch a multicast group
     ///
+    /// The group can be specified by name, UUID, or multicast IP address
+    /// (e.g., "224.1.2.3" or "ff38::1").
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_DROP_MVLAN_ADD_HAS_ANY..,
+    }]
+    async fn multicast_group_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::MulticastGroupPath>,
+    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
+
+    /// Fetch multicast group
+    ///
+    /// The group can be specified by name, UUID, or multicast IP address.
+    /// (e.g., "224.1.2.3" or "ff38::1").
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "multicast_group_view",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_MULTICAST_DROP_MVLAN_ADD_HAS_ANY,
+    }]
+    async fn v2026010800_multicast_group_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::MulticastGroupPath>,
+    ) -> Result<HttpResponseOk<v2026010800::MulticastGroup>, HttpError> {
+        let group = Self::multicast_group_view(rqctx, path_params).await?.0;
+        Ok(HttpResponseOk(group.into()))
+    }
+
+    /// Fetch a multicast group
+    ///
     /// The group can be specified by name or UUID.
     #[endpoint {
         method = GET,
@@ -1801,21 +1859,6 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025121200::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError>;
-
-    /// Fetch multicast group
-    ///
-    /// The group can be specified by name, UUID, or multicast IP address.
-    /// (e.g., "224.1.2.3" or "ff38::1").
-    #[endpoint {
-        method = GET,
-        path = "/v1/multicast-groups/{multicast_group}",
-        tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
-    }]
-    async fn multicast_group_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::MulticastGroupPath>,
-    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
 
     /// Update a multicast group
     ///
@@ -1864,6 +1907,21 @@ pub trait NexusExternalApi {
 
     /// List members of multicast group
     ///
+    /// The group can be specified by name, UUID, or multicast IP address.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}/members",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+    }]
+    async fn multicast_group_member_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::MulticastGroupPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<MulticastGroupMember>>, HttpError>;
+
+    /// List members of multicast group
+    ///
     /// The group can be specified by name or UUID.
     #[endpoint {
         method = GET,
@@ -1882,21 +1940,6 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025121200::MulticastGroupMember>>,
         HttpError,
     >;
-
-    /// List members of multicast group
-    ///
-    /// The group can be specified by name, UUID, or multicast IP address.
-    #[endpoint {
-        method = GET,
-        path = "/v1/multicast-groups/{multicast_group}/members",
-        tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
-    }]
-    async fn multicast_group_member_list(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::MulticastGroupPath>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<MulticastGroupMember>>, HttpError>;
 
     /// Add instance to multicast group
     ///
@@ -3677,6 +3720,22 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances/{instance}/multicast-groups",
         tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+    }]
+    async fn instance_multicast_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<views::MulticastGroupMember>>,
+        HttpError,
+    >;
+
+    /// List multicast groups for an instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/multicast-groups",
+        tags = ["experimental"],
         operation_id = "instance_multicast_group_list",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
@@ -3706,40 +3765,6 @@ pub trait NexusExternalApi {
         }
     }
 
-    /// List multicast groups for an instance
-    #[endpoint {
-        method = GET,
-        path = "/v1/instances/{instance}/multicast-groups",
-        tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
-    }]
-    async fn instance_multicast_group_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
-        path_params: Path<params::InstancePath>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<views::MulticastGroupMember>>,
-        HttpError,
-    >;
-
-    /// Join multicast group
-    ///
-    /// Deprecated: newer version supports implicit group creation, accepts group
-    /// by name/UUID/IP and allows specifying source IPs (optional for ASM,
-    /// required for SSM).
-    #[endpoint {
-        method = PUT,
-        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
-        tags = ["experimental"],
-        operation_id = "instance_multicast_group_join",
-        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
-    }]
-    async fn v2025121200_instance_multicast_group_join(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025121200::InstanceMulticastGroupPath>,
-        query_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseCreated<v2025121200::MulticastGroupMember>, HttpError>;
-
     /// Join multicast group by name, IP address, or UUID
     ///
     /// Groups can be referenced by name, IP address, or UUID. If the group
@@ -3763,6 +3788,37 @@ pub trait NexusExternalApi {
         body_params: TypedBody<params::InstanceMulticastGroupJoin>,
     ) -> Result<HttpResponseCreated<views::MulticastGroupMember>, HttpError>;
 
+    /// Join multicast group
+    ///
+    /// Deprecated: newer version supports implicit group creation, accepts group
+    /// by name/UUID/IP and allows specifying source IPs (optional for ASM,
+    /// required for SSM).
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "instance_multicast_group_join",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v2025121200_instance_multicast_group_join(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025121200::InstanceMulticastGroupPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseCreated<v2025121200::MulticastGroupMember>, HttpError>;
+
+    /// Leave multicast group by name, IP address, or UUID
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+    }]
+    async fn instance_multicast_group_leave(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstanceMulticastGroupPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
     /// Leave multicast group
     ///
     /// Deprecated: newer version accepts group by name, UUID, or IP address.
@@ -3778,19 +3834,6 @@ pub trait NexusExternalApi {
     async fn v2025121200_instance_multicast_group_leave(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025121200::InstanceMulticastGroupPath>,
-        query_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// Leave multicast group by name, IP address, or UUID
-    #[endpoint {
-        method = DELETE,
-        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
-        tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
-    }]
-    async fn instance_multicast_group_leave(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
