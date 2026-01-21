@@ -6226,13 +6226,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn rack_membership_status(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackMembershipConfigPathParams>,
-        query_params: Query<Option<shared::RackMembershipVersion>>,
+        query_params: Query<params::RackMembershipVersionParam>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let path_params = path_params.into_inner();
         let rack_id = RackUuid::from_untyped_uuid(path_params.rack_id);
-        let version = query_params.into_inner();
+        let version = query_params.into_inner().version;
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;

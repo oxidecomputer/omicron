@@ -3795,6 +3795,11 @@ pub struct ScimV2GroupPathParam {
     pub group_id: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RackMembershipVersionParam {
+    pub version: Option<shared::RackMembershipVersion>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

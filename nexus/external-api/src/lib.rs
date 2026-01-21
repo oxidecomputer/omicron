@@ -17,7 +17,6 @@ use dropshot::{
 use dropshot_api_manager_types::{ValidationContext, api_versions};
 use http::Response;
 use ipnetwork::IpNetwork;
-use nexus_types::external_api::shared::RackMembershipVersion;
 use nexus_types::{
     authn::cookies::Cookies,
     external_api::{
@@ -4388,7 +4387,7 @@ pub trait NexusExternalApi {
     async fn rack_membership_status(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackMembershipConfigPathParams>,
-        query_params: Query<Option<RackMembershipVersion>>,
+        query_params: Query<params::RackMembershipVersionParam>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError>;
 
     // Sleds

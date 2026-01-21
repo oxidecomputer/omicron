@@ -7827,22 +7827,29 @@
         }
       }
     },
-    "/v1/system/hardware/racks/{rack_id}/sleds": {
+    "/v1/system/hardware/racks/{rack_id}/membership": {
       "get": {
         "tags": [
           "experimental"
         ],
-        "summary": "Retrieve the latest rack cluster membership change",
-        "operationId": "rack_membership_config_latest",
+        "summary": "Retrieve the rack cluster membership change for the given version or the",
+        "description": "latest version if no version is given",
+        "operationId": "rack_membership_status",
         "parameters": [
           {
             "in": "path",
             "name": "rack_id",
-            "description": "ID of the rack",
             "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "$ref": "#/components/schemas/RackMembershipVersion"
             }
           }
         ],
@@ -7852,7 +7859,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackMembershipChange"
+                  "$ref": "#/components/schemas/RackMembershipStatus"
                 }
               }
             }
@@ -7864,12 +7871,14 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
+      }
+    },
+    "/v1/system/hardware/racks/{rack_id}/membership/add": {
       "post": {
         "tags": [
           "experimental"
         ],
-        "summary": "Add new sleds to rack cluster",
+        "summary": "Add new sleds to rack membership",
         "operationId": "rack_membership_add_sleds",
         "parameters": [
           {
@@ -7899,58 +7908,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "uint64",
-                  "type": "integer",
-                  "format": "uint64",
-                  "minimum": 0
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/hardware/racks/{rack_id}/sleds/{epoch}": {
-      "get": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Retrieve the rack cluster membership change for the given epoch",
-        "operationId": "rack_membership_config",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "epoch",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "path",
-            "name": "rack_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RackMembershipChange"
+                  "$ref": "#/components/schemas/RackMembershipStatus"
                 }
               }
             }
@@ -15121,7 +15079,7 @@
           "sled_ids": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/UninitializedSledId"
+              "$ref": "#/components/schemas/BaseboardId"
             },
             "uniqueItems": true
           }
@@ -25876,18 +25834,20 @@
           "time_modified"
         ]
       },
-      "RackMembershipChange": {
-        "description": "Status of last membership change from adding or removinig sleds",
+      "RackMembershipChangeState": {
+        "type": "string",
+        "enum": [
+          "in_progress",
+          "committed",
+          "aborted"
+        ]
+      },
+      "RackMembershipStatus": {
+        "description": "Status of the rack membership uniquely identified by the (rack_id, version) pair",
         "type": "object",
         "properties": {
-          "epoch": {
-            "description": "The generation / version of the configuration",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
           "members": {
-            "description": "All members of the rack cluster for this epoch",
+            "description": "All members of the rack for this epoch",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BaseboardId"
@@ -25916,30 +25876,31 @@
             "format": "date-time"
           },
           "unacknowledged_members": {
-            "description": "All members which have not committed to the membership change",
+            "description": "All members that have not yet responded to learning about this membership version",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BaseboardId"
             },
             "uniqueItems": true
+          },
+          "version": {
+            "$ref": "#/components/schemas/RackMembershipVersion"
           }
         },
         "required": [
-          "epoch",
           "members",
           "rack_id",
           "state",
           "time_created",
-          "unacknowledged_members"
+          "unacknowledged_members",
+          "version"
         ]
       },
-      "RackMembershipChangeState": {
-        "type": "string",
-        "enum": [
-          "in_progress",
-          "committed",
-          "aborted"
-        ]
+      "RackMembershipVersion": {
+        "description": "A unique, monotonically increasing number representing the set of active sleds in a rack at a given point in time.",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "RackResultsPage": {
         "description": "A single page of results",
