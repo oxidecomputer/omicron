@@ -867,14 +867,14 @@ impl ServiceInner {
 
         let rack_network_config = {
             let config = &config.rack_network_config;
-            NexusTypes::RackNetworkConfigV2 {
+            NexusTypes::RackNetworkConfig {
                 rack_subnet: config.rack_subnet,
                 infra_ip_first: config.infra_ip_first,
                 infra_ip_last: config.infra_ip_last,
                 ports: config
                     .ports
                     .iter()
-                    .map(|config| NexusTypes::PortConfigV2 {
+                    .map(|config| NexusTypes::PortConfig {
                         port: config.port.clone(),
                         routes: config
                             .routes
@@ -1728,6 +1728,7 @@ mod test {
         Inventory, InventoryDisk, OmicronZoneType, SledCpuFamily, SledRole,
         ZoneImageResolverInventory,
     };
+    use sled_agent_types::rack_init::rack_initialize_request_test_config;
 
     fn make_sled_info(
         sled_id: SledUuid,
@@ -1803,7 +1804,7 @@ mod test {
     }
 
     fn make_test_service_plan() -> ServicePlan {
-        let rss_config = Config::test_config();
+        let rss_config = rack_initialize_request_test_config();
         let fake_sleds = make_fake_sleds();
         let service_plan =
             ServicePlan::create_transient(&rss_config, fake_sleds)
@@ -1934,7 +1935,7 @@ mod test {
 
         let fake_sleds = make_fake_sleds();
 
-        let rss_config = Config::test_config();
+        let rss_config = rack_initialize_request_test_config();
         let service_plan =
             ServicePlan::create_transient(&rss_config, fake_sleds)
                 .expect("created service plan");

@@ -12,7 +12,7 @@ use anyhow::bail;
 use bootstrap_agent_lockstep_client::types::BootstrapAddressDiscovery;
 use bootstrap_agent_lockstep_client::types::Certificate;
 use bootstrap_agent_lockstep_client::types::Name;
-use bootstrap_agent_lockstep_client::types::PortConfigV2 as BaPortConfigV2;
+use bootstrap_agent_lockstep_client::types::PortConfig as BaPortConfig;
 use bootstrap_agent_lockstep_client::types::RackInitializeRequest;
 use bootstrap_agent_lockstep_client::types::RecoverySiloConfig;
 use bootstrap_agent_lockstep_client::types::UserId;
@@ -620,7 +620,7 @@ pub(crate) enum BgpAuthKeyError {
 fn validate_rack_network_config(
     config: &UserSpecifiedRackNetworkConfig,
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
-) -> Result<bootstrap_agent_lockstep_client::types::RackNetworkConfigV2> {
+) -> Result<bootstrap_agent_lockstep_client::types::RackNetworkConfig> {
     use bootstrap_agent_lockstep_client::types::BgpConfig as BaBgpConfig;
 
     // Ensure that there is at least one uplink
@@ -662,7 +662,7 @@ fn validate_rack_network_config(
 
     // TODO Add more client side checks on `rack_network_config` contents?
 
-    Ok(bootstrap_agent_lockstep_client::types::RackNetworkConfigV2 {
+    Ok(bootstrap_agent_lockstep_client::types::RackNetworkConfig {
         rack_subnet: RACK_SUBNET.net(),
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
@@ -687,7 +687,7 @@ fn validate_rack_network_config(
     })
 }
 
-/// Builds a `BaPortConfigV2` from a `UserSpecifiedPortConfig`.
+/// Builds a `BaPortConfig` from a `UserSpecifiedPortConfig`.
 ///
 /// Assumes that all auth keys are present in `bgp_auth_keys`.
 fn build_port_config(
@@ -695,7 +695,7 @@ fn build_port_config(
     port: &str,
     config: &UserSpecifiedPortConfig,
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
-) -> BaPortConfigV2 {
+) -> BaPortConfig {
     use bootstrap_agent_lockstep_client::types::BgpPeerConfig as BaBgpPeerConfig;
     use bootstrap_agent_lockstep_client::types::LldpAdminStatus as BaLldpAdminStatus;
     use bootstrap_agent_lockstep_client::types::LldpPortConfig as BaLldpPortConfig;
@@ -709,7 +709,7 @@ fn build_port_config(
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
 
-    BaPortConfigV2 {
+    BaPortConfig {
         port: port.to_owned(),
         routes: config
             .routes

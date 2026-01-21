@@ -13166,6 +13166,7 @@ dependencies = [
 name = "sled-agent-types-versions"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "bootstore",
  "camino",
