@@ -3688,21 +3688,21 @@ impl ServiceManager {
                 if let Some(info) = self.inner.sled_info.get() {
                     info!(
                         self.inner.log,
-                        "Ensuring there is a default route";
+                        "Ensuring there is an underlay route";
                         "gateway" => ?info.underlay_address,
                     );
-                    match zone.add_default_route(info.underlay_address).map_err(
-                        |err| Error::ZoneCommand {
+                    match zone
+                        .add_underlay_route(info.underlay_address)
+                        .map_err(|err| Error::ZoneCommand {
                             intent: "Adding Route".to_string(),
                             err,
-                        },
-                    ) {
+                        }) {
                         Ok(_) => (),
                         Err(e) => {
                             if e.to_string().contains("entry exists") {
                                 info!(
                                     self.inner.log,
-                                    "Default route already exists";
+                                    "Underlay route already exists";
                                     "gateway" => ?info.underlay_address,
                                 )
                             } else {

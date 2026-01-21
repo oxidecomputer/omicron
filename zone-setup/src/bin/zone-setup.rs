@@ -15,12 +15,12 @@ use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
 use illumos_utils::zone::{AddressRequest, Zones};
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::backoff::{BackoffError, retry_notify, retry_policy_local};
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
 use oxnet::Ipv6Net;
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
-use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use slog::{Logger, info};
 use std::fmt::Write as _;
 use std::fs::{OpenOptions, metadata, read_to_string, set_permissions, write};
@@ -280,7 +280,7 @@ async fn switch_zone_setup(
          {gz_local_link_addr}",
     );
     Route::add_bootstrap_route(
-        BOOTSTRAP_PREFIX,
+        Ipv6Subnet::new(bootstrap_addr),
         gz_local_link_addr,
         &bootstrap_vnic,
     )
@@ -688,11 +688,11 @@ async fn common_nw_set_up(
         None => {
             info!(
                 log,
-                "Underlay is not available yet; will not ensure default route",
+                "Underlay is not available yet; will not ensure route",
             );
         }
         Some(gw) => {
-            ensure_default_route_via_gateway_with_retries(gw, log).await?;
+            ensure_underlay_route_via_gateway_with_retries(gw, log).await?;
         }
     }
 
@@ -718,7 +718,7 @@ async fn common_nw_set_up(
     Ok(())
 }
 
-async fn ensure_default_route_via_gateway_with_retries(
+async fn ensure_underlay_route_via_gateway_with_retries(
     gateway: Ipv6Addr,
     log: &Logger,
 ) -> anyhow::Result<()> {
@@ -729,8 +729,6 @@ async fn ensure_default_route_via_gateway_with_retries(
         ))
     };
 
-    let gateway = Gateway::Ipv6(gateway);
-
     // Ensuring default route with gateway must happen after peer agents
     // have been initialized. Omicron zones will be able ensure a
     // default route with gateway immediately, but the switch zone on
@@ -739,10 +737,10 @@ async fn ensure_default_route_via_gateway_with_retries(
         retry_policy_local(),
         || async {
             info!(
-                log, "Ensuring there is a default route";
-                "gateway" => ?gateway,
+                log, "Ensuring there is an underlay route";
+                "gateway" => %gateway,
             );
-            Route::ensure_default_route_with_gateway(gateway).await.map_err(
+            Route::ensure_underlay_route_with_gateway(gateway).await.map_err(
                 |err| match err {
                     ExecutionError::CommandFailure(ref e) => {
                         if e.stdout.contains("Network is unreachable") {
@@ -758,9 +756,9 @@ async fn ensure_default_route_via_gateway_with_retries(
         |err, delay| {
             info!(
                 log,
-                "Cannot ensure there is a default route yet (retrying in {:?})",
-                delay;
-                "error" => #%err
+                "Cannot ensure there is an underlay route yet";
+                "will-retry-in" => ?delay,
+                "error" => #%err,
             );
         },
     )

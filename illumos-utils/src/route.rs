@@ -10,6 +10,7 @@ use crate::{
     output_to_exec_error,
 };
 use libc::ESRCH;
+use omicron_common::address::{AZ_PREFIX, BOOTSTRAP_SUBNET_PREFIX, Ipv6Subnet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use tokio::process::Command;
 
@@ -26,6 +27,22 @@ impl Route {
     pub async fn ensure_default_route_with_gateway(
         gateway: Gateway,
     ) -> Result<(), ExecutionError> {
+        Self::ensure_route_with_gateway("default", gateway).await
+    }
+
+    pub async fn ensure_underlay_route_with_gateway(
+        gateway: Ipv6Addr,
+    ) -> Result<(), ExecutionError> {
+        // Route to the underlay AZ's /48 by deriving it from the gateway IP.
+        let underlay_az: Ipv6Subnet<AZ_PREFIX> = Ipv6Subnet::new(gateway);
+        let gateway = Gateway::Ipv6(gateway);
+        Self::ensure_route_with_gateway(&underlay_az.to_string(), gateway).await
+    }
+
+    async fn ensure_route_with_gateway(
+        destination: &str,
+        gateway: Gateway,
+    ) -> Result<(), ExecutionError> {
         let inet;
         let gw;
         match gateway {
@@ -39,7 +56,6 @@ impl Route {
             }
         }
         // Add the desired route if it doesn't already exist
-        let destination = "default";
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[ROUTE, "-n", "get", inet, destination, inet, &gw]);
 
@@ -119,8 +135,29 @@ impl Route {
     }
 
     pub async fn add_bootstrap_route(
-        bootstrap_prefix: u16,
+        bootstrap_prefix: Ipv6Subnet<BOOTSTRAP_SUBNET_PREFIX>,
         gz_bootstrap_addr: Ipv6Addr,
+        zone_vnic_name: &str,
+    ) -> Result<(), ExecutionError> {
+        Self::add_inet6_route(
+            bootstrap_prefix,
+            gz_bootstrap_addr,
+            zone_vnic_name,
+        )
+        .await
+    }
+
+    pub async fn add_underlay_route(
+        prefix: Ipv6Subnet<AZ_PREFIX>,
+        gateway: Ipv6Addr,
+        zone_vnic_name: &str,
+    ) -> Result<(), ExecutionError> {
+        Self::add_inet6_route(prefix, gateway, zone_vnic_name).await
+    }
+
+    async fn add_inet6_route<const N: u8>(
+        prefix: Ipv6Subnet<N>,
+        gateway: Ipv6Addr,
         zone_vnic_name: &str,
     ) -> Result<(), ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
@@ -128,8 +165,8 @@ impl Route {
             ROUTE,
             "add",
             "-inet6",
-            &format!("{bootstrap_prefix:x}::/16"),
-            &gz_bootstrap_addr.to_string(),
+            &prefix.to_string(),
+            &gateway.to_string(),
             "-ifp",
             zone_vnic_name,
         ]);
