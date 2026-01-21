@@ -23,7 +23,10 @@ use tufaceous_artifact::ArtifactVersion;
 
 api_versions!([
     // Do not create new versions of this client-side versioned API.
-    // https://github.com/oxidecomputer/omicron/issues/9290
+    // See https://github.com/oxidecomputer/omicron/issues/9290
+
+    // Remove rack initialization endpoints moved to bootstrap-agent-lockstep-api.
+    (2, REMOVE_RACK_INIT_ENDPOINTS),
     (1, INITIAL),
 ]);
 
@@ -53,11 +56,12 @@ pub trait BootstrapAgentApi {
     ) -> Result<HttpResponseOk<Vec<Component>>, HttpError>;
 
     /// Get the current status of rack initialization or reset.
-    /// 
+    ///
     /// Deprecated. Do not use. Moved to bootstrap agent lockstep API.
     #[endpoint {
         method = GET,
         path = "/rack-initialize",
+        versions = VERSION_INITIAL..VERSION_REMOVE_RACK_INIT_ENDPOINTS,
     }]
     async fn rack_initialization_status(
         rqctx: RequestContext<Self::Context>,
@@ -69,6 +73,7 @@ pub trait BootstrapAgentApi {
     #[endpoint {
         method = POST,
         path = "/rack-initialize",
+        versions = VERSION_INITIAL..VERSION_REMOVE_RACK_INIT_ENDPOINTS,
     }]
     async fn rack_initialize(
         rqctx: RequestContext<Self::Context>,
@@ -81,6 +86,7 @@ pub trait BootstrapAgentApi {
     #[endpoint {
         method = DELETE,
         path = "/rack-initialize",
+        versions = VERSION_INITIAL..VERSION_REMOVE_RACK_INIT_ENDPOINTS,
     }]
     async fn rack_reset(
         rqctx: RequestContext<Self::Context>,

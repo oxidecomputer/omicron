@@ -13,7 +13,7 @@ use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
 use crate::transceivers::GetTransceiversResponse;
 use crate::transceivers::Handle as TransceiverHandle;
-use bootstrap_agent_client::types::RackOperationStatus;
+use bootstrap_agent_lockstep_client::types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -217,20 +217,21 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
         let ctx = rqctx.context();
 
-        let sled_agent_addr = ctx.bootstrap_agent_addr().map_err(|err| {
-            HttpError::for_bad_request(None, format!("{err:#}"))
-        })?;
+        let lockstep_addr =
+            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
+                HttpError::for_bad_request(None, format!("{err:#}"))
+            })?;
 
-        let client = bootstrap_agent_client::Client::new(
-            &format!("http://{}", sled_agent_addr),
-            ctx.log.new(slog::o!("component" => "bootstrap client")),
+        let client = bootstrap_agent_lockstep_client::Client::new(
+            &format!("http://{}", lockstep_addr),
+            ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
         );
 
         let op_status = client
             .rack_initialization_status()
             .await
             .map_err(|err| {
-                use bootstrap_agent_client::Error as BaError;
+                use bootstrap_agent_lockstep_client::Error as BaError;
                 match err {
                     BaError::CommunicationError(err) => {
                         let message =

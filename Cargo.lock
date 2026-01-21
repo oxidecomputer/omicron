@@ -16435,7 +16435,7 @@ dependencies = [
 name = "wicketd-api"
 version = "0.1.0"
 dependencies = [
- "bootstrap-agent-client",
+ "bootstrap-agent-lockstep-client",
  "dropshot",
  "gateway-client",
  "omicron-common",
