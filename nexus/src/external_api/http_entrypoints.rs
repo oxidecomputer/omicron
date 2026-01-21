@@ -1920,6 +1920,201 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    // External Subnets
+
+    async fn external_subnet_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::ExternalSubnet>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let project_lookup =
+                nexus.project_lookup(&opctx, scan_params.selector.clone())?;
+            let subnets = nexus
+                .external_subnet_list(&opctx, &project_lookup, &paginated_by)
+                .await?;
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                subnets,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn external_subnet_create(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::ProjectSelector>,
+        subnet_params: TypedBody<params::ExternalSubnetCreate>,
+    ) -> Result<HttpResponseCreated<views::ExternalSubnet>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let params = subnet_params.into_inner();
+            let project_lookup = nexus.project_lookup(&opctx, query)?;
+            let subnet = nexus
+                .external_subnet_create(&opctx, &project_lookup, params)
+                .await?;
+            Ok(HttpResponseCreated(subnet))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn external_subnet_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::ExternalSubnetPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<views::ExternalSubnet>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let selector = params::ExternalSubnetSelector {
+                external_subnet: path.external_subnet,
+                project: query.project,
+            };
+            let subnet = nexus.external_subnet_view(&opctx, selector).await?;
+            Ok(HttpResponseOk(subnet))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn external_subnet_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::ExternalSubnetPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        subnet_params: TypedBody<params::ExternalSubnetUpdate>,
+    ) -> Result<HttpResponseOk<views::ExternalSubnet>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let params = subnet_params.into_inner();
+            let selector = params::ExternalSubnetSelector {
+                external_subnet: path.external_subnet,
+                project: query.project,
+            };
+            let subnet =
+                nexus.external_subnet_update(&opctx, selector, params).await?;
+            Ok(HttpResponseOk(subnet))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn external_subnet_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::ExternalSubnetPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let selector = params::ExternalSubnetSelector {
+                external_subnet: path.external_subnet,
+                project: query.project,
+            };
+            nexus.external_subnet_delete(&opctx, selector).await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn external_subnet_attach(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::ExternalSubnetPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        attach_params: TypedBody<params::ExternalSubnetAttach>,
+    ) -> Result<HttpResponseAccepted<views::ExternalSubnet>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let attach = attach_params.into_inner();
+            let selector = params::ExternalSubnetSelector {
+                external_subnet: path.external_subnet,
+                project: query.project,
+            };
+            let subnet =
+                nexus.external_subnet_attach(&opctx, selector, attach).await?;
+            Ok(HttpResponseAccepted(subnet))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn external_subnet_detach(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::ExternalSubnetPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseAccepted<views::ExternalSubnet>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let selector = params::ExternalSubnetSelector {
+                external_subnet: path.external_subnet,
+                project: query.project,
+            };
+            let subnet = nexus.external_subnet_detach(&opctx, selector).await?;
+            Ok(HttpResponseAccepted(subnet))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Floating IP Addresses
 
     async fn floating_ip_list(

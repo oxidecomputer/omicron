@@ -188,6 +188,12 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     url = "http://docs.oxide.computer/api/floating-ips"
                 }
             },
+            "external-subnets" = {
+                description = "External subnets that can be attached to instances.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/external-subnets"
+                }
+            },
             "images" = {
                 description = "Images are read-only virtual disks that may be used to boot virtual machines.",
                 external_docs = {
@@ -1451,6 +1457,107 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPoolPath>,
     ) -> Result<HttpResponseOk<views::SubnetPoolUtilization>, HttpError>;
+
+    // External Subnets
+
+    /// List external subnets in a project
+    #[endpoint {
+        method = GET,
+        path = "/v1/external-subnets",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::ExternalSubnet>>, HttpError>;
+
+    /// Create an external subnet
+    #[endpoint {
+        method = POST,
+        path = "/v1/external-subnets",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        subnet_params: TypedBody<params::ExternalSubnetCreate>,
+    ) -> Result<HttpResponseCreated<views::ExternalSubnet>, HttpError>;
+
+    /// Fetch an external subnet
+    #[endpoint {
+        method = GET,
+        path = "/v1/external-subnets/{external_subnet}",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::ExternalSubnetPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<views::ExternalSubnet>, HttpError>;
+
+    /// Update an external subnet
+    #[endpoint {
+        method = PUT,
+        path = "/v1/external-subnets/{external_subnet}",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::ExternalSubnetPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        subnet_params: TypedBody<params::ExternalSubnetUpdate>,
+    ) -> Result<HttpResponseOk<views::ExternalSubnet>, HttpError>;
+
+    /// Delete an external subnet
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/external-subnets/{external_subnet}",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::ExternalSubnetPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Attach an external subnet to an instance
+    ///
+    /// Begins an asynchronous attach operation. Returns the subnet with
+    /// `instance_id` set to the target instance. The attach completes
+    /// asynchronously; poll the subnet to check completion.
+    #[endpoint {
+        method = POST,
+        path = "/v1/external-subnets/{external_subnet}/attach",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::ExternalSubnetPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        attach_params: TypedBody<params::ExternalSubnetAttach>,
+    ) -> Result<HttpResponseAccepted<views::ExternalSubnet>, HttpError>;
+
+    /// Detach an external subnet from an instance
+    ///
+    /// Begins an asynchronous detach operation. Returns the subnet with
+    /// `instance_id` cleared. The detach completes asynchronously.
+    #[endpoint {
+        method = POST,
+        path = "/v1/external-subnets/{external_subnet}/detach",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::ExternalSubnetPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseAccepted<views::ExternalSubnet>, HttpError>;
 
     // Floating IP Addresses
 

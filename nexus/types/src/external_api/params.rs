@@ -1570,6 +1570,69 @@ pub struct SubnetPoolSiloUpdate {
     pub is_default: bool,
 }
 
+// External Subnets
+
+path_param!(ExternalSubnetPath, external_subnet, "external subnet");
+
+/// Selector for looking up an external subnet
+#[derive(Deserialize, JsonSchema, Clone)]
+pub struct ExternalSubnetSelector {
+    /// Name or ID of the project (required if `external_subnet` is a Name)
+    pub project: Option<NameOrId>,
+    /// Name or ID of the external subnet
+    pub external_subnet: NameOrId,
+}
+
+/// Specify how to allocate an external subnet.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalSubnetAllocator {
+    /// Reserve a specific subnet.
+    Explicit {
+        /// The subnet CIDR to reserve. Must be available in the pool.
+        subnet: IpNet,
+        /// The pool containing this subnet. If not specified, the default
+        /// subnet pool for the subnet's IP version is used.
+        pool: Option<NameOrId>,
+    },
+    /// Automatically allocate a subnet with the specified prefix length.
+    Auto {
+        /// The prefix length for the allocated subnet (e.g., 24 for a /24).
+        prefix_len: u8,
+        /// Pool selection.
+        ///
+        /// If omitted, this field uses the silo's default pool. If the
+        /// silo has default pools for both IPv4 and IPv6, the request will
+        /// fail unless `ip_version` is specified in the pool selector.
+        #[serde(default)]
+        pool_selector: PoolSelector,
+    },
+}
+
+/// Create an external subnet
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnetCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// Subnet allocation method.
+    pub allocator: ExternalSubnetAllocator,
+}
+
+/// Update an external subnet
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnetUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+/// Attach an external subnet to an instance
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnetAttach {
+    /// Name or ID of the instance to attach to
+    pub instance: NameOrId,
+}
+
 // Floating IPs
 
 /// Specify how to allocate a floating IP address.
@@ -1714,7 +1777,7 @@ pub struct InstanceDiskAttach {
     pub name: Name,
 }
 
-/// Specify which IP pool to allocate from.
+/// Specify which IP or external subnet pool to allocate from.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PoolSelector {
