@@ -39,7 +39,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
-use trust_quorum_types::types::Epoch;
 use url::Url;
 use uuid::Uuid;
 
@@ -108,7 +107,7 @@ impl From<UninitializedSledId> for BaseboardId {
     Eq,
 )]
 pub struct AddSledsRequest {
-    pub sled_ids: BTreeSet<UninitializedSledId>,
+    pub sled_ids: BTreeSet<BaseboardId>,
 }
 
 path_param!(AffinityGroupPath, affinity_group, "affinity group");
@@ -3197,7 +3196,6 @@ pub struct LoginPath {
 #[derive(Deserialize, JsonSchema)]
 pub struct RackMembershipConfigPathParams {
     pub rack_id: Uuid,
-    pub epoch: Epoch,
 }
 
 /// This is meant as a security feature. We want to ensure we never redirect to

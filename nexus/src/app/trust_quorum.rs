@@ -5,11 +5,8 @@
 //! Nexus APIs for trust quorum
 
 use nexus_auth::context::OpContext;
-use nexus_types::{
-    external_api::params::UninitializedSledId,
-    trust_quorum::{
-        IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
-    },
+use nexus_types::trust_quorum::{
+    IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
 };
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackUuid;
@@ -28,8 +25,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: RackUuid,
-        new_sleds: BTreeSet<UninitializedSledId>,
-    ) -> Result<Epoch, Error> {
+        new_sleds: BTreeSet<BaseboardId>,
+    ) -> Result<TrustQuorumConfig, Error> {
         let (latest_committed_config, latest_epoch) =
             self.load_latest_possible_committed_config(opctx, rack_id).await?;
         let new_epoch = latest_epoch.next();
@@ -114,7 +111,7 @@ impl super::Nexus {
         };
         client.trust_quorum_reconfigure(&req).await?;
 
-        Ok(new_config.epoch)
+        Ok(new_config)
     }
 
     // Create a new `ProposedTrustQuorumConfig` including `new_sleds` in
@@ -124,11 +121,9 @@ impl super::Nexus {
         &self,
         latest_committed_config: TrustQuorumConfig,
         new_epoch: Epoch,
-        new_sleds: BTreeSet<UninitializedSledId>,
+        new_sleds: BTreeSet<BaseboardId>,
     ) -> Result<ProposedTrustQuorumConfig, Error> {
         let rack_id = latest_committed_config.rack_id;
-        let new_sleds: BTreeSet<BaseboardId> =
-            new_sleds.into_iter().map(Into::into).collect();
         let existing: BTreeSet<_> =
             latest_committed_config.members.keys().cloned().collect();
 

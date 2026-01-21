@@ -5,8 +5,8 @@
 //! Views are response bodies, most of which are public lenses onto DB models.
 
 use crate::external_api::shared::{
-    self, Baseboard, IpKind, IpRange, ServiceUsingCertificate,
-    TufSignedRootRole,
+    self, Baseboard, IpKind, IpRange, RackMembershipVersion,
+    ServiceUsingCertificate, TufSignedRootRole,
 };
 use crate::identity::AssetIdentityMetadata;
 use crate::trust_quorum::{TrustQuorumConfig, TrustQuorumMemberState};
@@ -33,7 +33,6 @@ use std::fmt;
 use std::net::IpAddr;
 use std::sync::LazyLock;
 use strum::{EnumIter, IntoEnumIterator};
-use trust_quorum_types::types::Epoch;
 use tufaceous_artifact::ArtifactHash;
 use url::Url;
 use uuid::Uuid;
@@ -687,26 +686,27 @@ pub enum RackMembershipChangeState {
     Aborted,
 }
 
-/// Status of last membership change from adding or removinig sleds
+/// Status of the rack membership uniquely identified by the (rack_id, version)
+/// pair
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RackMembershipChange {
+pub struct RackMembershipStatus {
     pub rack_id: Uuid,
-    /// The generation / version of the configuration
-    pub epoch: Epoch,
+    pub version: RackMembershipVersion,
     pub state: RackMembershipChangeState,
-    /// All members of the rack cluster for this epoch
+    /// All members of the rack for this epoch
     pub members: BTreeSet<BaseboardId>,
-    /// All members which have not committed to the membership change
+    /// All members that have not yet responded to learning about this
+    /// membership version
     pub unacknowledged_members: BTreeSet<BaseboardId>,
     pub time_created: DateTime<Utc>,
     pub time_committed: Option<DateTime<Utc>>,
     pub time_aborted: Option<DateTime<Utc>>,
 }
 
-impl From<TrustQuorumConfig> for RackMembershipChange {
+impl From<TrustQuorumConfig> for RackMembershipStatus {
     fn from(value: TrustQuorumConfig) -> Self {
         // `Unacked` means that a member has not received and acked a `Prepare`
-        // yet. `Prepared` means that a member has acknolwedged the prepare but
+        // yet. `Prepared` means that a member has acknowledged the prepare but
         // not the commit. `Committed` is when the member starts participating
         // in the new group.
         //
@@ -733,7 +733,7 @@ impl From<TrustQuorumConfig> for RackMembershipChange {
 
         Self {
             rack_id: value.rack_id.into_untyped_uuid(),
-            epoch: value.epoch,
+            version: RackMembershipVersion(value.epoch.0),
             state,
             members: value.members.keys().cloned().collect(),
             unacknowledged_members,
