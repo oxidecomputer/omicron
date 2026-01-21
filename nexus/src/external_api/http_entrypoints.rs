@@ -1638,20 +1638,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         pool_params: TypedBody<params::SubnetPoolCreate>,
     ) -> Result<HttpResponseCreated<views::SubnetPool>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let pool_params = pool_params.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let pool_params = pool_params.into_inner();
             let pool = nexus.subnet_pool_create(&opctx, &pool_params).await?;
             Ok(HttpResponseCreated(pool))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn subnet_pool_view(
@@ -1679,42 +1671,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::SubnetPoolPath>,
         updates: TypedBody<params::SubnetPoolUpdate>,
     ) -> Result<HttpResponseOk<views::SubnetPool>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let updates = updates.into_inner();
             let pool =
                 nexus.subnet_pool_update(&opctx, &path.pool, &updates).await?;
             Ok(HttpResponseOk(pool))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn subnet_pool_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SubnetPoolPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             nexus.subnet_pool_delete(&opctx, &path.pool).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn subnet_pool_member_list(
@@ -1754,23 +1730,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::SubnetPoolPath>,
         subnet_params: TypedBody<params::SubnetPoolMemberAdd>,
     ) -> Result<HttpResponseCreated<views::SubnetPoolMember>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let subnet_params = subnet_params.into_inner();
             let member = nexus
                 .subnet_pool_member_add(&opctx, &path.pool, &subnet_params)
                 .await?;
             Ok(HttpResponseCreated(member))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn subnet_pool_member_remove(
@@ -1778,23 +1746,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::SubnetPoolPath>,
         subnet_params: TypedBody<params::SubnetPoolMemberRemove>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let subnet_params = subnet_params.into_inner();
             nexus
                 .subnet_pool_member_remove(&opctx, &path.pool, &subnet_params)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn subnet_pool_silo_list(
@@ -1832,23 +1792,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::SubnetPoolPath>,
         silo_link: TypedBody<params::SubnetPoolLinkSilo>,
     ) -> Result<HttpResponseCreated<views::SubnetPoolSiloLink>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let silo_link = silo_link.into_inner();
             let link = nexus
                 .subnet_pool_silo_link(&opctx, &path.pool, &silo_link)
                 .await?;
             Ok(HttpResponseCreated(link))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn subnet_pool_silo_update(
@@ -1856,11 +1808,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::SubnetPoolSiloPath>,
         update: TypedBody<params::SubnetPoolSiloUpdate>,
     ) -> Result<HttpResponseOk<views::SubnetPoolSiloLink>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let update = update.into_inner();
             let link = nexus
@@ -1869,34 +1817,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseOk(link))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn subnet_pool_silo_unlink(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SubnetPoolSiloPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             nexus
                 .subnet_pool_silo_unlink(&opctx, &path.pool, &path.silo)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn subnet_pool_utilization_view(
@@ -1959,11 +1895,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::ProjectSelector>,
         subnet_params: TypedBody<params::ExternalSubnetCreate>,
     ) -> Result<HttpResponseCreated<views::ExternalSubnet>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();
             let params = subnet_params.into_inner();
             let project_lookup = nexus.project_lookup(&opctx, query)?;
@@ -1971,12 +1903,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .external_subnet_create(&opctx, &project_lookup, params)
                 .await?;
             Ok(HttpResponseCreated(subnet))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn external_subnet_view(
@@ -2011,11 +1939,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         subnet_params: TypedBody<params::ExternalSubnetUpdate>,
     ) -> Result<HttpResponseOk<views::ExternalSubnet>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let params = subnet_params.into_inner();
@@ -2026,12 +1950,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let subnet =
                 nexus.external_subnet_update(&opctx, selector, params).await?;
             Ok(HttpResponseOk(subnet))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn external_subnet_delete(
@@ -2039,11 +1959,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ExternalSubnetPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let selector = params::ExternalSubnetSelector {
@@ -2052,12 +1968,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             nexus.external_subnet_delete(&opctx, selector).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn external_subnet_attach(
@@ -2066,11 +1978,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::OptionalProjectSelector>,
         attach_params: TypedBody<params::ExternalSubnetAttach>,
     ) -> Result<HttpResponseAccepted<views::ExternalSubnet>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let attach = attach_params.into_inner();
@@ -2081,12 +1989,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let subnet =
                 nexus.external_subnet_attach(&opctx, selector, attach).await?;
             Ok(HttpResponseAccepted(subnet))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn external_subnet_detach(
@@ -2094,11 +1998,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ExternalSubnetPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseAccepted<views::ExternalSubnet>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let selector = params::ExternalSubnetSelector {
@@ -2107,12 +2007,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let subnet = nexus.external_subnet_detach(&opctx, selector).await?;
             Ok(HttpResponseAccepted(subnet))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     // Floating IP Addresses
