@@ -45,6 +45,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
@@ -70,6 +71,7 @@ mod disk;
 mod external_dns;
 pub(crate) mod external_endpoints;
 mod external_ip;
+mod external_subnet;
 mod iam;
 mod image;
 mod instance;
@@ -96,6 +98,7 @@ mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
+mod subnet_pool;
 pub(crate) mod support_bundles;
 mod switch;
 mod switch_interface;
@@ -155,6 +158,12 @@ pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 1536 * (1 << 30); // 1.5 TiB
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
+
+/// This was number was chosen as the best-ish measured on a Cosmo when more or
+/// less fully dedicating an SN861 as a disk for a single VM. This is certainly
+/// higher than necessary for Gimlet, and is chosen far higher than may be
+/// appropriate if the disk is shared across several or more instances.
+pub const LOCAL_STORAGE_WORKERS: NonZeroU32 = NonZeroU32::new(30).unwrap();
 
 /// This value is aribtrary
 pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;

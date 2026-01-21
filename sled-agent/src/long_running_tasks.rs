@@ -15,7 +15,9 @@
 use crate::bootstrap::bootstore_setup::{
     new_bootstore_config, poll_ddmd_for_bootstore_and_tq_peer_update,
 };
-use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
+use crate::bootstrap::secret_retriever::{
+    ConfigurableSecretRetriever, ConfigurableSecretRetrieverHandle,
+};
 use crate::bootstrap::trust_quorum_setup::new_trust_quorum_config;
 use crate::config::Config;
 use crate::hardware_monitor::{HardwareMonitor, HardwareMonitorHandle};
@@ -29,8 +31,8 @@ use sled_agent_config_reconciler::{
     TimeSyncConfig,
 };
 use sled_agent_health_monitor::HealthMonitorHandle;
+use sled_agent_resolvable_files::ZoneImageSourceResolver;
 use sled_agent_types::zone_bundle::CleanupContext;
-use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
@@ -74,6 +76,9 @@ pub struct LongRunningTaskHandles {
 
     /// A handle for interacting with the trust quorum
     pub trust_quorum: trust_quorum::NodeTaskHandle,
+
+    /// Handle to configure the secret retriever used by the KeyManager.
+    pub secret_retriever: ConfigurableSecretRetrieverHandle,
 }
 
 /// Spawn all long running tasks
@@ -88,7 +93,8 @@ pub async fn spawn_all_longrunning_tasks(
     oneshot::Sender<SledAgent>,
     oneshot::Sender<ServiceManager>,
 ) {
-    let storage_key_requester = spawn_key_manager(log);
+    let (storage_key_requester, secret_retriever_config) =
+        spawn_key_manager(log);
 
     let time_sync_config = if let Some(true) = config.skip_timesync {
         TimeSyncConfig::Skip
@@ -154,6 +160,7 @@ pub async fn spawn_all_longrunning_tasks(
             zone_image_resolver,
             health_monitor,
             trust_quorum,
+            secret_retriever: secret_retriever_config,
         },
         config_reconciler_spawn_token,
         sled_agent_started_tx,
@@ -161,13 +168,15 @@ pub async fn spawn_all_longrunning_tasks(
     )
 }
 
-fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
+fn spawn_key_manager(
+    log: &Logger,
+) -> (StorageKeyRequester, ConfigurableSecretRetrieverHandle) {
     info!(log, "Starting KeyManager");
-    let secret_retriever = LrtqOrHardcodedSecretRetriever::new();
+    let (secret_retriever, config_handle) = ConfigurableSecretRetriever::new();
     let (mut key_manager, storage_key_requester) =
         KeyManager::new(log, secret_retriever);
     tokio::spawn(async move { key_manager.run().await });
-    storage_key_requester
+    (storage_key_requester, config_handle)
 }
 
 async fn spawn_hardware_manager(
