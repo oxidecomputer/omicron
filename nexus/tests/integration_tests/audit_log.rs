@@ -265,9 +265,9 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
     assert_eq!(e2.request_uri, "/v1/login/test-silo/local");
     assert_eq!(e2.operation_id, "login_local");
     assert_eq!(e2.source_ip.to_string(), "127.0.0.1");
-    assert_eq!(
+    assert_matches::assert_matches!(
         e2.result,
-        views::AuditLogEntryResult::Success { http_status_code: 204 }
+        views::AuditLogEntryResult::Success { http_status_code: 204, .. }
     );
     assert!(e2.time_started >= t2 && e2.time_started <= t3);
     assert!(e2.time_completed > e2.time_started);
@@ -576,9 +576,10 @@ fn verify_entry(
     // Verify operation-specific fields
     assert_eq!(entry.operation_id, operation_id);
     assert_eq!(entry.request_uri, request_uri);
-    assert_eq!(
-        entry.result,
-        views::AuditLogEntryResult::Success { http_status_code }
+    assert_matches::assert_matches!(
+        &entry.result,
+        views::AuditLogEntryResult::Success { http_status_code: code, .. }
+            if *code == http_status_code
     );
     assert!(entry.time_started >= start_time && entry.time_started <= end_time);
 
@@ -640,9 +641,9 @@ async fn test_audit_log_access_token_auth(ctx: &ControlPlaneTestContext) {
             silo_id: DEFAULT_SILO_ID,
         }
     );
-    assert_eq!(
+    assert_matches::assert_matches!(
         entry.result,
-        views::AuditLogEntryResult::Success { http_status_code: 201 }
+        views::AuditLogEntryResult::Success { http_status_code: 201, .. }
     );
 }
 
@@ -705,8 +706,8 @@ async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
         entry.actor,
         views::AuditLogEntryActor::Scim { silo_id: silo.identity.id }
     );
-    assert_eq!(
+    assert_matches::assert_matches!(
         entry.result,
-        views::AuditLogEntryResult::Success { http_status_code: 200 }
+        views::AuditLogEntryResult::Success { http_status_code: 200, .. }
     );
 }

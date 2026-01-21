@@ -95,6 +95,12 @@ impl<T: ObjectIdentity> SimpleIdentity for T {
     }
 }
 
+/// Types that have an associated `ResourceType`. Used by the audit log to
+/// automatically derive the resource type from HTTP responses.
+pub trait HasResourceType {
+    const RESOURCE_TYPE: ResourceType;
+}
+
 /// Exists for types that don't properly implement `ObjectIdentity` but
 /// still need to be paginated by name or id.
 pub trait SimpleIdentityOrName {
@@ -1224,6 +1230,10 @@ pub struct Instance {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
+impl HasResourceType for Instance {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Instance;
+}
+
 /// Status of control-plane driven automatic failure recovery for this instance.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceAutoRestartStatus {
@@ -1400,6 +1410,10 @@ impl SimpleIdentity for AffinityGroupMember {
     }
 }
 
+impl HasResourceType for AffinityGroupMember {
+    const RESOURCE_TYPE: ResourceType = ResourceType::AffinityGroupMember;
+}
+
 /// A member of an Anti-Affinity Group
 ///
 /// Membership in a group is not exclusive - members may belong to multiple
@@ -1444,6 +1458,10 @@ impl SimpleIdentity for AntiAffinityGroupMember {
     }
 }
 
+impl HasResourceType for AntiAffinityGroupMember {
+    const RESOURCE_TYPE: ResourceType = ResourceType::AntiAffinityGroupMember;
+}
+
 // DISKS
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1468,6 +1486,10 @@ pub struct Disk {
     pub state: DiskState,
     pub device_path: String,
     pub disk_type: DiskType,
+}
+
+impl HasResourceType for Disk {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Disk;
 }
 
 /// State of a Disk
@@ -1761,6 +1783,10 @@ pub struct RouterRoute {
     pub target: RouteTarget,
     /// Selects which traffic this routing rule will apply to
     pub destination: RouteDestination,
+}
+
+impl HasResourceType for RouterRoute {
+    const RESOURCE_TYPE: ResourceType = ResourceType::RouterRoute;
 }
 
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -2634,6 +2660,10 @@ pub struct InstanceNetworkInterface {
     pub ip_stack: PrivateIpStack,
 }
 
+impl HasResourceType for InstanceNetworkInterface {
+    const RESOURCE_TYPE: ResourceType = ResourceType::InstanceNetworkInterface;
+}
+
 /// The VPC-private IP stack for a network interface.
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
@@ -2807,6 +2837,10 @@ impl SimpleIdentity for AddressLotCreateResponse {
     }
 }
 
+impl HasResourceType for AddressLotCreateResponse {
+    const RESOURCE_TYPE: ResourceType = ResourceType::AddressLot;
+}
+
 /// An address lot and associated blocks resulting from viewing an address lot.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AddressLotViewResponse {
@@ -2884,6 +2918,10 @@ impl SimpleIdentity for LoopbackAddress {
     }
 }
 
+impl HasResourceType for LoopbackAddress {
+    const RESOURCE_TYPE: ResourceType = ResourceType::LoopbackAddress;
+}
+
 /// A switch port represents a physical external port on a rack switch.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPort {
@@ -2951,6 +2989,10 @@ impl SimpleIdentity for SwitchPortSettings {
     fn id(&self) -> Uuid {
         self.identity.id
     }
+}
+
+impl HasResourceType for SwitchPortSettings {
+    const RESOURCE_TYPE: ResourceType = ResourceType::SwitchPortSettings;
 }
 
 /// This structure maps a port settings object to a port settings groups. Port
@@ -3343,6 +3385,10 @@ pub struct BgpConfig {
     /// Optional virtual routing and forwarding identifier for this BGP
     /// configuration.
     pub vrf: Option<String>,
+}
+
+impl HasResourceType for BgpConfig {
+    const RESOURCE_TYPE: ResourceType = ResourceType::BgpConfig;
 }
 
 /// Represents a BGP announce set by id. The id can be used with other API calls

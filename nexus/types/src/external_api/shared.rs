@@ -10,7 +10,9 @@ use super::params::RelativeUri;
 use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
-use omicron_common::api::external::{Name, SimpleIdentity};
+use omicron_common::api::external::{
+    HasResourceType, Name, ResourceType, SimpleIdentity,
+};
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
@@ -702,6 +704,10 @@ impl SimpleIdentity for SupportBundleInfo {
     fn id(&self) -> Uuid {
         self.id.into_untyped_uuid()
     }
+}
+
+impl HasResourceType for SupportBundleInfo {
+    const RESOURCE_TYPE: ResourceType = ResourceType::SupportBundle;
 }
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]

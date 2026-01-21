@@ -190,7 +190,13 @@ mod tests {
 
         let t1 = Utc::now();
 
-        let completion = AuditLogCompletion::Success { http_status_code: 201 };
+        // Complete with resource info to test that it's stored and retrieved
+        let created_resource_id = Uuid::new_v4();
+        let completion = AuditLogCompletion::Success {
+            http_status_code: 201,
+            resource_type: Some(ResourceType::Project),
+            resource_id: Some(created_resource_id),
+        };
         datastore
             .audit_log_entry_complete(opctx, &entry1, completion.into())
             .await
@@ -200,7 +206,7 @@ mod tests {
 
         let entry2_params = AuditLogEntryInitParams {
             request_id: "req-2".to_string(),
-            operation_id: "project_delete".to_string(),
+            operation_id: "instance_create".to_string(),
             request_uri: "https://omicron.com/projects/123".to_string(),
             source_ip: "1.1.1.1".parse().unwrap(),
             user_agent: Some("Chrome???".to_string()),
@@ -223,11 +229,12 @@ mod tests {
         assert_eq!(audit_log.len(), 1);
         assert_eq!(audit_log[0].request_id, "req-1");
 
-        // now complete entry2
-        let completion = AuditLogCompletion::Error {
-            http_status_code: 400,
-            error_code: Some("InvalidRequest".to_string()),
-            error_message: "Request was invalid".to_string(),
+        // now complete entry2 with resource info
+        let created_instance_id = Uuid::new_v4();
+        let completion = AuditLogCompletion::Success {
+            http_status_code: 201,
+            resource_type: Some(ResourceType::Instance),
+            resource_id: Some(created_instance_id),
         };
         datastore
             .audit_log_entry_complete(opctx, &entry2.clone(), completion.into())
@@ -236,21 +243,68 @@ mod tests {
 
         let t4 = Utc::now();
 
-        // get both entries
+        // get both entries and verify resource info
         let audit_log = datastore
             .audit_log_list(opctx, &pagparams, t0, None)
             .await
             .expect("retrieve audit log");
         assert_eq!(audit_log.len(), 2);
+
+        // First entry: project_create with Project resource
         assert_eq!(audit_log[0].request_id, "req-1");
         assert_eq!(audit_log[0].http_status_code.unwrap().0, 201);
+        assert_eq!(audit_log[0].resource_type, Some("project".to_string()));
+        assert_eq!(audit_log[0].resource_id, Some(created_resource_id));
+
+        // Second entry: instance_create with Instance resource
         assert_eq!(audit_log[1].request_id, "req-2");
-        assert_eq!(audit_log[1].http_status_code.unwrap().0, 400);
-        assert_eq!(audit_log[1].error_code, Some("InvalidRequest".to_string()));
+        assert_eq!(audit_log[1].http_status_code.unwrap().0, 201);
+        assert_eq!(audit_log[1].resource_type, Some("instance".to_string()));
+        assert_eq!(audit_log[1].resource_id, Some(created_instance_id));
+
+        // Create a third entry that fails (error completion) to verify errors
+        // don't have resource info
+        let entry3_params = AuditLogEntryInitParams {
+            request_id: "req-3".to_string(),
+            operation_id: "disk_create".to_string(),
+            request_uri: "https://omicron.com/disks".to_string(),
+            source_ip: "1.1.1.1".parse().unwrap(),
+            user_agent: Some("curl".to_string()),
+            actor: AuditLogActor::Unauthenticated,
+            auth_method: None,
+            credential_id: None,
+        };
+        let entry3 = datastore
+            .audit_log_entry_init(opctx, entry3_params.into())
+            .await
+            .expect("init third audit log entry");
+
+        let completion = AuditLogCompletion::Error {
+            http_status_code: 400,
+            error_code: Some("InvalidRequest".to_string()),
+            error_message: "Request was invalid".to_string(),
+        };
+        datastore
+            .audit_log_entry_complete(opctx, &entry3, completion.into())
+            .await
+            .expect("complete audit log entry");
+
+        // Verify the error entry has no resource info
+        let audit_log = datastore
+            .audit_log_list(opctx, &pagparams, t0, None)
+            .await
+            .expect("retrieve audit log");
+        assert_eq!(audit_log.len(), 3);
+        assert_eq!(audit_log[2].request_id, "req-3");
+        assert_eq!(audit_log[2].http_status_code.unwrap().0, 400);
+        assert_eq!(audit_log[2].error_code, Some("InvalidRequest".to_string()));
         assert_eq!(
-            audit_log[1].error_message,
+            audit_log[2].error_message,
             Some("Request was invalid".to_string())
         );
+        // Error completions should not have resource info
+        assert_eq!(audit_log[2].resource_type, None);
+        assert_eq!(audit_log[2].resource_id, None);
 
         // Only get first entry
         let audit_log = datastore
@@ -266,12 +320,12 @@ mod tests {
             audit_log[0].time_completed,
         );
 
-        // Only get second entry
+        // Get second and third entries (from t2 onwards)
         let audit_log = datastore
             .audit_log_list(opctx, &pagparams, t2, None)
             .await
-            .expect("retrieve second audit log entry");
-        assert_eq!(audit_log.len(), 1);
+            .expect("retrieve second and third audit log entries");
+        assert_eq!(audit_log.len(), 2);
         assert_eq!(audit_log[0].request_id, "req-2");
         assert!(
             audit_log[0].time_completed >= t3
@@ -279,6 +333,7 @@ mod tests {
             "{} was not between {t3} and {t4}",
             audit_log[0].time_completed,
         );
+        assert_eq!(audit_log[1].request_id, "req-3");
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -312,6 +367,8 @@ mod tests {
         let completion =
             AuditLogCompletionUpdate::from(AuditLogCompletion::Success {
                 http_status_code: 201,
+                resource_type: None,
+                resource_id: None,
             });
 
         let id1 = "1710a22e-b29b-4cfc-9e79-e8c93be187d7";

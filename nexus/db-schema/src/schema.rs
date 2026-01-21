@@ -2892,6 +2892,8 @@ table! {
         result_kind -> Nullable<crate::enums::AuditLogResultKindEnum>,
         auth_method -> Nullable<crate::enums::AuditLogAuthMethodEnum>,
         credential_id -> Nullable<Uuid>,
+        resource_type -> Nullable<Text>,
+        resource_id -> Nullable<Uuid>,
     }
 }
 
@@ -2914,6 +2916,8 @@ table! {
         result_kind -> crate::enums::AuditLogResultKindEnum,
         auth_method -> Nullable<crate::enums::AuditLogAuthMethodEnum>,
         credential_id -> Nullable<Uuid>,
+        resource_type -> Nullable<Text>,
+        resource_id -> Nullable<Uuid>,
     }
 }
 

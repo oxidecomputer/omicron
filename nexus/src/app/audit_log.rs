@@ -16,7 +16,7 @@ use omicron_common::backoff;
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::context::ApiContext;
+use crate::context::{ApiContext, MaybeHasResourceId};
 
 /// Truncate a str to at most `max` bytes, but make sure not to cut any chars
 /// in half.
@@ -151,7 +151,9 @@ impl super::Nexus {
     /// because we really want this to go through, but the caller should
     /// ignore error results because we do not want such a failure to fail the
     /// operation.
-    pub(crate) async fn audit_log_entry_complete<R: HttpResponse>(
+    pub(crate) async fn audit_log_entry_complete<
+        R: HttpResponse + MaybeHasResourceId,
+    >(
         &self,
         opctx: &OpContext,
         entry: &AuditLogEntryInit,
@@ -160,6 +162,8 @@ impl super::Nexus {
         let completion = match result {
             Ok(response) => AuditLogCompletion::Success {
                 http_status_code: response.status_code().as_u16(),
+                resource_type: response.resource_type(),
+                resource_id: response.resource_id(),
             },
             Err(error) => AuditLogCompletion::Error {
                 http_status_code: error.status_code.as_status().as_u16(),

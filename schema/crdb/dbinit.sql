@@ -6300,6 +6300,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     -- or SCIM token ID.
     credential_id UUID,
 
+    -- Resource type for the created resource (if any). Stored as a string
+    -- representation of the ResourceType enum.
+    resource_type STRING,
+
+    -- Resource ID for the created resource (if any).
+    resource_id UUID,
+
     -- make sure time_completed and result_kind are either both null or both not
     CONSTRAINT time_completed_and_result_kind CHECK (
         (time_completed IS NULL AND result_kind IS NULL)
@@ -6338,6 +6345,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
         OR
         -- For unauthenticated: must not have actor_id or actor_silo_id
         (actor_kind = 'unauthenticated' AND actor_id IS NULL AND actor_silo_id IS NULL)
+    ),
+
+    -- Resource info (type and ID) can only be set on success results
+    CONSTRAINT resource_info_only_on_success CHECK (
+        result_kind = 'success' OR (resource_type IS NULL AND resource_id IS NULL)
+    ),
+
+    -- Resource type and ID must both be present or both be absent
+    CONSTRAINT resource_type_and_id_consistent CHECK (
+        (resource_type IS NULL AND resource_id IS NULL)
+        OR (resource_type IS NOT NULL AND resource_id IS NOT NULL)
     )
 );
 
@@ -6391,7 +6409,9 @@ SELECT
     error_message,
     result_kind,
     auth_method,
-    credential_id
+    credential_id,
+    resource_type,
+    resource_id
 FROM omicron.public.audit_log
 WHERE
     time_completed IS NOT NULL
@@ -7838,7 +7858,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '223.0.0', NULL)
+    (TRUE, NOW(), NOW(), '224.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

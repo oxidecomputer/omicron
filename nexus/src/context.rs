@@ -36,26 +36,41 @@ use uuid::Uuid;
 
 use dropshot::{
     Body, HttpError, HttpResponse, HttpResponseAccepted, HttpResponseCreated,
-    HttpResponseDeleted, HttpResponseOk, HttpResponseUpdatedNoContent,
+    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
+    HttpResponseUpdatedNoContent,
 };
 use http::Response;
-use omicron_common::api::external::SimpleIdentity;
+use omicron_common::api::external::{
+    HasResourceType, ResourceType, SimpleIdentity,
+};
 
-/// Trait for extracting resource ID from HTTP response types to record in
-/// the audit log. Implemented for response types that may contain a created
-/// resource.
+/// Trait for extracting resource ID and type from HTTP response types to
+/// record in the audit log. Implemented for response types that may contain
+/// a created resource.
 pub trait MaybeHasResourceId {
     fn resource_id(&self) -> Option<Uuid> {
+        None
+    }
+    fn resource_type(&self) -> Option<ResourceType> {
         None
     }
 }
 
 impl<T> MaybeHasResourceId for HttpResponseCreated<T>
 where
-    T: SimpleIdentity + Serialize + JsonSchema + Send + Sync + 'static,
+    T: SimpleIdentity
+        + HasResourceType
+        + Serialize
+        + JsonSchema
+        + Send
+        + Sync
+        + 'static,
 {
     fn resource_id(&self) -> Option<Uuid> {
         Some(self.0.id())
+    }
+    fn resource_type(&self) -> Option<ResourceType> {
+        Some(T::RESOURCE_TYPE)
     }
 }
 
@@ -78,6 +93,17 @@ impl<T> MaybeHasResourceId for HttpResponseAccepted<T> where
 }
 // SCIM endpoints return raw Response<Body>
 impl MaybeHasResourceId for Response<Body> {}
+// HttpResponseHeaders wraps another response type. Since we can't access the
+// inner type (private field), and these are only used for responses that don't
+// contain created resources anyway, we use the default impl. This also covers
+// type aliases like HttpResponseSeeOther.
+impl<InnerT, HeadersT> MaybeHasResourceId
+    for HttpResponseHeaders<InnerT, HeadersT>
+where
+    InnerT: HttpResponse + dropshot::HttpCodedResponse,
+    HeadersT: JsonSchema + Serialize + Send + Sync + 'static,
+{
+}
 
 /// Indicates the kind of HTTP server.
 #[derive(Clone, Copy)]
@@ -405,15 +431,6 @@ where
         let opctx = Arc::new(op_context_for_external_api(rqctx).await?);
         let audit = nexus.audit_log_entry_init(&opctx, rqctx).await?;
         let result = handler(Arc::clone(&opctx), Arc::clone(&nexus)).await;
-        // TODO: pass resource_id to audit_log_entry_complete once
-        // the schema supports it
-        let resource_id = result.as_ref().ok().and_then(|r| r.resource_id());
-        slog::debug!(
-            rqctx.log,
-            "audit_and_time: extracted resource_id";
-            "resource_id" => ?resource_id,
-            "request_id" => %rqctx.request_id,
-        );
         // Ignore error: unlike the init line, audit log failures cannot cause
         // the request to fail because the primary operation has already taken
         // place. The complete function retries internally and logs on failure.

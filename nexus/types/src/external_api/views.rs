@@ -17,8 +17,9 @@ use daft::Diffable;
 pub use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::{
     AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
-    Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
-    Nullable, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
+    Digest, Error, FailureDomain, HasResourceType, IdentityMetadata,
+    InstanceState, Name, Nullable, ObjectIdentity, ResourceType,
+    SimpleIdentity, SimpleIdentityOrName,
 };
 use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
@@ -66,6 +67,10 @@ pub struct Silo {
     /// Optionally, silos can have a group name that is automatically granted
     /// the silo admin role.
     pub admin_group_name: Option<String>,
+}
+
+impl HasResourceType for Silo {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Silo;
 }
 
 /// A collection of resource counts used to describe capacity and utilization
@@ -147,6 +152,10 @@ pub struct AffinityGroup {
     pub failure_domain: FailureDomain,
 }
 
+impl HasResourceType for AffinityGroup {
+    const RESOURCE_TYPE: ResourceType = ResourceType::AffinityGroup;
+}
+
 /// View of an Anti-Affinity Group
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AntiAffinityGroup {
@@ -155,6 +164,10 @@ pub struct AntiAffinityGroup {
     pub project_id: Uuid,
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,
+}
+
+impl HasResourceType for AntiAffinityGroup {
+    const RESOURCE_TYPE: ResourceType = ResourceType::AntiAffinityGroup;
 }
 
 // IDENTITY PROVIDER
@@ -204,6 +217,10 @@ pub struct SamlIdentityProvider {
     pub group_attribute_name: Option<String>,
 }
 
+impl HasResourceType for SamlIdentityProvider {
+    const RESOURCE_TYPE: ResourceType = ResourceType::SamlIdentityProvider;
+}
+
 // PROJECTS
 
 /// View of a Project
@@ -214,6 +231,10 @@ pub struct Project {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     // Important: Silo ID does not get presented to user
+}
+
+impl HasResourceType for Project {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Project;
 }
 
 // CERTIFICATES
@@ -227,6 +248,10 @@ pub struct Certificate {
     pub service: ServiceUsingCertificate,
     /// PEM-formatted string containing public certificate chain
     pub cert: String,
+}
+
+impl HasResourceType for Certificate {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Certificate;
 }
 
 // IMAGES
@@ -260,6 +285,10 @@ pub struct Image {
     pub size: ByteCount,
 }
 
+impl HasResourceType for Image {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Image;
+}
+
 // SNAPSHOTS
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -285,6 +314,10 @@ pub struct Snapshot {
     pub size: ByteCount,
 }
 
+impl HasResourceType for Snapshot {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Snapshot;
+}
+
 // VPCs
 
 /// View of a VPC
@@ -305,6 +338,10 @@ pub struct Vpc {
     // TODO-design should this be optional?
     /// The name used for the VPC in DNS.
     pub dns_name: Name,
+}
+
+impl HasResourceType for Vpc {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Vpc;
 }
 
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
@@ -328,6 +365,10 @@ pub struct VpcSubnet {
     pub custom_router_id: Option<Uuid>,
 }
 
+impl HasResourceType for VpcSubnet {
+    const RESOURCE_TYPE: ResourceType = ResourceType::VpcSubnet;
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VpcRouterKind {
@@ -349,6 +390,10 @@ pub struct VpcRouter {
     pub vpc_id: Uuid,
 }
 
+impl HasResourceType for VpcRouter {
+    const RESOURCE_TYPE: ResourceType = ResourceType::VpcRouter;
+}
+
 // INTERNET GATEWAYS
 
 /// An internet gateway provides a path between VPC networks and external
@@ -360,6 +405,10 @@ pub struct InternetGateway {
 
     /// The VPC to which the gateway belongs.
     pub vpc_id: Uuid,
+}
+
+impl HasResourceType for InternetGateway {
+    const RESOURCE_TYPE: ResourceType = ResourceType::InternetGateway;
 }
 
 /// An IP pool that is attached to an internet gateway
@@ -375,6 +424,10 @@ pub struct InternetGatewayIpPool {
     pub ip_pool_id: Uuid,
 }
 
+impl HasResourceType for InternetGatewayIpPool {
+    const RESOURCE_TYPE: ResourceType = ResourceType::InternetGatewayIpPool;
+}
+
 /// An IP address that is attached to an internet gateway
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InternetGatewayIpAddress {
@@ -386,6 +439,10 @@ pub struct InternetGatewayIpAddress {
 
     /// The associated IP address,
     pub address: IpAddr,
+}
+
+impl HasResourceType for InternetGatewayIpAddress {
+    const RESOURCE_TYPE: ResourceType = ResourceType::InternetGatewayIpAddress;
 }
 
 // IP POOLS
@@ -400,6 +457,10 @@ pub struct IpPool {
     pub ip_version: IpVersion,
     /// Type of IP pool (unicast or multicast).
     pub pool_type: shared::IpPoolType,
+}
+
+impl HasResourceType for IpPool {
+    const RESOURCE_TYPE: ResourceType = ResourceType::IpPool;
 }
 
 /// The utilization of IP addresses in a pool.
@@ -460,6 +521,10 @@ impl SimpleIdentity for IpPoolSiloLink {
     }
 }
 
+impl HasResourceType for IpPoolSiloLink {
+    const RESOURCE_TYPE: ResourceType = ResourceType::IpPoolResource;
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolRange {
     pub id: Uuid,
@@ -474,6 +539,10 @@ impl SimpleIdentity for IpPoolRange {
     }
 }
 
+impl HasResourceType for IpPoolRange {
+    const RESOURCE_TYPE: ResourceType = ResourceType::IpPoolResource;
+}
+
 // SUBNET POOLS
 
 /// A pool of subnets for external subnet allocation
@@ -485,6 +554,10 @@ pub struct SubnetPool {
     pub ip_version: IpVersion,
     /// Type of subnet pool (unicast or multicast)
     pub pool_type: shared::IpPoolType,
+}
+
+impl HasResourceType for SubnetPool {
+    const RESOURCE_TYPE: ResourceType = ResourceType::SubnetPool;
 }
 
 /// A member (subnet) within a subnet pool
@@ -506,12 +579,26 @@ pub struct SubnetPoolMember {
     pub max_prefix_length: u8,
 }
 
+impl HasResourceType for SubnetPoolMember {
+    const RESOURCE_TYPE: ResourceType = ResourceType::SubnetPoolMember;
+}
+
 /// A link between a subnet pool and a silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SubnetPoolSiloLink {
     pub subnet_pool_id: Uuid,
     pub silo_id: Uuid,
     pub is_default: bool,
+}
+
+impl SimpleIdentity for SubnetPoolSiloLink {
+    fn id(&self) -> Uuid {
+        self.subnet_pool_id
+    }
+}
+
+impl HasResourceType for SubnetPoolSiloLink {
+    const RESOURCE_TYPE: ResourceType = ResourceType::SubnetPool;
 }
 
 /// Utilization information for a subnet pool
@@ -540,6 +627,10 @@ pub struct ExternalSubnet {
     pub subnet_pool_member_id: Uuid,
     /// The instance this subnet is attached to, if any
     pub instance_id: Option<Uuid>,
+}
+
+impl HasResourceType for ExternalSubnet {
+    const RESOURCE_TYPE: ResourceType = ResourceType::ExternalSubnet;
 }
 
 // INSTANCE EXTERNAL IP ADDRESSES
@@ -607,6 +698,10 @@ pub struct FloatingIp {
     /// The ID of the instance that this Floating IP is attached to,
     /// if it is presently in use.
     pub instance_id: Option<Uuid>,
+}
+
+impl HasResourceType for FloatingIp {
+    const RESOURCE_TYPE: ResourceType = ResourceType::FloatingIp;
 }
 
 impl From<FloatingIp> for ExternalIp {
@@ -679,6 +774,10 @@ pub struct MulticastGroupMember {
     pub source_ips: Vec<IpAddr>,
     /// Current state of the multicast group membership.
     pub state: String,
+}
+
+impl HasResourceType for MulticastGroupMember {
+    const RESOURCE_TYPE: ResourceType = ResourceType::MulticastGroupMember;
 }
 
 // RACKS
@@ -772,6 +871,10 @@ impl SimpleIdentity for SledId {
     fn id(&self) -> Uuid {
         self.id.into_untyped_uuid()
     }
+}
+
+impl HasResourceType for SledId {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Sled;
 }
 
 /// An operator's view of a Sled.
@@ -1126,6 +1229,10 @@ impl SimpleIdentity for User {
     }
 }
 
+impl HasResourceType for User {
+    const RESOURCE_TYPE: ResourceType = ResourceType::SiloUser;
+}
+
 // SESSION
 
 // Add silo name to User because the console needs to display it
@@ -1193,6 +1300,10 @@ pub struct SshKey {
 
     /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
     pub public_key: String,
+}
+
+impl HasResourceType for SshKey {
+    const RESOURCE_TYPE: ResourceType = ResourceType::SshKey;
 }
 
 /// View of a device access token
@@ -1428,6 +1539,10 @@ impl SimpleIdentity for AlertSubscriptionCreated {
     }
 }
 
+impl HasResourceType for AlertSubscriptionCreated {
+    const RESOURCE_TYPE: ResourceType = ResourceType::AlertReceiver;
+}
+
 /// The possible alert delivery mechanisms for an alert receiver.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "kind")]
@@ -1448,6 +1563,10 @@ pub struct WebhookReceiver {
 
     #[serde(flatten)]
     pub config: WebhookReceiverConfig,
+}
+
+impl HasResourceType for WebhookReceiver {
+    const RESOURCE_TYPE: ResourceType = ResourceType::AlertReceiver;
 }
 
 impl From<WebhookReceiver> for AlertReceiver {
@@ -1522,6 +1641,10 @@ impl SimpleIdentity for WebhookSecret {
     fn id(&self) -> Uuid {
         self.id
     }
+}
+
+impl HasResourceType for WebhookSecret {
+    const RESOURCE_TYPE: ResourceType = ResourceType::WebhookSecret;
 }
 
 /// A delivery of a webhook event.
@@ -1814,6 +1937,10 @@ impl SimpleIdentity for UpdatesTrustRoot {
     }
 }
 
+impl HasResourceType for UpdatesTrustRoot {
+    const RESOURCE_TYPE: ResourceType = ResourceType::TufTrustRoot;
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UpdateStatus {
     /// Current target release of the system software
@@ -1934,6 +2061,10 @@ impl SimpleIdentity for ScimClientBearerTokenValue {
     }
 }
 
+impl HasResourceType for ScimClientBearerTokenValue {
+    const RESOURCE_TYPE: ResourceType = ResourceType::ScimClientBearerToken;
+}
+
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct ScimClientBearerToken {
     pub id: Uuid,
@@ -2017,6 +2148,12 @@ pub enum AuditLogEntryResult {
     Success {
         /// HTTP status code
         http_status_code: u16,
+        /// Type of resource created (if applicable). Only set for create
+        /// operations. Represented as a string (e.g., "instance", "disk").
+        resource_type: Option<String>,
+        /// ID of the resource created (if applicable). Only set for create
+        /// operations.
+        resource_id: Option<Uuid>,
     },
     /// The operation failed
     Error {
