@@ -18,4 +18,3 @@ thiserror.workspace = true
 tokio.workspace = true
 zeroize.workspace = true
 omicron-workspace-hack.workspace = true
-

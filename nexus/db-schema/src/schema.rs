@@ -2890,6 +2890,7 @@ table! {
         error_message -> Nullable<Text>,
         result_kind -> Nullable<crate::enums::AuditLogResultKindEnum>,
         auth_method -> Nullable<crate::enums::AuditLogAuthMethodEnum>,
+        credential_id -> Nullable<Uuid>,
     }
 }
 
@@ -2911,6 +2912,7 @@ table! {
         error_message -> Nullable<Text>,
         result_kind -> crate::enums::AuditLogResultKindEnum,
         auth_method -> Nullable<crate::enums::AuditLogAuthMethodEnum>,
+        credential_id -> Nullable<Uuid>,
     }
 }
 

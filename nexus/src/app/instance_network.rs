@@ -510,7 +510,7 @@ pub(crate) async fn probe_ensure_dpd_config(
     // Notify dendrite that there are changes for it to reconcile.
     // In the event of a failure to notify dendrite, we'll log an error
     // and rely on dendrite's RPW timer to catch it up.
-    if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+    if let Err(e) = dpd_client.nat_trigger_update().await {
         error!(log, "failed to notify dendrite of nat updates"; "error" => ?e);
     };
 
@@ -642,7 +642,7 @@ pub(crate) async fn probe_delete_dpd_config(
         // Notify dendrite that there are changes for it to reconcile.
         // In the event of a failure to notify dendrite, we'll log an error
         // and rely on dendrite's RPW timer to catch it up.
-        if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+        if let Err(e) = dpd_client.nat_trigger_update().await {
             error!(log, "failed to notify dendrite of nat updates"; "error" => ?e);
         };
     }
@@ -762,7 +762,7 @@ async fn notify_dendrite_nat_state(
         // Notify dendrite that there are changes for it to reconcile.
         // In the event of a failure to notify dendrite, we'll log an error
         // and rely on dendrite's RPW timer to catch it up.
-        if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+        if let Err(e) = dpd_client.nat_trigger_update().await {
             error!(log, "failed to notify dendrite of nat updates"; "error" => ?e);
         };
     }

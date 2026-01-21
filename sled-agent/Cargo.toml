@@ -97,6 +97,7 @@ sled-hardware.workspace = true
 sled-hardware-types.workspace = true
 sled-storage.workspace = true
 sp-sim.workspace = true
+secrecy.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true

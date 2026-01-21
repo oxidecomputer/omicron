@@ -53,14 +53,12 @@ use crate::db::pagination::paginated;
 use crate::db::queries::external_multicast_group::NextExternalMulticastGroup;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 
-/// External multicast group with computed source IPs from members.
-///
-/// The `source_ips` field contains the union of all member source IPs,
-/// computed via a separate query.
+/// External multicast group with computed source filter state from members.
 #[derive(Clone, Debug)]
 pub struct ExternalMulticastGroupWithSources {
     pub group: ExternalMulticastGroup,
     pub source_ips: Vec<IpAddr>,
+    pub has_any_source_member: bool,
 }
 
 impl From<ExternalMulticastGroupWithSources> for views::MulticastGroup {
@@ -69,6 +67,7 @@ impl From<ExternalMulticastGroupWithSources> for views::MulticastGroup {
             identity: value.group.identity(),
             multicast_ip: value.group.multicast_ip.ip(),
             source_ips: value.source_ips,
+            has_any_source_member: value.has_any_source_member,
             ip_pool_id: value.group.ip_pool_id,
             state: value.group.state.to_string(),
         }
@@ -297,12 +296,21 @@ impl DataStore {
         let filter_state_map = self
             .multicast_groups_source_filter_state(opctx, &[group_id])
             .await?;
-        let source_ips = filter_state_map
+        let (source_ips, has_any_source_member) = filter_state_map
             .get(&group_id.into_untyped_uuid())
-            .map(|state| state.specific_sources.iter().copied().collect())
+            .map(|state| {
+                (
+                    state.specific_sources.iter().copied().collect(),
+                    state.has_any_source_member,
+                )
+            })
             .unwrap_or_default();
 
-        Ok(ExternalMulticastGroupWithSources { group, source_ips })
+        Ok(ExternalMulticastGroupWithSources {
+            group,
+            source_ips,
+            has_any_source_member,
+        })
     }
 
     /// Lookup an external multicast group by IP address.

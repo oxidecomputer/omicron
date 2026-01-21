@@ -20,7 +20,7 @@ use omicron_common::api::external::{
     Nullable, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
 use omicron_uuid_kinds::*;
-use oxnet::{Ipv4Net, Ipv6Net};
+use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -459,6 +459,74 @@ pub struct IpPoolRange {
     pub range: IpRange,
 }
 
+// SUBNET POOLS
+
+/// A pool of subnets for external subnet allocation
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The IP version for this pool
+    pub ip_version: IpVersion,
+    /// Type of subnet pool (unicast or multicast)
+    pub pool_type: shared::IpPoolType,
+}
+
+/// A member (subnet) within a subnet pool
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolMember {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// ID of the parent subnet pool
+    pub subnet_pool_id: Uuid,
+    /// The subnet CIDR
+    pub subnet: IpNet,
+    /// Minimum prefix length for allocations from this subnet; a smaller prefix
+    /// means larger allocations are allowed (e.g. a /16 prefix yields larger
+    /// subnet allocations than a /24 prefix).
+    pub min_prefix_length: u8,
+    /// Maximum prefix length for allocations from this subnet; a larger prefix
+    /// means smaller allocations are allowed (e.g. a /24 prefix yields smaller
+    /// subnet allocations than a /16 prefix).
+    pub max_prefix_length: u8,
+}
+
+/// A link between a subnet pool and a silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SubnetPoolSiloLink {
+    pub subnet_pool_id: Uuid,
+    pub silo_id: Uuid,
+    pub is_default: bool,
+}
+
+/// Utilization information for a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolUtilization {
+    /// Number of addresses allocated from this pool
+    pub allocated: f64,
+    /// Total capacity of this pool in addresses
+    pub capacity: f64,
+}
+
+// EXTERNAL SUBNETS
+
+/// An external subnet allocated from a subnet pool
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnet {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The allocated subnet CIDR
+    pub subnet: IpNet,
+    /// The project this subnet belongs to
+    pub project_id: Uuid,
+    /// The subnet pool this was allocated from
+    pub subnet_pool_id: Uuid,
+    /// The subnet pool member this subnet corresponds to
+    pub subnet_pool_member_id: Uuid,
+    /// The instance this subnet is attached to, if any
+    pub instance_id: Option<Uuid>,
+}
+
 // INSTANCE EXTERNAL IP ADDRESSES
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -558,13 +626,18 @@ pub struct MulticastGroup {
     pub identity: IdentityMetadata,
     /// The multicast IP address held by this resource.
     pub multicast_ip: IpAddr,
-    /// Union of all member source IP addresses (computed, read-only).
+    /// Deduplicated union of source IPs specified by members.
     ///
-    /// This field shows the combined source IPs across all group members.
-    /// Individual members may subscribe to different sources; this union
-    /// reflects all sources that any member is subscribed to.
-    /// Empty array means no members have source filtering enabled.
+    /// Contains only sources from members that joined with explicit `source_ips`.
+    /// Members using any-source multicast (empty `source_ips`) do not contribute,
+    /// so a non-empty value does not imply all members use source filtering.
+    /// For SSM addresses (232/8, ff3x::/32), this is always non-empty.
     pub source_ips: Vec<IpAddr>,
+    /// True if any member joined without specifying source IPs (any-source).
+    ///
+    /// When true, at least one member receives traffic from any source rather
+    /// than filtering to specific sources.
+    pub has_any_source_member: bool,
     /// The ID of the IP pool this resource belongs to.
     pub ip_pool_id: Uuid,
     /// Current state of the multicast group.
@@ -1866,6 +1939,11 @@ pub struct AuditLogEntry {
     /// How the user authenticated the request (access token, session, or SCIM
     /// token). Null for unauthenticated requests like login attempts.
     pub auth_method: Option<AuthMethod>,
+
+    /// ID of the credential used for authentication. Null for unauthenticated
+    /// requests. The value of `auth_method` indicates what kind of credential
+    /// it is (access token, session, or SCIM token).
+    pub credential_id: Option<Uuid>,
 
     // Fields that are optional because they get filled in after the action completes
     /// Time operation completed

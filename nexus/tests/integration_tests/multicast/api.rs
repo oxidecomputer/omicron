@@ -389,6 +389,10 @@ async fn test_join_by_ip_asm(cptestctx: &ControlPlaneTestContext) {
         "Group should be in the ASM pool"
     );
     assert!(group.source_ips.is_empty(), "ASM group should have no source IPs");
+    assert!(
+        group.has_any_source_member,
+        "ASM group with any-source member should have has_any_source_member=true"
+    );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
     wait_for_group_deleted(cptestctx, &expected_group_name).await;
@@ -458,6 +462,10 @@ async fn test_join_by_ip_ssm_with_sources(cptestctx: &ControlPlaneTestContext) {
         group.source_ips[0].to_string(),
         source_ip.to_string(),
         "SSM group should have the specified source IP"
+    );
+    assert!(
+        !group.has_any_source_member,
+        "SSM group should have has_any_source_member=false (sources required)"
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
@@ -905,10 +913,13 @@ async fn test_join_by_ip_different_sources_succeeds(
     wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
-/// Test that ASM groups can optionally have source IPs (IGMPv3/MLDv2 filtering).
+/// Test ASM groups with optional source IPs (IGMPv3/MLDv2 filtering).
 ///
 /// Unlike SSM where sources are required, ASM addresses allow optional source
-/// filtering. The group's `source_ips` field shows the union of all member sources.
+/// filtering. This test verifies:
+/// 1. First member joins with sources → has_any_source_member=false
+/// 2. Second member joins without sources → has_any_source_member=true
+/// 3. Group source_ips shows union of all member sources
 #[nexus_test]
 async fn test_join_by_ip_asm_with_sources_succeeds(
     cptestctx: &ControlPlaneTestContext,
@@ -940,61 +951,64 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
     let expected_group_name =
         format!("mcast-{}", explicit_ip.to_string().replace('.', "-"));
 
-    // First instance joins ASM group without sources
+    // First instance joins ASM group with sources
+    let source1: IpAddr = "10.99.99.1".parse().unwrap();
+    let source2: IpAddr = "10.99.99.2".parse().unwrap();
     let join_url1 = format!(
         "/v1/instances/{}/multicast-groups/{explicit_ip}?project={project_name}",
         instance1.identity.name
     );
+    let join_body1 = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source1, source2]),
+        ip_version: None,
+    };
+    put_upsert::<_, MulticastGroupMember>(client, &join_url1, &join_body1)
+        .await;
+
+    let group = wait_for_group_active(client, &expected_group_name).await;
+
+    // All members have sources, so has_any_source_member=false
+    assert!(
+        !group.has_any_source_member,
+        "ASM group where all members specify sources should have has_any_source_member=false"
+    );
+    let mut actual_sources = group.source_ips.clone();
+    actual_sources.sort();
+    let mut expected_sources = vec![source1, source2];
+    expected_sources.sort();
+    assert_eq!(actual_sources, expected_sources);
+
+    // Second instance joins without sources (any-source subscription)
+    let join_url2 = format!(
+        "/v1/instances/{}/multicast-groups/{explicit_ip}?project={project_name}",
+        instance2.identity.name
+    );
     put_upsert::<_, MulticastGroupMember>(
         client,
-        &join_url1,
+        &join_url2,
         &InstanceMulticastGroupJoin::default(),
     )
     .await;
 
-    wait_for_group_active(client, &expected_group_name).await;
-
-    // Verify group has no source_ips initially
+    // Now has any-source member, so has_any_source_member=true
     let group: MulticastGroup = object_get(
         client,
         &format!("/v1/multicast-groups/{expected_group_name}"),
     )
     .await;
     assert!(
-        group.source_ips.is_empty(),
-        "ASM group with no-source member should have empty source_ips"
+        group.has_any_source_member,
+        "ASM group with any-source member should have has_any_source_member=true"
     );
-
-    // Second instance joins the same ASM group with sources (valid for ASM)
-    let join_url2 = format!(
-        "/v1/instances/{}/multicast-groups/{explicit_ip}?project={project_name}",
-        instance2.identity.name
-    );
-    let source1: IpAddr = "10.99.99.1".parse().unwrap();
-    let source2: IpAddr = "10.99.99.2".parse().unwrap();
-    let join_body_2 = InstanceMulticastGroupJoin {
-        source_ips: Some(vec![source1, source2]),
-        ip_version: None,
-    };
-    put_upsert::<_, MulticastGroupMember>(client, &join_url2, &join_body_2)
-        .await;
-
-    // Verify group source_ips is union of all member sources
-    let group: MulticastGroup = object_get(
-        client,
-        &format!("/v1/multicast-groups/{expected_group_name}"),
-    )
-    .await;
+    // source_ips should still show the first member's sources
     let mut actual_sources = group.source_ips.clone();
     actual_sources.sort();
-    let mut expected_sources = vec![source1, source2];
-    expected_sources.sort();
     assert_eq!(
         actual_sources, expected_sources,
         "ASM group source_ips should be union of member sources"
     );
 
-    // Also verify list endpoint returns the same source_ips
+    // Also verify list endpoint returns the same values
     let groups: Collection<MulticastGroup> =
         NexusRequest::iter_collection_authn(
             client,
@@ -1012,10 +1026,8 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
         .expect("ASM group should appear in list");
     let mut listed_sources = listed_group.source_ips.clone();
     listed_sources.sort();
-    assert_eq!(
-        listed_sources, expected_sources,
-        "List endpoint should also show source_ips union for ASM group"
-    );
+    assert_eq!(listed_sources, expected_sources);
+    assert!(listed_group.has_any_source_member);
 
     cleanup_instances(
         cptestctx,

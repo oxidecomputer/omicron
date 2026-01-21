@@ -215,9 +215,10 @@ pub struct MulticastGroup {
     /// ASM can optionally use them via IGMPv3/MLDv2). Empty array means any source.
     pub source_ips: Vec<IpAddr>,
     // Deprecated: Always None. Field kept for backwards compatibility with
-    // clients using API version 2025122300..2026011000. Removed in 2026011000
-    // as egress multicast is not in MVP scope.
+    // clients using API versions before MULTICAST_IMPLICIT_LIFECYCLE_UPDATES.
+    // Removed as egress multicast is not in MVP scope.
     /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// None means no VLAN tagging on egress.
     pub mvlan: Option<VlanID>,
     /// The ID of the IP pool this resource belongs to.
     pub ip_pool_id: Uuid,

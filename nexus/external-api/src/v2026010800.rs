@@ -2,17 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2026010800 to 2026011000.
+//! Nexus external types from 2026010800 (`MULTICAST_IMPLICIT_LIFECYCLE_UPDATES`)
+//! that changed in 2026012100 (`MULTICAST_DROP_MVLAN_ADD_HAS_ANY`).
 //!
-//! This version (MULTICAST_IMPLICIT_LIFECYCLE_UPDATES) uses the same request
-//! types as current (MulticastGroupIdentifier, source_ips in member add), but
-//! still includes `mvlan` in responses for backwards compatibility.
+//! ## MulticastGroup
 //!
-//! ## MulticastGroup Changes
-//!
-//! [`MulticastGroup`] includes `mvlan` field which was removed in 2026011000
-//! (MULTICAST_DROP_MVLAN). The mvlan field was for egress multicast VLAN
-//! tagging which is not in MVP scope.
+//! [`MulticastGroup`] includes the deprecated `mvlan` field (always None) and
+//! omits `has_any_source_member` which was added in 2026012100.
 //!
 //! Affected endpoints:
 //! - `GET /v1/multicast-groups` (multicast_group_list)
@@ -28,23 +24,22 @@ use uuid::Uuid;
 
 use nexus_types::external_api::views;
 
-/// View of a Multicast Group.
-///
-/// This version includes `mvlan` for backwards compatibility with clients
-/// using API version 2026010800..2026011000.
+/// View of a Multicast Group
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct MulticastGroup {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     /// The multicast IP address held by this resource.
     pub multicast_ip: IpAddr,
-    /// Source IP addresses for multicast source filtering (SSM requires these;
-    /// ASM can optionally use them via IGMPv3/MLDv2). Empty array means any source.
+    /// Union of all member source IP addresses (computed, read-only).
+    ///
+    /// This field shows the combined source IPs across all group members.
+    /// Individual members may subscribe to different sources; this union
+    /// reflects all sources that any member is subscribed to.
+    /// Empty array means no members have source filtering enabled.
     pub source_ips: Vec<IpAddr>,
-    // Deprecated: Always None. Field kept for backwards compatibility with
-    // clients using API version 2026010800..2026011000. Removed in 2026011000
-    // as egress multicast is not in MVP scope.
     /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// None means no VLAN tagging on egress.
     pub mvlan: Option<VlanID>,
     /// The ID of the IP pool this resource belongs to.
     pub ip_pool_id: Uuid,

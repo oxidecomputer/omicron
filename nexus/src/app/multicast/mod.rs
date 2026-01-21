@@ -242,12 +242,22 @@ impl super::Nexus {
             .db_datastore
             .multicast_groups_source_filter_state(opctx, &[group_id])
             .await?;
-        let source_ips = filter_state_map
+        let (source_ips, has_any_source_member) = filter_state_map
             .get(&group.identity.id)
-            .map(|state| state.specific_sources.iter().copied().collect())
+            .map(|state| {
+                (
+                    state.specific_sources.iter().copied().collect(),
+                    state.has_any_source_member,
+                )
+            })
             .unwrap_or_default();
 
-        Ok(ExternalMulticastGroupWithSources { group, source_ips }.into())
+        Ok(ExternalMulticastGroupWithSources {
+            group,
+            source_ips,
+            has_any_source_member,
+        }
+        .into())
     }
 
     /// Resolve which multicast pool contains a given IP address.
@@ -309,13 +319,21 @@ impl super::Nexus {
         Ok(groups
             .into_iter()
             .map(|group| {
-                let source_ips = filter_state_map
+                let (source_ips, has_any_source_member) = filter_state_map
                     .get(&group.identity.id)
                     .map(|state| {
-                        state.specific_sources.iter().copied().collect()
+                        (
+                            state.specific_sources.iter().copied().collect(),
+                            state.has_any_source_member,
+                        )
                     })
                     .unwrap_or_default();
-                ExternalMulticastGroupWithSources { group, source_ips }.into()
+                ExternalMulticastGroupWithSources {
+                    group,
+                    source_ips,
+                    has_any_source_member,
+                }
+                .into()
             })
             .collect())
     }
