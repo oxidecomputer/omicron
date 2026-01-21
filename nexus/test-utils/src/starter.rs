@@ -166,6 +166,8 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub password: Option<String>,
 
     pub simulated_upstairs: Arc<sim::SimulatedUpstairs>,
+
+    db_listen_port: u16,
 }
 
 type StepInitFn<'a, N> = Box<
@@ -216,7 +218,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
                 simulated_upstairs_log,
             )),
+            db_listen_port: dev::db::COCKROACHDB_DEFAULT_LISTEN_PORT,
         }
+    }
+
+    pub fn db_listen_port(&mut self, port: u16) {
+        self.db_listen_port = port;
     }
 
     pub async fn init_with_steps(
@@ -266,7 +273,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             }
             #[cfg(feature = "omicron-dev")]
             PopulateCrdb::FromSeed { input_tar } => {
-                crdb::test_setup_database_from_seed(log, input_tar).await
+                crdb::test_setup_database_from_seed(
+                    log,
+                    input_tar,
+                    self.db_listen_port,
+                )
+                .await
             }
             PopulateCrdb::Empty => crdb::test_setup_database_empty(log).await,
         };

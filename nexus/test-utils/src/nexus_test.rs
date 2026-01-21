@@ -361,8 +361,10 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     config: &mut NexusConfig,
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
+    listen_port: u16,
 ) -> Result<ControlPlaneTestContext<N>> {
-    let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
+    let mut starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
+    starter.db_listen_port(listen_port);
 
     let log = &starter.logctx.log;
     debug!(log, "Ensuring seed tarball exists");

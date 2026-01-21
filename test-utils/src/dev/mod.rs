@@ -62,9 +62,10 @@ pub enum StorageSource {
 pub async fn test_setup_database(
     log: &Logger,
     source: StorageSource,
+    listen_port: u16,
 ) -> db::CockroachInstance {
     usdt::register_probes().expect("Failed to register USDT DTrace probes");
-    setup_database(log, source).await.unwrap()
+    setup_database(log, source, listen_port).await.unwrap()
 }
 
 // TODO: switch to anyhow entirely -- this function is currently a mishmash of
@@ -72,8 +73,10 @@ pub async fn test_setup_database(
 async fn setup_database(
     log: &Logger,
     storage_source: StorageSource,
+    listen_port: u16,
 ) -> Result<db::CockroachInstance> {
     let builder = db::CockroachStarterBuilder::new();
+    let builder = builder.listen_port(listen_port);
     let builder = match &storage_source {
         StorageSource::DoNotPopulate | StorageSource::CopyFromSeed { .. } => {
             builder
