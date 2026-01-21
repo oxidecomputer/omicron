@@ -65,6 +65,11 @@ pub enum Error {
 
     #[error("No matching NIC found for port {0} at slot {1}.")]
     NoNicforPort(String, u32),
+
+    #[error(
+        "Tried to update attached subnets on non-existent port ({0}, {1:?})"
+    )]
+    AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 }
 
 /// Delete all xde devices on the system.
