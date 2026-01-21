@@ -5,6 +5,9 @@
 //! Types from API version 2026011600 (`RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR`)
 //! that changed in version 2026012000 (`FLOATING_IP_ALLOCATOR_UPDATE`).
 //!
+//! These types are also valid through version 2026011601 (`EXTERNAL_SUBNET_ATTACHMENT`),
+//! which did not modify them.
+//!
 //! ## AddressAllocator Changes
 //!
 //! This version's [`AddressAllocator::Explicit`] has both `ip` and optional `pool` fields.
