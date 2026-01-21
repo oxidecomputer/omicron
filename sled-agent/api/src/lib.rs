@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (18, ADD_ATTACHED_SUBNETS),
     (17, TWO_TYPES_OF_DELEGATED_ZVOL),
     (16, MEASUREMENT_PROPER_INVENTORY),
     (15, ADD_TRUST_QUORUM_STATUS),
@@ -1312,4 +1313,50 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         body: TypedBody<latest::trust_quorum::TrustQuorumNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the subnets attached to an instance.
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}/attached-subnets",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_put_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::attached_subnet::AttachedSubnets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Delete all subnets attached to an instance.
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/attached-subnets",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_delete_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Attach a subnet to an instance.
+    #[endpoint {
+        method = POST,
+        path = "/vmms/{propolis_id}/attached-subnets",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_post_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::attached_subnet::AttachedSubnet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Detach a subnet from an instance.
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/attached-subnets/{subnet}",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_delete_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::attached_subnet::VmmSubnetPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 }

@@ -4,6 +4,12 @@
 
 //! Re-exports of the latest versions of all types.
 
+pub mod attached_subnet {
+    pub use crate::v18::attached_subnet::AttachedSubnet;
+    pub use crate::v18::attached_subnet::AttachedSubnets;
+    pub use crate::v18::attached_subnet::VmmSubnetPathParam;
+}
+
 pub mod artifact {
     pub use crate::v1::artifact::ArtifactConfig;
     pub use crate::v1::artifact::ArtifactCopyFromDepotBody;
