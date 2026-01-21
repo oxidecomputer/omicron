@@ -6073,7 +6073,6 @@
           "experimental"
         ],
         "summary": "List multicast groups",
-        "description": "Prior version that included deprecated `mvlan` field and omitted `has_any_source_member`.",
         "operationId": "multicast_group_list",
         "parameters": [
           {
@@ -6133,7 +6132,7 @@
           "experimental"
         ],
         "summary": "Fetch multicast group",
-        "description": "Prior version that included deprecated `mvlan` field and omitted `has_any_source_member`.",
+        "description": "The group can be specified by name, UUID, or multicast IP address. (e.g., \"224.1.2.3\" or \"ff38::1\").",
         "operationId": "multicast_group_view",
         "parameters": [
           {
@@ -23691,7 +23690,7 @@
         ]
       },
       "PoolSelector": {
-        "description": "Specify which IP or external subnet pool to allocate from.",
+        "description": "Specify which IP pool to allocate from.",
         "oneOf": [
           {
             "description": "Use the specified pool by name or ID.",
@@ -29526,13 +29525,6 @@
       }
     },
     {
-      "name": "external-subnets",
-      "description": "External subnets that can be attached to instances.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/external-subnets"
-      }
-    },
-    {
       "name": "floating-ips",
       "description": "Floating IPs allow a project to allocate well-known IPs to instances.",
       "externalDocs": {
@@ -29663,13 +29655,6 @@
       "description": "Endpoints related to system health",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-status"
-      }
-    },
-    {
-      "name": "system/subnet-pools",
-      "description": "Subnet pools are collections of IP subnets that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate external subnets from the pool.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system-subnet-pools"
       }
     },
     {
