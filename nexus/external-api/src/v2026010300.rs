@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2026010300 to 2026010500.
+//! Types from API version 2026010300 (DUAL_STACK_NICS) that changed in version
+//! 2026010500 (POOL_SELECTION_ENUMS).
 //!
 //! ## Pool Selection Changes
 //!
@@ -26,7 +27,7 @@
 //! [`EphemeralIpCreate`]: self::EphemeralIpCreate
 //! [`ExternalIpCreate`]: self::ExternalIpCreate
 //! [`InstanceCreate`]: self::InstanceCreate
-//! [`AddressSelector`]: crate::v2026011501::AddressSelector
+//! [`AddressSelector`]: crate::v2026010500::AddressSelector
 //! [`PoolSelector`]: nexus_types::external_api::params::PoolSelector
 //! [`MulticastGroupJoinSpec`]: nexus_types::external_api::params::MulticastGroupJoinSpec
 
@@ -36,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 
-use crate::v2026011501;
+use crate::v2026010500;
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
@@ -157,16 +158,16 @@ pub struct FloatingIpCreate {
     pub ip_version: Option<IpVersion>,
 }
 
-impl TryFrom<FloatingIpCreate> for v2026011501::FloatingIpCreate {
+impl TryFrom<FloatingIpCreate> for v2026010500::FloatingIpCreate {
     type Error = external::Error;
 
     fn try_from(
         old: FloatingIpCreate,
-    ) -> Result<v2026011501::FloatingIpCreate, external::Error> {
+    ) -> Result<v2026010500::FloatingIpCreate, external::Error> {
         let address_selector = match (old.ip, old.pool, old.ip_version) {
             // Explicit IP address provided -> ip_version must not be set
             (Some(ip), pool, None) => {
-                v2026011501::AddressSelector::Explicit { ip, pool }
+                v2026010500::AddressSelector::Explicit { ip, pool }
             }
             // Explicit IP and ip_version is an invalid combination
             (Some(_), _, Some(_)) => {
@@ -176,7 +177,7 @@ impl TryFrom<FloatingIpCreate> for v2026011501::FloatingIpCreate {
                 ));
             }
             // No explicit IP, but named pool specified -> ip_version must not be set
-            (None, Some(pool), None) => v2026011501::AddressSelector::Auto {
+            (None, Some(pool), None) => v2026010500::AddressSelector::Auto {
                 pool_selector: params::PoolSelector::Explicit { pool },
             },
             // Named pool and ip_version is an invalid combination
@@ -187,11 +188,11 @@ impl TryFrom<FloatingIpCreate> for v2026011501::FloatingIpCreate {
                 ));
             }
             // Allocate from default pool with optional IP version preference
-            (None, None, ip_version) => v2026011501::AddressSelector::Auto {
+            (None, None, ip_version) => v2026010500::AddressSelector::Auto {
                 pool_selector: params::PoolSelector::Auto { ip_version },
             },
         };
-        Ok(v2026011501::FloatingIpCreate {
+        Ok(v2026010500::FloatingIpCreate {
             identity: old.identity,
             address_selector,
         })
@@ -255,19 +256,19 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
-impl TryFrom<InstanceCreate> for params::InstanceCreate {
+impl TryFrom<InstanceCreate> for v2026010500::InstanceCreate {
     type Error = external::Error;
 
     fn try_from(
         old: InstanceCreate,
-    ) -> Result<params::InstanceCreate, external::Error> {
+    ) -> Result<v2026010500::InstanceCreate, external::Error> {
         let external_ips: Vec<params::ExternalIpCreate> = old
             .external_ips
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(params::InstanceCreate {
+        Ok(v2026010500::InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,
             memory: old.memory,
@@ -275,15 +276,7 @@ impl TryFrom<InstanceCreate> for params::InstanceCreate {
             user_data: old.user_data,
             network_interfaces: old.network_interfaces,
             external_ips,
-            multicast_groups: old
-                .multicast_groups
-                .into_iter()
-                .map(|g| params::MulticastGroupJoinSpec {
-                    group: g.into(),
-                    source_ips: None,
-                    ip_version: None,
-                })
-                .collect(),
+            multicast_groups: old.multicast_groups,
             disks: old.disks,
             boot_disk: old.boot_disk,
             ssh_public_keys: old.ssh_public_keys,
@@ -376,7 +369,7 @@ mod tests {
             })
     }
 
-    /// Verifies that valid inputs convert to v2026011501::FloatingIpCreate
+    /// Verifies that valid inputs convert to v2026010500::FloatingIpCreate
     /// with the correct AddressSelector variant based on ip/pool/ip_version.
     #[proptest]
     fn floating_ip_create_valid_converts_correctly(
@@ -385,7 +378,7 @@ mod tests {
     ) {
         use proptest::test_runner::TestCaseError;
 
-        let output: v2026011501::FloatingIpCreate =
+        let output: v2026010500::FloatingIpCreate =
             input.clone().try_into().map_err(|e| {
                 TestCaseError::fail(format!("unexpected error: {e}"))
             })?;
@@ -399,7 +392,7 @@ mod tests {
         match (input.ip, input.pool, input.ip_version) {
             // Explicit IP address provided -> AddressSelector::Explicit.
             (Some(ip), pool, None) => {
-                let v2026011501::AddressSelector::Explicit {
+                let v2026010500::AddressSelector::Explicit {
                     ip: out_ip,
                     pool: out_pool,
                 } = output.address_selector
@@ -414,7 +407,7 @@ mod tests {
             // Pool specified without IP -> AddressSelector::Auto with
             // PoolSelector::Explicit.
             (None, Some(pool), None) => {
-                let v2026011501::AddressSelector::Auto {
+                let v2026010500::AddressSelector::Auto {
                     pool_selector:
                         params::PoolSelector::Explicit { pool: out_pool },
                 } = output.address_selector
@@ -428,7 +421,7 @@ mod tests {
             // Neither IP nor pool -> AddressSelector::Auto with
             // PoolSelector::Auto.
             (None, None, ip_version) => {
-                let v2026011501::AddressSelector::Auto {
+                let v2026010500::AddressSelector::Auto {
                     pool_selector:
                         params::PoolSelector::Auto { ip_version: out_ip_version },
                 } = output.address_selector
@@ -450,7 +443,7 @@ mod tests {
         #[strategy(invalid_floating_ip_create_strategy())]
         input: FloatingIpCreate,
     ) {
-        let result: Result<v2026011501::FloatingIpCreate, _> = input.try_into();
+        let result: Result<v2026010500::FloatingIpCreate, _> = input.try_into();
         prop_assert!(result.is_err());
     }
 }

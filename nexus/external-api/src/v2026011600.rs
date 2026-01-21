@@ -25,6 +25,7 @@ use std::net::IpAddr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::v2026010500;
 use nexus_types::external_api::params;
 use omicron_common::api::external::{IdentityMetadataCreateParams, NameOrId};
 
@@ -83,6 +84,28 @@ pub struct FloatingIpCreate {
     /// IP address allocation method.
     #[serde(default)]
     pub address_allocator: AddressAllocator,
+}
+
+impl From<v2026010500::AddressSelector> for AddressAllocator {
+    fn from(value: v2026010500::AddressSelector) -> Self {
+        match value {
+            v2026010500::AddressSelector::Explicit { ip, pool } => {
+                AddressAllocator::Explicit { ip, pool }
+            }
+            v2026010500::AddressSelector::Auto { pool_selector } => {
+                AddressAllocator::Auto { pool_selector }
+            }
+        }
+    }
+}
+
+impl From<v2026010500::FloatingIpCreate> for FloatingIpCreate {
+    fn from(value: v2026010500::FloatingIpCreate) -> Self {
+        Self {
+            identity: value.identity,
+            address_allocator: value.address_selector.into(),
+        }
+    }
 }
 
 impl From<FloatingIpCreate> for params::FloatingIpCreate {

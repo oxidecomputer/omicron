@@ -2,21 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2026010100 to 2026010300.
+//! Types from API version 2026010100 (SILO_PROJECT_IP_VERSION_AND_POOL_TYPE)
+//! that changed in version 2026010300 (DUAL_STACK_NICS).
 //!
 //! ## Network Interface Changes
 //!
-//! This version adds dual-stack NIC support with [`InstanceNetworkInterfaceAttachment`]
-//! and [`InstanceNetworkInterfaceCreate`] changes.
-//!
-//! ## Multicast Changes
-//!
-//! `InstanceCreate.multicast_groups` uses `Vec<NameOrId>` instead of
-//! `Vec<MulticastGroupJoinSpec>`. The conversion adds default values for
-//! `source_ips` and `ip_version` fields.
-//!
-//! Affected endpoints:
-//! - `POST /v1/instances` (instance_create)
+//! This version has pre-dual-stack NIC support with [`InstanceNetworkInterfaceAttachment`]
+//! and [`InstanceNetworkInterfaceCreate`]. These are used by `v2025122300::InstanceCreate`.
 //!
 //! [`InstanceNetworkInterfaceAttachment`]: self::InstanceNetworkInterfaceAttachment
 //! [`InstanceNetworkInterfaceCreate`]: self::InstanceNetworkInterfaceCreate
@@ -48,8 +40,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::net::IpAddr;
 use uuid::Uuid;
-
-use crate::v2026010300;
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
 /// at the time the instance is created.
@@ -306,159 +296,6 @@ impl TryFrom<InstanceNetworkInterfaceCreate>
             vpc_name: value.vpc_name,
             subnet_name: value.subnet_name,
             ip_config,
-        })
-    }
-}
-
-/// Create-time parameters for an `Instance`
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceCreate {
-    #[serde(flatten)]
-    pub identity: external::IdentityMetadataCreateParams,
-    /// The number of vCPUs to be allocated to the instance
-    pub ncpus: external::InstanceCpuCount,
-    /// The amount of RAM (in bytes) to be allocated to the instance
-    pub memory: external::ByteCount,
-    /// The hostname to be assigned to the instance
-    pub hostname: external::Hostname,
-
-    /// User data for instance initialization systems (such as cloud-init).
-    /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /
-    /// characters with padding). Maximum 32 KiB unencoded data.
-    // While serde happily accepts #[serde(with = "<mod>")] as a shorthand for
-    // specifying `serialize_with` and `deserialize_with`, schemars requires the
-    // argument to `with` to be a type rather than merely a path prefix (i.e. a
-    // mod or type). It's admittedly a bit tricky for schemars to address;
-    // unlike `serialize` or `deserialize`, `JsonSchema` requires several
-    // functions working together. It's unfortunate that schemars has this
-    // built-in incompatibility, exacerbated by its glacial rate of progress
-    // and immunity to offers of help.
-    #[serde(default, with = "params::UserData")]
-    pub user_data: Vec<u8>,
-
-    /// The network interfaces to be created for this instance.
-    #[serde(default)]
-    pub network_interfaces: InstanceNetworkInterfaceAttachment,
-
-    /// The external IP addresses provided to this instance.
-    ///
-    /// By default, all instances have outbound connectivity, but no inbound
-    /// connectivity. These external addresses can be used to provide a fixed,
-    /// known IP address for making inbound connections to the instance.
-    #[serde(default)]
-    pub external_ips: Vec<v2026010300::ExternalIpCreate>,
-
-    /// The multicast groups this instance should join.
-    ///
-    /// The instance will be automatically added as a member of the specified
-    /// multicast groups during creation, enabling it to send and receive
-    /// multicast traffic for those groups.
-    #[serde(default)]
-    pub multicast_groups: Vec<external::NameOrId>,
-
-    /// A list of disks to be attached to the instance.
-    ///
-    /// Disk attachments of type "create" will be created, while those of type
-    /// "attach" must already exist.
-    ///
-    /// The order of this list does not guarantee a boot order for the instance.
-    /// Use the boot_disk attribute to specify a boot disk. When boot_disk is
-    /// specified it will count against the disk attachment limit.
-    #[serde(default)]
-    pub disks: Vec<params::InstanceDiskAttachment>,
-
-    /// The disk the instance is configured to boot from.
-    ///
-    /// This disk can either be attached if it already exists or created along
-    /// with the instance.
-    ///
-    /// Specifying a boot disk is optional but recommended to ensure predictable
-    /// boot behavior. The boot disk can be set during instance creation or
-    /// later if the instance is stopped. The boot disk counts against the disk
-    /// attachment limit.
-    ///
-    /// An instance that does not have a boot disk set will use the boot
-    /// options specified in its UEFI settings, which are controlled by both the
-    /// instance's UEFI firmware and the guest operating system. Boot options
-    /// can change as disks are attached and detached, which may result in an
-    /// instance that only boots to the EFI shell until a boot disk is set.
-    #[serde(default)]
-    pub boot_disk: Option<params::InstanceDiskAttachment>,
-
-    /// An allowlist of SSH public keys to be transferred to the instance via
-    /// cloud-init during instance creation.
-    ///
-    /// If not provided, all SSH public keys from the user's profile will be sent.
-    /// If an empty list is provided, no public keys will be transmitted to the
-    /// instance.
-    pub ssh_public_keys: Option<Vec<external::NameOrId>>,
-
-    /// Should this instance be started upon creation; true by default.
-    #[serde(default = "params::bool_true")]
-    pub start: bool,
-
-    /// The auto-restart policy for this instance.
-    ///
-    /// This policy determines whether the instance should be automatically
-    /// restarted by the control plane on failure. If this is `null`, no
-    /// auto-restart policy will be explicitly configured for this instance, and
-    /// the control plane will select the default policy when determining
-    /// whether the instance can be automatically restarted.
-    ///
-    /// Currently, the global default auto-restart policy is "best-effort", so
-    /// instances with `null` auto-restart policies will be automatically
-    /// restarted. However, in the future, the default policy may be
-    /// configurable through other mechanisms, such as on a per-project basis.
-    /// In that case, any configured default policy will be used if this is
-    /// `null`.
-    #[serde(default)]
-    pub auto_restart_policy: Option<external::InstanceAutoRestartPolicy>,
-
-    /// Anti-Affinity groups which this instance should be added.
-    #[serde(default)]
-    pub anti_affinity_groups: Vec<external::NameOrId>,
-
-    /// The CPU platform to be used for this instance. If this is `null`, the
-    /// instance requires no particular CPU platform; when it is started the
-    /// instance will have the most general CPU platform supported by the sled
-    /// it is initially placed on.
-    #[serde(default)]
-    pub cpu_platform: Option<external::InstanceCpuPlatform>,
-}
-
-impl TryFrom<InstanceCreate> for params::InstanceCreate {
-    type Error = external::Error;
-
-    fn try_from(value: InstanceCreate) -> Result<Self, Self::Error> {
-        let network_interfaces = value.network_interfaces.try_into()?;
-        Ok(Self {
-            identity: value.identity,
-            ncpus: value.ncpus,
-            memory: value.memory,
-            hostname: value.hostname,
-            user_data: value.user_data,
-            network_interfaces,
-            external_ips: value
-                .external_ips
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<Vec<_>, _>>()?,
-            multicast_groups: value
-                .multicast_groups
-                .into_iter()
-                .map(|g| params::MulticastGroupJoinSpec {
-                    group: g.into(),
-                    source_ips: None,
-                    ip_version: None,
-                })
-                .collect(),
-            disks: value.disks,
-            boot_disk: value.boot_disk,
-            ssh_public_keys: value.ssh_public_keys,
-            start: value.start,
-            auto_restart_policy: value.auto_restart_policy,
-            anti_affinity_groups: value.anti_affinity_groups,
-            cpu_platform: value.cpu_platform,
         })
     }
 }

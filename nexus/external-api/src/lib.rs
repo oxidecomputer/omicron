@@ -41,7 +41,6 @@ mod v2025122300;
 mod v2026010100;
 mod v2026010300;
 mod v2026010500;
-mod v2026011501;
 mod v2026011600;
 
 #[cfg(test)]
@@ -1618,17 +1617,19 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/floating-ips",
         tags = ["floating-ips"],
-        versions = VERSION_POOL_SELECTION_ENUMS..VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR,
+        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
     }]
-    async fn v2026011501_floating_ip_create(
+    async fn v2025121200_floating_ip_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        floating_params: TypedBody<v2026011501::FloatingIpCreate>,
+        floating_params: TypedBody<v2025121200::FloatingIpCreate>,
     ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
-        Self::v2026011600_floating_ip_create(
+        let floating_params =
+            floating_params.map(v2026010300::FloatingIpCreate::from);
+        Self::v2026010300_floating_ip_create(
             rqctx,
             query_params,
-            floating_params.map(Into::into),
+            floating_params,
         )
         .await
     }
@@ -1648,8 +1649,8 @@ pub trait NexusExternalApi {
         floating_params: TypedBody<v2026010300::FloatingIpCreate>,
     ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
         let floating_params =
-            floating_params.try_map(v2026011501::FloatingIpCreate::try_from)?;
-        Self::v2026011501_floating_ip_create(
+            floating_params.try_map(v2026010500::FloatingIpCreate::try_from)?;
+        Self::v2026010500_floating_ip_create(
             rqctx,
             query_params,
             floating_params,
@@ -1663,19 +1664,17 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/floating-ips",
         tags = ["floating-ips"],
-        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+        versions = VERSION_POOL_SELECTION_ENUMS..VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR,
     }]
-    async fn v2025121200_floating_ip_create(
+    async fn v2026010500_floating_ip_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        floating_params: TypedBody<v2025121200::FloatingIpCreate>,
+        floating_params: TypedBody<v2026010500::FloatingIpCreate>,
     ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
-        let floating_params =
-            floating_params.map(v2026010300::FloatingIpCreate::from);
-        Self::v2026010300_floating_ip_create(
+        Self::v2026011600_floating_ip_create(
             rqctx,
             query_params,
-            floating_params,
+            floating_params.map(Into::into),
         )
         .await
     }
@@ -2188,80 +2187,16 @@ pub trait NexusExternalApi {
 
     /// Create instance
     #[endpoint {
-        operation_id = "disk_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = ..VERSION_LOCAL_STORAGE,
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
-    async fn v2025112000_instance_create(
+    async fn instance_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<v2025112000::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::v2025121200_instance_create(
-            rqctx,
-            query_params,
-            new_instance.map(Into::into),
-        )
-        .await
-    }
-
-    /// Create instance
-    #[endpoint {
-        operation_id = "instance_create",
-        method = POST,
-        path = "/v1/instances",
-        tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
-    }]
-    async fn v2025121200_instance_create(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<v2025121200::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::v2026010100_instance_create(
-            rqctx,
-            query_params,
-            new_instance.map(Into::into),
-        )
-        .await
-    }
-
-    /// Create instance
-    #[endpoint {
-        operation_id = "instance_create",
-        method = POST,
-        path = "/v1/instances",
-        tags = ["instances"],
-        versions =
-            VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS..VERSION_DUAL_STACK_NICS,
-    }]
-    async fn v2026010100_instance_create(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<v2026010100::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        let new_instance = new_instance.try_map(TryInto::try_into)?;
-        Self::instance_create(rqctx, query_params, new_instance).await
-    }
-
-    /// Create instance
-    #[endpoint {
-        operation_id = "instance_create",
-        method = POST,
-        path = "/v1/instances",
-        tags = ["instances"],
-        versions = VERSION_DUAL_STACK_NICS..VERSION_POOL_SELECTION_ENUMS,
-    }]
-    async fn v2026010300_instance_create(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<v2026010300::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        let new_instance = new_instance.try_map(TryInto::try_into)?;
-        Self::instance_create(rqctx, query_params, new_instance).await
-    }
+        new_instance: TypedBody<params::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError>;
 
     /// Create instance
     #[endpoint {
@@ -2282,16 +2217,88 @@ pub trait NexusExternalApi {
 
     /// Create instance
     #[endpoint {
+        operation_id = "instance_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_DUAL_STACK_NICS..VERSION_POOL_SELECTION_ENUMS,
     }]
-    async fn instance_create(
+    async fn v2026010300_instance_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<params::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError>;
+        new_instance: TypedBody<v2026010300::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::v2026010500_instance_create(
+            rqctx,
+            query_params,
+            new_instance.try_map(TryInto::try_into)?,
+        )
+        .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions =
+            VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn v2025122300_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2025122300::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::v2026010300_instance_create(
+            rqctx,
+            query_params,
+            new_instance.try_map(TryInto::try_into)?,
+        )
+        .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+    }]
+    async fn v2025120300_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2025120300::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::v2025122300_instance_create(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2025112000::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::v2025120300_instance_create(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
+    }
 
     /// Fetch instance
     #[endpoint {
