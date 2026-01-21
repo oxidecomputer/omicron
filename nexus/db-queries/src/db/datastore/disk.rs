@@ -318,9 +318,9 @@ impl DataStore {
 
     /// Return a `datastore::Disk` given a `model::Disk`
     ///
-    /// Prefer to use `disk_get` instead: this version of the function bypasses
-    /// the LookupPath induced permissions check and is (currently) only called
-    /// from omdb.
+    /// Note: basically all of Nexus should _not_ be using this, and should be
+    /// using `disk_get` instead: this version of the function bypasses the
+    /// LookupPath induced permissions check and should only called from omdb.
     pub async fn disk_get_with_model(
         &self,
         opctx: &OpContext,
