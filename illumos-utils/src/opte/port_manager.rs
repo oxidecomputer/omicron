@@ -41,6 +41,7 @@ use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::AttachedSubnetConfig;
 use oxide_vpc::api::DelRouterEntryReq;
+use oxide_vpc::api::DetachSubnetResp;
 use oxide_vpc::api::DhcpCfg;
 use oxide_vpc::api::ExternalIpCfg;
 use oxide_vpc::api::IpCfg;
@@ -63,6 +64,7 @@ use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
+use slog::warn;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -992,6 +994,141 @@ impl PortManager {
         })?;
 
         Ok(())
+    }
+
+    pub fn attached_subnets_ensure(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        ensure_removed: Vec<IpCidr>,
+        ensure_added: Vec<AttachedSubnet>,
+    ) -> Result<(), Error> {
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
+            Error::AttachedSubnetUpdateMissingPort(nic_id, nic_kind)
+        })?;
+        self.attached_subnets_ensure_port(port, ensure_removed, ensure_added)
+    }
+
+    fn attached_subnets_ensure_port(
+        &self,
+        port: &Port,
+        ensure_removed: Vec<IpCidr>,
+        ensure_added: Vec<AttachedSubnet>,
+    ) -> Result<(), Error> {
+        debug!(
+            self.inner.log,
+            "ensuring attached subnets for port";
+            "port_name" => %port.name(),
+        );
+        let hdl = Handle::new()?;
+        for cidr in ensure_removed.into_iter() {
+            hdl.detach_subnet(port.name(), cidr)?;
+        }
+        for subnet in ensure_added.into_iter() {
+            self.attach_subnet_port(port, subnet)?
+        }
+        Ok(())
+    }
+
+    pub fn attach_subnet(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
+            Error::AttachedSubnetUpdateMissingPort(nic_id, nic_kind)
+        })?;
+        self.attach_subnet_port(port, subnet)
+    }
+
+    fn attach_subnet_port(
+        &self,
+        port: &Port,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        let hdl = Handle::new()?;
+        let AttachedSubnet { cidr, is_external } = subnet;
+        match hdl.attach_subnet(port.name(), cidr, is_external) {
+            Ok(_) => {
+                debug!(
+                    self.inner.log,
+                    "attached subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %cidr,
+                    "is_external" => is_external,
+                );
+                Ok(())
+            }
+            Err(e) => {
+                error!(
+                    self.inner.log,
+                    "failed to attach subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %cidr,
+                    "is_external" => is_external,
+                    "error" => ?e,
+                );
+                Err(Error::from(e))
+            }
+        }
+    }
+
+    pub fn detach_subnet(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        subnet: IpCidr,
+    ) -> Result<(), Error> {
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
+            Error::AttachedSubnetUpdateMissingPort(nic_id, nic_kind)
+        })?;
+        self.detach_subnet_port(port, subnet)
+    }
+
+    fn detach_subnet_port(
+        &self,
+        port: &Port,
+        subnet: IpCidr,
+    ) -> Result<(), Error> {
+        let hdl = Handle::new()?;
+        // This returns an Error if the actual request failed. The
+        // `DetachSubnetResp` it returns in the Ok(_) variant is either
+        // `NotFound` or `Ok(IpCidr)`, so in both cases we've "detached" it. We
+        // return success either way.
+        match hdl.detach_subnet(port.name(), subnet) {
+            Ok(DetachSubnetResp::Ok(_)) => {
+                debug!(
+                    self.inner.log,
+                    "detached subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %subnet,
+                );
+                Ok(())
+            }
+            Ok(DetachSubnetResp::NotFound) => {
+                warn!(
+                    self.inner.log,
+                    "subnet is already detached";
+                    "port_name" => %port.name(),
+                    "subnet" => %subnet,
+                );
+                Ok(())
+            }
+            Err(e) => {
+                error!(
+                    self.inner.log,
+                    "failed to detach subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %subnet,
+                    "error" => ?e,
+                );
+                Err(Error::from(e))
+            }
+        }
     }
 }
 

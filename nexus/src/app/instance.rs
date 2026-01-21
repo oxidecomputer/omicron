@@ -1597,6 +1597,19 @@ impl super::Nexus {
             }
         }
 
+        // TODO-completeness: We need to handle VPC subnets too, see
+        // https://github.com/oxidecomputer/omicron/issues/9580.
+        let attached_subnets = self
+            .datastore()
+            .instance_lookup_external_subnets(opctx, authz_instance)
+            .await?
+            .into_iter()
+            .map(|ext| sled_agent_client::types::AttachedSubnet {
+                subnet: ext.subnet.into(),
+                is_external: true,
+            })
+            .collect();
+
         let local_config = sled_agent_client::types::InstanceSledLocalConfig {
             hostname,
             nics,
@@ -1610,6 +1623,7 @@ impl super::Nexus {
                 search_domains: Vec::new(),
             },
             delegated_zvols,
+            attached_subnets,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());

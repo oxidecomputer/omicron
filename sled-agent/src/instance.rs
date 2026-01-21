@@ -16,9 +16,13 @@ use crate::profile::*;
 use crate::zone_bundle::ZoneBundler;
 
 use chrono::Utc;
+use iddqd::IdOrdMap;
+use iddqd::id_ord_map::Entry;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
+use illumos_utils::opte::{
+    DhcpCfg, PortCreateParams, PortManager, net_to_cidr,
+};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
@@ -33,6 +37,7 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     GenericUuid, InstanceUuid, OmicronZoneUuid, PropolisUuid,
 };
+use oxnet::IpNet;
 use propolis_api_types::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
 use propolis_client::instance_spec::{
@@ -42,6 +47,7 @@ use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_resolvable_files::ramdisk_file_source;
+use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use slog::Logger;
@@ -139,6 +145,9 @@ pub enum Error {
 
     #[error("Instance is terminating")]
     Terminating,
+
+    #[error("The IP subnet {0} is already attached")]
+    SubnetAlreadyAttached(IpNet),
 }
 
 type PropolisClientError =
@@ -254,6 +263,21 @@ enum InstanceRequest {
     RefreshMulticastGroups {
         tx: oneshot::Sender<Result<(), ManagerError>>,
     },
+    SetAttachedSubnets {
+        subnets: AttachedSubnets,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
+    ClearAttachedSubnets {
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
+    AttachSubnet {
+        subnet: AttachedSubnet,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
+    DetachSubnet {
+        subnet: IpNet,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
 }
 
 impl InstanceRequest {
@@ -298,7 +322,11 @@ impl InstanceRequest {
             | Self::RefreshExternalIps { tx }
             | Self::JoinMulticastGroup { tx, .. }
             | Self::LeaveMulticastGroup { tx, .. }
-            | Self::RefreshMulticastGroups { tx } => tx
+            | Self::RefreshMulticastGroups { tx }
+            | Self::SetAttachedSubnets { tx, .. }
+            | Self::ClearAttachedSubnets { tx }
+            | Self::AttachSubnet { tx, .. }
+            | Self::DetachSubnet { tx, .. } => tx
                 .send(Err(error.into()))
                 .map_err(|_| Error::FailedSendClientClosed),
         }
@@ -564,6 +592,9 @@ struct InstanceRunner {
 
     // Zvols to delegate to the Propolis zone
     delegated_zvols: Vec<DelegatedZvol>,
+
+    // Subnets attached to this instance.
+    attached_subnets: IdOrdMap<AttachedSubnet>,
 }
 
 /// Translate a `propolis-client` `InstanceSpecV0` into the newer
@@ -757,6 +788,22 @@ impl InstanceRunner {
                                 tx.send(self.refresh_multicast_groups().map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
                             }
+                            SetAttachedSubnets { tx, subnets } => {
+                                tx.send(self.set_attached_subnets(subnets).map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            }
+                            ClearAttachedSubnets { tx } => {
+                                tx.send(self.clear_attached_subnets().map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            }
+                            AttachSubnet { tx, subnet } => {
+                                tx.send(self.attach_subnet(subnet).map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            }
+                            DetachSubnet { tx, subnet } => {
+                                tx.send(self.detach_subnet(subnet).map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            }
                         }
                     };
                     tokio::select! {
@@ -861,6 +908,18 @@ impl InstanceRunner {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 RefreshMulticastGroups { tx } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                SetAttachedSubnets { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                ClearAttachedSubnets { tx } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                AttachSubnet { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                DetachSubnet { tx, .. } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
             };
@@ -1580,6 +1639,113 @@ impl InstanceRunner {
     fn primary_nic(&self) -> Option<&NetworkInterface> {
         self.requested_nics.iter().find(|nic| nic.primary)
     }
+
+    /// Replace the set of attached subnets, setting it to exactly the input.
+    fn set_attached_subnets(
+        &mut self,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        let Some(primary_nic) = self.primary_nic() else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+
+        // OPTE itself either inserts a new subnet, or updates the mapping it
+        // currently has, so we can "add" the full set here.
+        //
+        // We do need to compute the set of subnets we want to remove, which are
+        // just those we have locally, but not in the requested set.
+        let requested = subnets.subnets;
+        let to_remove = self
+            .attached_subnets
+            .iter()
+            .filter_map(|s| match requested.get(&s.subnet) {
+                Some(_) => None,
+                None => Some(net_to_cidr(s.subnet)),
+            })
+            .collect::<Vec<_>>();
+        let to_ensure = requested
+            .iter()
+            .map(|s| illumos_utils::opte::AttachedSubnet {
+                cidr: net_to_cidr(s.subnet),
+                is_external: s.is_external,
+            })
+            .collect::<Vec<_>>();
+        let nic_id = primary_nic.id;
+        let nic_kind = primary_nic.kind;
+        self.port_manager
+            .attached_subnets_ensure(nic_id, nic_kind, to_remove, to_ensure)
+            .map_err(Error::from)?;
+        self.attached_subnets = requested;
+        Ok(())
+    }
+
+    /// Delete all attached subnets.
+    fn clear_attached_subnets(&mut self) -> Result<(), Error> {
+        let Some(primary_nic) = self.primary_nic() else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+        let nic_id = primary_nic.id;
+        let nic_kind = primary_nic.kind;
+        let to_remove = self
+            .attached_subnets
+            .iter()
+            .map(|s| net_to_cidr(s.subnet))
+            .collect();
+        self.port_manager
+            .attached_subnets_ensure(nic_id, nic_kind, to_remove, vec![])
+            .map_err(Error::from)?;
+        self.attached_subnets.clear();
+        Ok(())
+    }
+
+    /// Attach a single subnet.
+    ///
+    /// This returns an error if a subnet with the matching IP CIDR is already
+    /// attached. Detach it first.
+    fn attach_subnet(&mut self, subnet: AttachedSubnet) -> Result<(), Error> {
+        let Some((nic_id, nic_kind)) =
+            self.primary_nic().map(|nic| (nic.id, nic.kind))
+        else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+        let entry = match self.attached_subnets.entry(&subnet.subnet) {
+            Entry::Vacant(entry) => entry,
+            Entry::Occupied(_) => {
+                return Err(Error::SubnetAlreadyAttached(subnet.subnet));
+            }
+        };
+        let subnet_ = illumos_utils::opte::AttachedSubnet {
+            cidr: net_to_cidr(subnet.subnet),
+            is_external: subnet.is_external,
+        };
+        self.port_manager
+            .attach_subnet(nic_id, nic_kind, subnet_)
+            .map_err(Error::from)?;
+        entry.insert(subnet);
+        Ok(())
+    }
+
+    /// Detach a single subnet.
+    ///
+    /// This is idempotent, returning successfully even if the subnet is gone.
+    fn detach_subnet(&mut self, subnet: IpNet) -> Result<(), Error> {
+        let Some((nic_id, nic_kind)) =
+            self.primary_nic().map(|nic| (nic.id, nic.kind))
+        else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+        let Some(entry) = self.attached_subnets.remove(&subnet) else {
+            return Ok(());
+        };
+        let res = self
+            .port_manager
+            .detach_subnet(nic_id, nic_kind, net_to_cidr(subnet))
+            .map_err(Error::from);
+        if res.is_err() {
+            let _ = self.attached_subnets.insert_unique(entry);
+        }
+        res
+    }
 }
 
 fn propolis_error_code(
@@ -1803,6 +1969,7 @@ impl Instance {
             zone_bundler,
             metrics_queue,
             delegated_zvols: local_config.delegated_zvols,
+            attached_subnets: IdOrdMap::new(),
         };
 
         let runner_handle = tokio::task::spawn(async move {
@@ -1961,6 +2128,45 @@ impl Instance {
     ) -> Result<(), Error> {
         self.tx
             .try_send(InstanceRequest::RefreshMulticastGroups { tx })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    pub(crate) fn set_attached_subnets(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::SetAttachedSubnets { subnets, tx })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    pub(crate) fn clear_attached_subnets(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::ClearAttachedSubnets { tx })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    pub(crate) fn attach_subnet(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::AttachSubnet { subnet, tx })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    pub(crate) fn detach_subnet(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::DetachSubnet { subnet, tx })
             .or_else(InstanceRequest::fail_try_send)
     }
 }
@@ -2161,9 +2367,14 @@ impl InstanceRunner {
                 external_ips: &self.external_ips,
                 firewall_rules: &self.firewall_rules,
                 dhcp_config: self.dhcp_config.clone(),
-                // TODO Accept these in the sled-agent API. See
-                // https://github.com/oxidecomputer/omicron/issues/9702.
-                attached_subnets: vec![],
+                attached_subnets: self
+                    .attached_subnets
+                    .iter()
+                    .map(|att| illumos_utils::opte::AttachedSubnet {
+                        cidr: net_to_cidr(att.subnet),
+                        is_external: att.is_external,
+                    })
+                    .collect(),
             })?;
             opte_port_names.push(port.0.name().to_string());
             opte_ports.push(port);
@@ -2822,6 +3033,7 @@ mod tests {
                 search_domains: vec![],
             },
             delegated_zvols: vec![],
+            attached_subnets: vec![],
         };
 
         InstanceInitialState {
@@ -3433,6 +3645,7 @@ mod tests {
                 zone_bundler,
                 metrics_queue,
                 delegated_zvols: local_config.delegated_zvols,
+                attached_subnets: IdOrdMap::new(),
             }
         }
     }

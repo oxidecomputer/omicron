@@ -112,7 +112,7 @@ impl Gateway {
 }
 
 /// Convert a nexus [IpNet] to an OPTE [IpCidr].
-fn net_to_cidr(net: IpNet) -> IpCidr {
+pub fn net_to_cidr(net: IpNet) -> IpCidr {
     match net {
         IpNet::V4(net) => IpCidr::Ip4(Ipv4Cidr::new(
             net.addr().into(),
