@@ -1,0 +1,14 @@
+#
+# Health monitor: example config file
+#
+
+enabled = false
+
+[sim_health_checks.smf_services_in_maintenance.ok]
+services = [
+    { fmri = "svc:/system/fake-service-1:default", zone = "oxz_fake_zone_1" },
+    { fmri = "svc:/network/fake-service-2:default", zone = "oxz_fake_zone_2" },
+    { fmri = "svc:/application/fake-service-3:default", zone = "global" }
+]
+errors = []
+# TODO-K: Add time of status

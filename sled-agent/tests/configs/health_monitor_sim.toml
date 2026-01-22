@@ -1,0 +1,5 @@
+#
+# Health monitor: example config file
+#
+
+enabled = false
