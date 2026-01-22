@@ -52,8 +52,13 @@ pub fn insert_subnet_pool_member_query(
     //
     // Expressing these as a bunch of ANDs is important. They could be done as
     // ORs, but that implies a full table scan.
+    //
+    // NOTE: We also have to do the same comparison against the `ip_pool_range`
+    // table. Those are really the same address space. Ideally, we'd have them
+    // all integrated into the Address Lot object, but we can't do that until we
+    // fix https://github.com/oxidecomputer/omicron/issues/3448.
     builder.sql("\
-        WITH candidate_contains_existing_first AS (\
+        WITH candidate_contains_existing_member_first AS (\
             SELECT 1 \
             FROM subnet_pool_member \
             WHERE \
@@ -65,7 +70,7 @@ pub fn insert_subnet_pool_member_query(
         .param()
         .bind::<sql_types::Inet, _>(last_address)
         .sql(" AND time_deleted IS NULL LIMIT 1), \
-        candidate_contains_existing_last AS (\
+        candidate_contains_existing_member_last AS (\
             SELECT 1 \
             FROM subnet_pool_member \
             WHERE \
@@ -77,7 +82,7 @@ pub fn insert_subnet_pool_member_query(
         .param()
         .bind::<sql_types::Inet, _>(last_address)
         .sql(" AND time_deleted IS NULL LIMIT 1), \
-        existing_contains_candidate_first AS (\
+        existing_member_contains_candidate_first AS (\
             SELECT 1 \
             FROM subnet_pool_member \
             WHERE "
@@ -85,7 +90,7 @@ pub fn insert_subnet_pool_member_query(
         .param()
         .bind::<sql_types::Inet, _>(first_address)
         .sql(" BETWEEN first_address AND last_address AND time_deleted IS NULL LIMIT 1), \
-        existing_contains_candidate_last AS (\
+        existing_member_contains_candidate_last AS (\
             SELECT 1 \
             FROM subnet_pool_member \
             WHERE "
@@ -93,12 +98,56 @@ pub fn insert_subnet_pool_member_query(
         .param()
         .bind::<sql_types::Inet, _>(last_address)
         .sql(" BETWEEN first_address AND last_address AND time_deleted IS NULL LIMIT 1), \
+        candidate_contains_existing_ip_pool_range_first AS (\
+            SELECT 1 \
+            FROM ip_pool_range \
+            WHERE \
+                first_address BETWEEN "
+        )
+        .param()
+        .bind::<sql_types::Inet, _>(first_address)
+        .sql(" AND ")
+        .param()
+        .bind::<sql_types::Inet, _>(last_address)
+        .sql(" AND time_deleted IS NULL LIMIT 1), \
+        candidate_contains_existing_ip_pool_range_last AS (\
+            SELECT 1 \
+            FROM ip_pool_range \
+            WHERE \
+                last_address BETWEEN "
+        )
+        .param()
+        .bind::<sql_types::Inet, _>(first_address)
+        .sql(" AND ")
+        .param()
+        .bind::<sql_types::Inet, _>(last_address)
+        .sql(" AND time_deleted IS NULL LIMIT 1), \
+        existing_ip_pool_range_contains_candidate_first AS (\
+            SELECT 1 \
+            FROM ip_pool_range \
+            WHERE "
+        )
+        .param()
+        .bind::<sql_types::Inet, _>(first_address)
+        .sql(" BETWEEN first_address AND last_address AND time_deleted IS NULL LIMIT 1), \
+        existing_ip_pool_range_contains_candidate_last AS (\
+            SELECT 1 \
+            FROM ip_pool_range \
+            WHERE "
+        )
+        .param()
+        .bind::<sql_types::Inet, _>(last_address)
+        .sql(" BETWEEN first_address AND last_address AND time_deleted IS NULL LIMIT 1), \
         candidate_does_not_overlap AS (\
                 SELECT 1 \
-                WHERE NOT EXISTS(SELECT 1 FROM candidate_contains_existing_first) \
-                  AND NOT EXISTS(SELECT 1 FROM candidate_contains_existing_last) \
-                  AND NOT EXISTS(SELECT 1 FROM existing_contains_candidate_first) \
-                  AND NOT EXISTS(SELECT 1 FROM existing_contains_candidate_last)\
+                WHERE NOT EXISTS(SELECT 1 FROM candidate_contains_existing_member_first) \
+                  AND NOT EXISTS(SELECT 1 FROM candidate_contains_existing_member_last) \
+                  AND NOT EXISTS(SELECT 1 FROM existing_member_contains_candidate_first) \
+                  AND NOT EXISTS(SELECT 1 FROM existing_member_contains_candidate_last) \
+                  AND NOT EXISTS(SELECT 1 FROM candidate_contains_existing_ip_pool_range_first) \
+                  AND NOT EXISTS(SELECT 1 FROM candidate_contains_existing_ip_pool_range_last) \
+                  AND NOT EXISTS(SELECT 1 FROM existing_ip_pool_range_contains_candidate_first) \
+                  AND NOT EXISTS(SELECT 1 FROM existing_ip_pool_range_contains_candidate_last)\
             ), new_record_values AS (SELECT ")
         .param()
         .bind::<sql_types::Uuid, _>(member.id)
@@ -404,7 +453,6 @@ pub fn insert_external_subnet_query(
     builder.sql(", ");
     push_cte_to_insert_actual_ip_subnet(
         &mut builder,
-        silo_id,
         project_id,
         identity,
     );
@@ -615,7 +663,6 @@ fn push_cte_to_update_subnet_pool_member_rcgen(builder: &mut QueryBuilder) {
 // records we've selected in earlier CTEs.
 fn push_cte_to_insert_actual_ip_subnet(
     builder: &mut QueryBuilder,
-    silo_id: &Uuid,
     project_id: &Uuid,
     identity: ExternalSubnetIdentity,
 ) {
@@ -631,7 +678,6 @@ fn push_cte_to_insert_actual_ip_subnet(
             time_deleted, \
             subnet_pool_id, \
             subnet_pool_member_id, \
-            silo_id, \
             project_id, \
             subnet, \
             attach_state, \
@@ -660,9 +706,6 @@ fn push_cte_to_insert_actual_ip_subnet(
             subnet_pool_member_id, ",
         )
         .param()
-        .bind::<sql_types::Uuid, _>(*silo_id)
-        .sql(" AS silo_id, ")
-        .param()
         .bind::<sql_types::Uuid, _>(*project_id)
         .sql(
             " AS project_id, \
@@ -679,7 +722,6 @@ fn push_cte_to_insert_actual_ip_subnet(
                 time_deleted, \
                 subnet_pool_id, \
                 subnet_pool_member_id, \
-                silo_id, \
                 project_id, \
                 subnet, \
                 attach_state, \

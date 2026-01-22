@@ -799,6 +799,8 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         subnet_pool_id -> Uuid,
         subnet -> Inet,
+        first_address -> Inet,
+        last_address -> Inet,
         min_prefix_length -> Int2,
         max_prefix_length -> Int2,
         rcgen -> Int8,

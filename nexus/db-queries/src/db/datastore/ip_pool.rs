@@ -1646,7 +1646,7 @@ impl DataStore {
                         Error::invalid_request(
                             format!(
                                 "The provided IP range {}-{} overlaps with \
-                            an existing range",
+                            an existing IP Pool range or Subnet Pool member",
                                 range.first_address(),
                                 range.last_address(),
                             )
@@ -2514,7 +2514,7 @@ mod test {
     use nexus_types::deployment::{
         OmicronZoneExternalFloatingIp, OmicronZoneExternalIp,
     };
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::params::{self, SubnetPoolCreate, SubnetPoolMemberAdd};
     use nexus_types::identity::Resource;
     use nexus_types::silo::INTERNAL_SILO_ID;
     use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
@@ -5937,6 +5937,96 @@ mod test {
         assert!(
             result.is_err(),
             "Should not find multicast pool when asking for unicast"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_insert_ip_pool_range_which_overlaps_subnet_pool_member() {
+        let logctx = dev::test_setup_log(
+            "cannot_insert_ip_pool_range_which_overlaps_subnet_pool_member",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // First create a Subnet Pool and member.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V6.into(),
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+        let _member = datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: "fd00::/48".parse().unwrap(),
+                    min_prefix_length: None,
+                    max_prefix_length: None,
+                },
+            )
+            .await
+            .expect("able to create subnet pool member");
+
+        // Next create an IP Pool and try to insert an overlapping range.
+        let identity = IdentityMetadataCreateParams {
+            name: "test-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V6,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Failed to create IP pool");
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+        let range = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+            )
+            .unwrap(),
+        );
+        let err = datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
+            .await
+            .expect_err(
+                "should fail to insert IP Pool range that overlaps \
+                subnet Pool member"
+            );
+        let Error::InvalidRequest { message } = &err else {
+            panic!("Expected InvalidRequest, found {err:#?}");
+        };
+        assert_eq!(
+            message.external_message(),
+            format!(
+                "The provided IP range {}-{} overlaps with an existing \
+                IP Pool range or Subnet Pool member",
+                range.first_address(),
+                range.last_address(),
+            ),
         );
 
         db.terminate().await;

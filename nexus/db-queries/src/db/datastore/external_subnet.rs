@@ -317,9 +317,8 @@ impl DataStore {
             .map_err(|e| match e {
                 DieselError::NotFound => Error::invalid_request(&format!(
                     "The IP subnet {} overlaps with an existing \
-                    member of Subnet Pool with ID '{}'",
+                    Subnet Pool member or IP Pool range",
                     params.subnet,
-                    authz_pool.id(),
                 )),
                 e => public_error_from_diesel(e, ErrorHandler::Server),
             })
@@ -505,6 +504,8 @@ mod tests {
     use dropshot::test_util::LogContext;
     use nexus_auth::authz;
     use nexus_db_model::IpAttachState;
+    use nexus_db_model::IpPool;
+    use nexus_db_model::IpPoolReservationType;
     use nexus_db_model::Name;
     use nexus_db_model::Project;
     use nexus_db_model::SubnetPool;
@@ -519,7 +520,9 @@ mod tests {
     use nexus_types::external_api::params::SubnetPoolMemberAdd;
     use nexus_types::identity::Resource;
     use nexus_types::silo::DEFAULT_SILO_ID;
+    use omicron_common::address::IpRange;
     use omicron_common::address::IpVersion;
+    use omicron_common::address::Ipv6Range;
     use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -769,12 +772,8 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            format!(
-                "The IP subnet 10.1.1.0/24 overlaps with an existing \
-                member of Subnet Pool with ID '{}'",
-                authz_pool.id().into_untyped_uuid(),
-            )
-            .as_str()
+            "The IP subnet 10.1.1.0/24 overlaps with an existing \
+            Subnet Pool member or IP Pool range"
         );
 
         db.terminate().await;
@@ -2692,23 +2691,18 @@ mod tests {
 
         // Create one member in the pool, explicitly chosen to be at the end of
         // the IP address space.
-        let subnets = &["255.255.255.0/24".parse().unwrap()];
-        let mut members = Vec::with_capacity(subnets.len());
-        for subnet in subnets.iter().copied() {
-            let member = datastore
-                .add_subnet_pool_member(
-                    opctx,
-                    &authz_pool,
-                    &SubnetPoolMemberAdd {
-                        subnet,
-                        min_prefix_length: Some(24),
-                        max_prefix_length: Some(30),
-                    },
-                )
-                .await
-                .expect("able to create subnet pool member");
-            members.push(member);
-        }
+        let _member = datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: "255.255.255.0/24".parse().unwrap(),
+                    min_prefix_length: Some(24),
+                    max_prefix_length: Some(30),
+                },
+            )
+            .await
+            .expect("able to create subnet pool member");
 
         // Create a dummy project. This doesn't have all the details we normally
         // need, like default VPC or VPC Subnets, but it has enough to test the
@@ -2776,5 +2770,89 @@ mod tests {
             oxnet::IpNet::from(subnet.subnet),
             "255.255.255.0/26".parse::<oxnet::IpNet>().unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn cannot_insert_subnet_pool_member_which_overlaps_ip_pool_range() {
+        let logctx = dev::test_setup_log(
+            "cannot_insert_subnet_pool_member_which_overlaps_ip_pool_range",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // First create an IP Pool and range.
+        let identity = IdentityMetadataCreateParams {
+            name: "test-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V6.into(),
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Failed to create IP pool");
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+        let range = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+            )
+            .unwrap(),
+        );
+        let _range = datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
+            .await
+            .expect("should insert IP Pool range");
+
+        // Next create a Subnet Pool and try to add an overlapping range.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V6.into(),
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+
+        let err = datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: "fd00::/48".parse().unwrap(),
+                    min_prefix_length: None,
+                    max_prefix_length: None,
+                },
+            )
+            .await
+            .expect_err("should not be able to create subnet pool member");
+        let Error::InvalidRequest { message } = &err else {
+            panic!("Expected InvalidRequest, found {err:#?}");
+        };
+        assert_eq!(
+            message.external_message(),
+            "The IP subnet fd00::/48 overlaps with an existing Subnet Pool \
+            member or IP Pool range",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }
