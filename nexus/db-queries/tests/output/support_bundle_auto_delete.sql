@@ -8,32 +8,20 @@ WITH
   used_count
     AS (SELECT count(*) AS used FROM support_bundle WHERE state IN ('collecting', 'active')),
   active_count AS (SELECT count(*) AS active FROM support_bundle WHERE state = 'active'),
-  thresholds
-    AS (
-      SELECT
-        ceil(
-          (SELECT total FROM dataset_count) * (SELECT target_free_percent FROM config) / 100.0
-        )::INT8
-          AS target_free,
-        ceil(
-          (SELECT total FROM dataset_count) * (SELECT min_keep_percent FROM config) / 100.0
-        )::INT8
-          AS min_keep
-    ),
   deletion_calc
     AS (
       SELECT
-        (SELECT total FROM dataset_count) AS total_datasets,
-        (SELECT used FROM used_count) AS used_datasets,
-        (SELECT active FROM active_count) AS active_bundles,
-        greatest(
-          0,
-          (SELECT target_free FROM thresholds)
-          - ((SELECT total FROM dataset_count) - (SELECT used FROM used_count))
-        )
-          AS bundles_needed,
-        greatest(0, (SELECT active FROM active_count) - (SELECT min_keep FROM thresholds))
-          AS max_deletable
+        d.total AS total_datasets,
+        u.used AS used_datasets,
+        a.active AS active_bundles,
+        greatest(0, ceil(d.total * c.target_free_percent / 100.0)::INT8 - (d.total - u.used))
+          AS autodeletion_count,
+        greatest(0, a.active - ceil(d.total * c.min_keep_percent / 100.0)::INT8) AS max_deletable
+      FROM
+        dataset_count AS d
+        CROSS JOIN used_count AS u
+        CROSS JOIN active_count AS a
+        CROSS JOIN config AS c
     ),
   candidates
     AS (
@@ -46,7 +34,7 @@ WITH
       ORDER BY
         time_created ASC, id ASC
       LIMIT
-        (SELECT least(bundles_needed, max_deletable) FROM deletion_calc)
+        (SELECT least(autodeletion_count, max_deletable) FROM deletion_calc)
     ),
   deleted
     AS (

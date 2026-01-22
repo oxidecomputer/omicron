@@ -488,8 +488,6 @@ pub struct SupportBundleCollectorConfig {
     /// Default: Off
     #[serde(default)]
     pub disable: bool,
-    // NOTE: Auto-deletion configuration (target_free_percent, min_keep_percent)
-    // is now stored in the database's support_bundle_config table.
 }
 
 #[serde_as]

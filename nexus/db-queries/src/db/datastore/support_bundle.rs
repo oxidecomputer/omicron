@@ -590,8 +590,6 @@ impl DataStore {
     }
 
     /// Get the current support bundle auto-deletion config.
-    ///
-    /// The singleton row always exists (created by schema migration).
     pub async fn support_bundle_config_get(
         &self,
         opctx: &OpContext,
@@ -611,8 +609,7 @@ impl DataStore {
 
     /// Set support bundle auto-deletion config.
     ///
-    /// Values are percentages (0-100). The singleton row always exists
-    /// (created by schema migration), so this is an UPDATE operation.
+    /// Values are percentages (0-100).
     pub async fn support_bundle_config_set(
         &self,
         opctx: &OpContext,
@@ -676,71 +673,66 @@ pub fn support_bundle_auto_delete_query() -> TypedSqlQuery<(
     query.sql(
         "
 WITH
-  -- Read config from database (singleton row always exists from migration)
+  -- Read config from database
   config AS (
     SELECT target_free_percent, min_keep_percent
     FROM support_bundle_config
     WHERE singleton = true
   ),
-  -- Count non-tombstoned datasets (uses lookup_usable_rendezvous_debug_dataset index)
+  -- Count non-tombstoned datasets
   dataset_count AS (
     SELECT COUNT(*) as total
     FROM rendezvous_debug_dataset
     WHERE time_tombstoned IS NULL
   ),
-  -- Count bundles occupying datasets for deletion calculation purposes.
-  -- We only count stable states: Collecting and Active.
-  --
-  -- Why exclude transitional states (Destroying, Failing)?
-  -- These bundles are already in cleanup transitions and their datasets will
-  -- be freed soon. Including them would cause concurrent auto-delete operations
-  -- to each see free=0 and keep deleting more bundles than necessary.
-  --
-  -- Why exclude Failed?
-  -- Failed bundles do NOT occupy datasets (their dataset was expunged).
+  -- Count bundles occupying datasets (stable states: Collecting, Active).
+  -- Bundles in other states (Destroying, Failing, Failed) either do not use
+  -- datasets, or will transition to not using datasets imminently.
   used_count AS (
     SELECT COUNT(*) as used
     FROM support_bundle
     WHERE state IN ('collecting', 'active')
   ),
-  -- Count active bundles (for min_keep check)
+  -- Count only Active bundles (which could be deleted).
+  -- We don't want to auto-delete bundles which are still being collected, so
+  -- this is effectively a count of 'viable targets to be deleted'.
   active_count AS (
     SELECT COUNT(*) as active
     FROM support_bundle
     WHERE state = 'active'
   ),
-  -- Calculate absolute thresholds from percentages using CEIL.
+  -- Calculate how many bundles we want to delete AND are allowed to delete.
+  -- Uses CROSS JOIN to combine single-row CTEs, making all columns accessible.
   -- CEIL ensures we always round up, so 10% of 5 datasets = 1, not 0.
-  thresholds AS (
-    SELECT
-      CEIL((SELECT total FROM dataset_count) * (SELECT target_free_percent FROM config) / 100.0)::INT8 as target_free,
-      CEIL((SELECT total FROM dataset_count) * (SELECT min_keep_percent FROM config) / 100.0)::INT8 as min_keep
-  ),
-  -- Calculate how many bundles we need AND are allowed to delete.
-  -- min_keep is respected first (max_deletable constraint).
   deletion_calc AS (
     SELECT
-      (SELECT total FROM dataset_count) as total_datasets,
-      (SELECT used FROM used_count) as used_datasets,
-      (SELECT active FROM active_count) as active_bundles,
+      d.total as total_datasets,
+      u.used as used_datasets,
+      a.active as active_bundles,
+      -- 'Count we want free' - 'Count actually free'
       GREATEST(0,
-        (SELECT target_free FROM thresholds)
-        - ((SELECT total FROM dataset_count) - (SELECT used FROM used_count))
-      ) as bundles_needed,
+        CEIL(d.total * c.target_free_percent / 100.0)::INT8 - (d.total - u.used)
+      ) as autodeletion_count,
+      -- 'Count we can delete' - 'Count we must keep'
       GREATEST(0,
-        (SELECT active FROM active_count) - (SELECT min_keep FROM thresholds)
+        a.active - CEIL(d.total * c.min_keep_percent / 100.0)::INT8
       ) as max_deletable
+    FROM dataset_count d
+    CROSS JOIN used_count u
+    CROSS JOIN active_count a
+    CROSS JOIN config c
   ),
   -- Find the N oldest active bundles we're allowed to delete.
   -- Uses lookup_bundle_by_state_and_creation index for ordering.
-  -- Secondary sort on id ensures deterministic selection when timestamps match,
-  -- which is critical for preventing over-deletion under concurrent execution.
   candidates AS (
     SELECT id
     FROM support_bundle
     WHERE state = 'active'
+    -- Secondary sort on id ensures deterministic selection when timestamps match,
+    -- which helps with test determinism if the timestamps don't have sufficient
+    -- granularity between bundle creation times.
     ORDER BY time_created ASC, id ASC
-    LIMIT (SELECT LEAST(bundles_needed, max_deletable) FROM deletion_calc)
+    LIMIT (SELECT LEAST(autodeletion_count, max_deletable) FROM deletion_calc)
   ),
   -- Atomically transition to Destroying (only if still Active).
   -- The state='active' check handles concurrent user deletions.
@@ -1785,8 +1777,6 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // Tests for support_bundle_auto_delete
-
     #[tokio::test]
     async fn test_auto_deletion_no_bundles() {
         let logctx = dev::test_setup_log("test_auto_deletion_no_bundles");
@@ -2293,11 +2283,11 @@ mod test {
     // Tests for the auto_delete CTE query
 
     #[tokio::test]
-    async fn test_auto_delete_query_explains() {
+    async fn test_auto_delete_query_explain() {
         use crate::db::explain::ExplainableAsync;
         use crate::db::pub_test_utils::TestDatabase;
 
-        let logctx = dev::test_setup_log("test_auto_delete_query_explains");
+        let logctx = dev::test_setup_log("test_auto_delete_query_explain");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let conn = db.pool().claim().await.unwrap();
 
