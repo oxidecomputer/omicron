@@ -474,6 +474,21 @@ impl SystemApis {
     /// Returns a string that can be passed to `dot(1)` to render a graph of
     /// API dependencies among deployment units
     pub fn dot_by_unit(&self, filter: ApiDependencyFilter) -> Result<String> {
+        let (graph, _) = self.make_deployment_unit_graph(filter, false)?;
+        Ok(Dot::new(&graph).to_string())
+    }
+
+    // The complex type below is only used in this one place: the return value
+    // of this internal helper function.  A type alias doesn't seem better.
+    #[allow(clippy::type_complexity)]
+    fn make_deployment_unit_graph(
+        &self,
+        dependency_filter: ApiDependencyFilter,
+        versioned_on_server_only: bool,
+    ) -> Result<(
+        petgraph::graph::Graph<&DeploymentUnitName, &ClientPackageName>,
+        BTreeMap<&DeploymentUnitName, NodeIndex>,
+    )> {
         let mut graph = petgraph::graph::Graph::new();
         let nodes: BTreeMap<_, _> = self
             .deployment_units()
@@ -489,8 +504,38 @@ impl SystemApis {
             let my_node = nodes.get(deployment_unit).unwrap();
             for server_pkg in server_components {
                 for (client_pkg, _) in
-                    self.component_apis_consumed(server_pkg, filter)?
+                    self.component_apis_consumed(server_pkg, dependency_filter)?
                 {
+                    if versioned_on_server_only {
+                        let api = self
+                            .api_metadata
+                            .client_pkgname_lookup(client_pkg)
+                            .unwrap();
+                        if api.versioned_how != VersionedHow::Server {
+                            continue;
+                        }
+
+                        // XXX-dap relationships we want to ignore because
+                        // they're local-machine only
+                        match (server_pkg.as_str(), client_pkg.as_str()) {
+                            ("ddmd", "dpd-client")
+                            | ("dpd", "gateway-client")
+                            | ("lldpd", "dpd-client")
+                            | ("mgd", "ddm-admin-client")
+                            | ("mgd", "dpd-client")
+                            | ("mgd", "gateway-client")
+                            | ("omicron-sled-agent", "gateway-client")
+                            | ("omicron-sled-agent", "ddm-admin-client")
+                            | ("omicron-sled-agent", "dpd-client") // XXX-dap
+                            | ("omicron-sled-agent", "mg-admin-client")
+                            | ("omicron-sled-agent", "propolis-client")
+                            | ("tfportd", "dpd-client")
+                            | ("tfportd", "lldpd-client")
+                            | ("wicketd", _) => continue,
+                            _ => (),
+                        }
+                    }
+
                     // Multiple server components may produce an API. However,
                     // if an API is produced by multiple server components
                     // within the same deployment unit, we would like to only
@@ -506,17 +551,16 @@ impl SystemApis {
                         .collect();
                     for other_unit in other_units {
                         let other_node = nodes.get(other_unit).unwrap();
-                        graph.update_edge(
-                            *my_node,
-                            *other_node,
-                            client_pkg.clone(),
+                        eprintln!(
+                            "dap: edge: {deployment_unit} {other_unit} {server_pkg} {client_pkg}"
                         );
+                        graph.update_edge(*my_node, *other_node, client_pkg);
                     }
                 }
             }
         }
 
-        Ok(Dot::new(&graph).to_string())
+        Ok((graph, nodes))
     }
 
     /// Returns a string that can be passed to `dot(1)` to render a graph of
@@ -530,7 +574,7 @@ impl SystemApis {
     }
 
     // The complex type below is only used in this one place: the return value
-    // of an internal helper function.  A type alias doesn't seem better.
+    // of this internal helper function.  A type alias doesn't seem better.
     #[allow(clippy::type_complexity)]
     fn make_component_graph(
         &self,
@@ -643,8 +687,20 @@ impl SystemApis {
             nodes.iter().map(|(s_c, node)| (node, s_c)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {
             bail!(
-                "graph of server-managed components has a cycle (includes \
-                 node: {:?})",
+                "graph of server-managed API dependencies between components \
+                 has a cycle (includes node: {:?})",
+                reverse_nodes.get(&error.node_id()).unwrap()
+            );
+        }
+
+        // Do the same with a graph of deployment units.
+        let (graph, nodes) = self.make_deployment_unit_graph(filter, true)?;
+        let reverse_nodes: BTreeMap<_, _> =
+            nodes.iter().map(|(d_u, node)| (node, d_u)).collect();
+        if let Err(error) = petgraph::algo::toposort(&graph, None) {
+            bail!(
+                "graph of server-managed API dependencies between deployment \
+                 units has a cycle (includes node: {:?})",
                 reverse_nodes.get(&error.node_id()).unwrap()
             );
         }
