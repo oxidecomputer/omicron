@@ -42,6 +42,7 @@ mod v2026010100;
 mod v2026010300;
 mod v2026010500;
 mod v2026011501;
+mod v2026011600;
 
 #[cfg(test)]
 mod test_utils;
@@ -74,6 +75,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026012200, FLOATING_IP_ALLOCATOR_UPDATE),
     (2026012100, TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG),
     (2026011601, EXTERNAL_SUBNET_ATTACHMENT),
     (2026011600, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
@@ -1573,25 +1575,60 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<views::FloatingIp>>, HttpError>;
 
+    /// Create a floating IP
+    ///
+    /// A specific IP address can be reserved, or an IP can be auto-allocated
+    /// from a specific pool or the silo's default pool.
+    #[endpoint {
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_FLOATING_IP_ALLOCATOR_UPDATE..,
+    }]
+    async fn floating_ip_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        floating_params: TypedBody<params::FloatingIpCreate>,
+    ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError>;
+
     /// Create floating IP
     #[endpoint {
         operation_id = "floating_ip_create",
         method = POST,
         path = "/v1/floating-ips",
         tags = ["floating-ips"],
-        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+        versions = VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR..VERSION_FLOATING_IP_ALLOCATOR_UPDATE,
     }]
-    async fn v2025121200_floating_ip_create(
+    async fn v2026011600_floating_ip_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        floating_params: TypedBody<v2025121200::FloatingIpCreate>,
+        floating_params: TypedBody<v2026011600::FloatingIpCreate>,
     ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
-        let floating_params =
-            floating_params.map(v2026010300::FloatingIpCreate::from);
-        Self::v2026010300_floating_ip_create(
+        Self::floating_ip_create(
             rqctx,
             query_params,
-            floating_params,
+            floating_params.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create floating IP
+    #[endpoint {
+        operation_id = "floating_ip_create",
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_POOL_SELECTION_ENUMS..VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR,
+    }]
+    async fn v2026011501_floating_ip_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        floating_params: TypedBody<v2026011501::FloatingIpCreate>,
+    ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
+        Self::v2026011600_floating_ip_create(
+            rqctx,
+            query_params,
+            floating_params.map(Into::into),
         )
         .await
     }
@@ -1626,33 +1663,22 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/floating-ips",
         tags = ["floating-ips"],
-        versions = VERSION_POOL_SELECTION_ENUMS..VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR,
+        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
     }]
-    async fn v2026011501_floating_ip_create(
+    async fn v2025121200_floating_ip_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        floating_params: TypedBody<v2026011501::FloatingIpCreate>,
+        floating_params: TypedBody<v2025121200::FloatingIpCreate>,
     ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
-        Self::floating_ip_create(
+        let floating_params =
+            floating_params.map(v2026010300::FloatingIpCreate::from);
+        Self::v2026010300_floating_ip_create(
             rqctx,
             query_params,
-            floating_params.map(Into::into),
+            floating_params,
         )
         .await
     }
-
-    /// Create floating IP
-    #[endpoint {
-        method = POST,
-        path = "/v1/floating-ips",
-        tags = ["floating-ips"],
-        versions = VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR..,
-    }]
-    async fn floating_ip_create(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::ProjectSelector>,
-        floating_params: TypedBody<params::FloatingIpCreate>,
-    ) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError>;
 
     /// Update floating IP
     #[endpoint {

@@ -1654,21 +1654,19 @@ pub struct ExternalSubnetAttach {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AddressAllocator {
-    /// Reserve a specific IP address.
+    /// Reserve a specific IP address. The pool is inferred from the address
+    /// since IP pools cannot have overlapping ranges.
     Explicit {
-        /// The IP address to reserve. Must be available in the pool.
+        /// The IP address to reserve.
         ip: IpAddr,
-        /// The pool containing this address. If not specified, the default
-        /// pool for the address's IP version is used.
-        pool: Option<NameOrId>,
     },
-    /// Automatically allocate an IP address from a specified pool.
+    /// Automatically allocate an IP address from a pool.
     Auto {
         /// Pool selection.
         ///
-        /// If omitted, this field uses the silo's default pool. If the
-        /// silo has default pools for both IPv4 and IPv6, the request will
-        /// fail unless `ip_version` is specified in the pool selector.
+        /// If omitted, the silo's default pool is used. If the silo has
+        /// default pools for both IPv4 and IPv6, the request will fail
+        /// unless `ip_version` is specified.
         #[serde(default)]
         pool_selector: PoolSelector,
     },
@@ -4272,5 +4270,69 @@ mod tests {
         let result: Result<MulticastGroupUpdate, _> =
             serde_json::from_str(json);
         assert!(result.is_err(), "Should reject reserved VLAN ID 1");
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_requires_ip() {
+        // Explicit requires an IP address - pool-only is not valid
+        let json = r#"{"type": "explicit", "pool": "my-pool"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "explicit without ip should fail");
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_with_ip() {
+        let json = r#"{"type": "explicit", "ip": "10.0.0.1"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "explicit with ip should be valid");
+        match result.unwrap() {
+            AddressAllocator::Explicit { ip } => {
+                assert_eq!(ip, "10.0.0.1".parse::<std::net::IpAddr>().unwrap());
+            }
+            _ => panic!("Expected Explicit variant"),
+        }
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_missing_ip() {
+        let json = r#"{"type": "explicit"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "explicit without ip should fail");
+    }
+
+    #[test]
+    fn test_address_allocator_auto_with_explicit_pool() {
+        // To allocate from a specific pool, use Auto with explicit pool_selector
+        let json = r#"{"type": "auto", "pool_selector": {"type": "explicit", "pool": "my-pool"}}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "auto with explicit pool_selector should be valid"
+        );
+        match result.unwrap() {
+            AddressAllocator::Auto { pool_selector } => {
+                assert!(matches!(pool_selector, PoolSelector::Explicit { .. }));
+            }
+            _ => panic!("Expected Auto variant"),
+        }
+    }
+
+    #[test]
+    fn test_address_allocator_auto_with_auto_pool() {
+        // Auto-allocate from default pool
+        let json = r#"{"type": "auto", "pool_selector": {"type": "auto"}}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "auto with auto pool_selector should be valid");
+    }
+
+    #[test]
+    fn test_address_allocator_auto_default() {
+        // Default pool_selector when omitted
+        let json = r#"{"type": "auto"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "auto without pool_selector should use default"
+        );
     }
 }

@@ -262,7 +262,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.12",
             true,
@@ -351,7 +350,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.13",
             true,
@@ -440,7 +438,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.14",
             true,
@@ -533,7 +530,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.15",
             true,
@@ -590,7 +586,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.16",
             true,
@@ -691,7 +686,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.17",
             true,

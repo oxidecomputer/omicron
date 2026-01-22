@@ -2,38 +2,36 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types from API version 2026010500 (`POOL_SELECTION_ENUMS`) that changed in
-//! version 2026011600 (`RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR`).
+//! Types from API version 2026011600 (`RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR`)
+//! that changed in version 2026012200 (`FLOATING_IP_ALLOCATOR_UPDATE`).
 //!
-//! ## AddressAllocator Rename
+//! These types are also valid through version 2026011601 (`EXTERNAL_SUBNET_ATTACHMENT`),
+//! which did not modify them.
 //!
-//! [`FloatingIpCreate`] has an `address_selector` field with type
-//! [`AddressSelector`]. The "selector" naming is a misnomer in our current
-//! scheme, where "selector" implies filtering/fetching from existing resources.
-//! `RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR` renames these to
-//! `address_allocator` and [`AddressAllocator`], which better describes the
-//! action of reserving/assigning a floating IP from a pool.
+//! ## AddressAllocator Changes
+//!
+//! This version's [`AddressAllocator::Explicit`] has both `ip` and optional `pool` fields.
+//! `FLOATING_IP_ALLOCATOR_UPDATE` simplifies `Explicit` to only require `ip` (pool is
+//! inferred from the address), with pool-based allocation moving to
+//! `Auto(PoolSelector::Explicit { pool })`.
 //!
 //! Affected endpoints:
 //! - `POST /v1/floating-ips` (floating_ip_create)
 //!
-//! [`FloatingIpCreate`]: self::FloatingIpCreate
-//! [`AddressSelector`]: self::AddressSelector
-//! [`AddressAllocator`]: crate::v2026011600::AddressAllocator
+//! [`AddressAllocator::Explicit`]: self::AddressAllocator::Explicit
 
 use std::net::IpAddr;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::v2026011600;
 use nexus_types::external_api::params;
 use omicron_common::api::external::{IdentityMetadataCreateParams, NameOrId};
 
 /// Specify how to allocate a floating IP address.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum AddressSelector {
+pub enum AddressAllocator {
     /// Reserve a specific IP address.
     Explicit {
         /// The IP address to reserve. Must be available in the pool.
@@ -54,28 +52,25 @@ pub enum AddressSelector {
     },
 }
 
-impl Default for AddressSelector {
+impl Default for AddressAllocator {
     fn default() -> Self {
-        AddressSelector::Auto { pool_selector: params::PoolSelector::default() }
-    }
-}
-
-impl From<AddressSelector> for v2026011600::AddressAllocator {
-    fn from(value: AddressSelector) -> Self {
-        match value {
-            AddressSelector::Explicit { ip, pool } => {
-                v2026011600::AddressAllocator::Explicit { ip, pool }
-            }
-            AddressSelector::Auto { pool_selector } => {
-                v2026011600::AddressAllocator::Auto { pool_selector }
-            }
+        AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::default(),
         }
     }
 }
 
-impl From<AddressSelector> for params::AddressAllocator {
-    fn from(value: AddressSelector) -> Self {
-        v2026011600::AddressAllocator::from(value).into()
+impl From<AddressAllocator> for params::AddressAllocator {
+    fn from(value: AddressAllocator) -> Self {
+        match value {
+            // Pool field is ignored since the IP uniquely identifies the pool
+            AddressAllocator::Explicit { ip, pool: _ } => {
+                params::AddressAllocator::Explicit { ip }
+            }
+            AddressAllocator::Auto { pool_selector } => {
+                params::AddressAllocator::Auto { pool_selector }
+            }
+        }
     }
 }
 
@@ -87,21 +82,15 @@ pub struct FloatingIpCreate {
 
     /// IP address allocation method.
     #[serde(default)]
-    pub address_selector: AddressSelector,
-}
-
-impl From<FloatingIpCreate> for v2026011600::FloatingIpCreate {
-    fn from(value: FloatingIpCreate) -> Self {
-        Self {
-            identity: value.identity,
-            address_allocator: value.address_selector.into(),
-        }
-    }
+    pub address_allocator: AddressAllocator,
 }
 
 impl From<FloatingIpCreate> for params::FloatingIpCreate {
     fn from(value: FloatingIpCreate) -> Self {
-        v2026011600::FloatingIpCreate::from(value).into()
+        Self {
+            identity: value.identity,
+            address_allocator: value.address_allocator.into(),
+        }
     }
 }
 
@@ -116,28 +105,28 @@ mod tests {
     use std::net::IpAddr;
     use test_strategy::proptest;
 
-    fn address_selector_strategy() -> impl Strategy<Value = AddressSelector> {
+    fn address_allocator_strategy() -> impl Strategy<Value = AddressAllocator> {
         prop_oneof![
             (any::<IpAddr>(), optional_name_or_id_strategy())
-                .prop_map(|(ip, pool)| AddressSelector::Explicit { ip, pool }),
+                .prop_map(|(ip, pool)| AddressAllocator::Explicit { ip, pool }),
             pool_selector_strategy().prop_map(|pool_selector| {
-                AddressSelector::Auto { pool_selector }
+                AddressAllocator::Auto { pool_selector }
             }),
         ]
     }
 
     fn floating_ip_create_strategy() -> impl Strategy<Value = FloatingIpCreate>
     {
-        (identity_strategy(), address_selector_strategy()).prop_map(
-            |(identity, address_selector)| FloatingIpCreate {
+        (identity_strategy(), address_allocator_strategy()).prop_map(
+            |(identity, address_allocator)| FloatingIpCreate {
                 identity,
-                address_selector,
+                address_allocator,
             },
         )
     }
 
     /// Verifies that conversion to params::FloatingIpCreate preserves identity
-    /// and correctly maps AddressSelector to AddressAllocator.
+    /// and correctly maps AddressAllocator.
     #[proptest]
     fn floating_ip_create_converts_correctly(
         #[strategy(floating_ip_create_strategy())] expected: FloatingIpCreate,
@@ -151,8 +140,8 @@ mod tests {
             actual.identity.description
         );
 
-        match expected.address_selector {
-            AddressSelector::Explicit { ip: expected_ip, .. } => {
+        match expected.address_allocator {
+            AddressAllocator::Explicit { ip: expected_ip, .. } => {
                 match actual.address_allocator {
                     params::AddressAllocator::Explicit { ip } => {
                         prop_assert_eq!(expected_ip, ip);
@@ -164,44 +153,37 @@ mod tests {
                     }
                 }
             }
-            AddressSelector::Auto { pool_selector: expected_pool_selector } => {
-                match actual.address_allocator {
-                    params::AddressAllocator::Auto {
-                        pool_selector: actual_pool_selector,
-                    } => {
-                        prop_assert_eq!(
-                            expected_pool_selector,
-                            actual_pool_selector
-                        );
-                    }
-                    _ => {
-                        return Err(TestCaseError::fail(
-                            "expected Auto variant",
-                        ));
-                    }
+            AddressAllocator::Auto {
+                pool_selector: expected_pool_selector,
+            } => match actual.address_allocator {
+                params::AddressAllocator::Auto {
+                    pool_selector: actual_pool_selector,
+                } => {
+                    prop_assert_eq!(
+                        expected_pool_selector,
+                        actual_pool_selector
+                    );
                 }
-            }
+                _ => {
+                    return Err(TestCaseError::fail("expected Auto variant"));
+                }
+            },
         }
     }
 
-    /// Verifies explicit JSON wire format parses into versioned types.
-    /// Conversion to latest params is tested by floating_ip_create_converts_correctly.
+    /// Verifies explicit JSON wire format.
     #[test]
     fn explicit_json_wire_format() {
-        let json =
-            r#"{"type": "explicit", "ip": "10.0.0.1", "pool": "my-pool"}"#;
+        let json = r#"{"type": "explicit", "ip": "10.0.0.1"}"#;
 
-        // Must parse into this version (AddressSelector)
-        let v2026011501: AddressSelector = serde_json::from_str(json).unwrap();
-        assert!(matches!(v2026011501, AddressSelector::Explicit { .. }));
-
-        // Must also parse into v2026011600 (AddressAllocator)
-        let v2026011600: v2026011600::AddressAllocator =
-            serde_json::from_str(json).unwrap();
-        assert!(matches!(
-            v2026011600,
-            v2026011600::AddressAllocator::Explicit { .. }
-        ));
+        let parsed: AddressAllocator = serde_json::from_str(json).unwrap();
+        match parsed {
+            AddressAllocator::Explicit { ip, .. } => {
+                let expected: IpAddr = "10.0.0.1".parse().unwrap();
+                assert_eq!(ip, expected);
+            }
+            _ => panic!("Expected Explicit variant"),
+        }
     }
 
     /// Verifies auto JSON wire format with explicit pool selector.
@@ -209,9 +191,9 @@ mod tests {
     fn auto_explicit_pool_json_wire_format() {
         let json = r#"{"type": "auto", "pool_selector": {"type": "explicit", "pool": "my-pool"}}"#;
 
-        let parsed: AddressSelector = serde_json::from_str(json).unwrap();
+        let parsed: AddressAllocator = serde_json::from_str(json).unwrap();
         match parsed {
-            AddressSelector::Auto { pool_selector } => {
+            AddressAllocator::Auto { pool_selector } => {
                 assert!(matches!(
                     pool_selector,
                     params::PoolSelector::Explicit { .. }
@@ -226,9 +208,9 @@ mod tests {
     fn auto_auto_pool_json_wire_format() {
         let json = r#"{"type": "auto", "pool_selector": {"type": "auto", "ip_version": "v4"}}"#;
 
-        let parsed: AddressSelector = serde_json::from_str(json).unwrap();
+        let parsed: AddressAllocator = serde_json::from_str(json).unwrap();
         match parsed {
-            AddressSelector::Auto { pool_selector } => match pool_selector {
+            AddressAllocator::Auto { pool_selector } => match pool_selector {
                 params::PoolSelector::Auto { ip_version } => {
                     assert_eq!(ip_version, Some(IpVersion::V4));
                 }
@@ -243,9 +225,9 @@ mod tests {
     fn auto_default_json_wire_format() {
         let json = r#"{"type": "auto"}"#;
 
-        let parsed: AddressSelector = serde_json::from_str(json).unwrap();
+        let parsed: AddressAllocator = serde_json::from_str(json).unwrap();
         match parsed {
-            AddressSelector::Auto { pool_selector } => match pool_selector {
+            AddressAllocator::Auto { pool_selector } => match pool_selector {
                 params::PoolSelector::Auto { ip_version } => {
                     assert_eq!(ip_version, None);
                 }
