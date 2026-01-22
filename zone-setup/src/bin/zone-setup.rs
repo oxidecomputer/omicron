@@ -686,13 +686,11 @@ async fn common_nw_set_up(
         // Only the switch zone will sometimes have an unknown underlay address
         // at zone boot.
         None => {
-            info!(
-                log,
-                "Underlay is not available yet; will not ensure route",
-            );
+            info!(log, "Underlay is not available yet; will not ensure route",);
         }
         Some(gw) => {
-            ensure_underlay_route_via_gateway_with_retries(gw, log).await?;
+            ensure_underlay_route_via_gateway_with_retries(gw, &datalink, log)
+                .await?;
         }
     }
 
@@ -720,6 +718,7 @@ async fn common_nw_set_up(
 
 async fn ensure_underlay_route_via_gateway_with_retries(
     gateway: Ipv6Addr,
+    datalink: &str,
     log: &Logger,
 ) -> anyhow::Result<()> {
     // Helper to attach error context in the retry loop below.
@@ -740,8 +739,9 @@ async fn ensure_underlay_route_via_gateway_with_retries(
                 log, "Ensuring there is an underlay route";
                 "gateway" => %gateway,
             );
-            Route::ensure_underlay_route_with_gateway(gateway).await.map_err(
-                |err| match err {
+            Route::ensure_underlay_route_with_gateway(gateway, datalink)
+                .await
+                .map_err(|err| match err {
                     ExecutionError::CommandFailure(ref e) => {
                         if e.stdout.contains("Network is unreachable") {
                             BackoffError::transient(err_with_context(err))
@@ -750,8 +750,7 @@ async fn ensure_underlay_route_via_gateway_with_retries(
                         }
                     }
                     _ => BackoffError::permanent(err_with_context(err)),
-                },
-            )
+                })
         },
         |err, delay| {
             info!(

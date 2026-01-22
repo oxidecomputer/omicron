@@ -13,8 +13,8 @@ use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
-use crate::zone::AddressRequest;
 use crate::zone::Zones;
+use crate::zone::{AddressRequest, ROUTE};
 use crate::zpool::{PathInPool, ZpoolOrRamdisk};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
@@ -388,7 +388,7 @@ impl RunningZone {
             let gateway_ip = gateway.to_string();
             let private_ip = addr.ip();
             self.run_cmd(&[
-                "/usr/sbin/route",
+                ROUTE,
                 "add",
                 "-host",
                 &gateway_ip,
@@ -397,13 +397,7 @@ impl RunningZone {
                 "-ifp",
                 port.name(),
             ])?;
-            self.run_cmd(&[
-                "/usr/sbin/route",
-                "add",
-                "-inet",
-                "default",
-                &gateway_ip,
-            ])?;
+            self.run_cmd(&[ROUTE, "add", "-inet", "default", &gateway_ip])?;
             Ok(addr)
         } else {
             // If the port is using IPv6 addressing we still want it to use
@@ -470,12 +464,14 @@ impl RunningZone {
         // Route to the underlay AZ's /48 by deriving it from the gateway IP.
         let underlay_az: Ipv6Subnet<AZ_PREFIX> = Ipv6Subnet::new(gateway);
         self.run_cmd([
-            "/usr/sbin/route",
+            ROUTE,
             "add",
             "-inet6",
             &underlay_az.to_string(),
             "-inet6",
             &gateway.to_string(),
+            "-ifp",
+            self.inner.control_vnic.name(),
         ])?;
         Ok(())
     }
