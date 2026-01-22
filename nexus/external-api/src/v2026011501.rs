@@ -19,14 +19,14 @@
 //!
 //! [`FloatingIpCreate`]: self::FloatingIpCreate
 //! [`AddressSelector`]: self::AddressSelector
-//! [`AddressAllocator`]: crate::v2026011601::AddressAllocator
+//! [`AddressAllocator`]: crate::v2026011600::AddressAllocator
 
 use std::net::IpAddr;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::v2026011601;
+use crate::v2026011600;
 use nexus_types::external_api::params;
 use omicron_common::api::external::{IdentityMetadataCreateParams, NameOrId};
 
@@ -60,14 +60,14 @@ impl Default for AddressSelector {
     }
 }
 
-impl From<AddressSelector> for v2026011601::AddressAllocator {
+impl From<AddressSelector> for v2026011600::AddressAllocator {
     fn from(value: AddressSelector) -> Self {
         match value {
             AddressSelector::Explicit { ip, pool } => {
-                v2026011601::AddressAllocator::Explicit { ip, pool }
+                v2026011600::AddressAllocator::Explicit { ip, pool }
             }
             AddressSelector::Auto { pool_selector } => {
-                v2026011601::AddressAllocator::Auto { pool_selector }
+                v2026011600::AddressAllocator::Auto { pool_selector }
             }
         }
     }
@@ -75,7 +75,7 @@ impl From<AddressSelector> for v2026011601::AddressAllocator {
 
 impl From<AddressSelector> for params::AddressAllocator {
     fn from(value: AddressSelector) -> Self {
-        v2026011601::AddressAllocator::from(value).into()
+        v2026011600::AddressAllocator::from(value).into()
     }
 }
 
@@ -90,7 +90,7 @@ pub struct FloatingIpCreate {
     pub address_selector: AddressSelector,
 }
 
-impl From<FloatingIpCreate> for v2026011601::FloatingIpCreate {
+impl From<FloatingIpCreate> for v2026011600::FloatingIpCreate {
     fn from(value: FloatingIpCreate) -> Self {
         Self {
             identity: value.identity,
@@ -101,7 +101,7 @@ impl From<FloatingIpCreate> for v2026011601::FloatingIpCreate {
 
 impl From<FloatingIpCreate> for params::FloatingIpCreate {
     fn from(value: FloatingIpCreate) -> Self {
-        v2026011601::FloatingIpCreate::from(value).into()
+        v2026011600::FloatingIpCreate::from(value).into()
     }
 }
 
@@ -195,12 +195,12 @@ mod tests {
         let v2026011501: AddressSelector = serde_json::from_str(json).unwrap();
         assert!(matches!(v2026011501, AddressSelector::Explicit { .. }));
 
-        // Must also parse into v2026011601 (AddressAllocator)
-        let v2026011601: v2026011601::AddressAllocator =
+        // Must also parse into v2026011600 (AddressAllocator)
+        let v2026011600: v2026011600::AddressAllocator =
             serde_json::from_str(json).unwrap();
         assert!(matches!(
-            v2026011601,
-            v2026011601::AddressAllocator::Explicit { .. }
+            v2026011600,
+            v2026011600::AddressAllocator::Explicit { .. }
         ));
     }
 

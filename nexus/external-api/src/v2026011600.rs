@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Types from API version 2026011600 (`RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR`)
-//! that changed in version 2026012000 (`FLOATING_IP_ALLOCATOR_UPDATE`).
+//! that changed in version 2026012200 (`FLOATING_IP_ALLOCATOR_UPDATE`).
 //!
 //! These types are also valid through version 2026011601 (`EXTERNAL_SUBNET_ATTACHMENT`),
 //! which did not modify them.

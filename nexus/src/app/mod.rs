@@ -104,6 +104,7 @@ mod switch;
 mod switch_interface;
 mod switch_port;
 pub mod test_interfaces;
+mod trust_quorum;
 mod update;
 mod utilization;
 mod volume;
