@@ -76,6 +76,7 @@ use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
@@ -1259,6 +1260,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "fm_sitrep_gc" => {
             print_task_fm_sitrep_gc(details);
+        }
+        "trust_quorum_manager" => {
+            print_task_trust_quorum_manager(details);
         }
         _ => {
             println!(
@@ -3277,6 +3281,40 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     println!(
         "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
     );
+}
+
+fn print_task_trust_quorum_manager(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<TrustQuorumManagerStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+
+    match status {
+        TrustQuorumManagerStatus::PerRackStatus { statuses, errors } => {
+            if statuses.is_empty() && errors.is_empty() {
+                println!("No active reconfigurations");
+                return;
+            }
+            for status in statuses {
+                println!("{status}");
+            }
+
+            for error in errors {
+                println!("{error}");
+            }
+        }
+        TrustQuorumManagerStatus::Error(error) => {
+            println!("    task did not complete successfully: {error}");
+        }
+    }
 }
 
 const ERRICON: &str = "/!\\";

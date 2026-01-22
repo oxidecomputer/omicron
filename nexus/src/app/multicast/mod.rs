@@ -59,7 +59,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::multicast::ExternalMulticastGroupWithSources;
 use nexus_db_queries::{authz, db};
 use nexus_types::external_api::{params, views};
-use nexus_types::identity::Resource;
 use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{
@@ -162,20 +161,10 @@ impl super::Nexus {
         opctx: &OpContext,
         params: &MulticastGroupCreate,
     ) -> CreateResult<db::model::ExternalMulticastGroup> {
-        // If multicast_ip is provided, discover the pool containing that IP.
-        // Otherwise, pool resolution happens in the datastore layer.
-        let authz_pool = match params.multicast_ip {
-            Some(ip) => {
-                Some(self.resolve_pool_for_multicast_ip(opctx, ip).await?)
-            }
-            None => None,
-        };
-
         // Create multicast group (fleet-scoped, uses DEFAULT_MULTICAST_VNI)
-        let group = self
-            .db_datastore
-            .multicast_group_create(opctx, params, authz_pool)
-            .await?;
+        // Pool resolution (from explicit IP or default) happens in datastore.
+        let group =
+            self.db_datastore.multicast_group_create(opctx, params).await?;
 
         // Activate reconciler to process the new group ("Creating" → "Active")
         self.background_tasks.task_multicast_reconciler.activate();
@@ -248,37 +237,6 @@ impl super::Nexus {
             .unwrap_or_default();
 
         ExternalMulticastGroupWithSources { group, source_ips }.try_into()
-    }
-
-    /// Resolve which multicast pool contains a given IP address.
-    ///
-    /// Used for join-by-IP functionality where the user specifies a multicast
-    /// IP address directly. The system auto-discovers which pool contains the
-    /// IP (pool ranges are globally unique, so lookup is unambiguous) and
-    /// returns the authz pool for group creation.
-    ///
-    /// Note: only multicast pools linked to the caller's silo are
-    /// considered. Pool linking controls access to multicast addresses.
-    pub(crate) async fn resolve_pool_for_multicast_ip(
-        &self,
-        opctx: &OpContext,
-        ip: IpAddr,
-    ) -> Result<authz::IpPool, external::Error> {
-        let pool = self
-            .db_datastore
-            .ip_pool_containing_multicast_ip(opctx, ip)
-            .await?
-            .ok_or_else(|| {
-                external::Error::invalid_request(
-                    "multicast IP not in any pool's address range",
-                )
-            })?;
-
-        Ok(authz::IpPool::new(
-            authz::FLEET,
-            pool.id(),
-            external::LookupType::ById(pool.id()),
-        ))
     }
 
     /// List all multicast groups with full view.

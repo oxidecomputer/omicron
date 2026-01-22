@@ -947,6 +947,12 @@ pub struct ProbeDistributorStatus {
     pub errors: Vec<ProbeError>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub enum TrustQuorumManagerStatus {
+    PerRackStatus { statuses: Vec<String>, errors: Vec<String> },
+    Error(String),
+}
+
 #[cfg(test)]
 mod test {
     use super::TufRepoInfo;

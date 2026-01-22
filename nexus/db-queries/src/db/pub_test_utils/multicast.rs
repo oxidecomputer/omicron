@@ -169,14 +169,12 @@ pub async fn create_test_setup_with_range(
 pub async fn create_test_group(
     opctx: &OpContext,
     datastore: &DataStore,
-    setup: &TestSetup,
     group_name: &str,
     multicast_ip: &str,
 ) -> nexus_db_model::ExternalMulticastGroup {
     create_test_group_with_state(
         opctx,
         datastore,
-        setup,
         group_name,
         multicast_ip,
         false,
@@ -188,7 +186,6 @@ pub async fn create_test_group(
 pub async fn create_test_group_with_state(
     opctx: &OpContext,
     datastore: &DataStore,
-    setup: &TestSetup,
     group_name: &str,
     multicast_ip: &str,
     make_active: bool,
@@ -205,7 +202,7 @@ pub async fn create_test_group_with_state(
     };
 
     let group = datastore
-        .multicast_group_create(&opctx, &params, Some(setup.authz_pool.clone()))
+        .multicast_group_create(&opctx, &params)
         .await
         .expect("Should create multicast group");
 

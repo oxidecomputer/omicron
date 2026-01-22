@@ -451,6 +451,10 @@ task: "switch_port_config_manager"
     manages switch port settings for rack switches
 
 
+task: "trust_quorum_manager"
+    Drive trust quorum reconfigurations to completion
+
+
 task: "tuf_artifact_replication"
     replicate update repo artifacts across sleds
 
@@ -861,6 +865,12 @@ task: "switch_port_config_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "trust_quorum_manager"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+No active reconfigurations
 
 task: "tuf_artifact_replication"
   configured period: every <REDACTED_DURATION>h
@@ -1434,6 +1444,12 @@ task: "switch_port_config_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "trust_quorum_manager"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+No active reconfigurations
 
 task: "tuf_artifact_replication"
   configured period: every <REDACTED_DURATION>h
