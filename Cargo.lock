@@ -6972,6 +6972,7 @@ dependencies = [
  "scim2-rs",
  "serde",
  "test-strategy",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -7184,6 +7185,7 @@ dependencies = [
  "pq-sys",
  "reqwest",
  "sled-agent-client",
+ "sled-hardware-types",
  "slog",
  "uuid",
 ]
@@ -8500,6 +8502,7 @@ dependencies = [
  "steno",
  "strum 0.27.2",
  "subprocess",
+ "swrite",
  "tempfile",
  "term 0.7.0",
  "thiserror 2.0.17",
@@ -8507,6 +8510,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-util",
  "tough",
+ "trust-quorum-types",
  "tufaceous",
  "tufaceous-artifact",
  "tufaceous-lib",
@@ -13042,7 +13046,9 @@ dependencies = [
  "serde_json",
  "sled-agent-types",
  "sled-agent-types-versions",
+ "sled-hardware-types",
  "slog",
+ "trust-quorum-types",
  "uuid",
 ]
 

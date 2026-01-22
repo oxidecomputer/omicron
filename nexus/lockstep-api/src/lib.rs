@@ -44,6 +44,7 @@ use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::UpdateStatus;
+use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
@@ -562,6 +563,16 @@ pub trait NexusLockstepApi {
     async fn quiesce_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<QuiesceStatus>, HttpError>;
+
+    /// Retrieve the latest ongoing rack cluster membership change
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/{rack_id}/config/latest",
+    }]
+    async fn trust_quorum_get_latest_config(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<RackPathParam>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumConfig>>, HttpError>;
 }
 
 /// Path parameters for Rack requests.

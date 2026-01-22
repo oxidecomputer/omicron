@@ -5,7 +5,7 @@
 use daft::Diffable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, str::FromStr};
 
 pub mod underlay;
 
@@ -215,6 +215,42 @@ pub struct BaseboardId {
 impl std::fmt::Display for BaseboardId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.part_number, self.serial_number)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaseboardIdParseError {
+    MissingPartNumber,
+    MissingSerialNumber,
+    TooManyFields,
+}
+
+impl std::fmt::Display for BaseboardIdParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingPartNumber => write!(f, "missing part number"),
+            Self::MissingSerialNumber => write!(f, "missing serial number"),
+            Self::TooManyFields => write!(f, "too many fields"),
+        }
+    }
+}
+
+impl FromStr for BaseboardId {
+    type Err = BaseboardIdParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let mut iter = value.split(":");
+        let part_number =
+            iter.next().ok_or(BaseboardIdParseError::MissingPartNumber)?;
+        let serial_number =
+            iter.next().ok_or(BaseboardIdParseError::MissingSerialNumber)?;
+        if iter.next().is_some() {
+            return Err(BaseboardIdParseError::TooManyFields);
+        }
+        Ok(BaseboardId {
+            part_number: part_number.into(),
+            serial_number: serial_number.into(),
+        })
     }
 }
 

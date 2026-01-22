@@ -765,3 +765,10 @@ pub enum IpPoolType {
     /// All ranges in a multicast pool must be either ASM or SSM (not mixed).
     Multicast,
 }
+
+/// A unique, monotonically increasing number representing the set of active
+/// sleds in a rack at a given point in time.
+//
+// Maps to `trust_quorum_types::types::Epoch` under the hood
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RackMembershipVersion(pub u64);

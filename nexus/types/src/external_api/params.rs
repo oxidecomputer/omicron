@@ -95,6 +95,21 @@ impl From<UninitializedSledId> for BaseboardId {
     }
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct RackMembershipAddSledsRequest {
+    pub sled_ids: BTreeSet<BaseboardId>,
+}
+
 path_param!(AffinityGroupPath, affinity_group, "affinity group");
 path_param!(AntiAffinityGroupPath, anti_affinity_group, "anti affinity group");
 path_param!(
@@ -3178,6 +3193,11 @@ pub struct LoginPath {
     pub silo_name: Name,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct RackMembershipConfigPathParams {
+    pub rack_id: Uuid,
+}
+
 /// This is meant as a security feature. We want to ensure we never redirect to
 /// a URI on a different host.
 #[derive(Serialize, Deserialize, Debug, JsonSchema, Clone, Display)]
@@ -3773,6 +3793,11 @@ pub struct ScimV2UserPathParam {
 #[derive(Deserialize, JsonSchema)]
 pub struct ScimV2GroupPathParam {
     pub group_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RackMembershipVersionParam {
+    pub version: Option<shared::RackMembershipVersion>,
 }
 
 #[cfg(test)]

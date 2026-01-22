@@ -21,7 +21,7 @@ use nexus_types::{
     authn::cookies::Cookies,
     external_api::{
         headers, params, shared,
-        views::{self, MulticastGroupMember},
+        views::{self, MulticastGroupMember, RackMembershipStatus},
     },
 };
 use omicron_common::api::external::{
@@ -74,6 +74,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026012100, TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG),
     (2026011601, EXTERNAL_SUBNET_ATTACHMENT),
     (2026011600, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
     (2026011501, AUDIT_LOG_CREDENTIAL_ID),
@@ -4361,6 +4362,35 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         sled: TypedBody<params::UninitializedSledId>,
     ) -> Result<HttpResponseCreated<views::SledId>, HttpError>;
+
+    /// Add new sleds to rack membership
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/membership/add",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+    }]
+    async fn rack_membership_add_sleds(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
+        req: TypedBody<params::RackMembershipAddSledsRequest>,
+    ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError>;
+
+    /// Retrieve the rack cluster membership status
+    ///
+    /// Returns the status for the most recent change, or a specific version if
+    /// one is specified.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks/{rack_id}/membership",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+    }]
+    async fn rack_membership_status(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackMembershipConfigPathParams>,
+        query_params: Query<params::RackMembershipVersionParam>,
+    ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError>;
 
     // Sleds
 
