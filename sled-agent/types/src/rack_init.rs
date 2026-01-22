@@ -4,129 +4,9 @@
 
 //! Rack initialization types.
 
-use std::net::IpAddr;
-
-use anyhow::Result;
 use camino::Utf8Path;
-use omicron_common::{
-    address::IpRange,
-    api::{external::AllowedSourceIps, internal::nexus::Certificate},
-};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use omicron_common::api::internal::nexus::Certificate;
 pub use sled_agent_types_versions::latest::rack_init::*;
-use sled_hardware_types::Baseboard;
-
-use crate::early_networking::back_compat::RackNetworkConfigV1;
-
-/// Structures and routines used to maintain backwards compatibility.  The
-/// contents of this module should only be used to convert older data into the
-/// current format, and not for any ongoing run-time operations.
-pub mod back_compat {
-    use omicron_common::api::internal::nexus::Certificate;
-
-    use super::*;
-
-    #[derive(Clone, Deserialize)]
-    struct UnvalidatedRackInitializeRequestV1 {
-        trust_quorum_peers: Option<Vec<Baseboard>>,
-        bootstrap_discovery: BootstrapAddressDiscovery,
-        ntp_servers: Vec<String>,
-        dns_servers: Vec<IpAddr>,
-        internal_services_ip_pool_ranges: Vec<IpRange>,
-        external_dns_ips: Vec<IpAddr>,
-        external_dns_zone_name: String,
-        external_certificates: Vec<Certificate>,
-        recovery_silo: RecoverySiloConfig,
-        rack_network_config: RackNetworkConfigV1,
-        #[serde(default = "default_allowed_source_ips")]
-        allowed_source_ips: AllowedSourceIps,
-    }
-
-    fn validate_external_dns(
-        dns_ips: &Vec<IpAddr>,
-        internal_ranges: &Vec<IpRange>,
-    ) -> Result<()> {
-        use anyhow::bail;
-        if dns_ips.is_empty() {
-            bail!("At least one external DNS IP is required");
-        }
-
-        for &dns_ip in dns_ips {
-            if !internal_ranges.iter().any(|range| range.contains(dns_ip)) {
-                bail!(
-                    "External DNS IP {dns_ip} is not contained in \
-                         `internal_services_ip_pool_ranges`"
-                );
-            }
-        }
-        Ok(())
-    }
-
-    /// This is a deprecated format, maintained to allow importing from older
-    /// versions.
-    #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
-    #[serde(try_from = "UnvalidatedRackInitializeRequestV1")]
-    pub struct RackInitializeRequestV1 {
-        pub trust_quorum_peers: Option<Vec<Baseboard>>,
-        pub bootstrap_discovery: BootstrapAddressDiscovery,
-        pub ntp_servers: Vec<String>,
-        pub dns_servers: Vec<IpAddr>,
-        pub internal_services_ip_pool_ranges: Vec<IpRange>,
-        pub external_dns_ips: Vec<IpAddr>,
-        pub external_dns_zone_name: String,
-        pub external_certificates: Vec<Certificate>,
-        pub recovery_silo: RecoverySiloConfig,
-        pub rack_network_config: RackNetworkConfigV1,
-        #[serde(default = "default_allowed_source_ips")]
-        pub allowed_source_ips: AllowedSourceIps,
-    }
-
-    impl TryFrom<UnvalidatedRackInitializeRequestV1> for RackInitializeRequestV1 {
-        type Error = anyhow::Error;
-
-        fn try_from(value: UnvalidatedRackInitializeRequestV1) -> Result<Self> {
-            validate_external_dns(
-                &value.external_dns_ips,
-                &value.internal_services_ip_pool_ranges,
-            )?;
-
-            Ok(RackInitializeRequestV1 {
-                trust_quorum_peers: value.trust_quorum_peers,
-                bootstrap_discovery: value.bootstrap_discovery,
-                ntp_servers: value.ntp_servers,
-                dns_servers: value.dns_servers,
-                internal_services_ip_pool_ranges: value
-                    .internal_services_ip_pool_ranges,
-                external_dns_ips: value.external_dns_ips,
-                external_dns_zone_name: value.external_dns_zone_name,
-                external_certificates: value.external_certificates,
-                recovery_silo: value.recovery_silo,
-                rack_network_config: value.rack_network_config,
-                allowed_source_ips: value.allowed_source_ips,
-            })
-        }
-    }
-
-    impl From<RackInitializeRequestV1> for RackInitializeRequest {
-        fn from(v1: RackInitializeRequestV1) -> Self {
-            RackInitializeRequest {
-                trust_quorum_peers: v1.trust_quorum_peers,
-                bootstrap_discovery: v1.bootstrap_discovery,
-                ntp_servers: v1.ntp_servers,
-                dns_servers: v1.dns_servers,
-                internal_services_ip_pool_ranges: v1
-                    .internal_services_ip_pool_ranges,
-                external_dns_ips: v1.external_dns_ips,
-                external_dns_zone_name: v1.external_dns_zone_name,
-                external_certificates: v1.external_certificates,
-                recovery_silo: v1.recovery_silo,
-                rack_network_config: v1.rack_network_config.into(),
-                allowed_source_ips: v1.allowed_source_ips,
-            }
-        }
-    }
-}
 
 /// Load a RackInitializeRequest from a file path.
 pub fn rack_initialize_request_from_file<P: AsRef<Utf8Path>>(
@@ -136,13 +16,11 @@ pub fn rack_initialize_request_from_file<P: AsRef<Utf8Path>>(
     let contents = std::fs::read_to_string(&path).map_err(|err| {
         RackInitializeRequestParseError::Io { path: path.into(), err }
     })?;
-    let mut raw_config = rack_initialize_request_from_toml_with_fallback(
-        &contents,
-    )
-    .map_err(|err| RackInitializeRequestParseError::Deserialize {
-        path: path.into(),
-        err,
-    })?;
+    let mut raw_config = rack_initialize_request_from_toml(&contents)
+        .map_err(|err| RackInitializeRequestParseError::Deserialize {
+            path: path.into(),
+            err: err.into(),
+        })?;
 
     // In the same way that sled-agent itself (our caller) discovers the
     // optional config-rss.toml in a well-known path relative to its config
@@ -192,22 +70,11 @@ pub fn rack_initialize_request_from_file<P: AsRef<Utf8Path>>(
     Ok(raw_config)
 }
 
-/// Parse a RackInitializeRequest from TOML, with fallback to older versions.
-pub fn rack_initialize_request_from_toml_with_fallback(
+/// Parse a RackInitializeRequest from TOML.
+pub fn rack_initialize_request_from_toml(
     data: &str,
-) -> Result<RackInitializeRequest> {
-    // Note that if we fail to parse the request as any known
-    // version, we return the error corresponding to the parse
-    // failure for the newest schema.
-    toml::from_str::<RackInitializeRequest>(&data).or_else(
-        |latest_version_err| match toml::from_str::<
-            back_compat::RackInitializeRequestV1,
-        >(&data)
-        {
-            Ok(v1) => Ok(v1.into()),
-            Err(_v1_err) => Err(latest_version_err.into()),
-        },
-    )
+) -> Result<RackInitializeRequest, toml::de::Error> {
+    toml::from_str::<RackInitializeRequest>(data)
 }
 
 /// Return a RackInitializeRequest configuration suitable for testing.
@@ -239,11 +106,13 @@ impl RackInitializeRequestParams {
 
 #[cfg(test)]
 mod tests {
+    use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
 
     use camino::Utf8PathBuf;
-    use omicron_common::address::{AZ_PREFIX, RACK_PREFIX, SLED_PREFIX};
+    use omicron_common::address::{AZ_PREFIX, IpRange, RACK_PREFIX, SLED_PREFIX};
+    use omicron_common::api::external::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
 
     use super::*;
