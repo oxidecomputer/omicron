@@ -134,10 +134,10 @@ pub mod probes {
 
 pub mod rack_init {
     pub use crate::bootstrap_v1::rack_init::RecoverySiloConfig;
-    pub use crate::v1::rack_init::BootstrapAddressDiscovery;
-    pub use crate::v1::rack_init::RackInitializeRequest;
-    pub use crate::v1::rack_init::RackInitializeRequestParseError;
-    pub use crate::v1::rack_init::default_allowed_source_ips;
+    pub use crate::v14::rack_init::BootstrapAddressDiscovery;
+    pub use crate::v14::rack_init::RackInitializeRequest;
+    pub use crate::v14::rack_init::RackInitializeRequestParams;
+    pub use crate::v14::rack_init::RackInitializeRequestParseError;
 }
 
 pub mod sled {

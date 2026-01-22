@@ -15,9 +15,8 @@ use dropshot_api_manager_types::api_versions;
 use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::{
-    rack_init::RackInitializeRequest, rack_ops::RackOperationStatus,
-};
+use sled_agent_types::rack_ops::RackOperationStatus;
+use sled_agent_types_versions::v1::rack_init::RackInitializeRequest;
 use sled_hardware_types::Baseboard;
 use tufaceous_artifact::ArtifactVersion;
 

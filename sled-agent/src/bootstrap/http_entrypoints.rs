@@ -25,9 +25,7 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::rack_init::{
-    RackInitializeRequest, RackInitializeRequestParams,
-};
+use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::rack_ops::RackOperationStatus;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
@@ -115,7 +113,9 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
 
     async fn rack_initialize(
         _rqctx: RequestContext<Self::Context>,
-        _body: TypedBody<RackInitializeRequest>,
+        _body: TypedBody<
+            sled_agent_types_versions::v1::rack_init::RackInitializeRequest,
+        >,
     ) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
         // This endpoint has moved to the lockstep API on port 8080.
         Err(HttpError::for_client_error(

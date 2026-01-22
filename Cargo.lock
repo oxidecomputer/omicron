@@ -1004,6 +1004,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "tufaceous-artifact",
 ]

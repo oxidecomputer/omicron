@@ -6,6 +6,7 @@
 
 use camino::Utf8Path;
 use omicron_common::api::internal::nexus::Certificate;
+
 pub use sled_agent_types_versions::latest::rack_init::*;
 
 /// Load a RackInitializeRequest from a file path.
@@ -16,10 +17,12 @@ pub fn rack_initialize_request_from_file<P: AsRef<Utf8Path>>(
     let contents = std::fs::read_to_string(&path).map_err(|err| {
         RackInitializeRequestParseError::Io { path: path.into(), err }
     })?;
-    let mut raw_config = rack_initialize_request_from_toml(&contents)
-        .map_err(|err| RackInitializeRequestParseError::Deserialize {
-            path: path.into(),
-            err: err.into(),
+    let mut raw_config =
+        rack_initialize_request_from_toml(&contents).map_err(|err| {
+            RackInitializeRequestParseError::Deserialize {
+                path: path.into(),
+                err: err.into(),
+            }
         })?;
 
     // In the same way that sled-agent itself (our caller) discovers the
@@ -89,21 +92,6 @@ pub fn rack_initialize_request_test_config() -> RackInitializeRequest {
         .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e))
 }
 
-#[derive(Debug, Clone)]
-pub struct RackInitializeRequestParams {
-    pub rack_initialize_request: RackInitializeRequest,
-    pub skip_timesync: bool,
-}
-
-impl RackInitializeRequestParams {
-    pub fn new(
-        rack_initialize_request: RackInitializeRequest,
-        skip_timesync: bool,
-    ) -> RackInitializeRequestParams {
-        RackInitializeRequestParams { rack_initialize_request, skip_timesync }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::net::IpAddr;
@@ -111,7 +99,9 @@ mod tests {
     use std::net::Ipv6Addr;
 
     use camino::Utf8PathBuf;
-    use omicron_common::address::{AZ_PREFIX, IpRange, RACK_PREFIX, SLED_PREFIX};
+    use omicron_common::address::{
+        AZ_PREFIX, IpRange, RACK_PREFIX, SLED_PREFIX,
+    };
     use omicron_common::api::external::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
 
