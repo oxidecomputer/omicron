@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::health_checks::poll_smf_services_in_maintenance;
-use crate::health_checks::sim_poll_smf_services_in_maintenance;
+use crate::health_checks::sim_smf_services_in_maintenance;
 
 use illumos_utils::svcs::SvcsInMaintenanceResult;
 use sled_agent_types::inventory::HealthMonitorInventory;
@@ -25,13 +25,18 @@ impl HealthMonitorHandle {
     /// Returns a `HealthMonitorHandle` that doesn't monitor health and always
     /// reports no problems unless a `ConfigSimHealthMonitor` with simulated
     /// data is passed.
-    pub fn spawn_sim(sim_failed_checks: bool) -> Self {
+    pub fn spawn_sim(
+        sim_health_checks: Option<HealthMonitorInventory>,
+    ) -> Self {
         let (smf_services_in_maintenance_tx, smf_services_in_maintenance_rx) =
             watch::channel(Ok(SvcsInMaintenanceResult::new()));
 
-        if sim_failed_checks {
+        if sim_health_checks.is_some() {
+            let HealthMonitorInventory { smf_services_in_maintenance } =
+                sim_health_checks.unwrap();
             tokio::spawn(async move {
-                sim_poll_smf_services_in_maintenance(
+                sim_smf_services_in_maintenance(
+                    smf_services_in_maintenance,
                     smf_services_in_maintenance_tx,
                 )
                 .await

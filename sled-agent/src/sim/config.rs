@@ -10,6 +10,7 @@ use dropshot::ConfigDropshot;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::inventory::HealthMonitorInventory;
 pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use sp_sim::FAKE_GIMLET_MODEL;
 use std::net::Ipv6Addr;
@@ -71,11 +72,12 @@ pub struct ConfigHardware {
 pub struct ConfigHealthMonitor {
     // TODO-K: change name here
     pub enabled: bool,
+    pub sim_health_checks: Option<HealthMonitorInventory>,
 }
 
 //#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 //pub struct ConfigSimHealthCheckResults {
-//
+//    pub smf_services_in_maintenance: SvcsInMaintenanceResult,
 //}
 
 /// Configuration for a sled agent

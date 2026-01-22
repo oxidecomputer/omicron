@@ -91,6 +91,7 @@ impl<'a> ControlPlaneBuilder<'a> {
                 extra_sled_agents: self.nextra_sled_agents,
                 sled_agent_health_monitor: sim::ConfigHealthMonitor {
                     enabled: false,
+                    sim_health_checks: None,
                 },
             },
             self.tls_cert,

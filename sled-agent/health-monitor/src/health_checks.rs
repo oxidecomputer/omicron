@@ -4,8 +4,6 @@
 
 //! Helpers for running health checks from the sled agent
 
-use chrono::Utc;
-use illumos_utils::svcs::SvcInMaintenance;
 use illumos_utils::svcs::Svcs;
 use illumos_utils::svcs::SvcsInMaintenanceResult;
 use slog::Logger;
@@ -46,28 +44,13 @@ pub(crate) async fn poll_smf_services_in_maintenance(
     }
 }
 
-pub(crate) async fn sim_poll_smf_services_in_maintenance(
-    // TODO-K: Add sim config here?
+pub(crate) async fn sim_smf_services_in_maintenance(
+    sim_smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
     smf_services_in_maintenance_tx: watch::Sender<
         Result<SvcsInMaintenanceResult, String>,
     >,
 ) {
-    // We poll every minute to mimic what the actual health monitor does
-    let mut interval = interval(Duration::from_secs(60));
-    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-    loop {
-        interval.tick().await;
-        smf_services_in_maintenance_tx.send_modify(|status| {
-            // TODO-K: Set the config here instead
-            *status = Ok(SvcsInMaintenanceResult {
-                services: vec![SvcInMaintenance {
-                    fmri: "fake".to_string(),
-                    zone: "fake-global".to_string(),
-                }],
-                errors: vec![],
-                time_of_status: Some(Utc::now()),
-            });
-        })
-    }
+    smf_services_in_maintenance_tx.send_modify(|status| {
+        *status = sim_smf_services_in_maintenance;
+    })
 }

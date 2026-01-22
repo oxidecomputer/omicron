@@ -131,7 +131,11 @@ async fn do_run() -> Result<(), CmdError> {
             Some(tmp.path()),
             ZpoolConfig::TenVirtualU2s,
             SledCpuFamily::AmdMilan,
-            ConfigHealthMonitor { enabled: args.enable_health_monitor },
+            // TODO-K: Use none for now, we can change later
+            ConfigHealthMonitor {
+                enabled: args.enable_health_monitor,
+                sim_health_checks: None,
+            },
         )
     };
 

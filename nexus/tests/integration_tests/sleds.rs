@@ -79,7 +79,10 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
                 &update_directory,
                 sim::SimMode::Explicit,
                 &cptestctx.first_sled_agent().simulated_upstairs,
-                sim::ConfigHealthMonitor { enabled: false },
+                sim::ConfigHealthMonitor {
+                    enabled: false,
+                    sim_health_checks: None,
+                },
             )
             .await
             .unwrap(),

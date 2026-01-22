@@ -4,15 +4,18 @@
 
 use anyhow::Context;
 use camino::Utf8PathBuf;
+use chrono::Utc;
 use clap::{Args, Parser, Subcommand};
 use futures::StreamExt;
 use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
+use illumos_utils::svcs::{SvcInMaintenance, SvcsInMaintenanceResult};
 use libc::SIGINT;
 use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
 use omicron_sled_agent::sim::ConfigHealthMonitor;
 use signal_hook_tokio::Signals;
+use sled_agent_types::inventory::HealthMonitorInventory;
 use std::fs;
 
 const DEFAULT_NEXUS_CONFIG: &str =
@@ -92,7 +95,18 @@ impl RunAllArgs {
         }
 
         let sled_agent_health_monitor = ConfigHealthMonitor {
+            // TODO-K: parse the TOML instead of hardcoding this here
             enabled: self.enable_sled_agent_health_monitor,
+            sim_health_checks: Some(HealthMonitorInventory {
+                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult {
+                    services: vec![SvcInMaintenance {
+                        fmri: "fake".to_string(),
+                        zone: "bobzone".to_string(),
+                    }],
+                    errors: vec![],
+                    time_of_status: Some(Utc::now()),
+                }),
+            }),
         };
 
         println!("omicron-dev: setting up all services ... ");
