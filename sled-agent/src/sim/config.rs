@@ -69,8 +69,14 @@ pub struct ConfigHardware {
 /// Configuration for the health monitor.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ConfigHealthMonitor {
+    // TODO-K: change name here
     pub enabled: bool,
 }
+
+//#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+//pub struct ConfigSimHealthCheckResults {
+//
+//}
 
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

@@ -171,10 +171,12 @@ impl SledAgent {
 
         let ConfigHealthMonitor { enabled } = config.health_monitor;
 
+        // TODO-K: Take configuration file with values and populate a fake
+        // health monitor report
         let health_monitor = if enabled {
             spawn_health_monitor_tasks(&log).await
         } else {
-            HealthMonitorHandle::stub()
+            HealthMonitorHandle::spawn_sim(true)
         };
 
         Arc::new(SledAgent {

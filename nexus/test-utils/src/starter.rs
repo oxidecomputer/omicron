@@ -1752,6 +1752,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                                 SLED_AGENT2_UUID.parse().unwrap(),
                                 1,
                                 sim_mode,
+                                // TODO-K: Don't start the monitor here?
                                 health_monitor,
                             )
                             .boxed()
@@ -1775,6 +1776,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                                 SledUuid::new_v4(),
                                 index.checked_add(1).unwrap(),
                                 sim_mode,
+                                // TODO-K: Don't start the monitor here?
                                 health_monitor.clone(),
                             )
                             .boxed()
