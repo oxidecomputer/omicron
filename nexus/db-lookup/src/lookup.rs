@@ -491,18 +491,12 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type [`SubnetPool`], identified by its UUID.
-    pub fn subnet_pool_id<'b>(self, id: SubnetPoolUuid) -> SubnetPool<'b>
-    where
-        'a: 'b,
-    {
+    pub fn subnet_pool_id(self, id: SubnetPoolUuid) -> SubnetPool<'a> {
         SubnetPool::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type [`SubnetPool`], identified by its Name.
-    pub fn subnet_pool_name<'b>(self, name: Name) -> SubnetPool<'b>
-    where
-        'a: 'b,
-    {
+    pub fn subnet_pool_name(self, name: Name) -> SubnetPool<'a> {
         SubnetPool::OwnedName(Root { lookup_root: self }, name)
     }
 }

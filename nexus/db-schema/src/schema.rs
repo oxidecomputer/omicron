@@ -815,13 +815,14 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         subnet_pool_id -> Uuid,
         subnet_pool_member_id -> Uuid,
-        silo_id -> Uuid,
         project_id -> Uuid,
         subnet -> Inet,
         attach_state -> crate::enums::IpAttachStateEnum,
         instance_id -> Nullable<Uuid>,
     }
 }
+
+allow_tables_to_appear_in_same_query!(external_subnet, project);
 
 table! {
     silo (id) {

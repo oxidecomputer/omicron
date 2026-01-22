@@ -7,7 +7,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_subnet (
     time_deleted TIMESTAMPTZ,
     subnet_pool_id UUID NOT NULL,
     subnet_pool_member_id UUID NOT NULL,
-    silo_id UUID NOT NULL,
     project_id UUID NOT NULL,
     subnet INET NOT NULL,
     first_address INET AS (subnet & netmask(subnet)) VIRTUAL,

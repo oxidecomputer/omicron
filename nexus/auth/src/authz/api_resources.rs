@@ -1237,16 +1237,6 @@ pub struct SubnetPoolList;
 /// purposes.
 pub const SUBNET_POOL_LIST: SubnetPoolList = SubnetPoolList;
 
-/*
-impl Eq for SubnetPoolList {}
-
-impl PartialEq for SubnetPoolList {
-    fn eq(&self, _: &Self) -> bool {
-        true
-    }
-}
-*/
-
 impl oso::PolarClass for SubnetPoolList {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()

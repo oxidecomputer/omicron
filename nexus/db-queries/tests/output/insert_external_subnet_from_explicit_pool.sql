@@ -46,7 +46,19 @@ WITH
       SELECT
         subnet_pool_id,
         subnet_pool_member_id,
-        CASE WHEN subnet_start IS NULL THEN member_start ELSE subnet_end + 1 END AS gap_start,
+        CASE
+        WHEN subnet_start IS NULL THEN member_start
+        ELSE least(
+          subnet_end,
+          IF(
+            "family"(subnet_end) = 4,
+            '255.255.255.254'::INET,
+            'ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe'::INET
+          )
+          + 1
+        )
+        END
+          AS gap_start,
         CASE
         WHEN next_subnet_start IS NULL THEN member_end
         ELSE next_subnet_start - 1

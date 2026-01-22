@@ -2621,6 +2621,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.subnet_pool_member (
      */
     first_address INET AS (subnet & netmask(subnet)) VIRTUAL,
     last_address INET AS (
+        /*
+         * This bit-masking is performing the `network()` function, which
+         * CockroachDB unfortunat lacks. We're or-ing the netmask and the
+         * hostmask, which together results in an all-1s bit pattern of either
+         * 32- or 128-bits.
+         */
         broadcast(subnet) & (netmask(subnet) | hostmask(subnet))
     ) VIRTUAL,
 
@@ -2717,9 +2723,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_subnet (
     /* FK into parent subnet_pool_member table. */
     subnet_pool_member_id UUID NOT NULL,
 
-    /* FK into the silo table. */
-    silo_id UUID NOT NULL,
-
     /* FK into the project table. */
     project_id UUID NOT NULL,
 
@@ -2741,6 +2744,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_subnet (
      */
     first_address INET AS (subnet & netmask(subnet)) VIRTUAL,
     last_address INET AS (
+        /*
+         * This bit-masking is performing the `network()` function, which
+         * CockroachDB unfortunat lacks. We're or-ing the netmask and the
+         * hostmask, which together results in an all-1s bit pattern of either
+         * 32- or 128-bits.
+         */
         broadcast(subnet) & (netmask(subnet) | hostmask(subnet))
     ) VIRTUAL,
 
@@ -2765,18 +2774,13 @@ WHERE
 CREATE INDEX IF NOT EXISTS lookup_external_subnet_by_subnet_pool_member_id
 ON omicron.public.external_subnet (subnet_pool_member_id)
 WHERE
-    time_deleted IS NOT NULL;
+    time_deleted IS NULL;
 
 CREATE INDEX IF NOT EXISTS lookup_external_subnet_by_instance_id
 ON omicron.public.external_subnet (instance_id)
 WHERE
     instance_id IS NOT NULL AND
-    time_deleted IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS lookup_external_subnet_by_silo_id
-ON omicron.public.external_subnet (silo_id)
-WHERE
-    time_deleted IS NOT NULL;
+    time_deleted IS NULL;
 
 /*
  * Indexes for quickly looking up overlapping subnets.

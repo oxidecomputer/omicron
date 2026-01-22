@@ -840,6 +840,9 @@ fn push_cte_to_select_next_subnet_from_pool(
     // are back-to-back, without any space, we get a negative "gap", which we
     // filter out in the next CTE. But this works as you'd expect if there is a
     // non-empty space between the subnets.
+    //
+    // The `LEAST` construction inside the gap start computation is to handle
+    // overflow with the end of the IP address range itself.
     builder.sql(
         "gaps_between_subnets AS (\
         SELECT \
@@ -847,7 +850,14 @@ fn push_cte_to_select_next_subnet_from_pool(
             subnet_pool_member_id, \
             CASE \
                 WHEN subnet_start IS NULL THEN member_start \
-                ELSE subnet_end + 1 \
+                ELSE LEAST(\
+                    subnet_end,
+                    IF(\
+                        family(subnet_end) = 4, \
+                        '255.255.255.254'::INET,
+                        'ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe'::INET\
+                    ) + 1\
+                )\
             END AS gap_start, \
             CASE \
                 WHEN next_subnet_start IS NULL THEN member_end \
@@ -1052,55 +1062,59 @@ pub fn decode_insert_external_subnet_error(
                         lookup_type,
                     ),
                 )
+            } else if msg == "result out of range" {
+                report_exhaustion(subnet)
             } else {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
         }
-        DieselError::NotFound => {
-            // The only situation where we insert 0 rows if is there is no
-            // available subnet during an automatic allocation. Report a useful
-            // error in that case, based on how the automatic allocation was
-            // requested.
-            match subnet {
-                ExternalSubnetAllocator::Explicit { .. } => {
-                    Error::internal_error(
-                        "Inserted 0 rows during the External Subnet \
-                        insert query, which should only happen when \
-                        we're doing an automatic allocation from a \
-                        pool or IP version. This is a programmer bug.",
+        DieselError::NotFound => report_exhaustion(subnet),
+        _ => public_error_from_diesel(e, ErrorHandler::Server),
+    }
+}
+
+// The only situation where we insert 0 rows if is there is no
+// available subnet during an automatic allocation. Report a useful
+// error in that case, based on how the automatic allocation was
+// requested. We also hit this case in the situation where we happen to be right
+// at the end of the boundary of the IP addresses themselves, e.g.,
+// `255.255.255.255`.
+fn report_exhaustion(subnet: &ExternalSubnetAllocator) -> Error {
+    match subnet {
+        ExternalSubnetAllocator::Explicit { .. } => Error::internal_error(
+            "Inserted 0 rows during the External Subnet \
+                insert query, which should only happen when \
+                we're doing an automatic allocation from a \
+                pool or IP version. This is a programmer bug.",
+        ),
+        ExternalSubnetAllocator::Auto { pool_selector, .. } => {
+            let msg = match pool_selector {
+                PoolSelector::Explicit { pool } => match pool {
+                    NameOrId::Id(id) => {
+                        format!(
+                            "All subnets are used in the \
+                                Subnet Pool with ID '{id}'"
+                        )
+                    }
+                    NameOrId::Name(name) => {
+                        format!(
+                            "All subnets are used in the \
+                                Subnet Pool with name '{name}'"
+                        )
+                    }
+                },
+                PoolSelector::Auto { ip_version } => {
+                    let version = ip_version
+                        .map(|v| format!("IP{v} "))
+                        .unwrap_or_else(String::new);
+                    format!(
+                        "All subnets are used in the default \
+                        {version}Subnet Pool for the current Silo"
                     )
                 }
-                ExternalSubnetAllocator::Auto { pool_selector, .. } => {
-                    let msg = match pool_selector {
-                        PoolSelector::Explicit { pool } => match pool {
-                            NameOrId::Id(id) => {
-                                format!(
-                                    "All subnets are used in the \
-                                        Subnet Pool with ID '{id}'"
-                                )
-                            }
-                            NameOrId::Name(name) => {
-                                format!(
-                                    "All subnets are used in the \
-                                        Subnet Pool with name '{name}'"
-                                )
-                            }
-                        },
-                        PoolSelector::Auto { ip_version } => {
-                            let version = ip_version
-                                .map(|v| format!("IP{v} "))
-                                .unwrap_or_else(String::new);
-                            format!(
-                                "All subnets are used in the default \
-                                {version}Subnet Pool for the current Silo"
-                            )
-                        }
-                    };
-                    Error::invalid_request(msg)
-                }
-            }
+            };
+            Error::invalid_request(msg)
         }
-        _ => public_error_from_diesel(e, ErrorHandler::Server),
     }
 }
 
@@ -1139,7 +1153,7 @@ pub fn delete_external_subnet_query(subnet_id: &Uuid) -> TypedSqlQuery<()> {
     builder.query()
 }
 
-/// Decode the erros emitted by `delete_external_subnet_query()`.
+/// Decode the errorss emitted by `delete_external_subnet_query()`.
 pub fn decode_delete_external_subnet_error(e: DieselError) -> Error {
     match e {
         DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)

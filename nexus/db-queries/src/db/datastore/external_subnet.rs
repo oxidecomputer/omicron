@@ -16,6 +16,7 @@ use crate::db::queries::external_subnet::unlink_subnet_pool_from_silo_query;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use chrono::Utc;
 use diesel::ExpressionMethods as _;
+use diesel::JoinOnDsl as _;
 use diesel::QueryDsl as _;
 use diesel::SelectableHelper as _;
 use diesel::result::DatabaseErrorKind;
@@ -254,12 +255,18 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
         use nexus_db_schema::schema::external_subnet::dsl;
+        use nexus_db_schema::schema::project::dsl as project_dsl;
 
         // Look for child external subnets in the silo, fail if any exist.
         let conn = self.pool_connection_authorized(opctx).await?;
         let has_children = diesel::dsl::select(diesel::dsl::exists(
-            dsl::external_subnet
-                .filter(dsl::silo_id.eq(authz_silo.id()))
+            project_dsl::project
+                .inner_join(
+                    dsl::external_subnet
+                        .on(dsl::project_id.eq(project_dsl::id)),
+                )
+                .filter(project_dsl::silo_id.eq(authz_silo.id()))
+                .filter(project_dsl::time_deleted.is_null())
                 .filter(dsl::time_deleted.is_null()),
         ))
         .get_result_async::<bool>(&*conn)
@@ -1509,7 +1516,7 @@ mod tests {
     #[tokio::test]
     async fn cannot_insert_overlapping_external_subnets() {
         let context = setup_external_subnet_test(
-            "can_insert_external_subnet_from_explicit_ip_subnet",
+            "cannot_insert_overlapping_external_subnets",
         )
         .await;
         let ip_subnet = "2001:db8:1::/64".parse().unwrap();
@@ -2647,5 +2654,127 @@ mod tests {
         }
         context.db.terminate().await;
         context.logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn handle_overflow_at_subnet_boundaries() {
+        let logctx =
+            dev::test_setup_log("handle_overflow_at_subnet_boundaries");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a pool, link it to the default silo
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("able to link pool to default silo");
+
+        // Create one member in the pool, explicitly chosen to be at the end of
+        // the IP address space.
+        let subnets = &["255.255.255.0/24".parse().unwrap()];
+        let mut members = Vec::with_capacity(subnets.len());
+        for subnet in subnets.iter().copied() {
+            let member = datastore
+                .add_subnet_pool_member(
+                    opctx,
+                    &authz_pool,
+                    &SubnetPoolMemberAdd {
+                        subnet,
+                        min_prefix_length: Some(24),
+                        max_prefix_length: Some(30),
+                    },
+                )
+                .await
+                .expect("able to create subnet pool member");
+            members.push(member);
+        }
+
+        // Create a dummy project. This doesn't have all the details we normally
+        // need, like default VPC or VPC Subnets, but it has enough to test the
+        // below methods.
+        let (authz_project, _db_project) = db
+            .datastore()
+            .project_create(
+                db.opctx(),
+                Project::new(
+                    DEFAULT_SILO_ID,
+                    ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "my-project".parse().unwrap(),
+                            description: String::new(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .expect("able to create a project");
+
+        // Now, the real test.
+        //
+        // Create one external subnet that takes the upper half of the member.
+        // This allocates up to 255.255.255.255 for the last address in the
+        // subnet.
+        let _subnet = datastore
+            .create_external_subnet(
+                opctx,
+                &DEFAULT_SILO_ID,
+                &authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "first".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    allocator: ExternalSubnetAllocator::Explicit {
+                        subnet: "255.255.255.128/26".parse().unwrap(),
+                    },
+                },
+            )
+            .await
+            .expect("able to allocate first external subnet");
+
+        // Now what happens when we do any other allocation?
+        let subnet = datastore
+            .create_external_subnet(
+                opctx,
+                &DEFAULT_SILO_ID,
+                &authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "next".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    allocator: ExternalSubnetAllocator::Auto {
+                        prefix_len: 26,
+                        pool_selector: PoolSelector::Auto { ip_version: None },
+                    },
+                },
+            )
+            .await
+            .expect("able to allocate external subnet");
+        assert_eq!(
+            oxnet::IpNet::from(subnet.subnet),
+            "255.255.255.0/26".parse::<oxnet::IpNet>().unwrap()
+        );
     }
 }

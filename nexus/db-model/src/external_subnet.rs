@@ -34,7 +34,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
-/// An pool of subnets that can be attached to instances in the rack.
+/// A pool of subnets that can be attached to instances.
 #[derive(
     Clone,
     Debug,
@@ -197,7 +197,6 @@ pub struct ExternalSubnet {
     pub identity: ExternalSubnetIdentity,
     pub subnet_pool_id: DbTypedUuid<SubnetPoolKind>,
     pub subnet_pool_member_id: DbTypedUuid<SubnetPoolMemberKind>,
-    pub silo_id: Uuid,
     pub project_id: Uuid,
     pub subnet: IpNet,
     pub attach_state: IpAttachState,
