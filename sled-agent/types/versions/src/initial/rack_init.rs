@@ -13,7 +13,9 @@ use omicron_common::{
     },
     api::{
         external::AllowedSourceIps,
-        internal::{nexus::Certificate, shared::RackNetworkConfig},
+        internal::{
+            nexus::Certificate, shared::rack_init::v1::RackNetworkConfig,
+        },
     },
 };
 use schemars::JsonSchema;

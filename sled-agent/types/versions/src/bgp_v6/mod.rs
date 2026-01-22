@@ -2,6 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types for network setup required to bring up the control plane.
+//! Version `BGP_v6` of the Sled Agent API.
 
-pub use sled_agent_types_versions::latest::early_networking::*;
+pub mod early_networking;

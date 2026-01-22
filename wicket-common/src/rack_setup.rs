@@ -209,7 +209,7 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Switch port the peer is reachable on.
     pub port: String,
     /// Address of the peer.
-    pub addr: Ipv4Addr,
+    pub addr: IpAddr,
     /// How long to keep a session alive without a keepalive in seconds.
     /// Defaults to 6 seconds.
     pub hold_time: Option<u64>,

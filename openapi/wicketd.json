@@ -7557,7 +7557,7 @@
           "addr": {
             "description": "Address of the peer.",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "allowed_export": {
             "description": "Apply export policy to this peer with an allow list.",

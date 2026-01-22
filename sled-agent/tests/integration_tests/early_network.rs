@@ -4,7 +4,7 @@
 
 //! Tests that EarlyNetworkConfig deserializes across versions.
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 
 use bootstore::schemes::v0 as bootstore;
@@ -136,7 +136,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65000,
                         port: "bar".to_owned(),
-                        addr: Ipv4Addr::new(1, 2, 3, 4),
+                        addr: IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
                         hold_time: Some(20),
                         idle_hold_time: Some(50),
                         delay_open: None,

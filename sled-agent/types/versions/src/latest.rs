@@ -45,8 +45,8 @@ pub mod disk {
 }
 
 pub mod early_networking {
-    pub use crate::v1::early_networking::EarlyNetworkConfig;
-    pub use crate::v1::early_networking::EarlyNetworkConfigBody;
+    pub use crate::v15::early_networking::EarlyNetworkConfig;
+    pub use crate::v15::early_networking::EarlyNetworkConfigBody;
 }
 
 pub mod firewall_rules {

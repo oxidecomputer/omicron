@@ -54,7 +54,7 @@ use serde_json::json;
 use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
     EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig,
-    LldpAdminStatus, LldpPortConfig, PortConfigV2, RackNetworkConfigV2,
+    LldpAdminStatus, LldpPortConfig, PortConfig, RackNetworkConfig,
     RouteConfig as SledRouteConfig, TxEqConfig, UplinkAddressConfig,
 };
 use std::{
@@ -1072,7 +1072,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 bgp.dedup();
 
-                let mut ports: Vec<PortConfigV2> = vec![];
+                let mut ports: Vec<PortConfig> = vec![];
 
                 for (location, port, change) in &changes {
                     let PortSettingsChange::Apply(info) = change else {
@@ -1106,7 +1106,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         None
                     };
 
-                    let mut port_config = PortConfigV2 {
+                    let mut port_config = PortConfig {
                         addresses: info.addresses.iter().map(|a|
 			    UplinkAddressConfig {
 				    address: a.address,
@@ -1118,15 +1118,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .map(|l| l.autoneg)
                             .unwrap_or(false),
                         bgp_peers: peer_configs.into_iter()
-                            // filter maps are cool
                             // For unnumbered peers (addr is None), use UNSPECIFIED
-                            // For IPv6 peers, skip (not supported in this context)
-                            .filter_map(|c| match c.addr {
-                                None => Some((c, Ipv4Addr::UNSPECIFIED)),
-                                Some(addr) => match addr.ip() {
-                                    IpAddr::V4(v4) => Some((c, v4)),
-                                    IpAddr::V6(_) => None,
-                                },
+                            .map(|c| match c.addr {
+                                None => (c, IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+                                Some(addr) => (c, addr.ip()),
                             })
                             .map(|(c, addr)| {
                                 SledBgpPeerConfig {
@@ -1197,7 +1192,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let peer_addr_for_lookup = if peer.addr.is_unspecified() {
                             None
                         } else {
-                            Some(IpNetwork::from(IpAddr::from(peer.addr)))
+                            Some(IpNetwork::from(peer.addr))
                         };
 
                         peer.communities = match self
@@ -1316,7 +1311,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     schema_version: 2,
                     body: EarlyNetworkConfigBody {
                         ntp_servers,
-                        rack_network_config: Some(RackNetworkConfigV2 {
+                        rack_network_config: Some(RackNetworkConfig {
                             rack_subnet: subnet,
                             infra_ip_first,
                             infra_ip_last,

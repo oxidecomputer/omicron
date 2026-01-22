@@ -1657,9 +1657,9 @@
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer. Use `Ipv4Addr::UNSPECIFIED` to indicate an unnumbered BGP session established over the interface specified by `port`.",
+            "description": "Address of the peer. Use `UNSPECIFIED` to indicate an unnumbered BGP session established over the interface specified by `port`.",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "allowed_export": {
             "description": "Define export policy for a peer.",
