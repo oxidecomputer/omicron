@@ -1230,13 +1230,14 @@ impl AuthorizedResource for ScimClientBearerTokenList {
 }
 
 /// Synthetic resource for authorization to list Subnet Pools.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SubnetPoolList;
 
 /// Singleton representing the [`SubnetPoolList`] itself for authz
 /// purposes.
 pub const SUBNET_POOL_LIST: SubnetPoolList = SubnetPoolList;
 
+/*
 impl Eq for SubnetPoolList {}
 
 impl PartialEq for SubnetPoolList {
@@ -1244,6 +1245,7 @@ impl PartialEq for SubnetPoolList {
         true
     }
 }
+*/
 
 impl oso::PolarClass for SubnetPoolList {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {

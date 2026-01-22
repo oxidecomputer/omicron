@@ -99,7 +99,7 @@ pub struct SubnetPoolMember {
 
 impl SubnetPoolMember {
     pub fn new(
-        params: &params::SubnetPoolMemberCreate,
+        params: &params::SubnetPoolMemberAdd,
         pool_id: SubnetPoolUuid,
     ) -> Result<Self, Error> {
         // Require that the subnet is actually a network, i.e.,
@@ -110,13 +110,18 @@ impl SubnetPoolMember {
                 ID of zero.",
             ));
         }
+        let min_prefix_length =
+            params.min_prefix_length.unwrap_or(params.subnet.width());
+        let max_prefix_length =
+            params.max_prefix_length.unwrap_or(params.subnet.width());
+
         // Sanity checks on the prefix lengths.
         //
         // - Min has to be <= max.
         // - Min and max <= 32 or 64, depending on IP version.
         // - Min has to be >= subnet prefix itself.
         // - Max has to be >= subnet prefix itself.
-        if params.min_prefix_length > params.max_prefix_length {
+        if min_prefix_length > max_prefix_length {
             return Err(Error::invalid_request(
                 "The minimum prefix length must be no greater than the maximum",
             ));
@@ -124,18 +129,21 @@ impl SubnetPoolMember {
         let (version, max_for_version) = if params.subnet.is_ipv4() {
             (IpVersion::V4, std::net::Ipv4Addr::BITS)
         } else {
-            const MAX_IPV6_SUBNET_PREFIX_LENGTH: u32 = 64;
-            (IpVersion::V6, MAX_IPV6_SUBNET_PREFIX_LENGTH)
+            // NOTE: Depending on which RFC you read or what the context is, a
+            // /64 is the smallest IPv6 subnet you can create. Still, we don't
+            // really control how this is used, the guest does, so we should try
+            // to be permissive here.
+            (IpVersion::V6, std::net::Ipv6Addr::BITS)
         };
-        if u32::from(params.max_prefix_length) > max_for_version {
+        if u32::from(max_prefix_length) > max_for_version {
             return Err(Error::invalid_request(&format!(
                 "Cannot create an IP{} subnet with a max prefix length \
                 greater than {}",
                 version, max_for_version,
             )));
         };
-        if params.min_prefix_length < params.subnet.width()
-            || params.max_prefix_length < params.subnet.width()
+        if min_prefix_length < params.subnet.width()
+            || max_prefix_length < params.subnet.width()
         {
             return Err(Error::invalid_request(&format!(
                 "Min and max prefix length must be no less than \
@@ -151,8 +159,8 @@ impl SubnetPoolMember {
             time_deleted: None,
             subnet_pool_id: pool_id.into(),
             subnet: params.subnet.into(),
-            min_prefix_length: SqlU8::new(params.min_prefix_length),
-            max_prefix_length: SqlU8::new(params.max_prefix_length),
+            min_prefix_length: SqlU8::new(min_prefix_length),
+            max_prefix_length: SqlU8::new(max_prefix_length),
             rcgen: Generation::new(),
         })
     }

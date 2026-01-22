@@ -22,7 +22,7 @@ use nexus_db_model::SubnetPoolMember;
 use nexus_db_model::SubnetPoolSiloLink;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_schema::enums::IpVersionEnum;
-use nexus_types::external_api::params::ExternalSubnetSelector;
+use nexus_types::external_api::params::ExternalSubnetAllocator;
 use nexus_types::external_api::params::PoolSelector;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -344,12 +344,12 @@ pub fn insert_external_subnet_query(
     silo_id: &Uuid,
     project_id: &Uuid,
     identity: ExternalSubnetIdentity,
-    subnet_selector: &ExternalSubnetSelector,
+    subnet_selector: &ExternalSubnetAllocator,
 ) -> TypedSqlQuery<SelectableSql<ExternalSubnet>> {
     let mut builder = QueryBuilder::new();
     builder.sql("WITH ");
     match subnet_selector {
-        ExternalSubnetSelector::Explicit { subnet } => {
+        ExternalSubnetAllocator::Explicit { subnet } => {
             // In this case, we're given the IP subnet. We need to find the
             // Subnet Pool and Subnet Pool Member containing it (if any), ensure
             // they're linked to the current Silo, and then return those values.
@@ -359,9 +359,9 @@ pub fn insert_external_subnet_query(
                 *subnet,
             );
         }
-        ExternalSubnetSelector::Auto {
-            pool: PoolSelector::Explicit { pool },
-            prefix,
+        ExternalSubnetAllocator::Auto {
+            pool_selector: PoolSelector::Explicit { pool },
+            prefix_len,
         } => {
             // We're given the pool itself. Select it as a constant, ensure it's
             // actually linked to the current Silo, and then push the CTE that
@@ -371,11 +371,11 @@ pub fn insert_external_subnet_query(
             builder.sql(", ");
             push_cte_to_ensure_pool_is_linked_to_silo(&mut builder, silo_id);
             builder.sql(", ");
-            push_cte_to_select_next_subnet_from_pool(&mut builder, *prefix);
+            push_cte_to_select_next_subnet_from_pool(&mut builder, *prefix_len);
         }
-        ExternalSubnetSelector::Auto {
-            pool: PoolSelector::Auto { ip_version },
-            prefix,
+        ExternalSubnetAllocator::Auto {
+            pool_selector: PoolSelector::Auto { ip_version },
+            prefix_len,
         } => {
             // THis is the same as the above, but we're taking the pool by
             // looking up the default pool linked to the current silo for the
@@ -390,7 +390,7 @@ pub fn insert_external_subnet_query(
                 ip_version.map(Into::into),
             );
             builder.sql(", ");
-            push_cte_to_select_next_subnet_from_pool(&mut builder, *prefix);
+            push_cte_to_select_next_subnet_from_pool(&mut builder, *prefix_len);
         }
     }
     builder.sql(", ");
@@ -984,7 +984,7 @@ pub fn decode_insert_external_subnet_error(
     e: DieselError,
     silo_id: &Uuid,
     authz_project: &authz::Project,
-    subnet: &ExternalSubnetSelector,
+    subnet: &ExternalSubnetAllocator,
 ) -> Error {
     match &e {
         DieselError::DatabaseError(DatabaseErrorKind::Unknown, info) => {
@@ -1025,8 +1025,8 @@ pub fn decode_insert_external_subnet_error(
             ) {
                 // This should only happen if we were given an explicit pool by
                 // name or ID.
-                let ExternalSubnetSelector::Auto {
-                    pool: PoolSelector::Explicit { pool },
+                let ExternalSubnetAllocator::Auto {
+                    pool_selector: PoolSelector::Explicit { pool },
                     ..
                 } = subnet
                 else {
@@ -1062,7 +1062,7 @@ pub fn decode_insert_external_subnet_error(
             // error in that case, based on how the automatic allocation was
             // requested.
             match subnet {
-                ExternalSubnetSelector::Explicit { .. } => {
+                ExternalSubnetAllocator::Explicit { .. } => {
                     Error::internal_error(
                         "Inserted 0 rows during the External Subnet \
                         insert query, which should only happen when \
@@ -1070,8 +1070,8 @@ pub fn decode_insert_external_subnet_error(
                         pool or IP version. This is a programmer bug.",
                     )
                 }
-                ExternalSubnetSelector::Auto { pool, .. } => {
-                    let msg = match pool {
+                ExternalSubnetAllocator::Auto { pool_selector, .. } => {
+                    let msg = match pool_selector {
                         PoolSelector::Explicit { pool } => match pool {
                             NameOrId::Id(id) => {
                                 format!(
@@ -1212,9 +1212,9 @@ mod tests {
     use chrono::Utc;
     use nexus_db_model::ExternalSubnetIdentity;
     use nexus_db_model::SubnetPoolMember;
-    use nexus_types::external_api::params::ExternalSubnetSelector;
+    use nexus_types::external_api::params::ExternalSubnetAllocator;
     use nexus_types::external_api::params::PoolSelector;
-    use nexus_types::external_api::params::SubnetPoolMemberCreate;
+    use nexus_types::external_api::params::SubnetPoolMemberAdd;
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::NameOrId;
@@ -1225,19 +1225,28 @@ mod tests {
     use omicron_uuid_kinds::SubnetPoolUuid;
     use uuid::Uuid;
 
+    const SILO_ID: Uuid = uuid::uuid!("1a597381-b5a1-43da-bd72-bb1ac0786c21");
+    const PROJECT_ID: Uuid =
+        uuid::uuid!("e9c2d699-c60d-4486-81c6-63de6897a4ed");
+    const SUBNET_ID: Uuid = uuid::uuid!("56ba77dc-6116-4537-a858-d3d56e34a222");
+    const SUBNET_MEMBER_ID: Uuid =
+        uuid::uuid!("b694e771-a21d-4022-9acf-1e1f5169945e");
+    const SUBNET_POOL_ID: Uuid =
+        uuid::uuid!("3d0525d9-4f7a-4fbd-bdca-f170aefb0499");
+
     #[tokio::test]
     async fn expectorate_insert_subnet_pool_member_query() {
         let t = Utc.with_ymd_and_hms(2020, 1, 1, 12, 12, 12).unwrap();
-        let pool_id = SubnetPoolUuid::from_untyped_uuid(uuid::uuid!(
-            "3ab604dc-35d2-4ebd-8c0b-30973979e0c8"
-        ));
-        let params = SubnetPoolMemberCreate {
-            pool: pool_id.into_untyped_uuid().into(),
+        let params = SubnetPoolMemberAdd {
             subnet: "10.1.0.0/16".parse().unwrap(),
-            min_prefix_length: 16,
-            max_prefix_length: 24,
+            min_prefix_length: Some(16),
+            max_prefix_length: Some(24),
         };
-        let mut member = SubnetPoolMember::new(&params, pool_id).unwrap();
+        let mut member = SubnetPoolMember::new(
+            &params,
+            SubnetPoolUuid::from_untyped_uuid(SUBNET_POOL_ID),
+        )
+        .unwrap();
         // Set some data of the member to be consistent.
         member.id =
             SubnetPoolMemberUuid::from_untyped_uuid(SUBNET_MEMBER_ID).into();
@@ -1250,15 +1259,6 @@ mod tests {
         .await;
     }
 
-    const SILO_ID: Uuid = uuid::uuid!("1a597381-b5a1-43da-bd72-bb1ac0786c21");
-    const PROJECT_ID: Uuid =
-        uuid::uuid!("e9c2d699-c60d-4486-81c6-63de6897a4ed");
-    const SUBNET_ID: Uuid = uuid::uuid!("56ba77dc-6116-4537-a858-d3d56e34a222");
-    const SUBNET_MEMBER_ID: Uuid =
-        uuid::uuid!("b694e771-a21d-4022-9acf-1e1f5169945e");
-    const SUBNET_POOL_ID: Uuid =
-        uuid::uuid!("3d0525d9-4f7a-4fbd-bdca-f170aefb0499");
-
     #[tokio::test]
     async fn can_explain_insert_external_subnet_from_explicit_ip_query() {
         let logctx =
@@ -1266,7 +1266,7 @@ mod tests {
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
-        let subnet = ExternalSubnetSelector::Explicit {
+        let subnet = ExternalSubnetAllocator::Explicit {
             subnet: "192.168.1.0/24".parse().unwrap(),
         };
         let identity = ExternalSubnetIdentity::new(
@@ -1292,7 +1292,7 @@ mod tests {
     }
 
     async fn expectorate_insert_external_subnet_query_impl(
-        subnet: ExternalSubnetSelector,
+        subnet: ExternalSubnetAllocator,
         path: &str,
     ) {
         let identity = ExternalSubnetIdentity::new(
@@ -1313,7 +1313,7 @@ mod tests {
 
     #[tokio::test]
     async fn expectorate_insert_external_subnet_from_explicit_subnet_query() {
-        let subnet = ExternalSubnetSelector::Explicit {
+        let subnet = ExternalSubnetAllocator::Explicit {
             subnet: "192.168.1.0/24".parse().unwrap(),
         };
         let path =
@@ -1323,9 +1323,11 @@ mod tests {
 
     #[tokio::test]
     async fn expectorate_insert_external_subnet_from_explicit_pool_query() {
-        let subnet = ExternalSubnetSelector::Auto {
-            pool: PoolSelector::Explicit { pool: NameOrId::Id(SUBNET_POOL_ID) },
-            prefix: 64,
+        let subnet = ExternalSubnetAllocator::Auto {
+            pool_selector: PoolSelector::Explicit {
+                pool: NameOrId::Id(SUBNET_POOL_ID),
+            },
+            prefix_len: 64,
         };
         let path = "tests/output/insert_external_subnet_from_explicit_pool.sql";
         expectorate_insert_external_subnet_query_impl(subnet, path).await;
@@ -1333,9 +1335,11 @@ mod tests {
 
     #[tokio::test]
     async fn expectorate_insert_external_subnet_from_ip_version_query() {
-        let subnet = ExternalSubnetSelector::Auto {
-            pool: PoolSelector::Auto { ip_version: Some(IpVersion::V6) },
-            prefix: 64,
+        let subnet = ExternalSubnetAllocator::Auto {
+            pool_selector: PoolSelector::Auto {
+                ip_version: Some(IpVersion::V6),
+            },
+            prefix_len: 64,
         };
         let path = "tests/output/insert_external_subnet_from_ip_version.sql";
         expectorate_insert_external_subnet_query_impl(subnet, path).await;
@@ -1343,9 +1347,9 @@ mod tests {
 
     #[tokio::test]
     async fn expectorate_insert_external_subnet_from_default_pool_query() {
-        let subnet = ExternalSubnetSelector::Auto {
-            pool: PoolSelector::Auto { ip_version: None },
-            prefix: 64,
+        let subnet = ExternalSubnetAllocator::Auto {
+            pool_selector: PoolSelector::Auto { ip_version: None },
+            prefix_len: 64,
         };
         let path = "tests/output/insert_external_subnet_from_default_pool.sql";
         expectorate_insert_external_subnet_query_impl(subnet, path).await;

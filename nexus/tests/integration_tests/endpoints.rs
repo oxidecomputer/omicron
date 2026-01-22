@@ -1086,14 +1086,12 @@ pub const DEMO_SUBNET_POOLS_URL: &'static str = "/v1/system/subnet-pools";
 pub static DEMO_SUBNET_POOL_NAME: LazyLock<Name> =
     LazyLock::new(|| "demo-subnet-pool".parse().unwrap());
 pub static DEMO_SUBNET_POOL_CREATE: LazyLock<params::SubnetPoolCreate> =
-    LazyLock::new(|| {
-        params::SubnetPoolCreate::new(
-            IdentityMetadataCreateParams {
-                name: DEMO_SUBNET_POOL_NAME.clone(),
-                description: String::from("a subnet pool"),
-            },
-            IpVersion::V4,
-        )
+    LazyLock::new(|| params::SubnetPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_SUBNET_POOL_NAME.clone(),
+            description: String::from("a subnet pool"),
+        },
+        ip_version: IpVersion::V4,
     });
 pub static DEMO_SUBNET_POOL_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/subnet-pools/{}", *DEMO_SUBNET_POOL_NAME)
@@ -1113,10 +1111,6 @@ pub static DEMO_SUBNET_POOL_MEMBERS_REMOVE_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/remove", *DEMO_SUBNET_POOL_MEMBERS_URL));
 pub static DEMO_SUBNET_POOL_MEMBER_ADD: LazyLock<params::SubnetPoolMemberAdd> =
     LazyLock::new(|| params::SubnetPoolMemberAdd {
-        identity: IdentityMetadataCreateParams {
-            name: "demo-subnet".parse().unwrap(),
-            description: String::from("a demo subnet"),
-        },
         subnet: "10.0.0.0/16".parse().unwrap(),
         min_prefix_length: None,
         max_prefix_length: None,

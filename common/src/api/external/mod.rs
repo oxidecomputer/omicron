@@ -996,8 +996,6 @@ pub enum ResourceType {
     SledLedger,
     Snapshot,
     SshKey,
-    SubnetPool,
-    SubnetPoolMember,
     SupportBundle,
     SubnetPool,
     SubnetPoolMember,

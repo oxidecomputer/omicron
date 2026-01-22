@@ -1493,27 +1493,6 @@ pub struct SubnetPoolCreate {
     /// The IP version for this pool (IPv4 or IPv6). All subnets in the pool
     /// must match this version.
     pub ip_version: IpVersion,
-    /// Type of subnet pool (defaults to Unicast)
-    #[serde(default)]
-    pub pool_type: shared::IpPoolType,
-}
-
-impl SubnetPoolCreate {
-    /// Create parameters for a unicast subnet pool (the default)
-    pub fn new(
-        identity: IdentityMetadataCreateParams,
-        ip_version: IpVersion,
-    ) -> Self {
-        Self { identity, ip_version, pool_type: shared::IpPoolType::Unicast }
-    }
-
-    /// Create parameters for a multicast subnet pool
-    pub fn new_multicast(
-        identity: IdentityMetadataCreateParams,
-        ip_version: IpVersion,
-    ) -> Self {
-        Self { identity, ip_version, pool_type: shared::IpPoolType::Multicast }
-    }
 }
 
 /// Update a subnet pool
@@ -1526,8 +1505,6 @@ pub struct SubnetPoolUpdate {
 /// Add a member (subnet) to a subnet pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolMemberAdd {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
     /// The subnet to add to the pool
     pub subnet: IpNet,
     /// Minimum prefix length for allocations from this subnet; a smaller prefix
@@ -1591,9 +1568,6 @@ pub enum ExternalSubnetAllocator {
     Explicit {
         /// The subnet CIDR to reserve. Must be available in the pool.
         subnet: IpNet,
-        /// The pool containing this subnet. If not specified, the default
-        /// subnet pool for the subnet's IP version is used.
-        pool: Option<NameOrId>,
     },
     /// Automatically allocate a subnet with the specified prefix length.
     Auto {
@@ -1697,93 +1671,6 @@ pub struct FloatingIpAttach {
 
     /// The type of `parent`'s resource
     pub kind: FloatingIpParentKind,
-}
-
-// SUBNET POOLS AND EXTERNAL SUBNETS
-
-/// Creation parameters for a Subnet Pool.
-///
-/// A Subnet Pool is a container of IP subnets that are controlled by Oxide
-/// users. Portions of these subnets can be attached to Oxide instances. The
-/// control plane ensures that traffic to those subnets is directed to the
-/// instance, at which point the user can decide how to further route or forward
-/// the traffic.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct SubnetPoolCreate {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    /// The IP version of the subnets contained in the pool.
-    pub ip_version: IpVersion,
-}
-
-/// Creation parameters member in a Subnet Pool.
-///
-/// Subnet Pool members describe individual IP Subnets in a pool. They can be
-/// allocated in full or in part to an Oxide instance.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct SubnetPoolMemberCreate {
-    /// The parent Subnet Pool in which to create this member.
-    pub pool: NameOrId,
-    /// The IP subnet for the member.
-    pub subnet: IpNet,
-    /// The minimum prefix length that can be allocated out of this member.
-    ///
-    /// This constrains the minimum length of any External Subnet object that
-    /// can be built from this pool member. Note that this defines the minimum
-    /// prefix, or equivalently the largest subnet that can built.
-    pub min_prefix_length: u8,
-    /// The maximum prefix length that can be allocated out of this member.
-    ///
-    /// This constrains the madximum length of any External Subnet object that
-    /// can be built from this pool member. Note that this defines the maximum
-    /// prefix, or equivalently the smallest subnet that can built.
-    pub max_prefix_length: u8,
-}
-
-/// Parameters for linking a Subnet Pool to a Silo.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct SubnetPoolSiloLinkCreate {
-    /// The Silo to which to link the Subnet Pool.
-    pub silo: NameOrId,
-    /// Whether this Subnet Pool should be the default.
-    ///
-    /// A Silo can have at most one default Subnet Pool per IP version. The
-    /// default Subnet Pool is used when creating an External Subnet, and the
-    /// Subnet Pool is unspecified.
-    #[serde(default)]
-    pub is_default: bool,
-}
-
-/// Creation parameters for an External Subnet.
-///
-/// An External Subnet is taken from a Subnet Pool and attached to an Instance.
-/// The Oxide control plane will ensure that traffic into the track targeting
-/// that subnet will arrive at the Instance. From there, software on the
-/// Instance can decide how to further route or forward the traffic.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct ExternalSubnetCreate {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    /// How to select the IP subnet for this External Subnet.
-    #[serde(flatten)]
-    pub subnet: ExternalSubnetSelector,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case", tag = "type")]
-pub enum ExternalSubnetSelector {
-    /// Select an explicit IP subnet.
-    Explicit {
-        /// The IP subnet to choose.
-        subnet: IpNet,
-    },
-    /// Automatically select the next IP subnet from a pool.
-    Auto {
-        /// How to select the Subnet Pool.
-        pool: PoolSelector,
-        /// The prefix size of the subnet to create from the pool.
-        prefix: u8,
-    },
 }
 
 // INSTANCES
