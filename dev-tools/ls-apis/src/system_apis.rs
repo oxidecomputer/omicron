@@ -551,9 +551,6 @@ impl SystemApis {
                         .collect();
                     for other_unit in other_units {
                         let other_node = nodes.get(other_unit).unwrap();
-                        eprintln!(
-                            "dap: edge: {deployment_unit} {other_unit} {server_pkg} {client_pkg}"
-                        );
                         graph.update_edge(*my_node, *other_node, client_pkg);
                     }
                 }
