@@ -1637,7 +1637,7 @@ pub struct ExternalSubnetAttach {
 
 /// Specify how to allocate a floating IP address.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum AddressAllocator {
     /// Reserve a specific IP address. The pool is inferred from the address
     /// since IP pools cannot have overlapping ranges.
@@ -4308,18 +4308,6 @@ mod tests {
         assert!(
             result.is_ok(),
             "auto without pool_selector should use default"
-        );
-    }
-
-    #[test]
-    fn test_address_allocator_auto_rejects_unknown_fields() {
-        // Auto with bare pool field should be rejected (issue #9680)
-        // Users must use pool_selector instead
-        let json = r#"{"type": "auto", "pool": "my-pool"}"#;
-        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
-        assert!(
-            result.is_err(),
-            "auto with unknown field 'pool' should be rejected"
         );
     }
 }
