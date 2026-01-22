@@ -31,10 +31,10 @@ impl HealthMonitorHandle {
         let (smf_services_in_maintenance_tx, smf_services_in_maintenance_rx) =
             watch::channel(Ok(SvcsInMaintenanceResult::new()));
 
-        // TODO-K: Don't allow a config to be both "enabled" and with fake data
-        if sim_health_checks.is_some() {
+        if let Some(results) = sim_health_checks {
             let HealthMonitorInventory { smf_services_in_maintenance } =
-                sim_health_checks.unwrap();
+                results;
+
             tokio::spawn(async move {
                 sim_smf_services_in_maintenance(
                     smf_services_in_maintenance,

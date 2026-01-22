@@ -70,7 +70,8 @@ pub struct ConfigHardware {
 /// Configuration for the simulated health monitor.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ConfigHealthMonitor {
-    /// Whether the real health monitor is running or not
+    /// Whether the real health monitor is running or not.
+    /// If set, it will override any simulated health check results.
     pub enabled: bool,
     /// Simulated failed health checks
     pub sim_health_checks: Option<HealthMonitorInventory>,
