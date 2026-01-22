@@ -22,31 +22,6 @@ pub struct HealthMonitorHandle {
 }
 
 impl HealthMonitorHandle {
-    /// Returns a `HealthMonitorHandle` that doesn't monitor health and always
-    /// reports no problems unless a `ConfigSimHealthMonitor` with simulated
-    /// data is passed.
-    pub fn spawn_sim(
-        sim_health_checks: Option<HealthMonitorInventory>,
-    ) -> Self {
-        let (smf_services_in_maintenance_tx, smf_services_in_maintenance_rx) =
-            watch::channel(Ok(SvcsInMaintenanceResult::new()));
-
-        if let Some(results) = sim_health_checks {
-            let HealthMonitorInventory { smf_services_in_maintenance } =
-                results;
-
-            tokio::spawn(async move {
-                sim_smf_services_in_maintenance(
-                    smf_services_in_maintenance,
-                    smf_services_in_maintenance_tx,
-                )
-                .await
-            });
-        };
-
-        Self { smf_services_in_maintenance_rx }
-    }
-
     pub fn spawn(log: Logger) -> Self {
         // Spawn a task to retrieve information about services in maintenance
         info!(log, "Starting SMF service health poller");
@@ -72,5 +47,30 @@ impl HealthMonitorHandle {
                 .borrow()
                 .clone(),
         }
+    }
+
+    /// Returns a `HealthMonitorHandle` that doesn't monitor health and always
+    /// reports no problems unless a `ConfigSimHealthMonitor` with simulated
+    /// data is passed.
+    pub fn spawn_sim(
+        sim_health_checks: Option<HealthMonitorInventory>,
+    ) -> Self {
+        let (smf_services_in_maintenance_tx, smf_services_in_maintenance_rx) =
+            watch::channel(Ok(SvcsInMaintenanceResult::new()));
+
+        if let Some(results) = sim_health_checks {
+            let HealthMonitorInventory { smf_services_in_maintenance } =
+                results;
+
+            tokio::spawn(async move {
+                sim_smf_services_in_maintenance(
+                    smf_services_in_maintenance,
+                    smf_services_in_maintenance_tx,
+                )
+                .await
+            });
+        };
+
+        Self { smf_services_in_maintenance_rx }
     }
 }

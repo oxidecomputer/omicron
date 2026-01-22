@@ -63,9 +63,6 @@ struct RunAllArgs {
     /// Override the nexus configuration file.
     #[clap(long, default_value = DEFAULT_NEXUS_CONFIG)]
     nexus_config: Utf8PathBuf,
-    ///// Enable the sled agent health monitor
-    //#[clap(long, default_value_t = false, action)]
-    //enable_sled_agent_health_monitor: bool,
     /// Override the sled agent health monitor configuration file.
     #[clap(long, default_value = DEFAULT_HEALTH_MONITOR_CONFIG)]
     health_monitor_config: Utf8PathBuf,
