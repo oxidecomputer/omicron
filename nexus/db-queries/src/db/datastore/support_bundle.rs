@@ -688,14 +688,20 @@ WITH
     FROM rendezvous_debug_dataset
     WHERE time_tombstoned IS NULL
   ),
-  -- Count bundles occupying datasets.
-  -- Bundles that occupy datasets: Collecting, Active, Destroying, Failing
+  -- Count bundles occupying datasets for deletion calculation purposes.
+  -- We only count stable states: Collecting and Active.
+  --
+  -- Why exclude transitional states (Destroying, Failing)?
+  -- These bundles are already in cleanup transitions and their datasets will
+  -- be freed soon. Including them would cause concurrent auto-delete operations
+  -- to each see free=0 and keep deleting more bundles than necessary.
+  --
+  -- Why exclude Failed?
   -- Failed bundles do NOT occupy datasets (their dataset was expunged).
-  -- Uses lookup_bundle_by_state_and_creation index.
   used_count AS (
     SELECT COUNT(*) as used
     FROM support_bundle
-    WHERE state IN ('collecting', 'active', 'destroying', 'failing')
+    WHERE state IN ('collecting', 'active')
   ),
   -- Count active bundles (for min_keep check)
   active_count AS (
@@ -727,11 +733,13 @@ WITH
   ),
   -- Find the N oldest active bundles we're allowed to delete.
   -- Uses lookup_bundle_by_state_and_creation index for ordering.
+  -- Secondary sort on id ensures deterministic selection when timestamps match,
+  -- which is critical for preventing over-deletion under concurrent execution.
   candidates AS (
     SELECT id
     FROM support_bundle
     WHERE state = 'active'
-    ORDER BY time_created ASC
+    ORDER BY time_created ASC, id ASC
     LIMIT (SELECT LEAST(bundles_needed, max_deletable) FROM deletion_calc)
   ),
   -- Atomically transition to Destroying (only if still Active).
@@ -2078,8 +2086,9 @@ mod test {
             .expect("Should update state");
 
         // Set config: 100% target_free (CEIL(5*100/100)=5), 0% min_keep
-        // With 3 bundles (1 Active, 1 Collecting, 1 Destroying),
-        // free_datasets = 5 - 3 = 2 (ALL bundles occupy datasets, not just Active)
+        // With 3 bundles (1 Active, 1 Collecting, 1 Destroying):
+        // - used_count = 2 (Active + Collecting; Destroying not counted for deletion calc)
+        // - free_datasets = 5 - 2 = 3
         // We should only delete Active bundles though
         datastore
             .support_bundle_config_set(&opctx, 100, 0)
@@ -2094,10 +2103,10 @@ mod test {
         assert_eq!(result.total_datasets, 5);
         // Only 1 bundle is Active (candidates for deletion)
         assert_eq!(result.active_bundles, 1);
-        // Free datasets: 5 total - 3 bundles = 2
-        // (All bundles occupy datasets regardless of state)
-        assert_eq!(result.free_datasets, 2);
-        // We want 5 free but only have 2, so we want to delete 3
+        // Free datasets: 5 total - 2 used (Active + Collecting) = 3
+        // (Destroying bundles are not counted as they're already being freed)
+        assert_eq!(result.free_datasets, 3);
+        // We want 5 free but only have 3, so we want to delete 2
         // But we only have 1 Active bundle to delete
         assert_eq!(result.deleted_ids.len(), 1);
         assert_eq!(result.deleted_ids[0], bundle1.id.into());
@@ -2262,17 +2271,19 @@ mod test {
 
         // Now we have: 1 Destroying, 1 Failed, 1 Active
         // - Total datasets: 3
-        // - Used by non-Failed bundles: 2 (Destroying + Active)
-        // - Free datasets: 3 - 2 = 1
+        // - Used for deletion calc: 1 (only Active; Destroying not counted)
+        // - Free datasets: 3 - 1 = 2
         // Config still: 20% target_free (CEIL(3*20/100)=1), 0% min_keep
         let result = datastore
             .support_bundle_auto_delete(&opctx)
             .await
             .expect("Should succeed");
 
-        // Free should be 1 now (Failed bundle doesn't count as using a dataset)
-        assert_eq!(result.free_datasets, 1);
-        // Since free=1 >= target=1, no deletion needed
+        // Free should be 2 now:
+        // - Failed bundle doesn't count (dataset was expunged)
+        // - Destroying bundle doesn't count (already being freed)
+        assert_eq!(result.free_datasets, 2);
+        // Since free=2 >= target=1, no deletion needed
         assert!(result.deleted_ids.is_empty());
 
         db.terminate().await;
@@ -2310,5 +2321,186 @@ mod test {
             "tests/output/support_bundle_auto_delete.sql",
         )
         .await;
+    }
+
+    /// Test that concurrent auto-deletion operations don't over-delete bundles.
+    ///
+    /// This verifies the atomic CTE prevents the TOCTTOU issue where multiple
+    /// Nexuses running concurrently could each decide to delete bundles based
+    /// on stale state, resulting in more deletions than intended.
+    #[tokio::test]
+    async fn test_auto_deletion_concurrent_execution_prevents_over_deletion() {
+        let logctx = dev::test_setup_log(
+            "test_auto_deletion_concurrent_execution_prevents_over_deletion",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let nexus_id = OmicronZoneUuid::new_v4();
+
+        // Create 10 debug datasets
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 10).await;
+
+        // Create 10 bundles (all slots filled)
+        for _ in 0..10 {
+            let bundle = datastore
+                .support_bundle_create(&opctx, "for tests", nexus_id, None)
+                .await
+                .expect("Should be able to create bundle");
+
+            let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+            datastore
+                .support_bundle_update(
+                    &opctx,
+                    &authz_bundle,
+                    SupportBundleState::Active,
+                )
+                .await
+                .expect("Should update state");
+        }
+
+        // Set config: 20% target_free (CEIL(10*20/100)=2), 0% min_keep
+        // With 10 datasets, 10 bundles, free=0 < 2, need to delete 2 bundles
+        datastore
+            .support_bundle_config_set(&opctx, 20, 0)
+            .await
+            .expect("Should set config");
+
+        // Spawn multiple concurrent auto-delete operations.
+        // Without the atomic CTE, each would see free=0 and try to delete 2,
+        // potentially resulting in 10 deletions (5 tasks × 2 each).
+        // With the atomic CTE, only the first operation(s) should delete,
+        // and subsequent ones should see the updated state.
+        let num_concurrent_tasks = 5;
+        let mut handles = Vec::new();
+
+        for _ in 0..num_concurrent_tasks {
+            let datastore = datastore.clone();
+            let opctx = opctx.child(std::collections::BTreeMap::new());
+            handles.push(tokio::spawn(async move {
+                datastore.support_bundle_auto_delete(&opctx).await
+            }));
+        }
+
+        // Collect all results
+        let mut total_deleted = 0;
+        for handle in handles {
+            let result = handle.await.expect("Task should complete");
+            let result = result.expect("Auto-delete should succeed");
+            total_deleted += result.deleted_ids.len();
+        }
+
+        // The key assertion: we should have deleted exactly 2 bundles total,
+        // not 2 × num_concurrent_tasks. The atomic CTE ensures that once
+        // bundles are transitioned to Destroying, they're no longer candidates
+        // for other concurrent operations (the UPDATE's WHERE state='active'
+        // clause filters them out).
+        assert_eq!(
+            total_deleted, 2,
+            "Should delete exactly 2 bundles total across all concurrent \
+             operations, not {} (which would indicate over-deletion)",
+            total_deleted
+        );
+
+        // Verify the final state: 8 Active bundles remain
+        use nexus_db_schema::schema::support_bundle::dsl;
+        let conn = datastore.pool_connection_authorized(&opctx).await.unwrap();
+        let active_count: i64 = dsl::support_bundle
+            .filter(dsl::state.eq(SupportBundleState::Active))
+            .count()
+            .get_result_async(&*conn)
+            .await
+            .expect("Should count active bundles");
+
+        assert_eq!(
+            active_count, 8,
+            "Should have 8 Active bundles remaining after concurrent deletion"
+        );
+
+        // Verify we now have 2 Destroying bundles
+        let destroying_count: i64 = dsl::support_bundle
+            .filter(dsl::state.eq(SupportBundleState::Destroying))
+            .count()
+            .get_result_async(&*conn)
+            .await
+            .expect("Should count destroying bundles");
+
+        assert_eq!(
+            destroying_count, 2,
+            "Should have exactly 2 bundles in Destroying state"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_config_set_rejects_invalid_target_free_percent() {
+        let logctx = dev::test_setup_log(
+            "test_config_set_rejects_invalid_target_free_percent",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // 101% should be rejected
+        let result = datastore.support_bundle_config_set(&opctx, 101, 10).await;
+
+        assert!(
+            result.is_err(),
+            "Setting target_free_percent > 100 should fail"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("target_free_percent"),
+            "Error message should mention target_free_percent: {}",
+            err
+        );
+
+        // Verify valid values still work
+        datastore
+            .support_bundle_config_set(&opctx, 100, 10)
+            .await
+            .expect("100% should be valid");
+
+        datastore
+            .support_bundle_config_set(&opctx, 0, 10)
+            .await
+            .expect("0% should be valid");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_config_set_rejects_invalid_min_keep_percent() {
+        let logctx = dev::test_setup_log(
+            "test_config_set_rejects_invalid_min_keep_percent",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // 101% should be rejected
+        let result = datastore.support_bundle_config_set(&opctx, 10, 101).await;
+
+        assert!(result.is_err(), "Setting min_keep_percent > 100 should fail");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("min_keep_percent"),
+            "Error message should mention min_keep_percent: {}",
+            err
+        );
+
+        // Verify valid values still work
+        datastore
+            .support_bundle_config_set(&opctx, 10, 100)
+            .await
+            .expect("100% should be valid");
+
+        datastore
+            .support_bundle_config_set(&opctx, 10, 0)
+            .await
+            .expect("0% should be valid");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }

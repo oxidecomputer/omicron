@@ -6,14 +6,7 @@ WITH
   dataset_count
     AS (SELECT count(*) AS total FROM rendezvous_debug_dataset WHERE time_tombstoned IS NULL),
   used_count
-    AS (
-      SELECT
-        count(*) AS used
-      FROM
-        support_bundle
-      WHERE
-        state IN ('collecting', 'active', 'destroying', 'failing')
-    ),
+    AS (SELECT count(*) AS used FROM support_bundle WHERE state IN ('collecting', 'active')),
   active_count AS (SELECT count(*) AS active FROM support_bundle WHERE state = 'active'),
   thresholds
     AS (
@@ -51,7 +44,7 @@ WITH
       WHERE
         state = 'active'
       ORDER BY
-        time_created ASC
+        time_created ASC, id ASC
       LIMIT
         (SELECT least(bundles_needed, max_deletable) FROM deletion_calc)
     ),
