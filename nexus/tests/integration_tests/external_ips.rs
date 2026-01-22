@@ -132,8 +132,11 @@ async fn test_floating_ip_access(cptestctx: &ControlPlaneTestContext) {
         client,
         fip_name,
         &project.identity.id.to_string(),
-        None,
-        Some(v6_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v6_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
 
@@ -197,8 +200,11 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
         client,
         fip_name,
         project.identity.name.as_str(),
-        None,
-        Some(default_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: default_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
     assert_eq!(fip.identity.name.as_str(), fip_name);
@@ -209,15 +215,14 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
 
     assert_ip_pool_utilization(client, pool_name, 1, CAPACITY).await;
 
-    // Create with chosen IP and fallback to default pool.
+    // Create with chosen IP (pool is inferred from the address).
     let fip_name = FIP_NAMES[1];
     let ip_addr = "10.0.12.34".parse().unwrap();
     let fip = create_floating_ip(
         client,
         fip_name,
         project.identity.name.as_str(),
-        Some(ip_addr),
-        Some(default_pool.identity.name.as_str()),
+        params::AddressAllocator::Explicit { ip: ip_addr },
     )
     .await;
     assert_eq!(fip.identity.name.as_str(), fip_name);
@@ -269,8 +274,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
         client,
         fip_name,
         project.identity.name.as_str(),
-        Some(ip_addr),
-        Some("other-pool"),
+        params::AddressAllocator::Explicit { ip: ip_addr },
     )
     .await;
     assert_eq!(fip.identity.name.as_str(), fip_name);
@@ -476,8 +480,7 @@ async fn test_floating_ip_create_ip_in_use(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-
-    let (v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
+    create_default_ip_pools(&client).await;
 
     let project = create_project(client, PROJECT_NAME).await;
     let contested_ip = "10.0.0.0".parse().unwrap();
@@ -487,8 +490,7 @@ async fn test_floating_ip_create_ip_in_use(
         client,
         FIP_NAMES[0],
         project.identity.name.as_str(),
-        Some(contested_ip),
-        Some(v4_pool.identity.name.as_str()),
+        params::AddressAllocator::Explicit { ip: contested_ip },
     )
     .await;
 
@@ -505,9 +507,9 @@ async fn test_floating_ip_create_ip_in_use(
                 name: FIP_NAMES[1].parse().unwrap(),
                 description: "another fip".into(),
             },
+            // Explicit IP
             address_allocator: params::AddressAllocator::Explicit {
                 ip: contested_ip,
-                pool: Some(v4_pool.identity.name.clone().into()),
             },
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -519,6 +521,50 @@ async fn test_floating_ip_create_ip_in_use(
     .parsed_body()
     .unwrap();
     assert_eq!(error.message, "Requested external IP address not available");
+}
+
+/// Test that creating a floating IP with an explicit IP not in any pool fails.
+#[nexus_test]
+async fn test_floating_ip_create_ip_not_in_pool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_default_ip_pools(&client).await;
+    create_project(client, PROJECT_NAME).await;
+
+    // Default pool is 10.0.0.0/24; try an IP outside that range
+    let ip_not_in_pool: IpAddr = "192.168.1.100".parse().unwrap();
+
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &get_floating_ips_url(PROJECT_NAME),
+        )
+        .body(Some(&params::FloatingIpCreate {
+            identity: IdentityMetadataCreateParams {
+                name: FIP_NAMES[0].parse().unwrap(),
+                description: "fip with IP not in pool".into(),
+            },
+            address_allocator: params::AddressAllocator::Explicit {
+                ip: ip_not_in_pool,
+            },
+        }))
+        .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(
+        error.error_code,
+        Some("InvalidRequest".to_string()),
+        "Expected InvalidRequest for IP not in pool, got: {:?}",
+        error.error_code
+    );
 }
 
 #[nexus_test]
@@ -537,8 +583,11 @@ async fn test_floating_ip_create_name_in_use(
         client,
         contested_name,
         project.identity.name.as_str(),
-        None,
-        Some(v4_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v4_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
 
@@ -587,8 +636,11 @@ async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
         client,
         FIP_NAMES[0],
         project.identity.name.as_str(),
-        None,
-        Some(v6_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v6_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
 
@@ -638,8 +690,11 @@ async fn test_floating_ip_delete(cptestctx: &ControlPlaneTestContext) {
         client,
         FIP_NAMES[0],
         project.identity.name.as_str(),
-        None,
-        Some(v4_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v4_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
 
@@ -680,8 +735,11 @@ async fn test_floating_ip_create_attachment(
         client,
         FIP_NAMES[0],
         project.identity.name.as_str(),
-        None,
-        Some(v6_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v6_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
 
@@ -789,8 +847,11 @@ async fn test_external_ip_live_attach_detach(
                 client,
                 FIP_NAMES[i],
                 project.identity.name.as_str(),
-                None,
-                Some(v4_pool.identity.name.as_str()),
+                params::AddressAllocator::Auto {
+                    pool_selector: params::PoolSelector::Explicit {
+                        pool: v4_pool.identity.name.clone().into(),
+                    },
+                },
             )
             .await,
         );
@@ -1035,8 +1096,11 @@ async fn test_floating_ip_attach_fail_between_projects(
         client,
         FIP_NAMES[0],
         "proj2",
-        None,
-        Some(v4_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v4_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
 
@@ -1129,8 +1193,11 @@ async fn test_external_ip_attach_fail_if_in_use_by_other(
             client,
             FIP_NAMES[i],
             project.identity.name.as_str(),
-            None,
-            Some(v6_pool.identity.name.as_str()),
+            params::AddressAllocator::Auto {
+                pool_selector: params::PoolSelector::Explicit {
+                    pool: v6_pool.identity.name.clone().into(),
+                },
+            },
         )
         .await;
         let instance = instance_for_external_ips(
@@ -1191,8 +1258,11 @@ async fn test_external_ip_attach_fails_after_maximum(
             client,
             &fip_name,
             project.identity.name.as_str(),
-            None,
-            Some(v4_pool.identity.name.as_str()),
+            params::AddressAllocator::Auto {
+                pool_selector: params::PoolSelector::Explicit {
+                    pool: v4_pool.identity.name.clone().into(),
+                },
+            },
         )
         .await;
         fip_names.push(fip_name);
@@ -1597,8 +1667,11 @@ async fn cannot_attach_floating_ipv4_to_instance_missing_ipv4_stack(
         client,
         fip_name,
         PROJECT_NAME,
-        None,
-        Some(v4_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v4_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
     let url = attach_floating_ip_url(fip_name, PROJECT_NAME);
@@ -1662,8 +1735,11 @@ async fn cannot_attach_floating_ipv6_to_instance_missing_ipv6_stack(
         client,
         fip_name,
         PROJECT_NAME,
-        None,
-        Some(v6_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v6_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
     let url = attach_floating_ip_url(fip_name, PROJECT_NAME);
@@ -2092,8 +2168,11 @@ async fn can_create_instance_with_floating_ipv6_address(
         client,
         fip_name,
         &project.identity.id.to_string(),
-        None,
-        Some(v6_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v6_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
 

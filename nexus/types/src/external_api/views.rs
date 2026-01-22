@@ -5,10 +5,11 @@
 //! Views are response bodies, most of which are public lenses onto DB models.
 
 use crate::external_api::shared::{
-    self, Baseboard, IpKind, IpRange, ServiceUsingCertificate,
-    TufSignedRootRole,
+    self, Baseboard, IpKind, IpRange, RackMembershipVersion,
+    ServiceUsingCertificate, TufSignedRootRole,
 };
 use crate::identity::AssetIdentityMetadata;
+use crate::trust_quorum::{TrustQuorumConfig, TrustQuorumMemberState};
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -25,6 +26,7 @@ use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -674,6 +676,73 @@ pub struct MulticastGroupMember {
 pub struct Rack {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RackMembershipChangeState {
+    InProgress,
+    Committed,
+    Aborted,
+}
+
+/// Status of the rack membership uniquely identified by the (rack_id, version)
+/// pair
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RackMembershipStatus {
+    pub rack_id: Uuid,
+    /// Version that uniquely identifies the rack membership at a given point
+    /// in time
+    pub version: RackMembershipVersion,
+    pub state: RackMembershipChangeState,
+    /// All members of the rack for this version
+    pub members: BTreeSet<BaseboardId>,
+    /// All members that have not yet confirmed this membership version
+    pub unacknowledged_members: BTreeSet<BaseboardId>,
+    pub time_created: DateTime<Utc>,
+    pub time_committed: Option<DateTime<Utc>>,
+    pub time_aborted: Option<DateTime<Utc>>,
+}
+
+impl From<TrustQuorumConfig> for RackMembershipStatus {
+    fn from(value: TrustQuorumConfig) -> Self {
+        // `Unacked` means that a member has not received and acked a `Prepare`
+        // yet. `Prepared` means that a member has acknowledged the prepare but
+        // not the commit. `Committed` is when the member starts participating
+        // in the new group.
+        //
+        // Since we don't want to expose trust quorum specific knowledge to
+        // the operator, and they really only want to know when the membership
+        // change has started to take effect, we say that any member that hasn't
+        // yet committed is unacknowledged.
+        let unacknowledged_members = value
+            .members
+            .iter()
+            .filter_map(|(id, data)| match data.state {
+                TrustQuorumMemberState::Unacked
+                | TrustQuorumMemberState::Prepared => Some(id.clone()),
+                TrustQuorumMemberState::Committed => None,
+            })
+            .collect();
+        let state = if value.state.is_committed() {
+            RackMembershipChangeState::Committed
+        } else if value.state.is_aborted() {
+            RackMembershipChangeState::Aborted
+        } else {
+            RackMembershipChangeState::InProgress
+        };
+
+        Self {
+            rack_id: value.rack_id.into_untyped_uuid(),
+            version: RackMembershipVersion(value.epoch.0),
+            state,
+            members: value.members.keys().cloned().collect(),
+            unacknowledged_members,
+            time_created: value.time_created,
+            time_committed: value.time_committed,
+            time_aborted: value.time_aborted,
+        }
+    }
 }
 
 // FRUs

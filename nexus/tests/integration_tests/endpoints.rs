@@ -1255,7 +1255,6 @@ pub static DEMO_FLOAT_IP_CREATE: LazyLock<params::FloatingIpCreate> =
         },
         address_allocator: params::AddressAllocator::Explicit {
             ip: Ipv4Addr::new(10, 0, 0, 141).into(),
-            pool: None,
         },
     });
 
