@@ -1,5 +1,8 @@
 #
-# Health monitor: example config file
+# Sled agent health monitor: example config file
+#
+# With this configuration, we have injected some dummy failed health check
+# results.
 #
 
 enabled = false
@@ -10,5 +13,7 @@ services = [
     { fmri = "svc:/network/fake-service-2:default", zone = "oxz_fake_zone_2" },
     { fmri = "svc:/application/fake-service-3:default", zone = "global" }
 ]
+
 errors = []
-# TODO-K: Add time of status
+
+time_of_status = "2026-04-12T23:20:50.52Z"

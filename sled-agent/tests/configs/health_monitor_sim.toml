@@ -1,5 +1,7 @@
 #
-# Health monitor: example config file
+# Sled agent health monitor: example config file
+#
+# With this configuration, all health checks will appear as successful.
 #
 
 enabled = false

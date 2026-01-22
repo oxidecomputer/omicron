@@ -67,18 +67,14 @@ pub struct ConfigHardware {
     pub baseboard: Baseboard,
 }
 
-/// Configuration for the health monitor.
+/// Configuration for the simulated health monitor.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ConfigHealthMonitor {
-    // TODO-K: change name here
+    /// Whether the real health monitor is running or not
     pub enabled: bool,
+    /// Simulated failed health checks
     pub sim_health_checks: Option<HealthMonitorInventory>,
 }
-
-//#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-//pub struct ConfigSimHealthCheckResults {
-//    pub smf_services_in_maintenance: SvcsInMaintenanceResult,
-//}
 
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

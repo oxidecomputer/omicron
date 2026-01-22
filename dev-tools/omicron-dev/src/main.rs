@@ -4,25 +4,24 @@
 
 use anyhow::Context;
 use camino::Utf8PathBuf;
-use chrono::Utc;
 use clap::{Args, Parser, Subcommand};
 use futures::StreamExt;
 use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
-use illumos_utils::svcs::{SvcInMaintenance, SvcsInMaintenanceResult};
 use libc::SIGINT;
 use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
 use omicron_sled_agent::sim::ConfigHealthMonitor;
 use signal_hook_tokio::Signals;
-use sled_agent_types::inventory::HealthMonitorInventory;
 use std::fs;
 
 const DEFAULT_NEXUS_CONFIG: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexus/examples/config.toml");
 
-const DEFAULT_HEALTH_MONITOR_CONFIG: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../sled-agent/tests/configs/health_monitor_sim.toml");
+const DEFAULT_HEALTH_MONITOR_CONFIG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../sled-agent/tests/configs/health_monitor_sim.toml"
+);
 
 fn main() -> anyhow::Result<()> {
     oxide_tokio_rt::run(async {
@@ -67,7 +66,6 @@ struct RunAllArgs {
     ///// Enable the sled agent health monitor
     //#[clap(long, default_value_t = false, action)]
     //enable_sled_agent_health_monitor: bool,
-
     /// Override the sled agent health monitor configuration file.
     #[clap(long, default_value = DEFAULT_HEALTH_MONITOR_CONFIG)]
     health_monitor_config: Utf8PathBuf,
@@ -101,25 +99,13 @@ impl RunAllArgs {
                 .set_port(p);
         }
 
-        let health_monitor_config_str = fs::read_to_string(&self.health_monitor_config)?;
-        let sled_agent_health_monitor: ConfigHealthMonitor = toml::from_str(&health_monitor_config_str).context(
-            format!("parsing config: {}", self.health_monitor_config.as_str()),
-        )?;
-
-        //let sled_agent_health_monitor = ConfigHealthMonitor {
-        //    // TODO-K: parse the TOML instead of hardcoding this here
-        //    enabled: self.enable_sled_agent_health_monitor,
-        //    sim_health_checks: Some(HealthMonitorInventory {
-        //        smf_services_in_maintenance: Ok(SvcsInMaintenanceResult {
-        //            services: vec![SvcInMaintenance {
-        //                fmri: "fake".to_string(),
-        //                zone: "bobzone".to_string(),
-        //            }],
-        //            errors: vec![],
-        //            time_of_status: Some(Utc::now()),
-        //        }),
-        //    }),
-        //};
+        let health_monitor_config_str =
+            fs::read_to_string(&self.health_monitor_config)?;
+        let sled_agent_health_monitor: ConfigHealthMonitor =
+            toml::from_str(&health_monitor_config_str).context(format!(
+                "parsing config: {}",
+                self.health_monitor_config.as_str()
+            ))?;
 
         println!("omicron-dev: setting up all services ... ");
         let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
